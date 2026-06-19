@@ -1,0 +1,27 @@
+[package]
+name = "markdown-syntax"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "no_std + alloc Markdown syntax parser and serializer"
+homepage = "https://github.com/plimeor/markdown-syntax"
+repository = "https://github.com/plimeor/markdown-syntax"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Package snapshots keep the fixture corpus visible while publishing is disabled.
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "src/**",
+    "tests/**",
+]
+
+[lib]
+name = "markdown_syntax"
+path = "src/lib.rs"
+
+[features]
+default = []

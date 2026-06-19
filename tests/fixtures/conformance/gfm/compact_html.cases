@@ -1,0 +1,101 @@
+# markdown-syntax AST->HTML conformance suite v1
+source: compact_html
+count: 10
+
+--- case 1 options render.compact_html label-bytes 17 input-bytes 13 expected-bytes 19
+compact_paragraph
+--- input
+Hello world.
+
+--- expected
+<p>Hello world.</p>
+--- end
+--- case 2 options render.compact_html label-bytes 27 input-bytes 31 expected-bytes 42
+compact_multiple_paragraphs
+--- input
+Paragraph one.
+
+Paragraph two.
+
+--- expected
+<p>Paragraph one.</p><p>Paragraph two.</p>
+--- end
+--- case 3 options render.compact_html label-bytes 15 input-bytes 16 expected-bytes 27
+compact_heading
+--- input
+# Hello
+
+World.
+
+--- expected
+<h1>Hello</h1><p>World.</p>
+--- end
+--- case 4 options render.compact_html label-bytes 12 input-bytes 20 expected-bytes 47
+compact_list
+--- input
+- one
+- two
+- three
+
+--- expected
+<ul><li>one</li><li>two</li><li>three</li></ul>
+--- end
+--- case 5 options render.compact_html label-bytes 20 input-bytes 23 expected-bytes 47
+compact_ordered_list
+--- input
+1. one
+2. two
+3. three
+
+--- expected
+<ol><li>one</li><li>two</li><li>three</li></ol>
+--- end
+--- case 6 options render.compact_html label-bytes 18 input-bytes 9 expected-bytes 38
+compact_blockquote
+--- input
+> quoted
+
+--- expected
+<blockquote><p>quoted</p></blockquote>
+--- end
+--- case 7 options render.compact_html label-bytes 18 input-bytes 14 expected-bytes 30
+compact_code_block
+--- input
+```
+hello
+```
+
+--- expected
+<pre><code>hello
+</code></pre>
+--- end
+--- case 8 options render.compact_html label-bytes 22 input-bytes 4 expected-bytes 6
+compact_thematic_break
+--- input
+---
+
+--- expected
+<hr />
+--- end
+--- case 9 options extension.table,render.compact_html label-bytes 13 input-bytes 30 expected-bytes 103
+compact_table
+--- input
+| a | b |
+|---|---|
+| c | d |
+
+--- expected
+<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>c</td><td>d</td></tr></tbody></table>
+--- end
+--- case 10 options render.compact_html=false label-bytes 19 input-bytes 16 expected-bytes 29
+compact_default_off
+--- input
+# Hello
+
+World.
+
+--- expected
+<h1>Hello</h1>
+<p>World.</p>
+
+--- end
