@@ -317,20 +317,32 @@ fn render_description_details(children: &[Block], tight: bool, ctx: &Ctx) -> Str
     }
 }
 
-/// `code_body`: text-escape the value and add the implicit final newline. The
-/// AST convention is `value = content lines joined by '\n', no trailing
-/// newline`, so the block's terminating newline is always implicit and must be
-/// re-added here. A trailing blank content line therefore appears in the value
-/// as a trailing `\n` and still gets its own newline (e.g. `b\n\n` → `b\n\n\n`).
-/// An empty value stays empty (zero content lines).
+/// `code_body`: text-escape the value and add an implicit final line ending only
+/// when the AST value does not already carry one.
 fn code_body(value: &str) -> String {
     if value.is_empty() {
         String::new()
     } else {
         let mut s = escape_text(value);
-        s.push('\n');
+        if !value.ends_with('\n') && !value.ends_with('\r') {
+            s.push_str(preferred_code_line_ending(value));
+        }
         s
     }
+}
+
+fn preferred_code_line_ending(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\r' if bytes.get(cursor + 1) == Some(&b'\n') => return "\r\n",
+            b'\r' => return "\r",
+            b'\n' => return "\n",
+            _ => cursor += 1,
+        }
+    }
+    "\n"
 }
 
 /// First whitespace-delimited token of the info string, text-escaped; `None`

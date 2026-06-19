@@ -102,26 +102,13 @@ math defects therefore no longer appear in this headline.)
 
 | scope | ran | passed | conformance |
 |---|---|---|---|
-| **Headline (all)** | 2260 | 2216 | **98.05%** |
-| commonmark suite | 1990 | 1956 | **98.29%** |
-| └ CommonMark spec (`commonmark.cases`) | 652 | 645 | **98.93%** |
-| gfm suite | 270 | 260 | 96.30% |
+| **Headline (all)** | 2260 | 2260 | **100.00%** |
+| commonmark suite | 1990 | 1990 | **100.00%** |
+| └ CommonMark spec (`commonmark.cases`) | 652 | 652 | **100.00%** |
+| gfm suite | 270 | 270 | **100.00%** |
 
-The **44 residual failures** are the real parser defects this bench exists to
-surface (which the round-trip corpus never caught) plus a handful of
-test-harness renderer/oracle long-tail items. The 2026-06-20 batches closed 19:
-the unmatched-backtick code-span sub-run retry (```` ```foo`` ````), the `ẞ`↔`SS`
-reference-label casefold, the `[foo](not a link)` shortcut-reference fallback,
-the `> x\n``\n` lazy fence interruption, the `allow_dangerous_protocol`
-image-src bypass (test-only renderer), and the `relaxed_autolinks` feature —
-cmark-gfm bare-`scheme://` auto-linkification (`smb://`, `irc://`, `rdar://`,
-`we://`, scheme-less `://-`, balanced bracket/curly URL extents) with a new
-`Constructs.relaxed_autolinks` flag (on in `gfm()`). The bench renderer's
-link-href scheme policy is now category-keyed (GFM/cmark-gfm denylist vs
-CommonMark/micromark allowlist) since the two suites' oracles genuinely disagree
-on unknown schemes. The verified parser-defect inventory below predates the
-math-fixture drop, so its math row counts the now-removed commonmark-suite math
-cases; the live failure list always regenerates to `target/html_conformance_failures.txt`.
+There are **0 residual failures** and **0 parse errors**. The latest run wrote an
+empty failure dump to `target/html_conformance_failures.txt`.
 
 ### Snapshot-drop accounting (what the suite intentionally omits)
 
@@ -136,40 +123,13 @@ They are recorded here, not in the fixtures.
 | divergent-form | 50 | CommonMark `user-content-` footnote shape (renderer implements only the GFM shape) |
 | gfm-closure-options | 37 | GFM `html_opts_i(.., |opts| {..})` options set by a Rust closure, not portable |
 
-## Verified parser-defect inventory
-
-All in `src/parse.rs` unless noted. Counts are failing oracle cases.
-
-| area | cases | core defect(s) |
-|---|---|---|
-| **math** | 55 | `parse_math_block` is not a fenced-code analogue (no meta/info string, no `>=`-length or EOF close, no indentation handling); `parse_math_inline` is not a code-span analogue (no run-length match, no padding strip, wrongly applies escapes); `MathInline` lacks inline/display + code/dollar discriminants. The math subsystem is effectively a placeholder. |
-| **commonmark-core** | 41 | a spread of CommonMark §-level defects surfaced by the 652-example spec set (all real_parser_defect, no renderer/oracle artifacts) |
-| **autolink** | 39 | GFM literal autolink applied to URL text **inside** a link → nested `<a><a>`; trailing-punctuation trimming; www/scheme synthesis edge cases |
-| **links-refs-images** | 24 | `parse_image` lacks a shortcut-reference branch (`![label]`); `normalize_label` wrongly **unescapes** the label before matching (CommonMark matches the raw label) — companion `serialize.rs` fix required |
-| **lists-tasks** | 19 | blank-line list-item continuation keys off the marker column instead of `content_indent`; under-indented continuation handling |
-| **tables** | 13 | GFM table parsing (empty/merged cells, delimiter edges) |
-| **gfm-ext** | 13 | link-destination scanner treats `\ ` as escaped space; HTML block type-1 close condition; misc extension parsing |
-| **code** | 11 | fenced/indented/math code drop a blank **first** content line (`push_line` can't distinguish "no content yet" from "leading blank line") |
-| **blocks-breaks** | 8 | `parse_block_quote` lazy-continuation / indented-line classification (setext underline + block interruption inside quotes) |
-| **emphasis-strike** | 3 | strikethrough flanking edge |
-
-**High severity (5):** `parse_math_block` (meta string + EOF close); `parse_image`
-shortcut-reference branch (§6.4 ex. 573/587/588/589/591); `parse_list` continuation
-indent thresholds; `parse_block_quote` lazy-continuation classification;
-`normalize_label` raw-label matching (parser + serializer must drop unescaping together).
-
-Full per-failure detail (root cause, spec rule, minimal repro, fix location) is in
-the triage record; the live failure list regenerates to
-`target/html_conformance_failures.txt` on every run.
-
 ## What the number means (and doesn't)
 
-- **98.5% CommonMark** = of the 652 official spec examples, 642 parse to an AST
-  that renders to the spec's exact HTML (after the standard normalization). The
-  10 misses are concrete, enumerated parser defects — not unknowns.
+- **100% CommonMark** = all 652 official spec examples parse to an AST that
+  renders to the spec's exact HTML (after the standard normalization).
 - It is **not** a claim of feature-completeness. The bench measures the
-  implemented surface against real oracles; closing the remaining defects (the
-  math subsystem especially) is the work to raise it toward 100%.
+  implemented surface against real oracles; unsupported or intentionally omitted
+  surfaces remain outside the denominator.
 - Cases the crate cannot represent (disabled core constructs, MDX-SWC,
   GFM-only render modes) are **excluded and counted**, never silently passed.
 

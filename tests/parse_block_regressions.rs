@@ -202,7 +202,7 @@ mod review_block {
             );
         };
         assert!(matches!(code.kind, CodeBlockKind::Fenced { .. }));
-        assert_eq!(code.value, "aaa\naaa");
+        assert_eq!(code.value, "aaa\naaa\n");
     }
 
     /// B4 guard: only up to N spaces are removed; deeper indentation is preserved.
@@ -221,11 +221,11 @@ mod review_block {
         };
         // Three-space opening fence: `   aaa` loses 3, `    aaa` keeps 1, `  aaa`
         // loses only the two it has.
-        assert_eq!(code.value, "aaa\n aaa\naaa");
+        assert_eq!(code.value, "aaa\n aaa\naaa\n");
     }
 
     /// B5: leading/trailing blank lines are not part of an indented code block;
-    /// interior blanks stay.
+    /// interior blanks and the final content line ending stay.
     #[test]
     fn indented_code_trims_trailing_blank_lines() {
         let output = parse_with_options("    foo\n    \n", &SyntaxOptions::commonmark())
@@ -237,7 +237,7 @@ mod review_block {
             );
         };
         assert_eq!(code.kind, CodeBlockKind::Indented);
-        assert_eq!(code.value, "foo");
+        assert_eq!(code.value, "foo\n");
     }
 
     /// B5 guard: interior blank lines are preserved.
@@ -251,7 +251,7 @@ mod review_block {
                 output.document.children
             );
         };
-        assert_eq!(code.value, "foo\n\nbar");
+        assert_eq!(code.value, "foo\n\nbar\n");
     }
 }
 

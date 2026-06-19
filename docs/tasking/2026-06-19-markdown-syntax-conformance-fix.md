@@ -1,6 +1,6 @@
 ---
 date: 2026-06-19
-status: active
+status: completed
 ---
 
 # markdown-syntax Conformance Fix — Task Graph (code-tasking)

@@ -43,13 +43,13 @@ record is a deferred `后续` candidate, not yet created.
 | Path | Status | Purpose |
 | ---- | ------ | ------- |
 | `plans/2026-06-20-markdown-syntax-html-renderer.md` | active | Promote the test-only CommonMark/GFM renderer into `src/html/` behind an opt-in, non-default `html` cargo feature (safe-by-default, `no_std`+`alloc`, zero-dep); re-point the conformance bench at the public `to_html` API. Holds the renderer architecture decision in-body. |
-| `plans/2026-06-19-markdown-syntax-test-reorg.md` | draft | Design-only: stop distinguishing the `markdown-rs/` vs `comrak/` fixture directories (engine demoted to per-file metadata). Never executed; one stale detail conflicts with the renderer plan. |
+| `plans/2026-06-19-markdown-syntax-test-reorg.md` | completed | Test tree reorganization: role-separated `tests/fixtures/roundtrip/` and `tests/fixtures/conformance/{commonmark,gfm}/`; no `markdown-rs` vs `comrak` engine-owned fixture split. |
 
 ## Tasking
 
 | Path | Status | Purpose |
 | ---- | ------ | ------- |
-| `tasking/2026-06-19-markdown-syntax-conformance-fix.md` | active | Leaf-first task graph T001–T025 to fix parser defects via paired parser+serializer fixes + regenerated bench-verified goldens. The "HTML renderer" rule is narrowed to "not in the default build" to coexist with the renderer plan. Baseline counts are a stale 2026-06-19 snapshot. |
+| `tasking/2026-06-19-markdown-syntax-conformance-fix.md` | completed | Parser correctness workstream substrate: original leaf-first T001–T025 graph for paired parser+serializer fixes; completed with current numbers in `tests/html_conformance/CONFORMANCE.md`. |
 
 ## Archive
 

@@ -4,7 +4,7 @@ use crate::{
     ast::*,
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     entities::named_character_reference,
-    options::{ResolvedSyntaxOptions, SyntaxConfigError, SyntaxOptions},
+    options::{ResolvedSyntaxOptions, SyntaxConfigError, SyntaxOptions, SyntaxProfile},
     span::Span,
     validate::is_directive_name,
 };
@@ -40,6 +40,7 @@ const WIKILINK_MAX_BYTES: usize = 999;
 #[derive(Clone, Copy, Debug)]
 struct Line<'a> {
     text: &'a str,
+    eol: &'a str,
     start: usize,
     end: usize,
     end_with_eol: usize,
@@ -56,6 +57,7 @@ struct ListMarkerInfo<'a> {
     start: Option<u64>,
     delimiter: ListDelimiter,
     indent: usize,
+    marker_len: usize,
     content_indent: usize,
     content: &'a str,
 }
@@ -170,6 +172,9 @@ fn parse_blocks_from_lines(
             index += 1;
             continue;
         }
+        let after_definition_unbroken = index > 0
+            && !lines[index - 1].text.trim().is_empty()
+            && matches!(blocks.last(), Some(Block::Definition(_)));
 
         if allow_frontmatter && index == 0 {
             if let Some((block, next)) = parse_frontmatter(lines, index, options) {
@@ -193,7 +198,7 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_fenced_code(lines, index) {
+        if let Some((block, next)) = parse_fenced_code(lines, index, options) {
             blocks.push(block);
             index = next;
             continue;
@@ -233,7 +238,9 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_definition(lines, index, options) {
+        if let Some((block, next)) =
+            parse_definition(lines, index, options, after_definition_unbroken)
+        {
             blocks.push(block);
             index = next;
             continue;
@@ -257,10 +264,12 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_indented_code(lines, index, options) {
-            blocks.push(block);
-            index = next;
-            continue;
+        if !after_definition_unbroken {
+            if let Some((block, next)) = parse_indented_code(lines, index, options) {
+                blocks.push(block);
+                index = next;
+                continue;
+            }
         }
 
         if let Some((block, next)) = parse_table(lines, index, options, definitions, diagnostics) {
@@ -303,6 +312,7 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
                 let end = index;
                 lines.push(Line {
                     text: &input[start..end],
+                    eol: &input[index..index + 1],
                     start: base_offset + start,
                     end: base_offset + end,
                     end_with_eol: base_offset + index + 1,
@@ -313,20 +323,20 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
             }
             b'\r' => {
                 let end = index;
-                let end_with_eol = if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
-                    index += 2;
-                    index
+                let eol_end = if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
+                    index + 2
                 } else {
-                    index += 1;
-                    index
+                    index + 1
                 };
                 lines.push(Line {
                     text: &input[start..end],
+                    eol: &input[index..eol_end],
                     start: base_offset + start,
                     end: base_offset + end,
-                    end_with_eol: base_offset + end_with_eol,
+                    end_with_eol: base_offset + eol_end,
                     lazy: false,
                 });
+                index = eol_end;
                 start = index;
             }
             _ => index += 1,
@@ -336,6 +346,7 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
     if start < bytes.len() || input.is_empty() {
         lines.push(Line {
             text: &input[start..],
+            eol: "",
             start: base_offset + start,
             end: base_offset + bytes.len(),
             end_with_eol: base_offset + bytes.len(),
@@ -611,16 +622,15 @@ fn parse_math_block(
                 ));
             }
         }
-        // Join content lines with `\n` while preserving a leading blank line: a
-        // simple "newline before each non-first line" cannot tell zero lines
-        // from one empty line, so track the count explicitly.
         if content_lines > 0 {
-            value.push('\n');
+            // The previous content line's `eol` usually separates lines. This
+            // fallback only covers synthetic child input that lacks an EOL despite
+            // yielding another line.
+            ensure_line_separator(&mut value);
         }
-        value.push_str(&strip_leading_indent_columns(
-            lines[cursor].text,
-            opening_indent,
-        ));
+        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        value.push_str(&stripped);
+        value.push_str(lines[cursor].eol);
         content_lines += 1;
         cursor += 1;
     }
@@ -668,8 +678,12 @@ fn is_math_block_fence(input: &str) -> bool {
     math_block_fence_length(input).is_some()
 }
 
-fn parse_fenced_code(lines: &[Line<'_>], index: usize) -> Option<(Block, usize)> {
-    let line = trim_up_to_three_spaces(lines[index].text)?;
+fn parse_fenced_code(
+    lines: &[Line<'_>],
+    index: usize,
+    options: &ResolvedSyntaxOptions,
+) -> Option<(Block, usize)> {
+    let line = fence_line(lines[index].text, options)?;
     let (marker, length) = fence_start(line)?;
     // CommonMark: up to N columns of indentation (N = the opening fence's
     // indent, 0–3) are removed from each content line.
@@ -692,7 +706,7 @@ fn parse_fenced_code(lines: &[Line<'_>], index: usize) -> Option<(Block, usize)>
     let mut content_lines = 0usize;
     let mut cursor = index + 1;
     while cursor < lines.len() {
-        if let Some(close_line) = trim_up_to_three_spaces(lines[cursor].text) {
+        if let Some(close_line) = fence_line(lines[cursor].text, options) {
             if fence_close(close_line, marker, length) {
                 return Some((
                     Block::CodeBlock(CodeBlock {
@@ -709,16 +723,17 @@ fn parse_fenced_code(lines: &[Line<'_>], index: usize) -> Option<(Block, usize)>
             }
         }
         if content_lines > 0 {
-            value.push('\n');
+            // The previous content line's `eol` usually separates lines. This
+            // fallback only covers synthetic child input that lacks an EOL despite
+            // yielding another line.
+            ensure_line_separator(&mut value);
         }
-        value.push_str(&strip_leading_indent_columns(
-            lines[cursor].text,
-            opening_indent,
-        ));
+        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        value.push_str(&stripped);
+        value.push_str(lines[cursor].eol);
         content_lines += 1;
         cursor += 1;
     }
-
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -731,6 +746,56 @@ fn parse_fenced_code(lines: &[Line<'_>], index: usize) -> Option<(Block, usize)>
         }),
         lines.len(),
     ))
+}
+
+fn fence_line<'a>(line: &'a str, options: &ResolvedSyntaxOptions) -> Option<&'a str> {
+    if options.constructs.indented_code {
+        trim_up_to_three_spaces(line)
+    } else {
+        Some(trim_ascii_start(line))
+    }
+}
+
+fn container_closed_after_unclosed_fence(
+    lines: &[Line<'_>],
+    cursor: usize,
+    last_content_index: usize,
+    content: &str,
+    options: &ResolvedSyntaxOptions,
+) -> bool {
+    !lines[last_content_index].eol.is_empty()
+        && (cursor >= lines.len() || lines[cursor].text.trim().is_empty())
+        && content_has_unclosed_fenced_code(content, options)
+}
+
+fn content_has_unclosed_fenced_code(content: &str, options: &ResolvedSyntaxOptions) -> bool {
+    let lines = collect_lines(content, 0);
+    let mut open_fence = None;
+    for line in lines {
+        let Some(trimmed) = fence_line(line.text, options) else {
+            continue;
+        };
+        if let Some((marker, length, has_nonblank_content)) = open_fence {
+            if fence_close(trimmed, marker, length) {
+                open_fence = None;
+            } else {
+                open_fence = Some((
+                    marker,
+                    length,
+                    has_nonblank_content || !trimmed.trim().is_empty(),
+                ));
+            }
+            continue;
+        }
+        let Some((marker, length)) = fence_start(trimmed) else {
+            continue;
+        };
+        let info = trimmed[length..].trim();
+        if marker != FenceMarker::Backtick || !info.contains('`') {
+            open_fence = Some((marker, length, false));
+        }
+    }
+    open_fence.is_some_and(|(_, _, has_nonblank_content)| !has_nonblank_content)
 }
 
 /// Recursively determines whether the innermost block reachable through this
@@ -753,6 +818,10 @@ fn block_quote_content_paragraph_open(content: &str, options: &ResolvedSyntaxOpt
     if let Some(rest) = trimmed.strip_prefix('>') {
         let rest = rest.strip_prefix(' ').unwrap_or(rest);
         return block_quote_content_paragraph_open(rest, options);
+    }
+    if let Some(marker) = list_marker_info(trimmed) {
+        let first_content = list_marker_first_content(trimmed, marker);
+        return block_quote_content_paragraph_open(&first_content, options);
     }
     !lazy_line_starts_block(trimmed, options)
 }
@@ -797,6 +866,7 @@ fn parse_block_quote(
         let raw = lines[cursor].text;
         let trimmed_opt = trim_up_to_three_spaces(raw);
         let marked = trimmed_opt.is_some_and(|trimmed| trimmed.starts_with('>'));
+        let quote_rest_owned: String;
         if let Some(trimmed) = trimmed_opt {
             if trimmed.is_empty() {
                 break;
@@ -810,6 +880,15 @@ fn parse_block_quote(
             if rest.starts_with(' ') {
                 rest_start += 1;
                 rest = &rest[1..];
+            } else if rest.starts_with('\t') {
+                let marker_end_column = leading_indent_columns(raw) + 1;
+                match strip_leading_indent_columns_from(rest, 1, marker_end_column) {
+                    Cow::Borrowed(stripped) => rest = stripped,
+                    Cow::Owned(stripped) => {
+                        quote_rest_owned = stripped;
+                        rest = &quote_rest_owned;
+                    }
+                }
             }
             (rest, trimmed_start + rest_start)
         } else if in_table {
@@ -874,6 +953,12 @@ fn parse_block_quote(
 
     let span = Span::new(lines[index].start, lines[cursor - 1].end_with_eol);
     let child_base_offset = content_base_offset.unwrap_or(lines[index].start);
+    if !lines[cursor - 1].eol.is_empty() && !ends_with_line_ending(&content) {
+        content.push_str(lines[cursor - 1].eol);
+    }
+    if container_closed_after_unclosed_fence(lines, cursor, cursor - 1, &content, options) {
+        content.push('\n');
+    }
     if let Some(alert) = parse_alert_from_block_quote(
         &content,
         child_base_offset,
@@ -1009,15 +1094,17 @@ fn parse_list(
         // of `d`'s paragraph, not a sublist — CommonMark "too few spaces").
         let mut lazy_flags: Vec<bool> = Vec::new();
         let mut open_fence = None;
-        let mut paragraph_open = list_item_paragraph_stays_open(None, marker.content, options);
+        let first_content = list_marker_first_content(lines[cursor].text, marker);
+        let mut last_content_line: Option<String> = Some(first_content.as_ref().into());
+        let mut paragraph_open = list_item_paragraph_stays_open(None, &first_content, options);
         // CommonMark §5.2: a list item can begin with at most one blank line.
         // When the marker has no content the item starts blank, and the first
         // following blank line ends it — later indented content cannot join
         // (`-\n\n  foo` → empty item + separate paragraph).
-        let mut item_started_blank = marker.content.trim().is_empty();
-        push_line(&mut content, marker.content);
+        let mut item_started_blank = first_content.trim().is_empty();
+        push_line(&mut content, &first_content);
         lazy_flags.push(false);
-        update_list_item_fence(marker.content, &mut open_fence);
+        update_list_item_fence(&first_content, &mut open_fence);
         cursor += 1;
 
         while cursor < lines.len() {
@@ -1045,12 +1132,7 @@ fn parse_list(
                         first_marker,
                         marker.content_indent,
                     )
-                    || (leading_indent_columns(lines[next].text) < marker.content_indent
-                        && !dedented_code_stays_unrepresentable(
-                            lines[next].text,
-                            first_marker.indent,
-                            options,
-                        ))
+                    || leading_indent_columns(lines[next].text) < marker.content_indent
                 {
                     if next < lines.len()
                         && sibling_list_marker_at_line(
@@ -1098,13 +1180,7 @@ fn parse_list(
                 break;
             }
 
-            if leading_indent_columns(lines[cursor].text) < marker.content_indent
-                && !dedented_code_stays_unrepresentable(
-                    lines[cursor].text,
-                    first_marker.indent,
-                    options,
-                )
-            {
+            if leading_indent_columns(lines[cursor].text) < marker.content_indent {
                 if likely_block_start(lines[cursor].text, options) || !paragraph_open {
                     break;
                 }
@@ -1122,16 +1198,34 @@ fn parse_list(
                 marker.content_indent,
                 first_marker.indent,
             );
-            paragraph_open =
-                list_item_paragraph_stays_open(Some(paragraph_open), &stripped, options);
+            let starts_table = last_content_line.as_deref().is_some_and(|previous| {
+                table_can_start_source(
+                    previous,
+                    &stripped,
+                    options.constructs.indented_code,
+                    options.constructs.spoiler,
+                )
+            });
+            paragraph_open = if starts_table {
+                false
+            } else {
+                list_item_paragraph_stays_open(Some(paragraph_open), &stripped, options)
+            };
             push_line(&mut content, &stripped);
             lazy_flags.push(lazy);
             update_list_item_fence(&stripped, &mut open_fence);
+            last_content_line = Some(stripped.into_owned());
             item_end = cursor;
             cursor += 1;
         }
 
         let child_base = lines[item_start].start + marker.content_indent;
+        if !lines[item_end].eol.is_empty() && !ends_with_line_ending(&content) {
+            content.push_str(lines[item_end].eol);
+        }
+        if container_closed_after_unclosed_fence(lines, cursor, item_end, &content, options) {
+            content.push('\n');
+        }
         let mut child_lines = collect_lines(&content, child_base);
         for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
             child.lazy = lazy;
@@ -1240,10 +1334,7 @@ fn list_item_paragraph_stays_open(
     if previous_open == Some(false) {
         return false;
     }
-    if likely_block_start(line, options) {
-        return false;
-    }
-    true
+    block_quote_content_paragraph_open(line, options)
 }
 
 fn parse_description_list(
@@ -1596,9 +1687,10 @@ fn parse_definition(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
+    allow_subsequent_indent: bool,
 ) -> Option<(Block, usize)> {
     let line = lines[index];
-    let text = trim_up_to_three_spaces(line.text)?;
+    let text = trim_definition_start(line.text, allow_subsequent_indent)?;
     if !text.starts_with('[') {
         return None;
     }
@@ -1712,6 +1804,19 @@ fn parse_definition(
         }),
         next,
     ))
+}
+
+fn trim_definition_start(input: &str, allow_subsequent_indent: bool) -> Option<&str> {
+    if let Some(trimmed) = trim_up_to_three_spaces(input) {
+        return Some(trimmed);
+    }
+    if allow_subsequent_indent {
+        let (columns, bytes) = leading_indent(input);
+        if columns == 4 {
+            return Some(&input[bytes..]);
+        }
+    }
+    None
 }
 
 fn parse_footnote_definition(
@@ -2916,12 +3021,16 @@ fn parse_indented_code(
     // Track the last line that carried real content: leading and trailing blank
     // lines are not part of an indented code block, only interior ones are.
     let mut content_end = index;
+    let mut content_end_len = 0usize;
     while cursor < lines.len() {
         if let Some(text) = strip_indented_code_prefix(lines[cursor].text) {
+            ensure_line_separator(&mut value);
+            value.push_str(text);
+            value.push_str(lines[cursor].eol);
             if !text.trim().is_empty() {
                 content_end = cursor;
+                content_end_len = value.len();
             }
-            push_line(&mut value, text);
             cursor += 1;
             continue;
         }
@@ -2929,11 +3038,12 @@ fn parse_indented_code(
         if !lines[cursor].text.trim().is_empty() {
             break;
         }
-        push_line(&mut value, "");
+        ensure_line_separator(&mut value);
+        value.push_str(lines[cursor].eol);
         cursor += 1;
     }
     // Drop trailing blank lines accumulated past the last real content line.
-    value.truncate(value.trim_end_matches('\n').len());
+    value.truncate(content_end_len);
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -2981,6 +3091,9 @@ fn parse_table(
         return None;
     }
     let delimiter = table_indent_line(lines[index + 1].text, options.constructs.indented_code)?;
+    if list_marker_info(delimiter).is_some() {
+        return None;
+    }
     if !table_has_separator(lines[index].text, delimiter, options.constructs.spoiler) {
         return None;
     }
@@ -3626,6 +3739,9 @@ fn parse_inlines_with_context(
                     if text.is_empty() {
                         text_start = base_offset + index;
                     }
+                    if gfm_link_label_preserves_url_dot_escape(&text, char, options, context) {
+                        text.push('\\');
+                    }
                     text.push(char);
                     index = next_index;
                     continue;
@@ -3873,6 +3989,7 @@ fn parse_inlines_with_context(
                     index,
                     options.constructs.gfm_autolink_literal,
                     options.constructs.relaxed_autolinks,
+                    options.profile,
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(Inline::Autolink(Autolink {
@@ -4179,6 +4296,7 @@ fn parse_inlines_with_context(
                 index,
                 options.constructs.gfm_autolink_literal,
                 options.constructs.relaxed_autolinks,
+                options.profile,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Autolink(Autolink {
@@ -4197,16 +4315,26 @@ fn parse_inlines_with_context(
         if bytes[index] == b'<' {
             if let Some(end) = parse_autolink_end(input, index) {
                 let raw = &input[index..end];
-                if is_autolink(raw) && context.allow_links {
+                if is_autolink(raw) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::Autolink(Autolink {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        destination: raw[1..raw.len() - 1].into(),
-                        kind: AutolinkKind::Angle,
-                    }));
+                    if context.allow_links {
+                        nodes.push(Inline::Autolink(Autolink {
+                            meta: NodeMeta::new(Some(Span::new(
+                                base_offset + index,
+                                base_offset + end,
+                            ))),
+                            destination: raw[1..raw.len() - 1].into(),
+                            kind: AutolinkKind::Angle,
+                        }));
+                    } else {
+                        nodes.push(Inline::Text(Text {
+                            meta: NodeMeta::new(Some(Span::new(
+                                base_offset + index,
+                                base_offset + end,
+                            ))),
+                            value: raw[1..raw.len() - 1].into(),
+                        }));
+                    }
                     index = end;
                     text_start = index;
                     continue;
@@ -5869,6 +5997,16 @@ fn push_line(output: &mut String, line: &str) {
     output.push_str(line);
 }
 
+fn ensure_line_separator(output: &mut String) {
+    if !output.is_empty() && !ends_with_line_ending(output) {
+        output.push('\n');
+    }
+}
+
+fn ends_with_line_ending(input: &str) -> bool {
+    input.ends_with('\n') || input.ends_with('\r')
+}
+
 fn flush_text(nodes: &mut Vec<Inline>, text: &mut String, text_start: usize, end: usize) {
     if !text.is_empty() {
         nodes.push(Inline::Text(Text {
@@ -5876,6 +6014,18 @@ fn flush_text(nodes: &mut Vec<Inline>, text: &mut String, text_start: usize, end
             value: core::mem::take(text),
         }));
     }
+}
+
+fn gfm_link_label_preserves_url_dot_escape(
+    text: &str,
+    escaped: char,
+    options: &ResolvedSyntaxOptions,
+    context: InlineContext,
+) -> bool {
+    escaped == '.'
+        && !context.allow_links
+        && options.profile == SyntaxProfile::Gfm
+        && (text.starts_with("www.") || text.starts_with("http://") || text.starts_with("https://"))
 }
 
 fn next_char(input: &str, index: usize) -> Option<(usize, char)> {
@@ -6008,6 +6158,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 start: None,
                 delimiter,
                 indent,
+                marker_len: 1,
                 content_indent,
                 content: &trimmed[content_offset..],
             })
@@ -6036,6 +6187,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 start: Some(start),
                 delimiter,
                 indent,
+                marker_len,
                 content_indent,
                 content: &trimmed[content_offset..],
             })
@@ -6075,6 +6227,18 @@ fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize,
     }
 }
 
+fn list_marker_first_content<'a>(input: &'a str, marker: ListMarkerInfo<'a>) -> Cow<'a, str> {
+    let Some(trimmed) = trim_up_to_three_spaces(input) else {
+        return Cow::Borrowed(marker.content);
+    };
+    let after_marker = &trimmed[marker.marker_len..];
+    if after_marker.starts_with('\t') {
+        strip_leading_indent_columns_from(after_marker, 1, marker.indent + marker.marker_len)
+    } else {
+        Cow::Borrowed(marker.content)
+    }
+}
+
 fn is_list_padding_byte(byte: Option<u8>) -> bool {
     matches!(byte, None | Some(b' ' | b'\t'))
 }
@@ -6110,26 +6274,6 @@ fn same_list_marker_line(input: &str, first_marker: ListMarkerInfo<'_>) -> bool 
     list_marker_info(input).is_some_and(|candidate| same_list_marker(first_marker, candidate))
 }
 
-/// A line dedented past the item's content start normally ends the list
-/// (CommonMark §5.2); when it is indented code it becomes a sibling code block.
-/// That split round-trips only if the serializer can keep the list and the code
-/// block apart, but the serializer writes a two-column bullet marker and the
-/// code at its own four-space indent, so re-parsing folds the code back into the
-/// final item. Such a split therefore sits outside the serializer's stability
-/// boundary, and the item keeps the line (the pre-fix behavior) rather than
-/// emitting an AST that cannot survive a serialize/reparse round trip. Only
-/// genuine indented code triggers this — dedented paragraphs serialize at column
-/// zero and round-trip cleanly, so they still end the item.
-fn dedented_code_stays_unrepresentable(
-    line: &str,
-    list_indent: usize,
-    options: &ResolvedSyntaxOptions,
-) -> bool {
-    options.constructs.indented_code
-        && leading_indent_columns(line) > list_indent
-        && strip_indented_code_prefix(line).is_some()
-}
-
 fn next_nonblank_line(lines: &[Line<'_>], mut index: usize) -> usize {
     while index < lines.len() && lines[index].text.trim().is_empty() {
         index += 1;
@@ -6162,23 +6306,52 @@ fn leading_indent_columns(input: &str) -> usize {
 /// the result may be an owned `String`. Whitespace already at/over the budget
 /// (and any literal tab whose start sits at the budget) is returned verbatim.
 fn strip_leading_indent_columns(input: &str, max_columns: usize) -> Cow<'_, str> {
-    let mut column = 0usize;
+    strip_leading_indent_columns_from(input, max_columns, 0)
+}
+
+fn strip_leading_indent_columns_from(
+    input: &str,
+    max_columns: usize,
+    start_column: usize,
+) -> Cow<'_, str> {
+    let mut column = start_column;
+    let target_column = start_column + max_columns;
     for (index, byte) in input.as_bytes().iter().enumerate() {
         let next = match *byte {
             b' ' => column + 1,
             b'\t' => column + (4 - (column % 4)),
             _ => return Cow::Borrowed(&input[index..]),
         };
-        if next > max_columns {
+        if next > target_column {
             // A tab whose expansion crosses the budget (its start still inside the
             // budget) is split: the over-budget columns survive as spaces.
-            if *byte == b'\t' && column < max_columns {
-                let residual = next - max_columns;
+            if *byte == b'\t' && column < target_column {
+                let residual = next - target_column;
                 let mut owned = String::with_capacity(residual + input.len() - (index + 1));
                 for _ in 0..residual {
                     owned.push(' ');
                 }
-                owned.push_str(&input[index + 1..]);
+                let mut rest_column = next;
+                let mut rest_index = index + 1;
+                while let Some(rest_byte) = input.as_bytes().get(rest_index) {
+                    match *rest_byte {
+                        b' ' => {
+                            owned.push(' ');
+                            rest_column += 1;
+                            rest_index += 1;
+                        }
+                        b'\t' => {
+                            let width = 4 - (rest_column % 4);
+                            for _ in 0..width {
+                                owned.push(' ');
+                            }
+                            rest_column += width;
+                            rest_index += 1;
+                        }
+                        _ => break,
+                    }
+                }
+                owned.push_str(&input[rest_index..]);
                 return Cow::Owned(owned);
             }
             return Cow::Borrowed(&input[index..]);
@@ -6397,7 +6570,9 @@ fn table_indent_line(input: &str, indented_code: bool) -> Option<&str> {
 }
 
 // True if a backtick run of `length` at `start` has a matching-length closing
-// run later in `input` (cmark-gfm: code protects pipes only when paired).
+// run later in `input`. The table row scanner still treats unescaped pipes as
+// cell boundaries; this state only prevents extension syntax such as spoilers
+// from being recognized inside a code span.
 fn backtick_run_has_close(input: &str, start: usize, length: usize) -> bool {
     let bytes = input.as_bytes();
     let mut i = start + length;
@@ -6419,6 +6594,18 @@ fn backtick_run_has_close(input: &str, start: usize, length: usize) -> bool {
     false
 }
 
+fn table_backslash_pipe_run(input: &str, cursor: usize) -> Option<(usize, bool)> {
+    let bytes = input.as_bytes();
+    if bytes.get(cursor) != Some(&b'\\') {
+        return None;
+    }
+    let mut pipe = cursor;
+    while bytes.get(pipe) == Some(&b'\\') {
+        pipe += 1;
+    }
+    (bytes.get(pipe) == Some(&b'|')).then_some((pipe, (pipe - cursor) % 2 == 1))
+}
+
 fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
     let trimmed = input.trim();
     let mut cells = Vec::new();
@@ -6435,13 +6622,26 @@ fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
 
     while cursor < trimmed.len() {
         let (next, char) = next_char(trimmed, cursor).expect("valid UTF-8 byte index");
-        // cmark-gfm unescapes `\|` to a literal `|` inside a table cell, both
-        // inside and outside an inline code span; a backslash before any other
-        // byte is left untouched (it is a normal inline escape resolved later).
-        if char == '\\' && trimmed.as_bytes().get(cursor + 1) == Some(&b'|') {
-            cell.push('|');
-            cursor += 2;
-            continue;
+        // GitHub/cmark-gfm treats an odd backslash run before `|` as a literal
+        // cell-content pipe, but an even run leaves the pipe as a delimiter. Keep
+        // the original run before an even delimiter so the inline parser resolves
+        // the visible backslashes correctly.
+        if char == '\\' {
+            if let Some((pipe, escaped)) = table_backslash_pipe_run(trimmed, cursor) {
+                if escaped {
+                    for _ in 0..pipe - cursor - 1 {
+                        cell.push('\\');
+                    }
+                    cell.push('|');
+                    cursor = pipe + 1;
+                } else {
+                    for _ in 0..pipe - cursor {
+                        cell.push('\\');
+                    }
+                    cursor = pipe;
+                }
+                continue;
+            }
         }
         // Backticks are never escapable, so a preceding backslash does not block a
         // code-span boundary (a `\` directly before a closing backtick is content,
@@ -6455,12 +6655,20 @@ fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
             if code_fence == Some(length) {
                 code_fence = None;
             } else if code_fence.is_none() && backtick_run_has_close(trimmed, cursor, length) {
-                // cmark-gfm: a backtick run protects interior pipes only when it
-                // has a matching-length closing run within the row.
                 code_fence = Some(length);
             }
             cell.push_str(&trimmed[cursor..cursor + length]);
             cursor += length;
+            continue;
+        }
+
+        if spoiler
+            && char == '|'
+            && trimmed.as_bytes().get(cursor + 1) == Some(&b'|')
+            && code_fence.is_some()
+        {
+            cell.push_str("||");
+            cursor += 2;
             continue;
         }
 
@@ -6483,7 +6691,7 @@ fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
             }
         }
 
-        if char == '|' && code_fence.is_none() && !spoiler_open && !is_escaped_at(trimmed, cursor) {
+        if char == '|' && !spoiler_open && !is_escaped_at(trimmed, cursor) {
             cells.push(core::mem::take(&mut cell));
             // A delimiter ends the cell; spoiler state never spans a cell boundary.
             spoiler_open = false;
@@ -6533,6 +6741,9 @@ fn table_can_start_source(
     let Some(delimiter) = table_indent_line(delimiter, indented_code) else {
         return false;
     };
+    if list_marker_info(delimiter).is_some() {
+        return false;
+    }
     if !table_has_separator(header, delimiter, spoiler) {
         return false;
     }
@@ -6569,10 +6780,11 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
     let mut spoiler_open = false;
     while cursor < input.len() {
         let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
-        // `\|` is a cell-content pipe (cmark-gfm unescapes it), never a delimiter.
-        if char == '\\' && input.as_bytes().get(cursor + 1) == Some(&b'|') {
-            cursor += 2;
-            continue;
+        if char == '\\' {
+            if let Some((pipe, escaped)) = table_backslash_pipe_run(input, cursor) {
+                cursor = if escaped { pipe + 1 } else { pipe };
+                continue;
+            }
         }
         // Backticks are never escapable; a preceding backslash is code-span content.
         if char == '`' {
@@ -6592,6 +6804,14 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
         if spoiler
             && char == '|'
             && input.as_bytes().get(cursor + 1) == Some(&b'|')
+            && code_fence.is_some()
+        {
+            cursor += 2;
+            continue;
+        }
+        if spoiler
+            && char == '|'
+            && input.as_bytes().get(cursor + 1) == Some(&b'|')
             && code_fence.is_none()
             && !is_escaped_at(input, cursor)
         {
@@ -6606,7 +6826,7 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
                 continue;
             }
         }
-        if char == '|' && code_fence.is_none() && !spoiler_open && !is_escaped_at(input, cursor) {
+        if char == '|' && !spoiler_open && !is_escaped_at(input, cursor) {
             return true;
         }
         cursor = next;
@@ -6629,6 +6849,7 @@ fn likely_block_start(input: &str, options: &ResolvedSyntaxOptions) -> bool {
         || list_marker_can_interrupt_paragraph(input)
         || parse_thematic_break(Line {
             text: input,
+            eol: "",
             start: 0,
             end: input.len(),
             end_with_eol: input.len(),
@@ -6664,7 +6885,8 @@ fn list_marker_can_interrupt_paragraph(input: &str) -> bool {
 // table body loop; `likely_block_start` itself is left untouched.
 fn table_body_line_ends_table(line: &str, options: &ResolvedSyntaxOptions) -> bool {
     likely_block_start(line, options)
-        || list_marker_info(line).is_some_and(|marker| !marker.ordered || marker.start == Some(1))
+        || list_marker_info(line).is_some()
+        || (options.constructs.html_block && line_starts_html_block(line))
 }
 
 fn line_starts_interrupting_html_block(input: &str) -> bool {
@@ -6867,6 +7089,7 @@ fn parse_literal_autolink(
     index: usize,
     gfm: bool,
     relaxed: bool,
+    profile: SyntaxProfile,
 ) -> Option<(usize, String)> {
     let rest = &input[index..];
 
@@ -6882,20 +7105,28 @@ fn parse_literal_autolink(
                 return None;
             }
             let host = &input[index + scheme_len..];
-            // A non-empty host whose first char is alphanumeric is additionally
+            // A non-empty domain or bracketed IPv6 host is additionally
             // required, so `http://`, `http://#`, `http://$` are not links.
-            if !host_first_char_is_alnum(host) {
-                return None;
+            if !http_literal_host_ok(host) {
+                if relaxed {
+                    // Let cmark-gfm's relaxed `scheme://` pass decide cases
+                    // such as a bare `http://` followed by whitespace.
+                } else {
+                    return None;
+                }
+            } else {
+                // The URL extent is scanned from the very start (after `://`) and the
+                // trailing trim runs over the whole URL. Relaxed mode balances
+                // brackets/braces so `[abc]`/`{abc}`/IPv6 hosts stay in the URL.
+                let end = autolink_url_end(input, index + scheme_len, index + scheme_len, relaxed);
+                if end <= index + scheme_len {
+                    return None;
+                }
+                if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, profile) {
+                    return None;
+                }
+                return Some((end, input[index..end].into()));
             }
-            check_domain(host, true)?;
-            // The URL extent is scanned from the very start (after `://`) and the
-            // trailing trim runs over the whole URL. Relaxed mode balances
-            // brackets/braces so `[abc]`/`{abc}`/IPv6 hosts stay in the URL.
-            let end = autolink_url_end(input, index + scheme_len, index + scheme_len, relaxed);
-            if end <= index + scheme_len {
-                return None;
-            }
-            return Some((end, input[index..end].into()));
         }
 
         // `www.` URLs (synthesize a `http://` href). cmark allows the preceding
@@ -6910,7 +7141,11 @@ fn parse_literal_autolink(
             }
             check_domain(rest, false)?;
             let end = autolink_url_end(input, index, index, relaxed);
-            if end <= index {
+            if end <= index || (!relaxed && end <= index + 3 && !literal_starts_line(input, index))
+            {
+                return None;
+            }
+            if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, profile) {
                 return None;
             }
             let mut destination = String::from("http://");
@@ -6933,15 +7168,18 @@ fn parse_literal_autolink(
         if literal_scheme_prefix_ok(input, index) {
             if let Some(after_slashes) = relaxed_scheme_after_slashes(rest) {
                 let body_start = index + after_slashes;
-                if input[body_start..]
-                    .chars()
-                    .next()
-                    .is_some_and(|char| !char.is_whitespace())
-                {
-                    let end = autolink_url_end(input, body_start, body_start, true);
-                    if end > index {
-                        return Some((end, input[index..end].into()));
+                let next = input[body_start..].chars().next();
+                if next.is_none_or(|char| char.is_whitespace()) && after_slashes == 3 {
+                    return None;
+                }
+                let end = autolink_url_end(input, body_start, body_start, true);
+                if end > index {
+                    if literal_autolink_suppressed_by_link_label(
+                        input, index, end, relaxed, profile,
+                    ) {
+                        return None;
                     }
+                    return Some((end, input[index..end].into()));
                 }
             }
         }
@@ -6979,7 +7217,7 @@ fn relaxed_scheme_after_slashes(rest: &str) -> Option<usize> {
     }
 }
 
-// The char immediately before a `http(s)://` literal must be non-alphanumeric.
+// The char immediately before a `http(s)://` literal must be non-alphabetic.
 // An escaped `<` (`\<http://…`) is just literal text before the URL, so the
 // literal still forms (the `<` is not treated as an angle-autolink opener).
 fn literal_scheme_prefix_ok(input: &str, index: usize) -> bool {
@@ -6989,14 +7227,12 @@ fn literal_scheme_prefix_ok(input: &str, index: usize) -> bool {
     let Some(previous) = input[..index].chars().next_back() else {
         return true;
     };
-    !previous.is_ascii_alphanumeric()
+    !previous.is_ascii_alphabetic()
 }
 
-// The char before a `www.` literal must be `* _ ~ (` or whitespace. Control
-// whitespace (form feed, NEL, …) is excluded: it does not start a www literal,
-// and — since the serializer re-encodes such control
-// chars as `&#xHH;` — excluding them keeps the literal stable on the round trip
-// (the encoded entity would otherwise no longer read as a whitespace preceder).
+// The char before a `www.` literal must be one of cmark-gfm's accepted ASCII
+// delimiters or ordinary Markdown layout whitespace. Unicode whitespace is not
+// a start delimiter for this branch.
 fn literal_www_prefix_ok(input: &str, index: usize) -> bool {
     if index == 0 {
         return true;
@@ -7004,27 +7240,106 @@ fn literal_www_prefix_ok(input: &str, index: usize) -> bool {
     let Some(previous) = input[..index].chars().next_back() else {
         return true;
     };
-    if matches!(previous, '*' | '_' | '~' | '(') {
+    if matches!(previous, '*' | '_' | '~' | '(' | '[' | ']') {
         return true;
     }
-    if !previous.is_whitespace() {
-        return false;
-    }
-    // Keep the ordinary layout whitespace (space, tab, CR, LF); reject the
-    // exotic control whitespace (form feed, vertical tab, NEL, …) that the
-    // serializer re-encodes as a numeric entity.
-    matches!(previous, ' ' | '\t' | '\n' | '\r') || !previous.is_control()
+    matches!(previous, ' ' | '\t' | '\n' | '\r')
 }
 
-// A non-empty `http(s)://` host whose first char is a "domain" char is
-// required: an ASCII alphanumeric or any non-ASCII valid host char (so
-// `http://點看.com` links but `http://#`, `http://$` do not).
-fn host_first_char_is_alnum(host: &str) -> bool {
-    match host.chars().next() {
-        Some(char) if char.is_ascii() => char.is_ascii_alphanumeric(),
-        Some(char) => is_valid_hostchar(char),
-        None => false,
+fn literal_starts_line(input: &str, index: usize) -> bool {
+    index == 0
+        || input
+            .as_bytes()
+            .get(index - 1)
+            .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
+}
+
+fn literal_autolink_suppressed_by_link_label(
+    input: &str,
+    index: usize,
+    end: usize,
+    relaxed: bool,
+    profile: SyntaxProfile,
+) -> bool {
+    if !has_unclosed_link_label_opener(input, index) {
+        return false;
     }
+    if input[end..].starts_with("](") && !link_resource_tail_has_close(input, end + 2) {
+        return true;
+    }
+    !relaxed
+        && profile != SyntaxProfile::Gfm
+        && input.as_bytes().get(end).is_some_and(|byte| *byte == b']')
+}
+
+fn has_unclosed_link_label_opener(input: &str, index: usize) -> bool {
+    let line_start = input[..index]
+        .rfind(['\n', '\r'])
+        .map_or(0, |offset| offset + 1);
+    let mut depth = 0usize;
+    let mut cursor = line_start;
+    while cursor < index {
+        let Some((next, char)) = next_char(input, cursor) else {
+            break;
+        };
+        match char {
+            '\\' => {
+                cursor = next_char(input, next)
+                    .map(|(after_escape, _)| after_escape)
+                    .unwrap_or(next);
+                continue;
+            }
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        cursor = next;
+    }
+    depth > 0
+}
+
+fn link_resource_tail_has_close(input: &str, start: usize) -> bool {
+    let mut cursor = start;
+    while cursor < input.len() {
+        let Some((next, char)) = next_char(input, cursor) else {
+            break;
+        };
+        match char {
+            '\\' => {
+                cursor = next_char(input, next)
+                    .map(|(after_escape, _)| after_escape)
+                    .unwrap_or(next);
+                continue;
+            }
+            '\n' | '\r' => return false,
+            ')' => return true,
+            _ => {}
+        }
+        cursor = next;
+    }
+    false
+}
+
+fn http_literal_host_ok(host: &str) -> bool {
+    if host.starts_with('[') {
+        return bracketed_ipv6_host_end(host).is_some();
+    }
+    match host.chars().next() {
+        Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => {
+            check_domain(host, true).is_some()
+        }
+        Some(char) if !char.is_ascii() && is_valid_hostchar(char) => {
+            check_domain(host, true).is_some()
+        }
+        _ => false,
+    }
+}
+
+fn bracketed_ipv6_host_end(host: &str) -> Option<usize> {
+    let close = host.find(']')?;
+    (close > 1).then_some(close + 1)
 }
 
 // Port of cmark-gfm `is_valid_hostchar`: a host char is valid when it is not a
@@ -7113,8 +7428,10 @@ fn autolink_url_end(input: &str, start: usize, trim_from: usize, balanced: bool)
     // `autolink_relaxed_links_brackets_balanced` keeps one).
     let mut bracket_depth = 0i32;
     let mut curly_depth = 0i32;
+    let mut strict_has_open_bracket = false;
+    let mut strict_inside_backticks = false;
     for (offset, char) in input[start..].char_indices() {
-        if char.is_whitespace() || char == '<' {
+        if char.is_whitespace() || char == '<' || is_autolink_terminating_control(char) {
             break;
         }
         if balanced {
@@ -7137,8 +7454,13 @@ fn autolink_url_end(input: &str, start: usize, trim_from: usize, balanced: bool)
                 }
                 _ => {}
             }
-        } else if char == ']' {
-            break;
+        } else {
+            match char {
+                '[' => strict_has_open_bracket = true,
+                '`' => strict_inside_backticks = !strict_inside_backticks,
+                ']' if !strict_has_open_bracket && !strict_inside_backticks => break,
+                _ => {}
+            }
         }
         // Round-trip guard: when a literal autolink ends (a trailing entity
         // run, punctuation trim, unbalanced `)`, or the `]`/`<` hard boundary),
@@ -7159,6 +7481,10 @@ fn autolink_url_end(input: &str, start: usize, trim_from: usize, balanced: bool)
         end = start + offset + char.len_utf8();
     }
     autolink_delim(input, trim_from, end)
+}
+
+fn is_autolink_terminating_control(char: char) -> bool {
+    matches!(char, '\u{2066}'..='\u{2069}')
 }
 
 // Port of cmark-gfm `autolink_delim`: trim trailing delimiters from the end of
@@ -7335,12 +7661,29 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
         return true;
     };
     if previous.is_ascii_alphanumeric() {
+        if auto_mailto
+            && input[index..].starts_with('+')
+            && prefix_ends_with_gfm_email(input, index)
+        {
+            return true;
+        }
         return false;
     }
     if auto_mailto && previous == '/' {
         return false;
     }
     true
+}
+
+fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
+    let start = input[..end]
+        .rfind(char::is_whitespace)
+        .map_or(0, |offset| offset + 1);
+    let candidate = &input[start..end];
+    let Some(at) = candidate.rfind('@') else {
+        return false;
+    };
+    email_local_is_valid(&candidate[..at], true) && is_gfm_email_domain(&candidate[at + 1..], false)
 }
 
 // Validate the email local part. For the bare form, every char must be a GFM

@@ -5,43 +5,44 @@ content — it points at the docs that hold it._
 
 ## Current goal
 
-The crate was just migrated into its own dedicated repo (from the `labs`
-monorepo, 2026-06-20). No task is in flight. Two open workstreams exist:
+The crate was migrated into its own dedicated repo (from the `labs` monorepo,
+2026-06-20). No task is in flight. One open workstream remains:
 
-1. **Parse↔serialize correctness** — advance toward CommonMark/GFM conformance
-   via the task graph `docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md`
-   (T001–T025; leaf-first; paired parser+serializer fixes + regenerated
-   bench-verified goldens). Substrate: `docs/archive/2026-06-19-markdown-syntax-conformance-investigation.md`.
-2. **Ship an opt-in HTML renderer** — promote the test-only renderer into
+1. **Ship an opt-in HTML renderer** — promote the test-only renderer into
    `src/html/` behind a non-default `html` feature, per the active plan
    `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` (not yet started).
 
+Completed workstream: parse↔serialize correctness via
+`docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md`; current
+CommonMark/GFM AST→HTML conformance is 2260/2260 in
+`tests/html_conformance/CONFORMANCE.md`.
+
 ## Scope
 
-- In: the two workstreams above; both keep the default build byte-stable
+- In: the renderer workstream above; keep the default build byte-stable
   (`no_std`, zero runtime deps, empty default features).
-- Out: publishing the crate; pluggable HTML sanitization; the test-tree
-  reorganization (`docs/plans/2026-06-19-markdown-syntax-test-reorg.md`, draft).
+- Out: publishing the crate; pluggable HTML sanitization; reopening the completed
+  test-tree reorganization unless explicitly requested
+  (`docs/plans/2026-06-19-markdown-syntax-test-reorg.md`).
 
 ## Next step
 
-None pending. Pick up workstream 1 or 2 above when work resumes.
+None pending. Pick up the renderer workstream when work resumes.
 
 ## Verification state
 
-Post-migration: `cargo fmt --check`, `cargo build`, and `cargo test` (146 tests
-+ README doc-test) all green; `cargo tree` shows zero runtime deps. Current
-conformance numbers: see `tests/html_conformance/CONFORMANCE.md`.
+Current verification: `cargo fmt --check`, `cargo build`, `cargo test`,
+`RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, and
+`cargo build --target wasm32-unknown-unknown` all green. Current conformance
+numbers: 2260/2260; see `tests/html_conformance/CONFORMANCE.md`.
+Observed test layout: `tests/fixtures/roundtrip/`,
+`tests/fixtures/conformance/{commonmark,gfm}/`, and the four regression test
+files under `tests/`.
 
 ## Open docs
 
 - Plan (renderer): `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` — active
-- Tasking (correctness): `docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md` — active
 
 ## Stop condition
 
-n/a — no active task. Sequencing note for whoever resumes: the renderer
-promotion is a byte-for-byte port pinned to the *current* bench headline, while
-the correctness tasks move parser output and regenerate goldens — land the
-renderer plan first (frozen oracle) or coordinate golden regeneration if both
-run together.
+n/a — no active task.

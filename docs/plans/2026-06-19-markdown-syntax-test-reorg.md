@@ -1,13 +1,20 @@
 ---
 date: 2026-06-19
-status: draft
+status: completed
 ---
 
-# markdown-syntax test reorganization — design proposal
+# markdown-syntax test reorganization
 
-> **Promoted 2026-06-20 from `target/test-reorg-proposal.md`.** **Stale detail:** this proposal keeps `tests/html_conformance/renderer/` as-is, but the active renderer plan (`docs/plans/2026-06-20-markdown-syntax-html-renderer.md`) promotes that renderer into `src/html/` behind the `html` feature and deletes the directory. If this proposal is ever promoted to `active`, drop the `renderer/` line from its target tree. Defer its headline number to `tests/html_conformance/CONFORMANCE.md`.
+> **Implemented shape.** The current test tree is role-separated:
+> `tests/fixtures/roundtrip/` owns parse/serialize stability fixtures and
+> generated round-trip case snapshots; `tests/fixtures/conformance/{commonmark,gfm}/`
+> owns byte-counted HTML oracle cases for the measurement bench. The engine-owned
+> `markdown-rs/` / `comrak/` fixture split is absent from the current tree.
+> Current conformance numbers live in `tests/html_conformance/CONFORMANCE.md`.
+> The private renderer remains under `tests/html_conformance/renderer/` until
+> `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` lands.
 
-(No files moved, no source edited.)
+The sections below preserve the proposal that led to the implemented layout.
 
 Goal: satisfy the user's 3 hard constraints —
 1. stop distinguishing the `markdown-rs/` and `comrak/` directories,

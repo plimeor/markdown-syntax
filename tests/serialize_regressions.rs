@@ -114,7 +114,7 @@ mod serializer {
         let reparsed = parse_document(&markdown, &math_options());
         match &reparsed.children[..] {
             [Block::MathBlock(block), Block::Paragraph(paragraph)] => {
-                assert_eq!(block.value, "$$\n$$$\na $$ b");
+                assert_eq!(block.value, "$$\n$$$\na $$ b\n");
                 assert!(matches!(
                     &paragraph.children[..],
                     [Inline::Math(MathInline { value, .. })] if value == "a $$ b"
@@ -170,7 +170,7 @@ mod serializer {
         match &reparsed.children[..] {
             [Block::ContainerDirective(container)] => match &container.children[..] {
                 [Block::CodeBlock(code)] => {
-                    assert_eq!(code.value, "before\n:::\n::::\nafter");
+                    assert_eq!(code.value, "before\n:::\n::::\nafter\n");
                 }
                 other => panic!("unexpected directive children: {other:?}"),
             },
@@ -954,8 +954,8 @@ mod serializer_escape {
 
         let markdown = to_markdown(&document).expect("document serializes");
         assert!(markdown.contains("a&#x7C;b"));
-        assert!(markdown.contains("`c|d`"));
-        assert!(markdown.contains("$`x|y`$"));
+        assert!(markdown.contains(r"`c\|d`"));
+        assert!(markdown.contains(r"$`x\|y`$"));
         assert!(markdown.contains("[link&#x7C;label](/link)"));
         assert!(markdown.contains("![img&#x7C;alt](/img)"));
         assert!(markdown.contains("[ref&#x7C;text][pipe\\|id]"));

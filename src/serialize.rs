@@ -101,7 +101,20 @@ fn serialize_blocks_at_start(
             output.push_str("\n\n");
         }
         let at_document_start = document_start && index == 0;
-        output.push_str(&serialize_block(block, options, at_document_start)?);
+        if let (
+            Block::List(list),
+            Some(Block::CodeBlock(CodeBlock {
+                kind: CodeBlockKind::Indented,
+                ..
+            })),
+        ) = (block, blocks.get(index + 1))
+        {
+            output.push_str(&serialize_list_with_marker_spacing(
+                list, options, " ", "    ",
+            )?);
+        } else {
+            output.push_str(&serialize_block(block, options, at_document_start)?);
+        }
     }
     Ok(output)
 }
@@ -347,6 +360,15 @@ fn escape_alert_title(input: &str) -> String {
 }
 
 fn serialize_list(node: &List, options: &SerializeOptions) -> Result<String, SerializeError> {
+    serialize_list_with_marker_spacing(node, options, "", " ")
+}
+
+fn serialize_list_with_marker_spacing(
+    node: &List,
+    options: &SerializeOptions,
+    marker_prefix: &str,
+    marker_padding: &str,
+) -> Result<String, SerializeError> {
     let mut output = String::new();
     for (index, item) in node.children.iter().enumerate() {
         if index > 0 {
@@ -370,9 +392,12 @@ fn serialize_list(node: &List, options: &SerializeOptions) -> Result<String, Ser
         let marker = if node.ordered {
             let start = node.start.unwrap_or(1).saturating_add(index as u64);
             let delimiter = ordered_list_marker(list_delimiter);
-            format!("{start}{delimiter} ")
+            format!("{marker_prefix}{start}{delimiter}{marker_padding}")
         } else {
-            format!("{} ", unordered_list_marker(list_delimiter))
+            format!(
+                "{marker_prefix}{}{marker_padding}",
+                unordered_list_marker(list_delimiter)
+            )
         };
         let mut inner = serialize_item_blocks(&item.children, options, node.tight)?;
         if !node.ordered && unordered_list_marker(list_delimiter) == '*' {
@@ -493,14 +518,14 @@ fn serialize_code_block(
                 opener.push(' ');
                 opener.push_str(&escape_code_info(info));
             }
-            // The value is the content lines joined by `\n` with no trailing
-            // newline: the closing `\n` before the fence is the final line's
-            // terminator. Do NOT trim trailing newlines here — an internal or
-            // trailing blank content line shows up as a trailing `\n` in the
-            // value, and the `\n{value}\n{fence}` wrapping reproduces exactly
-            // those blank lines on re-parse (so `b\n\n` → three newlines between
-            // the fences → `[b, "", ""]` again).
-            Ok(format!("{opener}\n{}\n{fence}", node.value))
+            let mut output = opener;
+            output.push('\n');
+            output.push_str(&node.value);
+            if !ends_with_line_ending(&node.value) {
+                output.push('\n');
+            }
+            output.push_str(&fence);
+            Ok(output)
         }
     }
 }
@@ -668,6 +693,15 @@ fn is_gfm_literal_autolink(inline: &Inline) -> bool {
     matches!(
         inline,
         Inline::Autolink(node) if matches!(node.kind, AutolinkKind::GfmLiteral { .. })
+    )
+}
+
+fn is_gfm_literal_email(inline: &Inline) -> bool {
+    matches!(
+        inline,
+        Inline::Autolink(node)
+            if matches!(&node.kind, AutolinkKind::GfmLiteral { original }
+                if node.destination.strip_prefix("mailto:") == Some(original.as_str()))
     )
 }
 
@@ -863,8 +897,13 @@ fn serialize_inlines_with_context(
             Inline::Code(node) => {
                 if node.fence_length > 0 && !node.raw.is_empty() {
                     let fence = "`".repeat(node.fence_length);
+                    let raw = if context.table_cell {
+                        table_cell_escape_code_pipes(&node.raw)
+                    } else {
+                        node.raw.clone()
+                    };
                     output.push_str(&fence);
-                    output.push_str(&node.raw);
+                    output.push_str(&raw);
                     output.push_str(&fence);
                     continue;
                 }
@@ -872,14 +911,19 @@ fn serialize_inlines_with_context(
                     output.push_str("`` ``");
                     continue;
                 }
-                let fence = inline_code_fence(&node.value);
+                let value = if context.table_cell {
+                    table_cell_escape_code_pipes(&node.value)
+                } else {
+                    node.value.clone()
+                };
+                let fence = inline_code_fence(&value);
                 output.push_str(&fence);
-                if code_span_needs_padding(&node.value) {
+                if code_span_needs_padding(&value) {
                     output.push(' ');
-                    output.push_str(&node.value);
+                    output.push_str(&value);
                     output.push(' ');
                 } else {
-                    output.push_str(&node.value);
+                    output.push_str(&value);
                 }
                 output.push_str(&fence);
             }
@@ -958,7 +1002,11 @@ fn serialize_inlines_with_context(
                     // synthesized `mailto:` prefix) re-anchor leftward over
                     // email-local chars on reparse; guard the preceding char.
                     let is_bare_email = node.destination == alloc::format!("mailto:{original}");
-                    if is_bare_email {
+                    let follows_literal_email_plus = original.starts_with('+')
+                        && index
+                            .checked_sub(1)
+                            .is_some_and(|prev| is_gfm_literal_email(&inlines[prev]));
+                    if is_bare_email && !follows_literal_email_plus {
                         escape_trailing_email_local(&mut output);
                     } else {
                         escape_trailing_less_than(&mut output);
@@ -1895,15 +1943,34 @@ fn ordered_list_marker(delimiter: ListDelimiter) -> char {
 }
 
 fn prefix_lines(input: &str, prefix: &str) -> String {
-    input
-        .lines()
-        .map(|line| {
-            let mut output = String::from(prefix);
-            output.push_str(line);
-            output
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    if input.is_empty() {
+        return String::new();
+    }
+    let bytes = input.as_bytes();
+    let mut output = String::new();
+    let mut line_start = 0;
+    let mut cursor = 0;
+    while cursor < input.len() {
+        let eol_end = match bytes[cursor] {
+            b'\n' => Some(cursor + 1),
+            b'\r' if bytes.get(cursor + 1) == Some(&b'\n') => Some(cursor + 2),
+            b'\r' => Some(cursor + 1),
+            _ => None,
+        };
+        if let Some(end) = eol_end {
+            output.push_str(prefix);
+            output.push_str(&input[line_start..end]);
+            cursor = end;
+            line_start = cursor;
+        } else {
+            cursor += 1;
+        }
+    }
+    if line_start < input.len() {
+        output.push_str(prefix);
+        output.push_str(&input[line_start..]);
+    }
+    output
 }
 
 fn indent_after_first_line(input: &str, width: usize) -> String {
@@ -1956,6 +2023,10 @@ fn trim_trailing_newline(input: &str) -> &str {
     input.trim_end_matches('\n').trim_end_matches('\r')
 }
 
+fn ends_with_line_ending(input: &str) -> bool {
+    input.ends_with('\n') || input.ends_with('\r')
+}
+
 fn fence_for(input: &str, marker: FenceMarker, min_len: usize) -> String {
     let char = match marker {
         FenceMarker::Backtick => '`',
@@ -1973,6 +2044,17 @@ fn code_span_needs_padding(input: &str) -> bool {
     input.starts_with('`')
         || input.ends_with('`')
         || (input.starts_with(' ') && input.ends_with(' ') && input.chars().any(|char| char != ' '))
+}
+
+fn table_cell_escape_code_pipes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for char in input.chars() {
+        if char == '|' {
+            output.push('\\');
+        }
+        output.push(char);
+    }
+    output
 }
 
 fn block_math_fence(input: &str) -> String {
@@ -2002,6 +2084,7 @@ fn serialize_inline_math_with_context(
                 "inline math containing a table pipe and a code-math close",
             ));
         }
+        let input = table_cell_escape_code_pipes(input);
         return Ok(format!("$`{input}`$"));
     }
 
@@ -2039,9 +2122,9 @@ fn table_cell_has_unescaped_pipe(input: &str) -> bool {
             break;
         };
         // Backticks are never escapable: a preceding backslash is code-span
-        // content, so it must not suppress the code-span boundary here. This keeps
-        // the serializer in step with `split_table_row`, so a code-protected pipe
-        // (e.g. `` `|` ``) is not mistaken for an unescaped delimiter.
+        // content, so it must not suppress the code-span boundary here. Track
+        // code spans only for extension syntax such as spoilers; a single
+        // unescaped pipe still splits a table row, even inside code.
         if char == '`' {
             let length = input[cursor..]
                 .as_bytes()
@@ -2054,6 +2137,10 @@ fn table_cell_has_unescaped_pipe(input: &str) -> bool {
                 code_fence = Some(length);
             }
             cursor += length;
+            continue;
+        }
+        if char == '|' && input.as_bytes().get(cursor + 1) == Some(&b'|') && code_fence.is_some() {
+            cursor += 2;
             continue;
         }
         if char == '|'
@@ -2072,11 +2159,7 @@ fn table_cell_has_unescaped_pipe(input: &str) -> bool {
                 continue;
             }
         }
-        if char == '|'
-            && code_fence.is_none()
-            && !spoiler_open
-            && !crate::parse::is_escaped_at(input, cursor)
-        {
+        if char == '|' && !spoiler_open && !crate::parse::is_escaped_at(input, cursor) {
             return true;
         }
         cursor = next;

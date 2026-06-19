@@ -1,6 +1,6 @@
 | A\|B | Code | Link |
 | --- | --- | --- |
-| x\|y | `a|b` | [p\|q](https://example.com) |
+| x\|y | `a\|b` | [p\|q](https://example.com) |
 
 a
    |-

@@ -10,4 +10,4 @@ The ||dog dies||.
 
 | Text | Result |
 | --- | --- |
-| `||literal||` | ||visible|| |
+| `\|\|literal\|\|` | ||visible|| |
