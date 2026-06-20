@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: gfm_autolink_literal
-count: 61
+count: 60
 
 --- case 1 options - label-bytes 38 input-bytes 19 expected-bytes 26
 should ignore protocol urls by default
@@ -65,189 +65,182 @@ should not link email urls in links
 --- expected
 <p><a href="xxx">user@example.com</a></p>
 --- end
---- case 10 options gfm label-bytes 45 input-bytes 16 expected-bytes 61
-should support a closing paren at TLD (email)
---- input
-user@example.com
---- expected
-<p><a href="mailto:user@example.com">user@example.com</a></p>
---- end
---- case 11 options gfm label-bytes 43 input-bytes 7 expected-bytes 41
+--- case 10 options gfm label-bytes 43 input-bytes 7 expected-bytes 41
 should support a closing paren at TLD (www)
 --- input
 www.a.)
 --- expected
 <p><a href="http://www.a">www.a</a>.)</p>
 --- end
---- case 12 options gfm label-bytes 21 input-bytes 7 expected-bytes 41
+--- case 11 options gfm label-bytes 21 input-bytes 7 expected-bytes 41
 should support no TLD
 --- input
 www.a b
 --- expected
 <p><a href="http://www.a">www.a</a> b</p>
 --- end
---- case 13 options gfm label-bytes 36 input-bytes 9 expected-bytes 45
+--- case 12 options gfm label-bytes 36 input-bytes 9 expected-bytes 45
 should support a path instead of TLD
 --- input
 www.a/b c
 --- expected
 <p><a href="http://www.a/b">www.a/b</a> c</p>
 --- end
---- case 14 options gfm label-bytes 50 input-bytes 8 expected-bytes 51
+--- case 13 options gfm label-bytes 50 input-bytes 8 expected-bytes 51
 should support a replacement character in a domain
 --- input
 www.�a
 --- expected
 <p><a href="http://www.%EF%BF%BDa">www.�a</a></p>
 --- end
---- case 15 options gfm label-bytes 54 input-bytes 17 expected-bytes 68
+--- case 14 options gfm label-bytes 54 input-bytes 17 expected-bytes 68
 should support non-ascii characters in a domain (http)
 --- input
 http://點看.com
 --- expected
 <p><a href="http://%E9%BB%9E%E7%9C%8B.com">http://點看.com</a></p>
 --- end
---- case 16 options gfm label-bytes 53 input-bytes 14 expected-bytes 69
+--- case 15 options gfm label-bytes 53 input-bytes 14 expected-bytes 69
 should support non-ascii characters in a domain (www)
 --- input
 www.點看.com
 --- expected
 <p><a href="http://www.%E9%BB%9E%E7%9C%8B.com">www.點看.com</a></p>
 --- end
---- case 17 options gfm label-bytes 58 input-bytes 18 expected-bytes 25
+--- case 16 options gfm label-bytes 58 input-bytes 18 expected-bytes 25
 should *not* support non-ascii characters in atext (email)
 --- input
 點看@example.com
 --- expected
 <p>點看@example.com</p>
 --- end
---- case 18 options gfm label-bytes 61 input-bytes 18 expected-bytes 25
+--- case 17 options gfm label-bytes 61 input-bytes 18 expected-bytes 25
 should *not* support non-ascii characters in a domain (email)
 --- input
 example@點看.com
 --- expected
 <p>example@點看.com</p>
 --- end
---- case 19 options gfm label-bytes 45 input-bytes 16 expected-bytes 73
+--- case 18 options gfm label-bytes 45 input-bytes 16 expected-bytes 73
 should support non-ascii characters in a path
 --- input
 www.a.com/點看
 --- expected
 <p><a href="http://www.a.com/%E9%BB%9E%E7%9C%8B">www.a.com/點看</a></p>
 --- end
---- case 20 options gfm label-bytes 39 input-bytes 8 expected-bytes 45
+--- case 19 options gfm label-bytes 39 input-bytes 8 expected-bytes 45
 should support a dash to start a domain
 --- input
 www.-a.b
 --- expected
 <p><a href="http://www.-a.b">www.-a.b</a></p>
 --- end
---- case 21 options gfm label-bytes 40 input-bytes 5 expected-bytes 39
+--- case 20 options gfm label-bytes 40 input-bytes 5 expected-bytes 39
 should support a dollar as a domain name
 --- input
 www.$
 --- expected
 <p><a href="http://www.$">www.$</a></p>
 --- end
---- case 22 options gfm label-bytes 45 input-bytes 10 expected-bytes 49
+--- case 21 options gfm label-bytes 45 input-bytes 10 expected-bytes 49
 should support adjacent dots in a domain name
 --- input
 www.a..b.c
 --- expected
 <p><a href="http://www.a..b.c">www.a..b.c</a></p>
 --- end
---- case 23 options gfm label-bytes 52 input-bytes 8 expected-bytes 46
+--- case 22 options gfm label-bytes 52 input-bytes 8 expected-bytes 46
 should support named character references in domains
 --- input
 www.a&a;
 --- expected
 <p><a href="http://www.a">www.a</a>&amp;a;</p>
 --- end
---- case 24 options gfm label-bytes 54 input-bytes 19 expected-bytes 58
+--- case 23 options gfm label-bytes 54 input-bytes 19 expected-bytes 58
 should support a closing paren and period after a path
 --- input
 https://a.bc/d/e/).
 --- expected
 <p><a href="https://a.bc/d/e/">https://a.bc/d/e/</a>).</p>
 --- end
---- case 25 options gfm label-bytes 54 input-bytes 19 expected-bytes 58
+--- case 24 options gfm label-bytes 54 input-bytes 19 expected-bytes 58
 should support a period and closing paren after a path
 --- input
 https://a.bc/d/e/.)
 --- expected
 <p><a href="https://a.bc/d/e/">https://a.bc/d/e/</a>.)</p>
 --- end
---- case 26 options gfm label-bytes 56 input-bytes 14 expected-bytes 48
+--- case 25 options gfm label-bytes 56 input-bytes 14 expected-bytes 48
 should support a closing paren and period after a domain
 --- input
 https://a.bc).
 --- expected
 <p><a href="https://a.bc">https://a.bc</a>).</p>
 --- end
---- case 27 options gfm label-bytes 56 input-bytes 14 expected-bytes 48
+--- case 26 options gfm label-bytes 56 input-bytes 14 expected-bytes 48
 should support a period and closing paren after a domain
 --- input
 https://a.bc.)
 --- expected
 <p><a href="https://a.bc">https://a.bc</a>.)</p>
 --- end
---- case 28 options gfm label-bytes 51 input-bytes 15 expected-bytes 52
+--- case 27 options gfm label-bytes 51 input-bytes 15 expected-bytes 52
 should support a closing paren and period in a path
 --- input
 https://a.bc).d
 --- expected
 <p><a href="https://a.bc).d">https://a.bc).d</a></p>
 --- end
---- case 29 options gfm label-bytes 51 input-bytes 15 expected-bytes 52
+--- case 28 options gfm label-bytes 51 input-bytes 15 expected-bytes 52
 should support a period and closing paren in a path
 --- input
 https://a.bc.)d
 --- expected
 <p><a href="https://a.bc.)d">https://a.bc.)d</a></p>
 --- end
---- case 30 options gfm label-bytes 43 input-bytes 16 expected-bytes 54
+--- case 29 options gfm label-bytes 43 input-bytes 16 expected-bytes 54
 should support two closing parens in a path
 --- input
 https://a.bc/))d
 --- expected
 <p><a href="https://a.bc/))d">https://a.bc/))d</a></p>
 --- end
---- case 31 options gfm label-bytes 28 input-bytes 15 expected-bytes 22
+--- case 30 options gfm label-bytes 28 input-bytes 15 expected-bytes 22
 should not support ftp links
 --- input
 ftp://a/b/c.txt
 --- expected
 <p>ftp://a/b/c.txt</p>
 --- end
---- case 32 options gfm label-bytes 51 input-bytes 22 expected-bytes 63
+--- case 31 options gfm label-bytes 51 input-bytes 22 expected-bytes 63
 should support http links after Unicode punctuation
 --- input
 ，https://example.com
 --- expected
 <p>，<a href="https://example.com">https://example.com</a></p>
 --- end
---- case 33 options gfm label-bytes 52 input-bytes 22 expected-bytes 70
+--- case 32 options gfm label-bytes 52 input-bytes 22 expected-bytes 70
 should support email links after Unicode punctuation
 --- input
 ，example@example.com
 --- expected
 <p>，<a href="mailto:example@example.com">example@example.com</a></p>
 --- end
---- case 34 options gfm label-bytes 43 input-bytes 59 expected-bytes 61
+--- case 33 options gfm label-bytes 43 input-bytes 59 expected-bytes 61
 should not link character reference for `:`
 --- input
 http&#x3A;//user:password@host:port/path?key=value#fragment
 --- expected
 <p>http://user:password@host:port/path?key=value#fragment</p>
 --- end
---- case 35 options gfm label-bytes 32 input-bytes 24 expected-bytes 70
+--- case 34 options gfm label-bytes 32 input-bytes 24 expected-bytes 70
 should stop domains/paths at `<`
 --- input
 http://example.com/ab<cd
 --- expected
 <p><a href="http://example.com/ab">http://example.com/ab</a>&lt;cd</p>
 --- end
---- case 36 options gfm label-bytes 46 input-bytes 401 expected-bytes 1015
+--- case 35 options gfm label-bytes 46 input-bytes 401 expected-bytes 1015
 should support `mailto:` and `xmpp:` protocols
 --- input
 
@@ -288,7 +281,7 @@ Email me at:scyther@pokemon.com
 <p><a href="xmpp:scyther@pokemon.com/message">xmpp:scyther@pokemon.com/message</a>.</p>
 <p>Email me at:<a href="mailto:scyther@pokemon.com">scyther@pokemon.com</a></p>
 --- end
---- case 37 options gfm label-bytes 56 input-bytes 353 expected-bytes 1028
+--- case 36 options gfm label-bytes 56 input-bytes 353 expected-bytes 1028
 should match “character references” like GitHub does
 --- input
 
@@ -334,7 +327,7 @@ a www.example.com& b
 <p>a <a href="http://www.example.com&amp;">www.example.com&amp;</a> b</p>
 
 --- end
---- case 38 options gfm label-bytes 96 input-bytes 299 expected-bytes 676
+--- case 37 options gfm label-bytes 96 input-bytes 299 expected-bytes 676
 should match interplay with brackets, links, and images, like GitHub does (but without the bugs)
 --- input
 
@@ -377,7 +370,7 @@ should match interplay with brackets, links, and images, like GitHub does (but w
 <p><img src="#" alt=" contact@example.com " /></p>
 
 --- end
---- case 39 options gfm label-bytes 36 input-bytes 434 expected-bytes 1206
+--- case 38 options gfm label-bytes 36 input-bytes 434 expected-bytes 1206
 should match parens like GitHub does
 --- input
 
@@ -423,7 +416,7 @@ www.example.com/?q=a(business)))
 <p>(<a href="http://www.example.com/?q=a(business)">www.example.com/?q=a(business)</a>&quot;.</p>
 
 --- end
---- case 40 options gfm label-bytes 34 input-bytes 1749 expected-bytes 3674
+--- case 39 options gfm label-bytes 34 input-bytes 1749 expected-bytes 3674
 should match base like GitHub does
 --- input
 
@@ -610,7 +603,7 @@ Can contain an underscore followed by a period: aaa@a.b_.c
 <p><a href="">link</a> <a href="http://autolink">http://autolink</a> should still be expanded.</p>
 
 --- end
---- case 41 options gfm label-bytes 67 input-bytes 299 expected-bytes 942
+--- case 40 options gfm label-bytes 67 input-bytes 299 expected-bytes 942
 should match brackets like GitHub does (except for the bracket bug)
 --- input
 H0.
@@ -670,7 +663,7 @@ H5.
 <p>[[]]<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
 
 --- end
---- case 42 options gfm label-bytes 95 input-bytes 515 expected-bytes 1189
+--- case 41 options gfm label-bytes 95 input-bytes 515 expected-bytes 1189
 should match autolink literals combined w/ images like GitHub does (except for the bracket bug)
 --- input
 Image start.
@@ -753,7 +746,7 @@ Autolink literal after image.
 <p><img src="" alt="a" /> <a href="mailto:a@b.c">a@b.c</a></p>
 
 --- end
---- case 43 options gfm label-bytes 94 input-bytes 1060 expected-bytes 2627
+--- case 42 options gfm label-bytes 94 input-bytes 1060 expected-bytes 2627
 should match autolink literals combined w/ links like GitHub does (except for the bracket bug)
 --- input
 Link start.
@@ -926,7 +919,7 @@ Autolink literal after link.
 <p><a href="">a</a> <a href="mailto:a@b.c">a@b.c</a></p>
 
 --- end
---- case 44 options gfm label-bytes 93 input-bytes 374 expected-bytes 1892
+--- case 43 options gfm label-bytes 93 input-bytes 374 expected-bytes 1892
 should match “character references (named)” like GitHub does (except for the bracket bug)
 --- input
 # “character reference”
@@ -1037,7 +1030,7 @@ www.a&b~
 <p><a href="http://www.a&amp;b">www.a&amp;b</a>~</p>
 
 --- end
---- case 45 options gfm label-bytes 95 input-bytes 442 expected-bytes 2034
+--- case 44 options gfm label-bytes 95 input-bytes 442 expected-bytes 2034
 should match “character references (numeric)” like GitHub does (except for the bracket bug)
 --- input
 # “character reference”
@@ -1148,7 +1141,7 @@ www.a&#35~
 <p><a href="http://www.a&amp;#35">www.a&amp;#35</a>~</p>
 
 --- end
---- case 46 options gfm label-bytes 46 input-bytes 269 expected-bytes 443
+--- case 45 options gfm label-bytes 46 input-bytes 269 expected-bytes 443
 should match email TLD digits like GitHub does
 --- input
 a@0.0
@@ -1199,7 +1192,7 @@ react@0.0.0-experimental-aae83a4b9
 <p>[ react@0.0.0-experimental-aae83a4b9</p>
 
 --- end
---- case 47 options gfm label-bytes 54 input-bytes 396 expected-bytes 1444
+--- case 46 options gfm label-bytes 54 input-bytes 396 expected-bytes 1444
 should match protocol domain continue like GitHub does
 --- input
 # httpshhh? (2)
@@ -1310,7 +1303,7 @@ http://a~
 <p><a href="http://a">http://a</a>~</p>
 
 --- end
---- case 48 options gfm label-bytes 51 input-bytes 362 expected-bytes 588
+--- case 47 options gfm label-bytes 51 input-bytes 362 expected-bytes 588
 should match protocol domain start like GitHub does
 --- input
 # httpshhh? (1)
@@ -1421,7 +1414,7 @@ http://~
 <p>http://~</p>
 
 --- end
---- case 49 options gfm label-bytes 52 input-bytes 464 expected-bytes 1580
+--- case 48 options gfm label-bytes 52 input-bytes 464 expected-bytes 1580
 should match protocol path continue like GitHub does
 --- input
 # httpshhh? (4)
@@ -1532,7 +1525,7 @@ http://a/b~
 <p><a href="http://a/b">http://a/b</a>~</p>
 
 --- end
---- case 50 options gfm label-bytes 49 input-bytes 430 expected-bytes 1512
+--- case 49 options gfm label-bytes 49 input-bytes 430 expected-bytes 1512
 should match protocol path start like GitHub does
 --- input
 # httpshhh? (3)
@@ -1643,7 +1636,7 @@ http://a/~
 <p><a href="http://a/">http://a/</a>~</p>
 
 --- end
---- case 51 options gfm label-bytes 70 input-bytes 158 expected-bytes 348
+--- case 50 options gfm label-bytes 70 input-bytes 158 expected-bytes 348
 should match links, autolink literals, and characters like GitHub does
 --- input
 [www.example.com/a&copy;](#)
@@ -1667,7 +1660,7 @@ www.example.com/a\.
 <p><a href="http://www.example.com/a%5C">www.example.com/a\</a>.</p>
 
 --- end
---- case 52 options gfm label-bytes 78 input-bytes 442 expected-bytes 2028
+--- case 51 options gfm label-bytes 78 input-bytes 442 expected-bytes 2028
 should match character reference-like (named) things in paths like GitHub does
 --- input
 # “character reference”
@@ -1778,7 +1771,7 @@ www.a/b&c~
 <p><a href="http://www.a/b&amp;c">www.a/b&amp;c</a>~</p>
 
 --- end
---- case 53 options gfm label-bytes 80 input-bytes 510 expected-bytes 2170
+--- case 52 options gfm label-bytes 80 input-bytes 510 expected-bytes 2170
 should match character reference-like (numeric) things in paths like GitHub does
 --- input
 # “character reference”
@@ -1889,7 +1882,7 @@ www.a/b&#35~
 <p><a href="http://www.a/b&amp;#35">www.a/b&amp;#35</a>~</p>
 
 --- end
---- case 54 options gfm label-bytes 75 input-bytes 457 expected-bytes 959
+--- case 53 options gfm label-bytes 75 input-bytes 457 expected-bytes 959
 should match path or link end like GitHub does (except for the bracket bug)
 --- input
 In autolink literal path or link end?
@@ -1958,7 +1951,7 @@ www.a.com#d]()
 <p><a href="http://www.a.com#d">www.a.com#d</a>]()</p>
 
 --- end
---- case 55 options gfm label-bytes 48 input-bytes 2247 expected-bytes 4297
+--- case 54 options gfm label-bytes 48 input-bytes 2247 expected-bytes 4297
 should match previous (complex) like GitHub does
 --- input
 Last non-markdown ASCII whitespace (FF): noreply@example.com, http://example.com, https://example.com, www.example.com
@@ -2030,7 +2023,7 @@ Some more non-ascii: 🤷‍noreply@example.com, 🤷‍http://example.com, 🤷
 <p>Some more non-ascii: 🤷‍<a href="mailto:noreply@example.com">noreply@example.com</a>, 🤷‍<a href="http://example.com">http://example.com</a>, 🤷‍<a href="https://example.com">https://example.com</a>, 🤷‍www.example.com</p>
 
 --- end
---- case 56 options gfm label-bytes 38 input-bytes 1442 expected-bytes 3083
+--- case 55 options gfm label-bytes 38 input-bytes 1442 expected-bytes 3083
 should match previous like GitHub does
 --- input
 # HTTP
@@ -2155,7 +2148,7 @@ github.com: !<a href="mailto:a@b.c">a@b.c</a>, &quot;<a href="mailto:a@b.c">a@b.
 <p>[asd] ,<a href="https://github.com">https://github.com</a></p>
 
 --- end
---- case 57 options gfm label-bytes 80 input-bytes 289 expected-bytes 1473
+--- case 56 options gfm label-bytes 80 input-bytes 289 expected-bytes 1473
 should match www (domain continue) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf 2?
@@ -2266,7 +2259,7 @@ www.a~
 <p><a href="http://www.a">www.a</a>~</p>
 
 --- end
---- case 58 options gfm label-bytes 75 input-bytes 323 expected-bytes 1525
+--- case 57 options gfm label-bytes 75 input-bytes 323 expected-bytes 1525
 should match www (domain dot) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf 5?
@@ -2377,7 +2370,7 @@ www.a.~
 <p><a href="http://www.a">www.a</a>.~</p>
 
 --- end
---- case 59 options gfm label-bytes 48 input-bytes 253 expected-bytes 1362
+--- case 58 options gfm label-bytes 48 input-bytes 253 expected-bytes 1362
 should match www (domain start) like GitHub does
 --- input
 # wwwtf?
@@ -2488,7 +2481,7 @@ www.~
 <p><a href="http://www">www</a>.~</p>
 
 --- end
---- case 60 options gfm label-bytes 78 input-bytes 359 expected-bytes 1611
+--- case 59 options gfm label-bytes 78 input-bytes 359 expected-bytes 1611
 should match www (path continue) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf? (4)
@@ -2599,7 +2592,7 @@ www.a/b~
 <p><a href="http://www.a/b">www.a/b</a>~</p>
 
 --- end
---- case 61 options gfm label-bytes 75 input-bytes 325 expected-bytes 1543
+--- case 60 options gfm label-bytes 75 input-bytes 325 expected-bytes 1543
 should match www (path start) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf? (3)

@@ -107,28 +107,6 @@ mod review_validate {
         assert!(validate_document(&good).is_empty());
     }
 
-    // SR6 — empty-children emphasis-like inline containers serialize to bare
-    // delimiters that re-parse as literal text.
-    #[test]
-    fn sr6_empty_emphasis_container_is_invalid() {
-        let bad = paragraph(vec![Inline::Emphasis(Emphasis {
-            meta: NodeMeta::default(),
-            children: vec![],
-        })]);
-        assert!(!validate_document(&bad).is_empty());
-        assert!(matches!(
-            to_markdown(&bad),
-            Err(SerializeError::InvalidDocument(_))
-        ));
-
-        // A non-empty emphasis is valid and round-trips.
-        let good = paragraph(vec![Inline::Emphasis(Emphasis {
-            meta: NodeMeta::default(),
-            children: vec![text("a")],
-        })]);
-        assert!(validate_document(&good).is_empty());
-    }
-
     #[test]
     fn sr6_rejects_each_emphasis_like_container_when_empty() {
         let empty_containers = [
@@ -178,6 +156,21 @@ mod review_validate {
                 "empty container should be rejected"
             );
         }
+
+        let bad = paragraph(vec![Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![],
+        })]);
+        assert!(matches!(
+            to_markdown(&bad),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+
+        let good = paragraph(vec![Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![text("a")],
+        })]);
+        assert!(validate_document(&good).is_empty());
     }
 
     // SR7 — an escape of a non-ASCII-punctuation char serializes `\x` which the

@@ -5,9 +5,8 @@
 //! suite fixtures can stay faithful token-capturers and the renderer a pure
 //! function of `(Document, HtmlOptions)`.
 //!
-//! The fixtures store only RUNNABLE cases (cases the bench skipped were never
-//! compared and were dropped at snapshot time), so there is no skip path here:
-//! every case maps to a `(SyntaxOptions, HtmlOptions)` and is run.
+//! The fixtures store only runnable cases, so there is no skip path here: every
+//! case maps to a `(SyntaxOptions, HtmlOptions)` and is run.
 
 use markdown_syntax::{
     parse_with_options, to_html_with_options, HtmlOptions, SafeRawHtmlForm, SyntaxOptions,

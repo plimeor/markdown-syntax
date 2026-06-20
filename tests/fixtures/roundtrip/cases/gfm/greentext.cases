@@ -3,7 +3,7 @@ origin: gfm
 commit: d2da7a0
 source: upstream-tests/greentext.rs
 role: upstream-input
-count: 9
+count: 7
 profiles: commonmark,extras
 
 --- case 1 profile commonmark bytes 20
@@ -35,19 +35,7 @@ profiles: commonmark,extras
 >
 > Second line.
 --- end
---- case 7 profile commonmark bytes 71
-> First line.
-> The second sentence in the first line.
->
-> Second line.
---- end
---- case 8 profile extras bytes 52
-> [!Note]
-> This is the first line.
->
-> Second line.
---- end
---- case 9 profile extras bytes 52
+--- case 7 profile extras bytes 52
 > [!Note]
 > This is the first line.
 >

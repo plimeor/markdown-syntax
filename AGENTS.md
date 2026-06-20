@@ -16,7 +16,7 @@
 - Format: `cargo fmt --check`
 - Build (default): `cargo build` — the empty-feature / zero-dep gate
 - Test: `cargo test` — parse/serialize/validate/fixtures/roundtrip + the README
-  doc-test + the AST→HTML conformance bench
+  doc-test
 - Docs: `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
 - wasm check: `cargo build --target wasm32-unknown-unknown`
   (`rustup target add wasm32-unknown-unknown` first)
@@ -24,19 +24,19 @@
 ## Conformance
 
 - `tests/html_conformance/` is a measurement bench (AST→HTML vs vendored
-  CommonMark/GFM oracles), **not** a CI gate. Current conformance numbers live in
-  `tests/html_conformance/CONFORMANCE.md`.
+  CommonMark/GFM oracles), **not** a CI gate. To observe current numbers, run
+  `cargo test --features html --test html_conformance -- --nocapture`.
 - No bless flag: any `.ast` / `.canonical.md` golden a fix legitimately moves
   must be hand-regenerated in the same commit and verified to reflect correct
   structure — never edit a test to pass a wrong parse.
-- Correctness work uses paired parser+serializer fixes (the serializer can mask
-  a stably-wrong parse). See `docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md`.
+- Correctness work uses paired parser+serializer fixes when the serializer can
+  mask a stably-wrong parse.
 
 ## HTML renderer
 
-- No HTML renderer in the default build. Any renderer ships behind a non-default
-  `html` cargo feature (safe-by-default) and leaves the parser/AST/serializer
-  untouched. See `docs/plans/2026-06-20-markdown-syntax-html-renderer.md`.
+- No HTML renderer in the default build. The shipped renderer lives behind the
+  non-default `html` cargo feature (safe-by-default) and must not change the
+  default parser/AST/serializer surface.
 
 ## Directives
 
@@ -45,11 +45,8 @@
 ## Docs
 
 - `README.md` owns the public API, syntax scope, and stable-behavior contract.
-- `docs/` is a typed historical substrate (`plans/`, `tasking/`, `archive/`,
-  and future `requirements/` & `decisions/`), routed by `docs/index.md`, with
-  the active cursor at `docs/agent/current.md`. These are historical records and
-  durable authority, **not** current interface contracts. Follow the
-  agentic-document-workflow when authoring them.
-- Front matter (`date`, `status`) is the status surface — **do not restate the
-  status in the body prose.**
-- Orient from `docs/index.md` and `docs/agent/current.md` first.
+- `docs/decisions/` owns durable design rationale and rejected alternatives.
+  Read `docs/index.md` when you need to understand why a boundary exists.
+- Do not keep hand-maintained status ledgers for test results, conformance
+  numbers, old plans, or completed task graphs. Derive current state from
+  `README.md`, source files, fixtures, and runnable commands.

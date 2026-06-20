@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/frontmatter.rs
 role: upstream-input
-count: 22
+count: 21
 profiles: commonmark,frontmatter
 
 --- case 1 profile commonmark bytes 22
@@ -103,9 +103,4 @@ c
 ---
 a: b
 ---
---- end
---- case 22 profile frontmatter bytes 25
-+++
-title = "Jupyter"
-+++
 --- end

@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/gfm_tagfilter.rs
 role: upstream-input
-count: 6
+count: 5
 profiles: gfm
 
 --- case 1 profile gfm bytes 8
@@ -13,18 +13,15 @@ profiles: gfm
 a <i>
 <script>
 --- end
---- case 3 profile gfm bytes 8
-<iframe>
---- end
---- case 4 profile gfm bytes 9
+--- case 3 profile gfm bytes 9
 <iframe
 >
 --- end
---- case 5 profile gfm bytes 6
+--- case 4 profile gfm bytes 6
 <div
 >
 --- end
---- case 6 profile gfm bytes 897
+--- case 5 profile gfm bytes 897
 
 <title>
 

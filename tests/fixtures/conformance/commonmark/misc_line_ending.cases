@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: misc_line_ending
-count: 31
+count: 30
 
 --- case 1 options - label-bytes 31 input-bytes 1 expected-bytes 0
 should support just a line feed
@@ -223,23 +223,14 @@ C
 B</h2>
 <p>C</p>
 --- end
---- case 23 options allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 5 expected-bytes 5
-should support a line feed after html
---- input
-<div
-
---- expected
-<div
-
---- end
---- case 24 options allow_dangerous_html,allow_dangerous_protocol label-bytes 43 input-bytes 5 expected-bytes 5
+--- case 23 options allow_dangerous_html,allow_dangerous_protocol label-bytes 43 input-bytes 5 expected-bytes 5
 should support a carriage return after html
 --- input
 <div
 --- expected
 <div
 --- end
---- case 25 options allow_dangerous_html,allow_dangerous_protocol label-bytes 55 input-bytes 6 expected-bytes 6
+--- case 24 options allow_dangerous_html,allow_dangerous_protocol label-bytes 55 input-bytes 6 expected-bytes 6
 should support a carriage return + line feed after html
 --- input
 <div
@@ -248,7 +239,7 @@ should support a carriage return + line feed after html
 <div
 
 --- end
---- case 26 options allow_dangerous_html,allow_dangerous_protocol label-bytes 52 input-bytes 8 expected-bytes 14
+--- case 25 options allow_dangerous_html,allow_dangerous_protocol label-bytes 52 input-bytes 8 expected-bytes 14
 should support a blank line w/ line feeds after html
 --- input
 <div>
@@ -258,14 +249,14 @@ x
 <div>
 <p>x</p>
 --- end
---- case 27 options allow_dangerous_html,allow_dangerous_protocol label-bytes 58 input-bytes 8 expected-bytes 14
+--- case 26 options allow_dangerous_html,allow_dangerous_protocol label-bytes 58 input-bytes 8 expected-bytes 14
 should support a blank line w/ carriage returns after html
 --- input
 <div>x
 --- expected
 <div><p>x</p>
 --- end
---- case 28 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 10 expected-bytes 15
+--- case 27 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 10 expected-bytes 15
 should support a blank line w/ carriage return + line feeds after html
 --- input
 <div>
@@ -275,7 +266,7 @@ x
 <div>
 <p>x</p>
 --- end
---- case 29 options allow_dangerous_html,allow_dangerous_protocol label-bytes 52 input-bytes 7 expected-bytes 7
+--- case 28 options allow_dangerous_html,allow_dangerous_protocol label-bytes 52 input-bytes 7 expected-bytes 7
 should support a non-blank line w/ line feed in html
 --- input
 <div>
@@ -284,14 +275,14 @@ x
 <div>
 x
 --- end
---- case 30 options allow_dangerous_html,allow_dangerous_protocol label-bytes 58 input-bytes 7 expected-bytes 7
+--- case 29 options allow_dangerous_html,allow_dangerous_protocol label-bytes 58 input-bytes 7 expected-bytes 7
 should support a non-blank line w/ carriage return in html
 --- input
 <div>x
 --- expected
 <div>x
 --- end
---- case 31 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 8 expected-bytes 8
+--- case 30 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 8 expected-bytes 8
 should support a non-blank line w/ carriage return + line feed in html
 --- input
 <div>

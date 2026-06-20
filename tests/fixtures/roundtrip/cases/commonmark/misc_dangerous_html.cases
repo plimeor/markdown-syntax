@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/misc_dangerous_html.rs
 role: upstream-input
-count: 3
+count: 2
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 3
@@ -11,7 +11,4 @@ profiles: commonmark
 --- end
 --- case 2 profile commonmark bytes 4
 a<b>
---- end
---- case 3 profile commonmark bytes 3
-<x>
 --- end

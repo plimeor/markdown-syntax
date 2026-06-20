@@ -3,7 +3,7 @@ origin: gfm
 commit: d2da7a0
 source: upstream-tests/wikilinks.rs
 role: upstream-input
-count: 19
+count: 17
 profiles: wikilink-after,wikilink-before
 
 --- case 1 profile wikilink-after bytes 60
@@ -57,25 +57,19 @@ This is [[a &lt;link|&lt;script&gt;alert(0)&lt;/script&gt;]]
 | [[link label|url]] |
 
 --- end
---- case 14 profile wikilink-after bytes 22
-[[http://example.com]]
---- end
---- case 15 profile wikilink-before bytes 22
-[[http://example.com]]
---- end
---- case 16 profile wikilink-after bytes 44
+--- case 14 profile wikilink-after bytes 44
 This [[http://example.com|link label]] that
 
 --- end
---- case 17 profile wikilink-before bytes 44
+--- case 15 profile wikilink-before bytes 44
 This [[link label|http://example.com]] that
 
 --- end
---- case 18 profile wikilink-before bytes 33
+--- case 16 profile wikilink-before bytes 33
 This [[http://example.com]] that
 
 --- end
---- case 19 profile wikilink-before bytes 45
+--- case 17 profile wikilink-before bytes 45
 This [[link\[label|http://example.com]] that
 
 --- end

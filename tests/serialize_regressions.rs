@@ -75,7 +75,7 @@ mod serializer {
     }
 
     #[test]
-    fn default_list_serialization_preserves_markers_to_avoid_merging_adjacent_lists() {
+    fn list_markers_preserve_by_default_avoid_merging_and_can_be_overridden() {
         let input = "- a\n\n+ b\n\n* c\n";
         let document = parse_document(input, &SyntaxOptions::commonmark());
 
@@ -88,6 +88,12 @@ mod serializer {
             .children
             .iter()
             .all(|block| matches!(block, Block::List(_))));
+
+        let mut options = SerializeOptions::default();
+        options.bullet = ListDelimiter::Plus;
+        let overridden = to_markdown_with_options(&document, &options)
+            .expect("document serializes with options");
+        assert_eq!(overridden, "+ a\n\n+ b\n\n+ c\n");
     }
 
     #[test]
@@ -1055,21 +1061,6 @@ mod serializer_escape {
                             if matches!(&children[..], [Inline::Text(Text { value, .. })] if value == "visible")
                     )
         ));
-    }
-
-    #[test]
-    fn list_markers_preserve_by_default_and_can_be_overridden() {
-        let input = "- dash\n\n+ plus\n\n* star\n";
-        let document = parse_document(input, &SyntaxOptions::commonmark());
-
-        let markdown = to_markdown(&document).expect("document serializes");
-        assert_eq!(markdown, input);
-
-        let mut options = SerializeOptions::default();
-        options.bullet = ListDelimiter::Plus;
-        let overridden = to_markdown_with_options(&document, &options)
-            .expect("document serializes with options");
-        assert_eq!(overridden, "+ dash\n\n+ plus\n\n+ star\n");
     }
 }
 

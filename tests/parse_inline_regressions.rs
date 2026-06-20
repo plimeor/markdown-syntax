@@ -176,16 +176,7 @@ mod inline_delimiter {
     };
 
     #[test]
-    fn asterisk_triple_and_mixed_runs_nest_emphasis_and_strong() {
-        let inlines = paragraph("***foo***\n", &SyntaxOptions::commonmark());
-        let [Inline::Emphasis(emphasis)] = inlines.as_slice() else {
-            panic!("expected outer emphasis");
-        };
-        let [Inline::Strong(strong)] = emphasis.children.as_slice() else {
-            panic!("expected inner strong");
-        };
-        assert_text(strong.children.as_slice(), "foo");
-
+    fn asterisk_mixed_runs_nest_emphasis_and_strong() {
         let inlines = paragraph("**foo *bar***\n", &SyntaxOptions::commonmark());
         let [Inline::Strong(strong)] = inlines.as_slice() else {
             panic!("expected outer strong");

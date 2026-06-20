@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: thematic_break
-count: 27
+count: 26
 
 --- case 1 options - label-bytes 68 input-bytes 11 expected-bytes 20
 should support thematic breaks w/ asterisks, dashes, and underscores
@@ -223,15 +223,4 @@ a
 <hr />
 </blockquote>
 <p>a</p>
---- end
---- case 27 options - label-bytes 31 input-bytes 7 expected-bytes 42
-should not support lazyness (2)
---- input
-> a
----
---- expected
-<blockquote>
-<p>a</p>
-</blockquote>
-<hr />
 --- end

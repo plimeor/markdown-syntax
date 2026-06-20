@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/block_quote.rs
 role: upstream-input
-count: 34
+count: 33
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 13
@@ -152,11 +152,6 @@ b
 
 >    b
 --- end
---- case 33 profile commonmark bytes 13
-> # a
-> b
-> c
---- end
---- case 34 profile commonmark bytes 3
+--- case 33 profile commonmark bytes 3
 > a
 --- end

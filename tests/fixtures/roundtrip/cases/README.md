@@ -11,12 +11,10 @@ expected-behavior dialect produced the input; it is no longer a path segment.
 
 ## Executable Inputs
 
-`commonmark/` and `gfm/` hold the executable derived corpus. They contain only
+`commonmark/` and `gfm/` hold the executable derived corpus. They contain
 Markdown source arguments extracted from recognized upstream parser-facing calls
-and test macros. Expected HTML strings, assertion messages, AST text fields,
-serializer-focused output fixtures, render-only/sourcepos variants, dynamic
-performance inputs, and helper code are excluded from execution and documented
-in `MANIFEST.md`. Executable cases declare `role: upstream-input`.
+and package-owned stability inputs. Executable cases declare
+`role: upstream-input`.
 
 Each semantic case declares a `profile` in its case header. The fixture runner
 uses that profile to choose `CommonMark`, `GFM`, `MDX`, math, frontmatter,
@@ -43,10 +41,9 @@ count: 151
 profiles: commonmark
 ```
 
-The `source:` value is the engine-free relative path of the original oracle. The
-vendored upstream sources have been removed; `source:` is retained only as a
-historical provenance record and is no longer cross-checked against an on-disk
-file.
+The `source:` value is a historical provenance identifier. The vendored upstream
+sources are not present in this tree, and `source:` is not cross-checked against
+an on-disk file.
 
 Executable semantic cases include a profile in the case header. Each case is
 length-prefixed so the Markdown body can contain arbitrary delimiter-like text:

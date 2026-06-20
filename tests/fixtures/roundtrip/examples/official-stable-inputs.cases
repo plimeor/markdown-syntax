@@ -1,7 +1,7 @@
 # markdown-syntax selected CommonMark official input stability cases v1
 origin: commonmark generated CommonMark suite
 commit: 1506572
-source: ../oracles/upstream-tests/commonmark.rs
+source: upstream-tests/commonmark.rs
 role: input-stability-subset
 count: 8
 profiles: commonmark

@@ -1,24 +1,17 @@
 # Comrak Fixture Texts
 
-Files under `upstream/`, `upstream-tests/`, and `upstream-fuzz/` are copied
-from `kivikakk/comrak` at local comparison commit `d2da7a0`.
+Fixtures under `../gfm/` and `../../roundtrip/cases/` include Markdown inputs
+and expected-HTML oracle snapshots derived from `kivikakk/comrak` at local
+comparison commit `d2da7a0`.
 
-They are included as compatibility-oriented upstream audit sources.
+The upstream Rust test sources are not present in this tree. This crate stores
+only the byte-counted fixture snapshots it executes or audits locally; upstream
+assertions that target Comrak APIs, renderer-only options, dynamic performance
+inputs, source positions, or helper behavior are not executed verbatim.
 
-`../gfm/comrak_html_edges.cases` contains executable AST→HTML conformance cases
-derived from Comrak HTML expectations at the same comparison commit. It includes
-only non-duplicate GFM task-list and table renderer cases whose option surface
-is supported by this bench.
-
-`../derived-cases/comrak/` contains legacy string-literal artifacts derived from
-these files. Those artifacts are audited for source and count stability but are
-not executable semantic tests.
-
-`../derived-cases/semantic-inputs/comrak/` contains executable Markdown input
-cases extracted from recognized parser-facing upstream calls and macros. The
-case profile records whether the local fixture runner uses GFM, math,
-frontmatter, wikilink, or comrak-extra constructs for that input. Deferred
-dynamic, render-only, sourcepos, and helper groups are listed in
-`../derived-cases/semantic-inputs/MANIFEST.md`.
+`../gfm/comrak_html_edges.cases` contains executable AST-to-HTML conformance
+cases derived from Comrak HTML expectations at the same comparison commit. It
+includes only non-duplicate GFM task-list and table renderer cases whose option
+surface is supported by this bench.
 
 The upstream license text is retained in `COPYING.comrak`.

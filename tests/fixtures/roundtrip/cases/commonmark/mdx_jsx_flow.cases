@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/mdx_jsx_flow.rs
 role: upstream-input
-count: 36
+count: 34
 profiles: mdx
 
 --- case 1 profile mdx bytes 5
@@ -31,120 +31,112 @@ b
 --- case 7 profile mdx bytes 35
 <a b c:d e="" f={/* g */} {...h} />
 --- end
---- case 8 profile mdx bytes 5
-<a />
---- end
---- case 9 profile mdx bytes 12
-<a>
-- b
-</a>
---- end
---- case 10 profile mdx bytes 19
+--- case 8 profile mdx bytes 19
 <x
   y
 >  
 b
   </x>
 --- end
---- case 11 profile mdx bytes 14
+--- case 9 profile mdx bytes 14
 <a>  
 b
   </a>
 --- end
---- case 12 profile mdx bytes 22
+--- case 10 profile mdx bytes 22
 <a> <b>	
 c
   </b> </a>
 --- end
---- case 13 profile mdx bytes 11
+--- case 11 profile mdx bytes 11
 * <!a>
 1. b
 --- end
---- case 14 profile mdx bytes 7
+--- case 12 profile mdx bytes 7
 > <X
 />
 --- end
---- case 15 profile mdx bytes 11
+--- case 13 profile mdx bytes 11
 > a
 > <X
 />
 --- end
---- case 16 profile mdx bytes 13
+--- case 14 profile mdx bytes 13
 > <a b='
 c'/>
 --- end
---- case 17 profile mdx bytes 13
+--- case 15 profile mdx bytes 13
 > <a b='c
 '/>
 --- end
---- case 18 profile mdx bytes 14
+--- case 16 profile mdx bytes 14
 > <a b='c
 d'/>
 --- end
---- case 19 profile mdx bytes 14
+--- case 17 profile mdx bytes 14
 > <a b={c
 d}/>
 --- end
---- case 20 profile mdx bytes 12
+--- case 18 profile mdx bytes 12
 > <a {b
 c}/>
 --- end
---- case 21 profile mdx bytes 9
+--- case 19 profile mdx bytes 9
 > a
 <X />
 --- end
---- case 22 profile mdx bytes 12
+--- case 20 profile mdx bytes 12
 <>
   * a
 </>
 --- end
---- case 23 profile mdx bytes 16
+--- case 21 profile mdx bytes 16
 <div>
 {1}
 </div>
 --- end
---- case 24 profile mdx bytes 18
+--- case 22 profile mdx bytes 18
 <div>
 {'}'}
 </div>
 --- end
---- case 25 profile mdx bytes 13
+--- case 23 profile mdx bytes 13
 x<em>{1}</em>
 --- end
---- case 26 profile mdx bytes 13
+--- case 24 profile mdx bytes 13
 <em>x{1}</em>
 --- end
---- case 27 profile mdx bytes 13
+--- case 25 profile mdx bytes 13
 <em>{1}x</em>
 --- end
---- case 28 profile mdx bytes 13
+--- case 26 profile mdx bytes 13
 <em>{1}</em>x
 --- end
---- case 29 profile mdx bytes 7
+--- case 27 profile mdx bytes 7
 <x/>{1}
 --- end
---- case 30 profile mdx bytes 8
+--- case 28 profile mdx bytes 8
 <x/>{1}x
 --- end
---- case 31 profile mdx bytes 8
+--- case 29 profile mdx bytes 8
 x<x/>{1}
 --- end
---- case 32 profile mdx bytes 7
+--- case 30 profile mdx bytes 7
 {1}<x/>
 --- end
---- case 33 profile mdx bytes 8
+--- case 31 profile mdx bytes 8
 {1}<x/>x
 --- end
---- case 34 profile mdx bytes 8
+--- case 32 profile mdx bytes 8
 x{1}<x/>
 --- end
---- case 35 profile mdx bytes 23
+--- case 33 profile mdx bytes 23
 <x>{[
 '',
 {c:''}
 ]}</x>
 --- end
---- case 36 profile mdx bytes 46
+--- case 34 profile mdx bytes 46
 
 <style>{`
   .foo {}

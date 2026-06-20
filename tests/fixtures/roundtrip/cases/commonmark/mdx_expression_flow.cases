@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/mdx_expression_flow.rs
 role: upstream-input
-count: 40
+count: 31
 profiles: mdx
 
 --- case 1 profile mdx bytes 3
@@ -68,60 +68,30 @@ bravo}
     a
   `}
 --- end
---- case 17 profile mdx bytes 3
-{a}
---- end
---- case 18 profile mdx bytes 2
-{}
---- end
---- case 19 profile mdx bytes 2
-{a
---- end
---- case 20 profile mdx bytes 8
-{b { c }
---- end
---- case 21 profile mdx bytes 5
-{
-}
-a
---- end
---- case 22 profile mdx bytes 9
-{ a } 	
-b
---- end
---- case 23 profile mdx bytes 9
-  { a }
-b
---- end
---- case 24 profile mdx bytes 15
-  {`
-    a
-  `}
---- end
---- case 25 profile mdx bytes 7
+--- case 17 profile mdx bytes 7
 a{(b)}c
 --- end
---- case 26 profile mdx bytes 33
+--- case 18 profile mdx bytes 33
 a{/* b */ ( (c) /* d */ + (e) )}f
 --- end
---- case 27 profile mdx bytes 6
+--- case 19 profile mdx bytes 6
 {`
 	`}
 --- end
---- case 28 profile mdx bytes 11
+--- case 20 profile mdx bytes 11
 {`
 alpha	`}
 --- end
---- case 29 profile mdx bytes 36
+--- case 21 profile mdx bytes 36
 >  aaa <b c={`
 >      d
 >  `} /> eee
 --- end
---- case 30 profile mdx bytes 12
+--- case 22 profile mdx bytes 12
 > ab {`
 >	`}
 --- end
---- case 31 profile mdx bytes 49
+--- case 23 profile mdx bytes 49
 > {`
 > alpha
 >  bravo
@@ -129,35 +99,27 @@ alpha	`}
 >    delta
 > `}
 --- end
---- case 32 profile mdx bytes 49
-> {`
-> alpha
->  bravo
->   charlie
->    delta
-> `}
---- end
---- case 33 profile mdx bytes 12
+--- case 24 profile mdx bytes 12
 <a {...b} />
 --- end
---- case 34 profile mdx bytes 9
+--- case 25 profile mdx bytes 9
 <a {b} />
 --- end
---- case 35 profile mdx bytes 12
+--- case 26 profile mdx bytes 12
 <a {...?} />
 --- end
---- case 36 profile mdx bytes 14
+--- case 27 profile mdx bytes 14
 <a {b=c}={} d>
 --- end
---- case 37 profile mdx bytes 14
+--- case 28 profile mdx bytes 14
 <a {...b,c} d>
 --- end
---- case 38 profile mdx bytes 11
+--- case 29 profile mdx bytes 11
 <a {b=c} />
 --- end
---- case 39 profile mdx bytes 8
+--- case 30 profile mdx bytes 8
 <a {} />
 --- end
---- case 40 profile mdx bytes 15
+--- case 31 profile mdx bytes 15
 <a {/* b */} />
 --- end

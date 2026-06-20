@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/thematic_break.rs
 role: upstream-input
-count: 29
+count: 28
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 11
@@ -102,8 +102,5 @@ a
 ---
 --- end
 --- case 28 profile commonmark bytes 3
-***
---- end
---- case 29 profile commonmark bytes 3
 ***
 --- end

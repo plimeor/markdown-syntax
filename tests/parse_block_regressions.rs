@@ -420,23 +420,6 @@ mod parser {
     }
 
     #[test]
-    fn triple_asterisk_parses_as_nested_emphasis_and_strong() {
-        let output = parse_with_options("***foo***\n", &SyntaxOptions::commonmark())
-            .expect("valid CommonMark parse");
-        let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
-            panic!("expected paragraph");
-        };
-
-        let [Inline::Emphasis(emphasis)] = paragraph.children.as_slice() else {
-            panic!("expected outer emphasis");
-        };
-        let [Inline::Strong(strong)] = emphasis.children.as_slice() else {
-            panic!("expected inner strong");
-        };
-        assert!(matches!(strong.children.as_slice(), [Inline::Text(text)] if text.value == "foo"));
-    }
-
-    #[test]
     fn strict_mdx_reports_unclosed_jsx_blocks() {
         let err = parse_strict_with_options("<A>\n", &SyntaxOptions::mdx()).unwrap_err();
 

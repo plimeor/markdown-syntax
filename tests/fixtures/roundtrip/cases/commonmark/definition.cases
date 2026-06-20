@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/definition.rs
 role: upstream-input
-count: 80
+count: 79
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 26
@@ -341,27 +341,22 @@ example.com
 
 [a]: b)c
 --- end
---- case 64 profile commonmark bytes 13
-[a]
-
-[a]: b)c
---- end
---- case 65 profile commonmark bytes 26
+--- case 64 profile commonmark bytes 26
 [a]
 
 [a]: a(1(2(3(4()))))b
 --- end
---- case 66 profile commonmark bytes 14
+--- case 65 profile commonmark bytes 14
 [a]
 
 [a]: aaa)
 --- end
---- case 67 profile commonmark bytes 18
+--- case 66 profile commonmark bytes 18
 [a]
 
 [a]: aaa) "a"
 --- end
---- case 68 profile commonmark bytes 67
+--- case 67 profile commonmark bytes 67
  [a]: b "c"
   [d]: e
    [f]: g "h"
@@ -369,63 +364,63 @@ example.com
 	[k]: l (m)
 	 n [k] o
 --- end
---- case 69 profile commonmark bytes 19
+--- case 68 profile commonmark bytes 19
 [a
   b]: c
 
 [a
   b]
 --- end
---- case 70 profile commonmark bytes 11
+--- case 69 profile commonmark bytes 11
 [a]: )
 
 [a]
 --- end
---- case 71 profile commonmark bytes 12
+--- case 70 profile commonmark bytes 12
 [a]: )b
 
 [a]
 --- end
---- case 72 profile commonmark bytes 12
+--- case 71 profile commonmark bytes 12
 [a]: b)
 
 [a]
 --- end
---- case 73 profile commonmark bytes 10
+--- case 72 profile commonmark bytes 10
 [
 a
 =
 ]: b
 --- end
---- case 74 profile commonmark bytes 14
+--- case 73 profile commonmark bytes 14
 [a]: b '
 c
 =
 '
 --- end
---- case 75 profile commonmark bytes 10
+--- case 74 profile commonmark bytes 10
 [
 ***
 ]: b
 --- end
---- case 76 profile commonmark bytes 14
+--- case 75 profile commonmark bytes 14
 [a]: b '
 ***
 '
 --- end
---- case 77 profile commonmark bytes 10
+--- case 76 profile commonmark bytes 10
 [
 ```
 ]: b
 --- end
---- case 78 profile commonmark bytes 14
+--- case 77 profile commonmark bytes 14
 [a]: b '
 ```
 '
 --- end
---- case 79 profile commonmark bytes 19
+--- case 78 profile commonmark bytes 19
 [foo]: /url "title"
 --- end
---- case 80 profile commonmark bytes 12
+--- case 79 profile commonmark bytes 12
 [a]: <b> 'c'
 --- end

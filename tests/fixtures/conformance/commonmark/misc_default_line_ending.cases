@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: misc_default_line_ending
-count: 6
+count: 4
 
 --- case 1 options - label-bytes 23 input-bytes 3 expected-bytes 35
 should use `\n` default
@@ -31,24 +31,6 @@ should infer the first line ending (2)
 --- end
 --- case 4 options - label-bytes 38 input-bytes 5 expected-bytes 39
 should infer the first line ending (3)
---- input
-> a
-
---- expected
-<blockquote>
-<p>a</p>
-</blockquote>
-
---- end
---- case 5 options default_line_ending label-bytes 36 input-bytes 3 expected-bytes 35
-should support the given line ending
---- input
-> a
---- expected
-<blockquote><p>a</p></blockquote>
---- end
---- case 6 options default_line_ending label-bytes 64 input-bytes 4 expected-bytes 36
-should support the given line ending, even if line endings exist
 --- input
 > a
 

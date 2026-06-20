@@ -3,7 +3,7 @@ origin: gfm
 commit: d2da7a0
 source: upstream-tests/compact_html.rs
 role: upstream-input
-count: 10
+count: 9
 profiles: commonmark,gfm
 
 --- case 1 profile commonmark bytes 13
@@ -52,11 +52,5 @@ hello
 | a | b |
 |---|---|
 | c | d |
-
---- end
---- case 10 profile commonmark bytes 16
-# Hello
-
-World.
 
 --- end

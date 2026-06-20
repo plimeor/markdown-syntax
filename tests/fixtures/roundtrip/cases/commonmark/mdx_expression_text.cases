@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/mdx_expression_text.rs
 role: upstream-input
-count: 39
+count: 31
 profiles: mdx
 
 --- case 1 profile mdx bytes 6
@@ -80,59 +80,34 @@ a {var b = "c"} d
 a {b} c
 --- end
 --- case 22 profile mdx bytes 6
-a {} b
---- end
---- case 23 profile mdx bytes 6
 a {b c
 --- end
---- case 24 profile mdx bytes 12
+--- case 23 profile mdx bytes 12
 a {b { c } d
 --- end
---- case 25 profile mdx bytes 7
+--- case 24 profile mdx bytes 7
 a {
 } b
 --- end
---- case 26 profile mdx bytes 5
+--- case 25 profile mdx bytes 5
 a } b
 --- end
---- case 27 profile mdx bytes 7
+--- case 26 profile mdx bytes 7
 { a } b
 --- end
---- case 28 profile mdx bytes 12
+--- case 27 profile mdx bytes 12
 a {alpha} b.
 --- end
---- case 29 profile mdx bytes 7
-a {b} c
---- end
---- case 30 profile mdx bytes 8
+--- case 28 profile mdx bytes 8
 a {??} b
 --- end
---- case 31 profile mdx bytes 6
-a {} b
---- end
---- case 32 profile mdx bytes 6
-a {b c
---- end
---- case 33 profile mdx bytes 12
-a {b { c } d
---- end
---- case 34 profile mdx bytes 7
-a {
-} b
---- end
---- case 35 profile mdx bytes 5
-a } b
---- end
---- case 36 profile mdx bytes 7
-{ a } b
---- end
---- case 37 profile mdx bytes 15
+--- case 29 profile mdx bytes 15
 a { /* { */ } b
 --- end
---- case 38 profile mdx bytes 15
+--- case 30 profile mdx bytes 15
 a { /* } */ } b
 --- end
---- case 39 profile mdx bytes 63
+--- case 31 profile mdx bytes 63
 > alpha {`
 > bravo
 >  charlie

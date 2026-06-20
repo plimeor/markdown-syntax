@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: html_flow
-count: 150
+count: 147
 
 --- case 1 options - label-bytes 34 input-bytes 12 expected-bytes 18
 should support a heading w/ rank 1
@@ -1178,14 +1178,7 @@ should not support an eof after a space directly after a tag name
 --- expected
 <p>&lt;x</p>
 --- end
---- case 114 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 3 expected-bytes 13
-should not support an eof directly after a self-closing slash
---- input
-<x/
---- expected
-<p>&lt;x/</p>
---- end
---- case 115 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 9 expected-bytes 26
+--- case 114 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 9 expected-bytes 26
 should not support a line ending after a self-closing slash
 --- input
 <x/
@@ -1194,14 +1187,14 @@ should not support a line ending after a self-closing slash
 <p>&lt;x/
 <em>asd</em></p>
 --- end
---- case 116 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 4 expected-bytes 4
+--- case 115 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 4 expected-bytes 4
 should support an eof after a self-closing tag
 --- input
 <x/>
 --- expected
 <x/>
 --- end
---- case 117 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 6 expected-bytes 6
+--- case 116 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 6 expected-bytes 6
 should support a line ending after a self-closing tag
 --- input
 <x/>
@@ -1210,28 +1203,28 @@ a
 <x/>
 a
 --- end
---- case 118 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 5 expected-bytes 12
+--- case 117 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 5 expected-bytes 12
 should not support another character after a self-closing tag
 --- input
 <x/>a
 --- expected
 <p><x/>a</p>
 --- end
---- case 119 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 4 expected-bytes 11
+--- case 118 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 4 expected-bytes 11
 should not support another character after an opening tag
 --- input
 <x>a
 --- expected
 <p><x>a</p>
 --- end
---- case 120 options allow_dangerous_html,allow_dangerous_protocol label-bytes 51 input-bytes 5 expected-bytes 5
+--- case 119 options allow_dangerous_html,allow_dangerous_protocol label-bytes 51 input-bytes 5 expected-bytes 5
 should support boolean attributes in a complete tag
 --- input
 <x y>
 --- expected
 <x y>
 --- end
---- case 121 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 5 expected-bytes 12
+--- case 120 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 5 expected-bytes 12
 should not support a line ending before an attribute name
 --- input
 <x
@@ -1240,7 +1233,7 @@ y>
 <p><x
 y></p>
 --- end
---- case 122 options allow_dangerous_html,allow_dangerous_protocol label-bytes 71 input-bytes 7 expected-bytes 12
+--- case 121 options allow_dangerous_html,allow_dangerous_protocol label-bytes 71 input-bytes 7 expected-bytes 12
 should not support a line ending w/ whitespace before an attribute name
 --- input
 <x
@@ -1249,7 +1242,7 @@ should not support a line ending w/ whitespace before an attribute name
 <p><x
 y></p>
 --- end
---- case 123 options allow_dangerous_html,allow_dangerous_protocol label-bytes 95 input-bytes 8 expected-bytes 25
+--- case 122 options allow_dangerous_html,allow_dangerous_protocol label-bytes 95 input-bytes 8 expected-bytes 25
 should not support a line ending w/ whitespace and another line ending before an attribute name
 --- input
 <x
@@ -1259,7 +1252,7 @@ y>
 <p>&lt;x</p>
 <p>y&gt;</p>
 --- end
---- case 124 options allow_dangerous_html,allow_dangerous_protocol label-bytes 56 input-bytes 7 expected-bytes 14
+--- case 123 options allow_dangerous_html,allow_dangerous_protocol label-bytes 56 input-bytes 7 expected-bytes 14
 should not support a line ending between attribute names
 --- input
 <x y
@@ -1268,126 +1261,119 @@ z>
 <p><x y
 z></p>
 --- end
---- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 9 expected-bytes 9
+--- case 124 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 9 expected-bytes 9
 should support whitespace between attribute names
 --- input
 <x y   z>
 --- expected
 <x y   z>
 --- end
---- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 5 expected-bytes 18
+--- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 5 expected-bytes 18
 should not support a colon in a tag name
 --- input
 <x:y>
 --- expected
 <p>&lt;x:y&gt;</p>
 --- end
---- case 127 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 5 expected-bytes 18
+--- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 5 expected-bytes 18
 should not support an underscore in a tag name
 --- input
 <x_y>
 --- expected
 <p>&lt;x_y&gt;</p>
 --- end
---- case 128 options allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 5 expected-bytes 18
+--- case 127 options allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 5 expected-bytes 18
 should not support a dot in a tag name
 --- input
 <x.y>
 --- expected
 <p>&lt;x.y&gt;</p>
 --- end
---- case 129 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 6 expected-bytes 6
+--- case 128 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 6 expected-bytes 6
 should support a colon to start an attribute name
 --- input
 <x :y>
 --- expected
 <x :y>
 --- end
---- case 130 options allow_dangerous_html,allow_dangerous_protocol label-bytes 55 input-bytes 6 expected-bytes 6
+--- case 129 options allow_dangerous_html,allow_dangerous_protocol label-bytes 55 input-bytes 6 expected-bytes 6
 should support an underscore to start an attribute name
 --- input
 <x _y>
 --- expected
 <x _y>
 --- end
---- case 131 options allow_dangerous_html,allow_dangerous_protocol label-bytes 51 input-bytes 6 expected-bytes 19
+--- case 130 options allow_dangerous_html,allow_dangerous_protocol label-bytes 51 input-bytes 6 expected-bytes 19
 should not support a dot to start an attribute name
 --- input
 <x .y>
 --- expected
 <p>&lt;x .y&gt;</p>
 --- end
---- case 132 options allow_dangerous_html,allow_dangerous_protocol label-bytes 47 input-bytes 6 expected-bytes 6
+--- case 131 options allow_dangerous_html,allow_dangerous_protocol label-bytes 47 input-bytes 6 expected-bytes 6
 should support a colon to end an attribute name
 --- input
 <x y:>
 --- expected
 <x y:>
 --- end
---- case 133 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 6 expected-bytes 6
+--- case 132 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 6 expected-bytes 6
 should support an underscore to end an attribute name
 --- input
 <x y_>
 --- expected
 <x y_>
 --- end
---- case 134 options allow_dangerous_html,allow_dangerous_protocol label-bytes 45 input-bytes 6 expected-bytes 6
+--- case 133 options allow_dangerous_html,allow_dangerous_protocol label-bytes 45 input-bytes 6 expected-bytes 6
 should support a dot to end an attribute name
 --- input
 <x y.>
 --- expected
 <x y.>
 --- end
---- case 135 options allow_dangerous_html,allow_dangerous_protocol label-bytes 47 input-bytes 8 expected-bytes 8
+--- case 134 options allow_dangerous_html,allow_dangerous_protocol label-bytes 47 input-bytes 8 expected-bytes 8
 should support numbers to end an attribute name
 --- input
 <x y123>
 --- expected
 <x y123>
 --- end
---- case 136 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 9 expected-bytes 9
+--- case 135 options allow_dangerous_html,allow_dangerous_protocol label-bytes 46 input-bytes 9 expected-bytes 9
 should support a dash to end an attribute name
 --- input
 <x data->
 --- expected
 <x data->
 --- end
---- case 137 options allow_dangerous_html,allow_dangerous_protocol label-bytes 44 input-bytes 6 expected-bytes 19
+--- case 136 options allow_dangerous_html,allow_dangerous_protocol label-bytes 44 input-bytes 6 expected-bytes 19
 should not upport an initializer w/o a value
 --- input
 <x y=>
 --- expected
 <p>&lt;x y=&gt;</p>
 --- end
---- case 138 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 7 expected-bytes 20
+--- case 137 options allow_dangerous_html,allow_dangerous_protocol label-bytes 49 input-bytes 7 expected-bytes 20
 should not support an equals to as an initializer
 --- input
 <x y==>
 --- expected
 <p>&lt;x y==&gt;</p>
 --- end
---- case 139 options allow_dangerous_html,allow_dangerous_protocol label-bytes 64 input-bytes 7 expected-bytes 7
+--- case 138 options allow_dangerous_html,allow_dangerous_protocol label-bytes 64 input-bytes 7 expected-bytes 7
 should support a single character as an unquoted attribute value
 --- input
 <x y=z>
 --- expected
 <x y=z>
 --- end
---- case 140 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 8 expected-bytes 8
+--- case 139 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 8 expected-bytes 8
 should support an empty double quoted attribute value
 --- input
 <x y="">
 --- expected
 <x y="">
 --- end
---- case 141 options allow_dangerous_html,allow_dangerous_protocol label-bytes 53 input-bytes 8 expected-bytes 8
-should support an empty single quoted attribute value
---- input
-<x y="">
---- expected
-<x y="">
---- end
---- case 142 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 9 expected-bytes 16
+--- case 140 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 9 expected-bytes 16
 should not support a line ending in a double quoted attribute value
 --- input
 <x y="
@@ -1396,16 +1382,7 @@ should not support a line ending in a double quoted attribute value
 <p><x y="
 "></p>
 --- end
---- case 143 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 9 expected-bytes 16
-should not support a line ending in a single quoted attribute value
---- input
-<x y="
-">
---- expected
-<p><x y="
-"></p>
---- end
---- case 144 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 9 expected-bytes 16
+--- case 141 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 9 expected-bytes 16
 should not support a line ending in/after an unquoted attribute value
 --- input
 <w x=y
@@ -1414,28 +1391,28 @@ z>
 <p><w x=y
 z></p>
 --- end
---- case 145 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 9 expected-bytes 27
+--- case 142 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 9 expected-bytes 27
 should not support a double quote in/after an unquoted attribute value
 --- input
 <w x=y"z>
 --- expected
 <p>&lt;w x=y&quot;z&gt;</p>
 --- end
---- case 146 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 9 expected-bytes 22
+--- case 143 options allow_dangerous_html,allow_dangerous_protocol label-bytes 70 input-bytes 9 expected-bytes 22
 should not support a single quote in/after an unquoted attribute value
 --- input
 <w x=y'z>
 --- expected
 <p>&lt;w x=y'z&gt;</p>
 --- end
---- case 147 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 9 expected-bytes 32
+--- case 144 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 9 expected-bytes 32
 should not support an attribute after a double quoted attribute value
 --- input
 <x y=""z>
 --- expected
 <p>&lt;x y=&quot;&quot;z&gt;</p>
 --- end
---- case 148 options allow_dangerous_html,allow_dangerous_protocol label-bytes 42 input-bytes 11 expected-bytes 30
+--- case 145 options allow_dangerous_html,allow_dangerous_protocol label-bytes 42 input-bytes 11 expected-bytes 30
 should not support blank lines in complete
 --- input
 <x>
@@ -1447,7 +1424,7 @@ should not support blank lines in complete
 <blockquote>
 </blockquote>
 --- end
---- case 149 options allow_dangerous_html,allow_dangerous_protocol label-bytes 31 input-bytes 11 expected-bytes 50
+--- case 146 options allow_dangerous_html,allow_dangerous_protocol label-bytes 31 input-bytes 11 expected-bytes 50
 should not support lazyness (1)
 --- input
 > <a>
@@ -1458,7 +1435,7 @@ should not support lazyness (1)
 </blockquote>
 <p><em>bar</em></p>
 --- end
---- case 150 options allow_dangerous_html,allow_dangerous_protocol label-bytes 31 input-bytes 7 expected-bytes 39
+--- case 147 options allow_dangerous_html,allow_dangerous_protocol label-bytes 31 input-bytes 7 expected-bytes 39
 should not support lazyness (2)
 --- input
 > a

@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: definition
-count: 78
+count: 77
 
 --- case 1 options - label-bytes 31 input-bytes 26 expected-bytes 43
 should support link definitions
@@ -629,17 +629,7 @@ should not support an extra right paren (`)`) in a raw destination
 <p>[a]</p>
 <p>[a]: b)c</p>
 --- end
---- case 64 options - label-bytes 66 input-bytes 13 expected-bytes 26
-should not support an extra right paren (`)`) in a raw destination
---- input
-[a]
-
-[a]: b)c
---- expected
-<p>[a]</p>
-<p>[a]: b)c</p>
---- end
---- case 65 options - label-bytes 85 input-bytes 26 expected-bytes 40
+--- case 64 options - label-bytes 85 input-bytes 26 expected-bytes 40
 should support 4 or more sets of parens in a raw destination (link resources don’t)
 --- input
 [a]
@@ -649,7 +639,7 @@ should support 4 or more sets of parens in a raw destination (link resources don
 <p><a href="a(1(2(3(4()))))b">a</a></p>
 
 --- end
---- case 66 options - label-bytes 72 input-bytes 14 expected-bytes 27
+--- case 65 options - label-bytes 72 input-bytes 14 expected-bytes 27
 should not support a final (unbalanced) right paren in a raw destination
 --- input
 [a]
@@ -659,7 +649,7 @@ should not support a final (unbalanced) right paren in a raw destination
 <p>[a]</p>
 <p>[a]: aaa)</p>
 --- end
---- case 67 options - label-bytes 93 input-bytes 18 expected-bytes 41
+--- case 66 options - label-bytes 93 input-bytes 18 expected-bytes 41
 should not support a final (unbalanced) right paren in a raw destination “before” a title
 --- input
 [a]
@@ -669,7 +659,7 @@ should not support a final (unbalanced) right paren in a raw destination “befo
 <p>[a]</p>
 <p>[a]: aaa) &quot;a&quot;</p>
 --- end
---- case 68 options - label-bytes 46 input-bytes 67 expected-bytes 38
+--- case 67 options - label-bytes 46 input-bytes 67 expected-bytes 38
 should support subsequent indented definitions
 --- input
  [a]: b "c"
@@ -681,7 +671,7 @@ should support subsequent indented definitions
 --- expected
 <p>n <a href="l" title="m">k</a> o</p>
 --- end
---- case 69 options - label-bytes 49 input-bytes 19 expected-bytes 26
+--- case 68 options - label-bytes 49 input-bytes 19 expected-bytes 26
 should support line prefixes in definition labels
 --- input
 [a
@@ -693,7 +683,7 @@ should support line prefixes in definition labels
 <p><a href="c">a
 b</a></p>
 --- end
---- case 70 options - label-bytes 75 input-bytes 11 expected-bytes 24
+--- case 69 options - label-bytes 75 input-bytes 11 expected-bytes 24
 should not support definitions w/ only a closing paren as a raw destination
 --- input
 [a]: )
@@ -703,7 +693,7 @@ should not support definitions w/ only a closing paren as a raw destination
 <p>[a]: )</p>
 <p>[a]</p>
 --- end
---- case 71 options - label-bytes 80 input-bytes 12 expected-bytes 25
+--- case 70 options - label-bytes 80 input-bytes 12 expected-bytes 25
 should not support definitions w/ closing paren + more text as a raw destination
 --- input
 [a]: )b
@@ -713,7 +703,7 @@ should not support definitions w/ closing paren + more text as a raw destination
 <p>[a]: )b</p>
 <p>[a]</p>
 --- end
---- case 72 options - label-bytes 77 input-bytes 12 expected-bytes 25
+--- case 71 options - label-bytes 77 input-bytes 12 expected-bytes 25
 should not support definitions w/ text + a closing paren as a raw destination
 --- input
 [a]: b)
@@ -723,7 +713,7 @@ should not support definitions w/ text + a closing paren as a raw destination
 <p>[a]: b)</p>
 <p>[a]</p>
 --- end
---- case 73 options - label-bytes 52 input-bytes 10 expected-bytes 24
+--- case 72 options - label-bytes 52 input-bytes 10 expected-bytes 24
 should prefer setext headings over definition labels
 --- input
 [
@@ -735,7 +725,7 @@ a
 a</h1>
 <p>]: b</p>
 --- end
---- case 74 options - label-bytes 52 input-bytes 14 expected-bytes 28
+--- case 73 options - label-bytes 52 input-bytes 14 expected-bytes 28
 should prefer setext headings over definition titles
 --- input
 [a]: b '
@@ -747,7 +737,7 @@ c
 c</h1>
 <p>'</p>
 --- end
---- case 75 options - label-bytes 52 input-bytes 10 expected-bytes 27
+--- case 74 options - label-bytes 52 input-bytes 10 expected-bytes 27
 should prefer thematic breaks over definition labels
 --- input
 [
@@ -758,7 +748,7 @@ should prefer thematic breaks over definition labels
 <hr />
 <p>]: b</p>
 --- end
---- case 76 options - label-bytes 52 input-bytes 14 expected-bytes 31
+--- case 75 options - label-bytes 52 input-bytes 14 expected-bytes 31
 should prefer thematic breaks over definition titles
 --- input
 [a]: b '
@@ -769,7 +759,7 @@ should prefer thematic breaks over definition titles
 <hr />
 <p>'</p>
 --- end
---- case 77 options - label-bytes 50 input-bytes 10 expected-bytes 39
+--- case 76 options - label-bytes 50 input-bytes 10 expected-bytes 39
 should prefer code (fenced) over definition labels
 --- input
 [
@@ -781,7 +771,7 @@ should prefer code (fenced) over definition labels
 </code></pre>
 
 --- end
---- case 78 options - label-bytes 50 input-bytes 14 expected-bytes 43
+--- case 77 options - label-bytes 50 input-bytes 14 expected-bytes 43
 should prefer code (fenced) over definition titles
 --- input
 [a]: b '

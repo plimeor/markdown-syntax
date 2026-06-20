@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/image.rs
 role: upstream-input
-count: 37
+count: 35
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 20
@@ -136,16 +136,10 @@ My ![foo bar](/path/to/train.jpg  "title"   )
 --- case 33 profile commonmark bytes 24
 ![](javascript:alert(1))
 --- end
---- case 34 profile commonmark bytes 24
-![](javascript:alert(1))
---- end
---- case 35 profile commonmark bytes 24
-![](javascript:alert(1))
---- end
---- case 36 profile commonmark bytes 43
+--- case 34 profile commonmark bytes 43
 a ![alpha]() b ![bravo](charlie 'delta') c.
 --- end
---- case 37 profile commonmark bytes 36
+--- case 35 profile commonmark bytes 36
 [x]: y
 
 a ![x] b ![x][] c ![d][x] e.

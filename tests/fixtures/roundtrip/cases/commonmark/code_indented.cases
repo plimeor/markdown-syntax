@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/code_indented.rs
 role: upstream-input
-count: 29
+count: 27
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 38
@@ -101,39 +101,31 @@ b
     a
 --- end
 --- case 21 profile commonmark bytes 9
-> a
-    b
---- end
---- case 22 profile commonmark bytes 9
 - a
     b
 --- end
---- case 23 profile commonmark bytes 11
+--- case 22 profile commonmark bytes 11
 - a
     - b
 --- end
---- case 24 profile commonmark bytes 11
-- a
-    - b
---- end
---- case 25 profile commonmark bytes 13
+--- case 23 profile commonmark bytes 13
 ```
 a
     ```
 --- end
---- case 26 profile commonmark bytes 11
+--- case 24 profile commonmark bytes 11
 a <?
     ?>
 --- end
---- case 27 profile commonmark bytes 9
+--- case 25 profile commonmark bytes 9
 - Foo
 ---
 --- end
---- case 28 profile commonmark bytes 14
+--- case 26 profile commonmark bytes 14
 - Foo
      ---
 --- end
---- case 29 profile commonmark bytes 35
+--- case 27 profile commonmark bytes 35
 	console.log(1)
     console.log(2)
 

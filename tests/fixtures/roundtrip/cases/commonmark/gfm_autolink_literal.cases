@@ -3,7 +3,7 @@ origin: commonmark
 commit: 1506572
 source: upstream-tests/gfm_autolink_literal.rs
 role: upstream-input
-count: 62
+count: 61
 profiles: commonmark,gfm
 
 --- case 1 profile commonmark bytes 19
@@ -33,85 +33,82 @@ user@example.com
 --- case 9 profile gfm bytes 23
 [user@example.com](xxx)
 --- end
---- case 10 profile gfm bytes 16
-user@example.com
---- end
---- case 11 profile gfm bytes 7
+--- case 10 profile gfm bytes 7
 www.a.)
 --- end
---- case 12 profile gfm bytes 7
+--- case 11 profile gfm bytes 7
 www.a b
 --- end
---- case 13 profile gfm bytes 9
+--- case 12 profile gfm bytes 9
 www.a/b c
 --- end
---- case 14 profile gfm bytes 8
+--- case 13 profile gfm bytes 8
 www.�a
 --- end
---- case 15 profile gfm bytes 17
+--- case 14 profile gfm bytes 17
 http://點看.com
 --- end
---- case 16 profile gfm bytes 14
+--- case 15 profile gfm bytes 14
 www.點看.com
 --- end
---- case 17 profile gfm bytes 18
+--- case 16 profile gfm bytes 18
 點看@example.com
 --- end
---- case 18 profile gfm bytes 18
+--- case 17 profile gfm bytes 18
 example@點看.com
 --- end
---- case 19 profile gfm bytes 16
+--- case 18 profile gfm bytes 16
 www.a.com/點看
 --- end
---- case 20 profile gfm bytes 8
+--- case 19 profile gfm bytes 8
 www.-a.b
 --- end
---- case 21 profile gfm bytes 5
+--- case 20 profile gfm bytes 5
 www.$
 --- end
---- case 22 profile gfm bytes 10
+--- case 21 profile gfm bytes 10
 www.a..b.c
 --- end
---- case 23 profile gfm bytes 8
+--- case 22 profile gfm bytes 8
 www.a&a;
 --- end
---- case 24 profile gfm bytes 19
+--- case 23 profile gfm bytes 19
 https://a.bc/d/e/).
 --- end
---- case 25 profile gfm bytes 19
+--- case 24 profile gfm bytes 19
 https://a.bc/d/e/.)
 --- end
---- case 26 profile gfm bytes 14
+--- case 25 profile gfm bytes 14
 https://a.bc).
 --- end
---- case 27 profile gfm bytes 14
+--- case 26 profile gfm bytes 14
 https://a.bc.)
 --- end
---- case 28 profile gfm bytes 15
+--- case 27 profile gfm bytes 15
 https://a.bc).d
 --- end
---- case 29 profile gfm bytes 15
+--- case 28 profile gfm bytes 15
 https://a.bc.)d
 --- end
---- case 30 profile gfm bytes 16
+--- case 29 profile gfm bytes 16
 https://a.bc/))d
 --- end
---- case 31 profile gfm bytes 15
+--- case 30 profile gfm bytes 15
 ftp://a/b/c.txt
 --- end
---- case 32 profile gfm bytes 22
+--- case 31 profile gfm bytes 22
 ，https://example.com
 --- end
---- case 33 profile gfm bytes 22
+--- case 32 profile gfm bytes 22
 ，example@example.com
 --- end
---- case 34 profile gfm bytes 59
+--- case 33 profile gfm bytes 59
 http&#x3A;//user:password@host:port/path?key=value#fragment
 --- end
---- case 35 profile gfm bytes 24
+--- case 34 profile gfm bytes 24
 http://example.com/ab<cd
 --- end
---- case 36 profile gfm bytes 401
+--- case 35 profile gfm bytes 401
 
 mailto:scyther@pokemon.com
 
@@ -137,7 +134,7 @@ xmpp:scyther@pokemon.com/message.
 
 Email me at:scyther@pokemon.com
 --- end
---- case 37 profile gfm bytes 353
+--- case 36 profile gfm bytes 353
 
 a www.example.com&xxx;b c
 
@@ -166,7 +163,7 @@ a www.example.com&. b
 a www.example.com& b
 
 --- end
---- case 38 profile gfm bytes 299
+--- case 37 profile gfm bytes 299
 
 [ www.example.com
 
@@ -193,7 +190,7 @@ a www.example.com& b
 ![ contact@example.com ](#)
 
 --- end
---- case 39 profile gfm bytes 434
+--- case 38 profile gfm bytes 434
 
 www.example.com/?=a(b)cccccc
 
@@ -222,7 +219,7 @@ www.example.com/?q=a(business)))
 (www.example.com/?q=a(business)".
 
 --- end
---- case 40 profile gfm bytes 1749
+--- case 39 profile gfm bytes 1749
 
 # Literal autolinks
 
@@ -345,7 +342,7 @@ Can contain an underscore followed by a period: aaa@a.b_.c
 [link]() <http://autolink> should still be expanded.
 
 --- end
---- case 41 profile gfm bytes 299
+--- case 40 profile gfm bytes 299
 H0.
 
 [https://a.com&copy;b
@@ -383,7 +380,7 @@ H5.
 [[]]www.a.com&copy;b
 
 --- end
---- case 42 profile gfm bytes 515
+--- case 41 profile gfm bytes 515
 Image start.
 
 ![https://a.com
@@ -437,7 +434,7 @@ Autolink literal after image.
 ![a]() a@b.c
 
 --- end
---- case 43 profile gfm bytes 1060
+--- case 42 profile gfm bytes 1060
 Link start.
 
 [https://a.com
@@ -551,7 +548,7 @@ Autolink literal after link.
 [a]() a@b.c
 
 --- end
---- case 44 profile gfm bytes 374
+--- case 43 profile gfm bytes 374
 # “character reference”
 
 www.a&b (space)
@@ -623,7 +620,7 @@ www.a&b}
 www.a&b~
 
 --- end
---- case 45 profile gfm bytes 442
+--- case 44 profile gfm bytes 442
 # “character reference”
 
 www.a&#35 (space)
@@ -695,7 +692,7 @@ www.a&#35}
 www.a&#35~
 
 --- end
---- case 46 profile gfm bytes 269
+--- case 45 profile gfm bytes 269
 a@0.0
 
 a@0.b
@@ -727,7 +724,7 @@ react@0.0.0-experimental-aae83a4b9
 [ react@0.0.0-experimental-aae83a4b9
 
 --- end
---- case 47 profile gfm bytes 396
+--- case 46 profile gfm bytes 396
 # httpshhh? (2)
 
 http://a (space)
@@ -799,7 +796,7 @@ http://a}
 http://a~
 
 --- end
---- case 48 profile gfm bytes 362
+--- case 47 profile gfm bytes 362
 # httpshhh? (1)
 
 http:// (space)
@@ -871,7 +868,7 @@ http://}
 http://~
 
 --- end
---- case 49 profile gfm bytes 464
+--- case 48 profile gfm bytes 464
 # httpshhh? (4)
 
 http://a/b (space)
@@ -943,7 +940,7 @@ http://a/b}
 http://a/b~
 
 --- end
---- case 50 profile gfm bytes 430
+--- case 49 profile gfm bytes 430
 # httpshhh? (3)
 
 http://a/ (space)
@@ -1015,7 +1012,7 @@ http://a/}
 http://a/~
 
 --- end
---- case 51 profile gfm bytes 158
+--- case 50 profile gfm bytes 158
 [www.example.com/a&copy;](#)
 
 www.example.com/a&copy;
@@ -1029,7 +1026,7 @@ www.example.com/a&bogus;
 www.example.com/a\.
 
 --- end
---- case 52 profile gfm bytes 442
+--- case 51 profile gfm bytes 442
 # “character reference”
 
 www.a/b&c (space)
@@ -1101,7 +1098,7 @@ www.a/b&c}
 www.a/b&c~
 
 --- end
---- case 53 profile gfm bytes 510
+--- case 52 profile gfm bytes 510
 # “character reference”
 
 www.a/b&#35 (space)
@@ -1173,7 +1170,7 @@ www.a/b&#35}
 www.a/b&#35~
 
 --- end
---- case 54 profile gfm bytes 457
+--- case 53 profile gfm bytes 457
 In autolink literal path or link end?
 
 [https://a.com/d]()
@@ -1217,7 +1214,7 @@ http://a.com#d]()
 www.a.com#d]()
 
 --- end
---- case 55 profile gfm bytes 2247
+--- case 54 profile gfm bytes 2247
 Last non-markdown ASCII whitespace (FF): noreply@example.com, http://example.com, https://example.com, www.example.com
 
 Last non-whitespace ASCII control (US): noreply@example.com, http://example.com, https://example.com, www.example.com
@@ -1263,7 +1260,7 @@ Some non-ascii: 中noreply@example.com, 中http://example.com, 中https://exampl
 Some more non-ascii: 🤷‍noreply@example.com, 🤷‍http://example.com, 🤷‍https://example.com, 🤷‍www.example.com
 
 --- end
---- case 56 profile gfm bytes 1442
+--- case 55 profile gfm bytes 1442
 # HTTP
 
 https://a.b can start after EOF
@@ -1342,7 +1339,7 @@ See `https://github.com/remarkjs/remark/discussions/678`.
 [asd] ,https://github.com
 
 --- end
---- case 57 profile gfm bytes 289
+--- case 56 profile gfm bytes 289
 # wwwtf 2?
 
 www.a (space)
@@ -1414,7 +1411,7 @@ www.a}
 www.a~
 
 --- end
---- case 58 profile gfm bytes 323
+--- case 57 profile gfm bytes 323
 # wwwtf 5?
 
 www.a. (space)
@@ -1486,7 +1483,7 @@ www.a.}
 www.a.~
 
 --- end
---- case 59 profile gfm bytes 253
+--- case 58 profile gfm bytes 253
 # wwwtf?
 
 www. (space)
@@ -1558,7 +1555,7 @@ www.}
 www.~
 
 --- end
---- case 60 profile gfm bytes 359
+--- case 59 profile gfm bytes 359
 # wwwtf? (4)
 
 www.a/b (space)
@@ -1630,7 +1627,7 @@ www.a/b}
 www.a/b~
 
 --- end
---- case 61 profile gfm bytes 325
+--- case 60 profile gfm bytes 325
 # wwwtf? (3)
 
 www.a/ (space)
@@ -1702,6 +1699,6 @@ www.a/}
 www.a/~
 
 --- end
---- case 62 profile gfm bytes 106
+--- case 61 profile gfm bytes 106
 a https://alpha.com b bravo@charlie.com c www.delta.com d xmpp:echo@foxtrot.com e mailto:golf@hotel.com f.
 --- end

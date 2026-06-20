@@ -3,7 +3,7 @@ origin: gfm
 commit: d2da7a0
 source: upstream-tests/core.rs
 role: upstream-input
-count: 7
+count: 6
 profiles: commonmark
 
 --- case 1 profile commonmark bytes 52
@@ -44,13 +44,6 @@ _        _   _
 
 --- end
 --- case 6 profile commonmark bytes 27
-# h1
-foo
-## h2
-####### foo
-
---- end
---- case 7 profile commonmark bytes 27
 # h1
 foo
 ## h2

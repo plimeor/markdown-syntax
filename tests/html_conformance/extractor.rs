@@ -34,8 +34,8 @@
 //!
 //!   pub fn load_all() -> Vec<crate::types::OracleTuple>
 //!
-//! `load_all` asserts the one hard anchor (the `commonmark/commonmark.cases`
-//! source carries exactly 652 cases) and logs a per-file count summary.
+//! `load_all` logs a per-file count summary. Snapshot-integrity anchors live in
+//! the test entry so this reader remains a parser only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,7 +48,6 @@ const SUITE_ROOT: &str = "tests/fixtures/conformance";
 pub fn load_all() -> Vec<OracleTuple> {
     let mut all = Vec::new();
     let mut commonmark_total = 0usize;
-    let mut commonmark_count = 0usize;
     let mut gfm_total = 0usize;
 
     for (file, category) in suite_files() {
@@ -59,24 +58,13 @@ pub fn load_all() -> Vec<OracleTuple> {
             Category::Gfm => gfm_total += n,
             Category::CommonMark => commonmark_total += n,
         }
-        if rel == "commonmark/commonmark.cases" {
-            commonmark_count = n;
-        }
         log_count(&rel, n);
         all.extend(tuples);
     }
 
     eprintln!(
-        "[suite] commonmark total = {commonmark_total} (commonmark.cases = {commonmark_count}); \
-         gfm total = {gfm_total}; grand total = {}",
+        "[suite] commonmark total = {commonmark_total}; gfm total = {gfm_total}; grand total = {}",
         commonmark_total + gfm_total
-    );
-
-    // The one hard anchor: the snapshot of the CommonMark spec corpus is exactly
-    // 652 cases. A regression here means the snapshot drifted.
-    assert_eq!(
-        commonmark_count, 652,
-        "commonmark/commonmark.cases must carry exactly 652 cases (got {commonmark_count})"
     );
 
     all

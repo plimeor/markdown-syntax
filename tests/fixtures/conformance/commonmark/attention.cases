@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: attention
-count: 131
+count: 130
 
 --- case 1 options - label-bytes 30 input-bytes 9 expected-bytes 23
 should support emphasis w/ `*`
@@ -882,49 +882,42 @@ should not end inside HTML
 --- expected
 <p>*<img src="foo" title="*"/></p>
 --- end
---- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 35 input-bytes 27 expected-bytes 34
-should not end emphasis inside HTML
---- input
-*<img src="foo" title="*"/>
---- expected
-<p>*<img src="foo" title="*"/></p>
---- end
---- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 15 expected-bytes 22
+--- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 15 expected-bytes 22
 should not end strong inside HTML (1)
 --- input
 **<a href="**">
 --- expected
 <p>**<a href="**"></p>
 --- end
---- case 127 options allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 15 expected-bytes 22
+--- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 15 expected-bytes 22
 should not end strong inside HTML (2)
 --- input
 __<a href="__">
 --- expected
 <p>__<a href="__"></p>
 --- end
---- case 128 options - label-bytes 39 input-bytes 7 expected-bytes 32
+--- case 127 options - label-bytes 39 input-bytes 7 expected-bytes 32
 should not end emphasis inside code (1)
 --- input
 *a `*`*
 --- expected
 <p><em>a <code>*</code></em></p>
 --- end
---- case 129 options - label-bytes 39 input-bytes 7 expected-bytes 32
+--- case 128 options - label-bytes 39 input-bytes 7 expected-bytes 32
 should not end emphasis inside code (2)
 --- input
 _a `_`_
 --- expected
 <p><em>a <code>_</code></em></p>
 --- end
---- case 130 options - label-bytes 51 input-bytes 25 expected-bytes 65
+--- case 129 options - label-bytes 51 input-bytes 25 expected-bytes 65
 should not end strong emphasis inside autolinks (1)
 --- input
 **a<http://foo.bar/?q=**>
 --- expected
 <p>**a<a href="http://foo.bar/?q=**">http://foo.bar/?q=**</a></p>
 --- end
---- case 131 options - label-bytes 51 input-bytes 25 expected-bytes 65
+--- case 130 options - label-bytes 51 input-bytes 25 expected-bytes 65
 should not end strong emphasis inside autolinks (2)
 --- input
 __a<http://foo.bar/?q=__>
