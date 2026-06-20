@@ -1,5 +1,10 @@
 # markdown-syntax
 
+[![crates.io](https://img.shields.io/crates/v/markdown-syntax.svg)](https://crates.io/crates/markdown-syntax)
+[![docs.rs](https://docs.rs/markdown-syntax/badge.svg)](https://docs.rs/markdown-syntax)
+[![CI](https://github.com/plimeor/markdown-syntax/actions/workflows/ci.yml/badge.svg)](https://github.com/plimeor/markdown-syntax/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/markdown-syntax.svg)](#license)
+
 `markdown-syntax` is a `no_std + alloc` Rust crate for Markdown syntax:
 
 - Markdown source to Markdown AST.

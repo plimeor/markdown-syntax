@@ -1,0 +1,54 @@
+name: Release-plz
+
+# Automates releases: on every push to `main`, release-plz opens/updates a
+# "release PR" that bumps the version and updates CHANGELOG.md from the commit
+# history; merging that PR publishes to crates.io and creates the git tag and
+# GitHub release. See https://release-plz.dev for the current action reference.
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # Publish the crate + create the tag/GitHub release once a version bump lands.
+  release:
+    name: release-plz release
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'plimeor'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz release
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Open/update the release PR (version bump + changelog) for the next release.
+  release-pr:
+    name: release-plz PR
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'plimeor'
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz release-pr
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
