@@ -4,9 +4,11 @@
 
 - Markdown source to Markdown AST.
 - Markdown AST to canonical Markdown source.
-- Raw HTML is represented only as Markdown syntax nodes.
-- HTML rendering, sanitization, editor models, DOM semantics, and product
-  behavior are outside this crate.
+- With the opt-in `html` feature, Markdown AST to safe-by-default HTML.
+- Raw HTML is represented as Markdown syntax nodes; the opt-in HTML renderer
+  escapes or omits it by default unless explicitly configured otherwise.
+- Pluggable sanitization policies, editor models, DOM semantics, and product
+  behavior are outside the default crate surface.
 
 ## Design
 
@@ -31,6 +33,11 @@ let markdown = markdown_syntax::to_markdown(&output.document)?;
 error. Parser diagnostics, AST validation diagnostics, and serializer errors are
 separate domains.
 
+When built with `--features html`, the crate also exposes `to_html`,
+`to_html_with_options`, `HtmlOptions`, `HtmlError`, `SafeRawHtmlForm`, and
+`TasklistAttrOrder`. The default HTML options validate the AST first, escape raw
+HTML, and filter dangerous link/image protocols.
+
 ## Syntax Scope
 
 The first implementation is a vertical slice, not a full CommonMark claim. It
@@ -44,6 +51,8 @@ structured errors. Validation is intentionally conservative and does not claim t
 prove every semantic invariant of a hand-written AST.
 The serializer does not perform HTML safety filtering and does not preserve the
 original byte-for-byte authoring style from a bare AST.
+The HTML renderer evaluates no MDX and performs no syntax highlighting or DOM
+post-processing.
 
 ## Fixture Corpus
 
@@ -52,9 +61,9 @@ package-owned round-trip snapshots (Markdown source → AST → Markdown source
 stability), and `tests/fixtures/conformance/` holds fixtures derived from the
 CommonMark specification and other reference Markdown implementations, used to
 measure AST correctness against expected HTML. Derived fixtures are exercised
-only through this crate's public stability boundary; upstream expected-HTML
-renderings are retained only as provenance because this crate does not provide
-an HTML renderer. Attribution for the vendored conformance suites lives in
+through this crate's public stability boundary; with `--features html`, the
+HTML conformance bench also exercises the public renderer against those
+expected-HTML oracles. Attribution for the vendored conformance suites lives in
 `tests/fixtures/conformance/THIRD-PARTY-LICENSES/`.
 
 This package is currently marked `publish = false`; the fixture corpus is kept
@@ -64,7 +73,8 @@ an explicit package boundary and fixture-corpus license/provenance review first.
 ## no_std Boundary
 
 The crate root uses `#![no_std]` and `extern crate alloc`. Default features are
-empty. The package has no runtime dependencies.
+empty. The opt-in `html` feature also stays `no_std + alloc`. The package has
+no runtime dependencies.
 
 ## Rust Version
 

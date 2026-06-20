@@ -1,10 +1,11 @@
 # AST → HTML Conformance Bench
 
-A **test-only** measurement harness that answers the question the rest of the
-suite cannot: *how correct is the parser?* The derived corpus the rest of the
-suite uses only asserts round-trip **stability** (parse → serialize → reparse
-yields the same AST). A stably-wrong parse passes. This bench instead measures
-**correctness** against CommonMark/GFM expected-HTML oracles.
+A measurement harness that answers the question the rest of the suite cannot:
+*how correct is the parser?* The derived corpus the rest of the suite uses only
+asserts round-trip **stability** (parse → serialize → reparse yields the same
+AST). A stably-wrong parse passes. This bench instead measures **correctness**
+against CommonMark/GFM expected-HTML oracles using the crate's opt-in public HTML
+renderer.
 
 The bench **owns its conformance test data**. Each `(markdown input → expected
 HTML, options, label)` case lives in this project's own byte-counted fixture
@@ -16,23 +17,19 @@ snapshotted from upstream CommonMark/GFM oracle suites (provenance in
 `tests/fixtures/conformance/THIRD-PARTY-LICENSES/`); the snapshot keeps only the
 cases the bench actually runs.
 
-The bench renders **one** convention: every case is rendered the same way, with
-math always in the GFM form (`data-math-style` wrappers). The only behaviour
-keyed on the suite category is the two oracle conventions whose expected HTML
-legitimately differs by spec layer — safe-mode raw HTML (the commonmark suite
-text-escapes it, the gfm suite emits the `<!-- raw HTML omitted -->`
-placeholder) and the task-list checkbox attribute order.
-
-> The crate still ships **no** HTML renderer. The renderer here lives entirely
-> under `tests/html_conformance/renderer/` and exists only to turn an AST into
-> something comparable with the oracles. It is not part of the public surface.
+The bench renders **one** convention: every case is rendered with the public
+`markdown_syntax::to_html_with_options` API, with math always in the GFM form
+(`data-math-style` wrappers). The suite category is retained for oracle
+conventions whose expected HTML legitimately differs by spec layer: safe-mode
+raw HTML form, task-list checkbox attribute order, and the GFM/cmark-gfm
+link-scheme denylist for unknown URI schemes.
 
 ## How it works
 
 ```
 conformance/<category>/*.cases ──extractor (reader)──▶ (input, expected_html, category, options, label)
                                               │
-   input ──parse_with_options(crate)──▶ AST ──renderer──▶ html
+   input ──parse_with_options(crate)──▶ AST ──to_html_with_options(crate)──▶ html
                                               │
               normalize_html(html) == normalize_html(expected_html) ?
 ```
@@ -56,11 +53,10 @@ conformance/<category>/*.cases ──extractor (reader)──▶ (input, expecte
   subdirectory. Because the fixtures hold only runnable cases, the reader has no
   parsing of upstream `.rs`, no format grammar, and no skip-routing flags — that
   complexity was retired with the vendored oracles.
-- **renderer/** is a faithful CommonMark/GFM reference renderer over the crate's
-  AST, covering all 19 `Block` + 30 `Inline` arms. It renders a single
-  convention (math always GFM); the only category-divergent behaviour is the two
-  oracle conventions noted above (safe-mode raw HTML form, task-list checkbox
-  attribute order), selected from the `RenderConfig` the runner builds per tuple.
+- **src/html/** is the opt-in public renderer over the crate's AST, covering all
+  19 `Block` + 30 `Inline` arms. It renders a single convention (math always
+  GFM); the category-divergent oracle conventions noted above are selected from
+  the `HtmlOptions` the runner builds per tuple.
 - **normalizer.rs** is a faithful Rust port of the CommonMark spec test harness'
   `normalize.py` (block-tag-aware whitespace collapse, attribute lowercase+sort,
   `href`/`src` URL canonicalization, entity decode with `<>&"`→entities, `<pre>`
@@ -69,18 +65,18 @@ conformance/<category>/*.cases ──extractor (reader)──▶ (input, expecte
   insignificant and never masks a structural defect (verified by anti-masking
   self-tests: idempotency + deliberate should-fail fixtures).
 - **runner.rs** maps each case's option tokens → parse `SyntaxOptions` +
-  `RenderConfig` (one unified plan; the former per-suite token vocabularies are
-  token-disjoint so both clause blocks apply unconditionally), then runs
-  parse→render→normalize→compare. Since the fixtures already exclude cases the
-  bench can't fairly run, the runner has no skip path: every case is run and
-  compared.
+  public `HtmlOptions` (one unified plan; the former per-suite token
+  vocabularies are token-disjoint so both clause blocks apply unconditionally),
+  then runs parse→render→normalize→compare. Since the fixtures already exclude
+  cases the bench can't fairly run, the runner has no skip path: every case is
+  run and compared.
 - **report.rs** prints the per-suite / per-file breakdown and dumps every
   failure to `target/html_conformance_failures.txt` for inspection.
 
 ## Run it
 
 ```sh
-cargo test --no-default-features --test html_conformance -- --nocapture
+cargo test --features html --test html_conformance -- --nocapture
 ```
 
 `corpus_counts_match` asserts the snapshot-integrity anchor (the
@@ -91,7 +87,7 @@ measurement, not a pass/fail gate.
 
 ## Result (2026-06-20)
 
-The suite holds **2260** runnable cases. (An earlier revision carried a
+The suite holds **2265** runnable cases. (An earlier revision carried a
 second math oracle pair — `commonmark/math_flow.cases` +
 `commonmark/math_text.cases`, 65 cases — that rendered math in a second
 `class="language-math …"` convention. When the bench collapsed to a
@@ -102,10 +98,10 @@ math defects therefore no longer appear in this headline.)
 
 | scope | ran | passed | conformance |
 |---|---|---|---|
-| **Headline (all)** | 2260 | 2260 | **100.00%** |
+| **Headline (all)** | 2265 | 2265 | **100.00%** |
 | commonmark suite | 1990 | 1990 | **100.00%** |
 | └ CommonMark spec (`commonmark.cases`) | 652 | 652 | **100.00%** |
-| gfm suite | 270 | 270 | **100.00%** |
+| gfm suite | 275 | 275 | **100.00%** |
 
 There are **0 residual failures** and **0 parse errors**. The latest run wrote an
 empty failure dump to `target/html_conformance_failures.txt`.

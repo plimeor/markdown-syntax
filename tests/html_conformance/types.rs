@@ -1,10 +1,9 @@
 //! Shared, dependency-free types for the AST→HTML conformance bench.
 //!
-//! These are the FROZEN interface between the three subsystems (extractor,
-//! renderer, runner/report). The extractor produces [`OracleTuple`]s; the
-//! runner maps each tuple's captured option tokens to a parse
-//! [`markdown_syntax::SyntaxOptions`] plus a [`RenderConfig`]; the renderer
-//! consumes `(Document, &RenderConfig)`.
+//! These are the FROZEN interface between the extractor and runner/report. The
+//! extractor produces [`OracleTuple`]s; the runner maps each tuple's captured
+//! option tokens to parse [`markdown_syntax::SyntaxOptions`] plus public
+//! [`markdown_syntax::HtmlOptions`].
 //!
 //! The bench renders ONE convention (GFM). The only spec-layer split that
 //! survives is the suite [`Category`] (commonmark vs gfm), kept purely so a
@@ -69,43 +68,8 @@ pub struct OracleTuple {
     /// Raw option identifiers captured at the call site, e.g.
     /// `"allow_dangerous_html"`, `"Options::gfm"`, `"extension.table"`,
     /// `"render.unsafe_"`, `"ParseOptions::mdx"`, `"closure"`, `"math"`.
-    /// The runner interprets these into parse options + a [`RenderConfig`].
+    /// The runner interprets these into parse options + [`markdown_syntax::HtmlOptions`].
     pub option_tokens: Vec<String>,
     /// Routing flags (see [`TupleFlags`]).
     pub flags: TupleFlags,
-}
-
-/// Render-time configuration the renderer honors. Built by the runner per
-/// tuple from its option tokens + suite category.
-#[derive(Clone, Copy, Debug)]
-pub struct RenderConfig {
-    /// Suite-layer category, carried for the two category-divergent oracle
-    /// conventions (safe-mode raw HTML form, task-list checkbox attribute
-    /// order). It does NOT switch the rendering convention.
-    pub category: Category,
-    /// Emit raw HTML blocks/inlines verbatim (true) or text-escaped (false).
-    pub allow_dangerous_html: bool,
-    /// Keep `javascript:`/`vbscript:`/`file:`/`data:` hrefs (true) or blank them.
-    pub allow_dangerous_protocol: bool,
-    /// Image `src` bypasses the dangerous-protocol filter.
-    pub allow_any_img_src: bool,
-    /// Apply the GFM tagfilter to raw inline/flow HTML (`<script>`→`&lt;script>`).
-    pub gfm_tagfilter: bool,
-    /// Task-list `<input>` omits `disabled=""` (GFM `tasklist_classes` etc.).
-    pub tasklist_checkable: bool,
-}
-
-impl RenderConfig {
-    /// Conservative default for a suite category (no danger). The runner
-    /// overrides the flag fields per option tokens.
-    pub fn new(category: Category) -> Self {
-        Self {
-            category,
-            allow_dangerous_html: false,
-            allow_dangerous_protocol: false,
-            allow_any_img_src: false,
-            gfm_tagfilter: false,
-            tasklist_checkable: false,
-        }
-    }
 }

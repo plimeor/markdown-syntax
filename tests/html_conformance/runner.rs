@@ -1,21 +1,23 @@
 //! Maps each suite case's captured options → parse [`SyntaxOptions`] +
-//! [`RenderConfig`], runs parse→render→compare, and collects [`Report`].
+//! [`HtmlOptions`], runs parse→render→compare, and collects [`Report`].
 //!
 //! This is the single place the messy option vocabulary is interpreted, so the
 //! suite fixtures can stay faithful token-capturers and the renderer a pure
-//! function of `(Document, RenderConfig)`.
+//! function of `(Document, HtmlOptions)`.
 //!
 //! The fixtures store only RUNNABLE cases (cases the bench skipped were never
 //! compared and were dropped at snapshot time), so there is no skip path here:
-//! every case maps to a `(SyntaxOptions, RenderConfig)` and is run.
+//! every case maps to a `(SyntaxOptions, HtmlOptions)` and is run.
 
-use markdown_syntax::{parse_with_options, SyntaxOptions};
+use markdown_syntax::{
+    parse_with_options, to_html_with_options, HtmlOptions, SafeRawHtmlForm, SyntaxOptions,
+    TasklistAttrOrder,
+};
 
 use crate::extractor;
 use crate::normalizer::compare;
-use crate::renderer::render_document;
 use crate::report::{CaseResult, Outcome, Report};
-use crate::types::{OracleTuple, RenderConfig};
+use crate::types::{Category, OracleTuple};
 
 fn token(t: &OracleTuple, name: &str) -> bool {
     t.option_tokens.iter().any(|tok| tok == name)
@@ -27,7 +29,7 @@ fn ext(t: &OracleTuple, name: &str) -> bool {
     t.option_tokens.iter().any(|tok| tok == &needle)
 }
 
-/// Map a case's option tokens to parse options + a render config.
+/// Map a case's option tokens to parse options + render options.
 ///
 /// The two former per-suite token vocabularies are token-DISJOINT: the
 /// commonmark-suite tokens (`gfm`, `math`, `frontmatter`, `*_off`, plus the
@@ -37,7 +39,7 @@ fn ext(t: &OracleTuple, name: &str) -> bool {
 /// tokens that are actually present. The render config always uses the single
 /// GFM math form; only the suite [`Category`] is carried for the two
 /// category-divergent oracle conventions.
-fn plan(t: &OracleTuple) -> (SyntaxOptions, RenderConfig) {
+fn plan(t: &OracleTuple) -> (SyntaxOptions, HtmlOptions) {
     // Base parse options: the `gfm` token selects the GFM preset; otherwise
     // CommonMark, then the gfm-suite extension toggles are layered on top.
     let mut opts = if token(t, "gfm") {
@@ -135,8 +137,16 @@ fn plan(t: &OracleTuple) -> (SyntaxOptions, RenderConfig) {
         c.math_inline = true;
     }
 
-    // Render config: single GFM math form; flags from both token vocabularies.
-    let mut cfg = RenderConfig::new(t.category);
+    // Render options: single GFM math form; flags from both token vocabularies.
+    let mut cfg = HtmlOptions::default();
+    cfg.safe_raw_html_form = match t.category {
+        Category::CommonMark => SafeRawHtmlForm::EscapeText,
+        Category::Gfm => SafeRawHtmlForm::OmitPlaceholder,
+    };
+    cfg.tasklist_attr_order = match t.category {
+        Category::CommonMark => TasklistAttrOrder::DisabledFirst,
+        Category::Gfm => TasklistAttrOrder::CheckedFirst,
+    };
     cfg.allow_dangerous_html = token(t, "allow_dangerous_html");
     cfg.allow_dangerous_protocol = token(t, "allow_dangerous_protocol");
     cfg.allow_any_img_src = token(t, "allow_any_img_src");
@@ -164,21 +174,23 @@ pub fn run_all() -> Report {
     for t in &tuples {
         let (opts, cfg) = plan(t);
         let outcome = match parse_with_options(&t.input, &opts) {
-            Ok(output) => {
-                let html = render_document(&output.document, &cfg);
-                let cmp = compare(&html, &t.expected_html);
-                if cmp.raw_match {
-                    Outcome::PassRaw
-                } else if cmp.normalized_match {
-                    Outcome::PassNormalized
-                } else {
-                    Outcome::Fail {
-                        input: t.input.clone(),
-                        expected: t.expected_html.clone(),
-                        actual: html,
+            Ok(output) => match to_html_with_options(&output.document, &cfg) {
+                Ok(html) => {
+                    let cmp = compare(&html, &t.expected_html);
+                    if cmp.raw_match {
+                        Outcome::PassRaw
+                    } else if cmp.normalized_match {
+                        Outcome::PassNormalized
+                    } else {
+                        Outcome::Fail {
+                            input: t.input.clone(),
+                            expected: t.expected_html.clone(),
+                            actual: html,
+                        }
                     }
                 }
-            }
+                Err(e) => Outcome::ParseError(format!("html render error: {e:?}")),
+            },
             Err(e) => Outcome::ParseError(format!("{e:?}")),
         };
         results.push(CaseResult {

@@ -1,10 +1,10 @@
 //! Link-definition map, reference resolution, image-alt flattening, and
 //! autolink visible-text reduction.
 
-use std::collections::BTreeMap;
-use std::string::String;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
 
-use markdown_syntax::ast::{Block, Definition, Inline};
+use crate::ast::{Block, Definition, Inline};
 
 use super::escape::escape_text;
 

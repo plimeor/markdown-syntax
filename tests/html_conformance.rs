@@ -1,21 +1,22 @@
-//! AST → HTML conformance bench (test-only).
+#![cfg(feature = "html")]
+
+//! AST → HTML conformance bench.
 //!
-//! This crate does NOT ship an HTML renderer — see the package README. This
-//! harness builds a test-only reference renderer purely to MEASURE how
-//! faithfully the parser's AST reflects CommonMark/GFM semantics, by comparing
-//! `parse(input) → render → HTML` against this bench's own conformance suite
-//! under `tests/fixtures/conformance/<category>/<source>.cases`.
+//! This harness uses the crate's opt-in public HTML renderer purely to MEASURE
+//! how faithfully the parser's AST reflects CommonMark/GFM semantics, by
+//! comparing `parse(input) → to_html_with_options(AST) → HTML` against this
+//! bench's own conformance suite under
+//! `tests/fixtures/conformance/<category>/<source>.cases`.
 //!
 //! It exists because the rest of the suite verifies round-trip STABILITY, not
 //! CORRECTNESS; this is the only place an actual conformance number is produced.
 //!
 //! Layout (each declared with an explicit `#[path]` from this crate root so the
 //! submodules live under `tests/html_conformance/`):
-//!   - `types`      — frozen shared types (OracleTuple, RenderConfig, …)
+//!   - `types`      — frozen shared types (OracleTuple, Category, …)
 //!   - `normalizer` — faithful port of CommonMark `normalize.py`
 //!   - `extractor`  — reads (input, expected_html, options) cases from our suite fixtures
-//!   - `renderer`   — the test-only AST→HTML reference renderer
-//!   - `runner`     — maps each case's options → parse+render+compare
+//!   - `runner`     — maps each case's options → parse+public render+compare
 //!   - `report`     — pass/fail/skip tallies, headline %, failure dump
 
 #![allow(dead_code)]
@@ -25,9 +26,6 @@ mod types;
 
 #[path = "html_conformance/normalizer.rs"]
 mod normalizer;
-
-#[path = "html_conformance/renderer/mod.rs"]
-mod renderer;
 
 #[path = "html_conformance/extractor.rs"]
 mod extractor;

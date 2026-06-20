@@ -30,9 +30,9 @@ contracts.** Public API, crate behavior, and the canonical syntax scope live in
 ## Decisions
 
 *None yet.* The HTML-renderer architecture (opt-in `html` feature; reject
-default-on and a sibling `markdown-html` crate) is currently authored as the
-in-body Design Gate of the renderer plan below; promoting it to a `decisions/`
-record is a deferred `后续` candidate, not yet created.
+default-on and a sibling `markdown-html` crate) is recorded in the completed
+renderer plan below; promoting it to a `decisions/` record is a deferred
+`后续` candidate, not yet created.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ record is a deferred `后续` candidate, not yet created.
 
 | Path | Status | Purpose |
 | ---- | ------ | ------- |
-| `plans/2026-06-20-markdown-syntax-html-renderer.md` | active | Promote the test-only CommonMark/GFM renderer into `src/html/` behind an opt-in, non-default `html` cargo feature (safe-by-default, `no_std`+`alloc`, zero-dep); re-point the conformance bench at the public `to_html` API. Holds the renderer architecture decision in-body. |
+| `plans/2026-06-20-markdown-syntax-html-renderer.md` | completed | Promote the test-only CommonMark/GFM renderer into `src/html/` behind an opt-in, non-default `html` cargo feature (safe-by-default, `no_std`+`alloc`, zero-dep); re-point the conformance bench at the public `to_html` API. Holds the renderer architecture decision in-body. |
 | `plans/2026-06-19-markdown-syntax-test-reorg.md` | completed | Test tree reorganization: role-separated `tests/fixtures/roundtrip/` and `tests/fixtures/conformance/{commonmark,gfm}/`; no `markdown-rs` vs `comrak` engine-owned fixture split. |
 
 ## Tasking

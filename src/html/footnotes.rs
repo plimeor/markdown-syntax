@@ -12,13 +12,13 @@
 //! The body renderer consumes this read-only context; only the references it
 //! actually emits advance the per-id reference counter, so the suffixes match.
 
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::format;
-use std::string::String;
-use std::vec::Vec;
 
-use markdown_syntax::ast::{Block, Inline};
+use crate::ast::{Block, Inline};
 
 use super::escape::{attr_escape_gfm, encode_href};
 
@@ -474,8 +474,8 @@ fn register_ref(
 }
 
 fn block_wrap_inline(children: &[Inline]) -> Vec<Block> {
-    use markdown_syntax::ast::{NodeMeta, Paragraph};
-    std::vec![Block::Paragraph(Paragraph {
+    use crate::ast::{NodeMeta, Paragraph};
+    alloc::vec![Block::Paragraph(Paragraph {
         meta: NodeMeta::default(),
         children: children.to_vec(),
     })]

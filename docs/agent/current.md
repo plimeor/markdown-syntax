@@ -5,21 +5,21 @@ content — it points at the docs that hold it._
 
 ## Current goal
 
-The crate was migrated into its own dedicated repo (from the `labs` monorepo,
-2026-06-20). No task is in flight. One open workstream remains:
+No active workstream is in flight.
 
-1. **Ship an opt-in HTML renderer** — promote the test-only renderer into
-   `src/html/` behind a non-default `html` feature, per the active plan
-   `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` (not yet started).
+Completed workstreams:
 
-Completed workstream: parse↔serialize correctness via
-`docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md`; current
-CommonMark/GFM AST→HTML conformance is 2260/2260 in
+1. **Parse↔serialize correctness** — completed via
+   `docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md`.
+2. **Opt-in HTML renderer** — completed via
+   `docs/plans/2026-06-20-markdown-syntax-html-renderer.md`.
+
+Current CommonMark/GFM AST→HTML conformance is 2265/2265 in
 `tests/html_conformance/CONFORMANCE.md`.
 
 ## Scope
 
-- In: the renderer workstream above; keep the default build byte-stable
+- In: maintenance work that keeps the default build byte-stable
   (`no_std`, zero runtime deps, empty default features).
 - Out: publishing the crate; pluggable HTML sanitization; reopening the completed
   test-tree reorganization unless explicitly requested
@@ -27,21 +27,26 @@ CommonMark/GFM AST→HTML conformance is 2260/2260 in
 
 ## Next step
 
-None pending. Pick up the renderer workstream when work resumes.
+None pending.
 
 ## Verification state
 
-Current verification: `cargo fmt --check`, `cargo build`, `cargo test`,
-`RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, and
-`cargo build --target wasm32-unknown-unknown` all green. Current conformance
-numbers: 2260/2260; see `tests/html_conformance/CONFORMANCE.md`.
-Observed test layout: `tests/fixtures/roundtrip/`,
-`tests/fixtures/conformance/{commonmark,gfm}/`, and the four regression test
-files under `tests/`.
+Latest observed after rebasing onto `main`:
+
+- `cargo fmt --check`
+- `cargo test`
+- `cargo test --features html --test html_regressions` (7 tests)
+- `cargo test --features html --test html_conformance -- --nocapture`
+  - headline: 2265 / 2265 = 100.00%
+  - CommonMark spec: 652 / 652 = 100.00%
+  - failures: 0, parse errors: 0
+
+No `MEMORY.md` file exists in this repo to update.
 
 ## Open docs
 
-- Plan (renderer): `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` — active
+- Plan (renderer): `docs/plans/2026-06-20-markdown-syntax-html-renderer.md` — completed
+- Tasking (correctness): `docs/tasking/2026-06-19-markdown-syntax-conformance-fix.md` — completed
 
 ## Stop condition
 

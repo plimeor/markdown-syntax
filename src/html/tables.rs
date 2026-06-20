@@ -1,9 +1,8 @@
 //! GFM table rendering (attribute `align="…"` form).
 
-use std::string::String;
-use std::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
 
-use markdown_syntax::ast::{Table, TableAlignment};
+use crate::ast::{Table, TableAlignment};
 
 use super::inlines::render_inlines;
 use super::Ctx;
@@ -38,7 +37,7 @@ pub fn render_table(table: &Table, ctx: &Ctx) -> String {
     let mut head_parts: Vec<String> = Vec::with_capacity(width);
     for (col, cell) in header_cells.iter().enumerate() {
         let align = table_align_attr(alignment_for(table, col));
-        head_parts.push(std::format!(
+        head_parts.push(format!(
             "<th{align}>{}</th>",
             render_inlines(&cell.children, ctx)
         ));
@@ -58,9 +57,9 @@ pub fn render_table(table: &Table, ctx: &Ctx) -> String {
                     .get(col)
                     .map(|c| render_inlines(&c.children, ctx))
                     .unwrap_or_default();
-                cell_parts.push(std::format!("<td{align}>{content}</td>"));
+                cell_parts.push(format!("<td{align}>{content}</td>"));
             }
-            body_rows.push(std::format!("<tr>\n{}\n</tr>", cell_parts.join("\n")));
+            body_rows.push(format!("<tr>\n{}\n</tr>", cell_parts.join("\n")));
         }
         out.push_str(&body_rows.join("\n"));
         out.push_str("\n</tbody>\n");

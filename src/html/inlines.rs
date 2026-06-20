@@ -1,16 +1,16 @@
 //! All 30 `Inline` arms.
 
-use std::format;
-use std::string::String;
+use alloc::format;
+use alloc::string::String;
 
-use markdown_syntax::ast::{AutolinkKind, Inline, MathInlineKind};
+use crate::ast::{AutolinkKind, Inline, MathInlineKind};
 
 use super::escape::{
     attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
 };
 use super::footnotes;
 use super::refs::{escaped_alt, flatten_alt, visible_text};
-use super::Ctx;
+use super::{Ctx, SafeRawHtmlForm};
 
 /// Render an inline slice by concatenating each node's HTML.
 pub fn render_inlines(children: &[Inline], ctx: &Ctx) -> String {
@@ -304,9 +304,9 @@ fn render_raw_html(value: &str, ctx: &Ctx) -> String {
 /// commonmark suite text-escapes it (oracle `html_flow` case 1 →
 /// `&lt;!-- asd --&gt;`). Shared by the inline and block raw-HTML renderers.
 pub(super) fn safe_raw_html(value: &str, ctx: &Ctx) -> String {
-    match ctx.category {
-        crate::types::Category::Gfm => String::from(RAW_HTML_OMITTED),
-        crate::types::Category::CommonMark => escape_text(value),
+    match ctx.safe_raw_html_form {
+        SafeRawHtmlForm::OmitPlaceholder => String::from(RAW_HTML_OMITTED),
+        SafeRawHtmlForm::EscapeText => escape_text(value),
     }
 }
 
@@ -364,8 +364,8 @@ fn tag_terminates(rest: &str) -> bool {
 
 /// Literal-source fallback for an unresolved link reference: re-emit the
 /// bracketed source text so the surrounding output is not silently dropped.
-fn link_reference_fallback(n: &markdown_syntax::ast::LinkReference, ctx: &Ctx) -> String {
-    use markdown_syntax::ast::ReferenceKind;
+fn link_reference_fallback(n: &crate::ast::LinkReference, ctx: &Ctx) -> String {
+    use crate::ast::ReferenceKind;
     let inner = render_inlines(&n.children, ctx);
     match n.kind {
         ReferenceKind::Shortcut => format!("[{inner}]"),
@@ -375,8 +375,8 @@ fn link_reference_fallback(n: &markdown_syntax::ast::LinkReference, ctx: &Ctx) -
 }
 
 /// Literal-source fallback for an unresolved image reference.
-fn image_reference_fallback(n: &markdown_syntax::ast::ImageReference) -> String {
-    use markdown_syntax::ast::ReferenceKind;
+fn image_reference_fallback(n: &crate::ast::ImageReference) -> String {
+    use crate::ast::ReferenceKind;
     let inner = escape_text(&flatten_alt(&n.alt));
     match n.kind {
         ReferenceKind::Shortcut => format!("![{inner}]"),

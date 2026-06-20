@@ -3,7 +3,7 @@
 //! All inputs are assumed parser-normalized (e.g. NUL already folded to
 //! U+FFFD); the renderer never re-decodes or re-trims.
 
-use std::string::String;
+use alloc::string::String;
 
 /// CommonMark text escaper: replace, IN ORDER, `&`→`&amp;`, `<`→`&lt;`,
 /// `>`→`&gt;`, `"`→`&quot;`. The single quote is left literal.

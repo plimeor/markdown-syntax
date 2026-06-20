@@ -1,22 +1,20 @@
 //! All 19 `Block` arms plus the nested `ListItem` / `DescriptionItem` /
 //! `DescriptionDetails` helpers they dispatch to.
 
-use std::format;
-use std::string::String;
-use std::vec::Vec;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 
-use markdown_syntax::ast::{
+use crate::ast::{
     Alert, AlertKind, Block, BlockQuote, CodeBlock, ContainerDirective, DescriptionList, Heading,
     LeafDirective, List, ListItem, MathBlock, Paragraph,
 };
-
-use crate::types::Category;
 
 use super::escape::{attr_escape, escape_text};
 use super::inlines::{apply_tagfilter, render_inlines, safe_raw_html};
 use super::refs::flatten_alt;
 use super::tables::render_table;
-use super::Ctx;
+use super::{Ctx, TasklistAttrOrder};
 
 /// Render a block list, dropping empty-string results (Definition, Frontmatter,
 /// MDX*, source-position FootnoteDefinitions, output-less directives) and
@@ -179,7 +177,7 @@ fn render_list_items(list: &List, ctx: &Ctx) -> String {
 fn render_list_item(item: &ListItem, tight: bool, ctx: &Ctx) -> String {
     let checkbox = item
         .checked
-        .map(|checked| task_checkbox(checked, ctx.tasklist_checkable, ctx.category));
+        .map(|checked| task_checkbox(checked, ctx.tasklist_checkable, ctx.tasklist_attr_order));
 
     if tight {
         render_tight_item(item, checkbox, ctx)
@@ -270,14 +268,18 @@ fn render_loose_item(item: &ListItem, checkbox: Option<String>, ctx: &Ctx) -> St
 /// Attribute order is CATEGORY-DIVERGENT between the two suite layers: the gfm
 /// suite emits `checked=""` before `disabled=""`; the commonmark suite emits
 /// `disabled=""` before `checked=""`.
-fn task_checkbox(checked: bool, checkable: bool, category: Category) -> String {
+fn task_checkbox(checked: bool, checkable: bool, attr_order: TasklistAttrOrder) -> String {
     let checked_attr = if checked { " checked=\"\"" } else { "" };
     if checkable {
         return format!("<input type=\"checkbox\"{checked_attr} />");
     }
-    match category {
-        Category::Gfm => format!("<input type=\"checkbox\"{checked_attr} disabled=\"\" />"),
-        Category::CommonMark => format!("<input type=\"checkbox\" disabled=\"\"{checked_attr} />"),
+    match attr_order {
+        TasklistAttrOrder::CheckedFirst => {
+            format!("<input type=\"checkbox\"{checked_attr} disabled=\"\" />")
+        }
+        TasklistAttrOrder::DisabledFirst => {
+            format!("<input type=\"checkbox\" disabled=\"\"{checked_attr} />")
+        }
     }
 }
 
@@ -443,7 +445,7 @@ fn render_container_directive(d: &ContainerDirective, ctx: &Ctx) -> String {
 
 /// Shared directive data-* attribute serializer (LeafDirective / TextDirective
 /// use the same ` data-{name}="{value}"` form).
-fn directive_attrs(attributes: &[markdown_syntax::ast::DirectiveAttribute]) -> String {
+fn directive_attrs(attributes: &[crate::ast::DirectiveAttribute]) -> String {
     let mut out = String::new();
     for attr in attributes {
         let value = attr.value.as_deref().unwrap_or("");
