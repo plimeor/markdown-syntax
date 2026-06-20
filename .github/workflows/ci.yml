@@ -45,6 +45,3 @@ jobs:
 # Deferred — NOT gates yet:
 #  - `cargo clippy -- -D warnings`: the crate has pre-existing clippy warnings;
 #    clean them before adding this as a blocking gate.
-#  - `--features html` build/test: the `html` feature does not exist yet. Add
-#    these jobs in the same PR that introduces it
-#    (see docs/plans/2026-06-20-markdown-syntax-html-renderer.md).

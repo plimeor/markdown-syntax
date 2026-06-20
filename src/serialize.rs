@@ -79,13 +79,6 @@ pub fn to_markdown_with_options(
     Ok(output)
 }
 
-fn serialize_blocks(
-    blocks: &[Block],
-    options: &SerializeOptions,
-) -> Result<String, SerializeError> {
-    serialize_blocks_at_start(blocks, options, false)
-}
-
 /// Serialize a block sequence. `document_start` is true only for the top-level
 /// document body, where the first block sits at byte 0 and a contiguous `---`
 /// would open frontmatter; that one position emits a spaced dash thematic break
@@ -162,7 +155,7 @@ fn serialize_block(
             ThematicBreakMarker::Underscore => "___".into(),
         }),
         Block::BlockQuote(node) => {
-            let inner = serialize_blocks(&node.children, options)?;
+            let inner = serialize_blocks_at_start(&node.children, options, false)?;
             if inner.is_empty() {
                 Ok(">".into())
             } else {
@@ -200,7 +193,7 @@ fn serialize_block(
             Ok(output)
         }
         Block::FootnoteDefinition(node) => {
-            let inner = serialize_blocks(&node.children, options)?;
+            let inner = serialize_blocks_at_start(&node.children, options, false)?;
             let label = if node.meta.span.is_some() {
                 escape_footnote_label_source(&node.label)
             } else {
@@ -236,7 +229,7 @@ fn serialize_block(
             serialize_attributes(&node.attributes)
         )),
         Block::ContainerDirective(node) => {
-            let inner = serialize_blocks(&node.children, options)?;
+            let inner = serialize_blocks_at_start(&node.children, options, false)?;
             let fence = directive_fence(&inner);
             Ok(format!(
                 "{fence}{}{}{}\n{}\n{fence}",
@@ -329,7 +322,7 @@ fn serialize_alert(node: &Alert, options: &SerializeOptions) -> Result<String, S
             output.push_str(&escape_alert_title(title));
         }
     }
-    let inner = serialize_blocks(&node.children, options)?;
+    let inner = serialize_blocks_at_start(&node.children, options, false)?;
     if !inner.is_empty() {
         output.push('\n');
         output.push_str(&prefix_lines(&inner, "> "));
@@ -494,7 +487,7 @@ fn serialize_description_list(
                 output.push('\n');
             }
             output.push_str("\n:");
-            let inner = serialize_blocks(&detail.children, options)?;
+            let inner = serialize_blocks_at_start(&detail.children, options, false)?;
             if !inner.is_empty() {
                 output.push('\n');
                 output.push_str(&indent_lines(&inner, 4));
@@ -564,9 +557,7 @@ fn escape_code_info(input: &str) -> String {
 }
 
 fn serialize_table(node: &Table, options: &SerializeOptions) -> Result<String, SerializeError> {
-    let Some(header) = node.rows.first() else {
-        return Err(SerializeError::UnsupportedNode("empty table"));
-    };
+    let header = &node.rows[0];
     let mut output = serialize_table_row(header, options)?;
     output.push('\n');
     output.push('|');
@@ -778,10 +769,6 @@ fn serialize_inlines_with_context(
             }
             Inline::CharacterReference(node) => output.push_str(&node.reference),
             Inline::Emphasis(node) => {
-                if node.children.is_empty() {
-                    output.push_str(empty_emphasis_delimiter(inlines, index));
-                    continue;
-                }
                 let children = serialize_inlines_with_context(&node.children, options, context)?;
                 let touches_underscore = children.starts_with('_')
                     || children.ends_with('_')
@@ -1165,21 +1152,6 @@ fn text_is_at_line_end(inlines: &[Inline], index: usize) -> bool {
         inlines.get(index + 1),
         None | Some(Inline::SoftBreak(_)) | Some(Inline::LineBreak(_))
     )
-}
-
-fn empty_emphasis_delimiter(inlines: &[Inline], index: usize) -> &'static str {
-    let touches_underscore = matches!(
-        inlines.get(index.wrapping_sub(1)),
-        Some(Inline::Text(text)) if text.value.ends_with('_')
-    ) || matches!(
-        inlines.get(index + 1),
-        Some(Inline::Text(text)) if text.value.starts_with('_')
-    );
-    if touches_underscore {
-        "__"
-    } else {
-        "**"
-    }
 }
 
 fn escape_text_with_context(
@@ -1731,15 +1703,7 @@ fn reference_explicit_label(
 /// label, keeping the round trip stable; other control characters are still
 /// numeric-escaped, and tabs pass through as in `escape_reference_label_source`.
 fn escape_definition_label_source(input: &str) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            '\t' | '\n' | '\r' => output.push(char),
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            _ => output.push(char),
-        }
-    }
-    output
+    escape_reference_label_source(input, false)
 }
 
 fn escape_reference_label_source(input: &str, escape_pipe: bool) -> String {
@@ -2103,7 +2067,7 @@ fn serialize_inline_math_with_context(
         // parser skips, so an exact `$`…`$` fence round-trips; a `$$` display
         // value is verbatim including any edge spaces or newlines.
         MathInlineKind::Dollar { dollars } => {
-            let fence = "$".repeat(usize::from(dollars).max(1));
+            let fence = "$".repeat(usize::from(dollars));
             Ok(format!("{fence}{input}{fence}"))
         }
     }

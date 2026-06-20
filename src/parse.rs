@@ -21,11 +21,6 @@ pub enum ParseStrictError {
     Diagnostic(Diagnostic),
 }
 
-#[derive(Clone, Debug)]
-struct DefinitionRef {
-    identifier: String,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ParsedLinkResource {
     destination: String,
@@ -78,9 +73,9 @@ struct DescriptionTerm {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum HtmlBlockKind<'a> {
-    RawTag(&'a str),
-    BlockTag(&'a str),
+enum HtmlBlockKind {
+    RawTag,
+    BlockTag,
     Until(&'static str),
     UntilBlank,
 }
@@ -149,7 +144,7 @@ fn parse_blocks(
     base_offset: usize,
     allow_frontmatter: bool,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Block> {
     let lines = collect_lines(input, base_offset);
@@ -160,7 +155,7 @@ fn parse_blocks_from_lines(
     lines: &[Line<'_>],
     allow_frontmatter: bool,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Block> {
     let mut blocks = Vec::new();
@@ -357,7 +352,7 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
     lines
 }
 
-fn collect_definitions(input: &str, options: &ResolvedSyntaxOptions) -> Vec<DefinitionRef> {
+fn collect_definitions(input: &str, options: &ResolvedSyntaxOptions) -> Vec<String> {
     let mut diagnostics = Vec::new();
     let blocks = parse_blocks(input, 0, true, options, &[], &mut diagnostics);
     let mut definitions = Vec::new();
@@ -365,17 +360,15 @@ fn collect_definitions(input: &str, options: &ResolvedSyntaxOptions) -> Vec<Defi
     definitions
 }
 
-fn collect_definition_refs_from_blocks(blocks: &[Block], definitions: &mut Vec<DefinitionRef>) {
+fn collect_definition_refs_from_blocks(blocks: &[Block], definitions: &mut Vec<String>) {
     for block in blocks {
         match block {
             Block::Definition(definition) => {
                 if definitions
                     .iter()
-                    .all(|item| item.identifier != definition.identifier)
+                    .all(|identifier| identifier != &definition.identifier)
                 {
-                    definitions.push(DefinitionRef {
-                        identifier: definition.identifier.clone(),
-                    });
+                    definitions.push(definition.identifier.clone());
                 }
             }
             Block::BlockQuote(node) => {
@@ -450,7 +443,7 @@ fn parse_container_directive(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !options.constructs.directive_container {
@@ -674,10 +667,6 @@ fn math_block_fence_closes(input: &str, length: usize) -> bool {
     count >= length && input[count..].trim().is_empty()
 }
 
-fn is_math_block_fence(input: &str) -> bool {
-    math_block_fence_length(input).is_some()
-}
-
 fn parse_fenced_code(
     lines: &[Line<'_>],
     index: usize,
@@ -845,7 +834,7 @@ fn parse_block_quote(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !trim_up_to_three_spaces(lines[index].text)?.starts_with('>') {
@@ -989,7 +978,7 @@ fn parse_alert_from_block_quote(
     base_offset: usize,
     span: Span,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     if !options.constructs.gfm_alert {
@@ -1053,7 +1042,7 @@ fn parse_list(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     let first_marker = list_marker_info(lines[index].text)?;
@@ -1341,7 +1330,7 @@ fn parse_description_list(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !options.constructs.description_list || !is_description_term_line(lines[index].text, options)
@@ -1449,7 +1438,7 @@ fn parse_description_details(
     index: usize,
     marker: DescriptionMarker<'_>,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(DescriptionDetails, usize, bool)> {
     let mut content = String::new();
@@ -1616,7 +1605,7 @@ fn strip_indent_continuation(input: &str) -> Option<&str> {
 fn parse_atx_heading(
     line: Line<'_>,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
 ) -> Option<Block> {
     let text = trim_up_to_three_spaces(line.text)?;
     let depth = text
@@ -1823,7 +1812,7 @@ fn parse_footnote_definition(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !options.constructs.footnote_definition {
@@ -1898,7 +1887,7 @@ fn is_footnote_continuation(input: &str) -> bool {
 fn parse_leaf_directive(
     line: Line<'_>,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     if !options.constructs.directive_leaf {
@@ -1951,7 +1940,7 @@ fn parse_html_block(
     let mut value = String::new();
     let mut cursor = index;
     match kind {
-        HtmlBlockKind::RawTag(_) => {
+        HtmlBlockKind::RawTag => {
             // CommonMark §4.6 type-1: the block ends on a line containing ANY of
             // `</script>`, `</pre>`, `</style>`, `</textarea>` (case-insensitive),
             // regardless of which opened it.
@@ -1967,7 +1956,7 @@ fn parse_html_block(
                 cursor += 1;
             }
         }
-        HtmlBlockKind::BlockTag(_) => {
+        HtmlBlockKind::BlockTag => {
             while cursor < lines.len() && !lines[cursor].text.trim().is_empty() {
                 push_line(&mut value, lines[cursor].text);
                 cursor += 1;
@@ -1990,10 +1979,6 @@ fn parse_html_block(
             }
         }
     }
-
-    if cursor == index {
-        return None;
-    }
     Some((
         Block::HtmlBlock(HtmlBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -2006,14 +1991,14 @@ fn parse_html_block(
     ))
 }
 
-fn html_block_start(input: &str) -> Option<HtmlBlockKind<'_>> {
+fn html_block_start(input: &str) -> Option<HtmlBlockKind> {
     let trimmed = input.trim_end();
     if !trimmed.starts_with('<') {
         return None;
     }
 
-    if let Some(tag) = raw_html_tag_name(trimmed) {
-        return Some(HtmlBlockKind::RawTag(tag));
+    if raw_html_tag_start(trimmed) {
+        return Some(HtmlBlockKind::RawTag);
     }
     if trimmed.starts_with("<!--") {
         return Some(HtmlBlockKind::Until("-->"));
@@ -2028,8 +2013,8 @@ fn html_block_start(input: &str) -> Option<HtmlBlockKind<'_>> {
         return Some(HtmlBlockKind::Until("]]>"));
     }
 
-    if let Some(tag_name) = html_block_tag_prefix(trimmed) {
-        return Some(HtmlBlockKind::BlockTag(tag_name));
+    if html_block_tag_start(trimmed) {
+        return Some(HtmlBlockKind::BlockTag);
     }
 
     let Some((end, _tag_name)) = parse_html_tag(trimmed, 0) else {
@@ -2049,13 +2034,13 @@ pub(crate) fn line_starts_html_block(input: &str) -> bool {
         .is_some()
 }
 
-fn raw_html_tag_name(input: &str) -> Option<&'static str> {
+fn raw_html_tag_start(input: &str) -> bool {
     for tag in ["script", "pre", "style", "textarea"] {
         if html_raw_open_tag_prefix(input, tag) {
-            return Some(tag);
+            return true;
         }
     }
-    None
+    false
 }
 
 fn html_raw_open_tag_prefix(input: &str, tag: &str) -> bool {
@@ -2120,10 +2105,10 @@ fn line_contains_raw_closing_tag(input: &str, tag: &str) -> bool {
     false
 }
 
-fn html_block_tag_prefix(input: &str) -> Option<&str> {
+fn html_block_tag_start(input: &str) -> bool {
     let bytes = input.as_bytes();
     if bytes.first() != Some(&b'<') {
-        return None;
+        return false;
     }
 
     let mut cursor = 1;
@@ -2136,7 +2121,7 @@ fn html_block_tag_prefix(input: &str) -> Option<&str> {
         .get(cursor)
         .is_some_and(|byte| byte.is_ascii_alphabetic())
     {
-        return None;
+        return false;
     }
     cursor += 1;
     while bytes.get(cursor).is_some_and(|byte| html_name_byte(*byte)) {
@@ -2145,13 +2130,13 @@ fn html_block_tag_prefix(input: &str) -> Option<&str> {
 
     let name = &input[name_start..cursor];
     if !html_block_tag(name) {
-        return None;
+        return false;
     }
 
     match bytes.get(cursor) {
-        None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'>') => Some(name),
-        Some(b'/') if bytes.get(cursor + 1) == Some(&b'>') => Some(name),
-        _ => None,
+        None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'>') => true,
+        Some(b'/') if bytes.get(cursor + 1) == Some(&b'>') => true,
+        _ => false,
     }
 }
 
@@ -3084,7 +3069,7 @@ fn parse_table(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !options.constructs.gfm_table || index + 1 >= lines.len() {
@@ -3174,7 +3159,7 @@ fn parse_setext_heading(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
 ) -> Option<(Block, usize)> {
     if index + 1 >= lines.len() || lines[index].text.trim().is_empty() {
         return None;
@@ -3252,7 +3237,7 @@ fn parse_paragraph(
     lines: &[Line<'_>],
     index: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Block, usize) {
     let mut value = String::new();
@@ -3676,7 +3661,7 @@ fn parse_inlines(
     input: &str,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     parse_inlines_with_context(
@@ -3704,7 +3689,7 @@ fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
     context: InlineContext,
 ) -> Vec<Inline> {
@@ -4574,7 +4559,7 @@ fn parse_image(
     index: usize,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(usize, Inline)> {
     let label_start = index + 2;
@@ -4605,7 +4590,7 @@ fn parse_image(
         let close = find_reference_label_end(input, after_label)?;
         let label = &input[after_label + 1..close];
         let identifier = if label.is_empty() { alt_source } else { label };
-        if find_definition(definitions, identifier).is_some() {
+        if definition_exists(definitions, identifier) {
             return Some((
                 close + 1,
                 Inline::ImageReference(ImageReference {
@@ -4636,7 +4621,7 @@ fn parse_image(
     }
     // Shortcut image reference `![foo]` (no following `(`/`[`) where `foo` is a
     // defined label — mirrors parse_link's shortcut branch.
-    if find_definition(definitions, alt_source).is_some() {
+    if definition_exists(definitions, alt_source) {
         return Some((
             after_label,
             Inline::ImageReference(ImageReference {
@@ -4665,7 +4650,7 @@ fn parse_link(
     index: usize,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
     context: InlineContext,
 ) -> Option<(usize, Inline)> {
@@ -4712,7 +4697,7 @@ fn parse_link(
         } else {
             label
         };
-        if find_definition(definitions, identifier).is_some() {
+        if definition_exists(definitions, identifier) {
             return Some((
                 close + 1,
                 Inline::LinkReference(LinkReference {
@@ -4744,7 +4729,7 @@ fn parse_link(
         // `[...]` reaches the shortcut path below.
         return None;
     }
-    if find_definition(definitions, label_source).is_some() {
+    if definition_exists(definitions, label_source) {
         return Some((
             after_label,
             Inline::LinkReference(LinkReference {
@@ -4801,7 +4786,7 @@ fn label_contains_link(
     label_source: &str,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
 ) -> bool {
     let mut diagnostics = Vec::new();
     let inlines = parse_inlines_with_context(
@@ -4880,7 +4865,7 @@ fn parse_text_directive(
     index: usize,
     base_offset: usize,
     options: &ResolvedSyntaxOptions,
-    definitions: &[DefinitionRef],
+    definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(usize, Inline)> {
     if input[index..].starts_with("::") {
@@ -5109,7 +5094,7 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
         while cursor < input.len() {
             let (next, char) = next_char(input, cursor)?;
             if char as u8 == quote && !is_escaped_at(input, cursor) {
-                return Some((unescape_title(&input[index + 1..cursor]), next));
+                return Some((unescape_ascii_punctuation(&input[index + 1..cursor]), next));
             }
             cursor = next;
         }
@@ -5708,7 +5693,7 @@ fn parse_link_destination(
             let (next, char) = next_char(input, cursor)?;
             if char == '>' && !is_escaped_at(input, cursor) {
                 return Some((
-                    unescape_destination(&input[index + 1..cursor]),
+                    unescape_ascii_punctuation(&input[index + 1..cursor]),
                     LinkDestinationKind::Angle,
                     next,
                 ));
@@ -5751,7 +5736,7 @@ fn parse_link_destination(
         None
     } else {
         Some((
-            unescape_destination(&input[index..cursor]),
+            unescape_ascii_punctuation(&input[index..cursor]),
             LinkDestinationKind::Bare,
             cursor,
         ))
@@ -5773,7 +5758,11 @@ fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind,
             if contains_blank_line(&input[index + 1..cursor]) {
                 return None;
             }
-            return Some((unescape_title(&input[index + 1..cursor]), title_kind, next));
+            return Some((
+                unescape_ascii_punctuation(&input[index + 1..cursor]),
+                title_kind,
+                next,
+            ));
         }
         if opener == b'(' && char == '(' && !is_escaped_at(input, cursor) {
             return None;
@@ -5944,12 +5933,8 @@ fn line_can_start_definition_title(input: &str) -> bool {
     matches!(trimmed.as_bytes().first(), Some(b'"' | b'\'' | b'('))
 }
 
-fn unescape_destination(input: &str) -> String {
+fn unescape_ascii_punctuation(input: &str) -> String {
     // Only ASCII punctuation is escapable (`\ ` keeps its backslash).
-    unescape_selected(input, |char| char.is_ascii_punctuation())
-}
-
-fn unescape_title(input: &str) -> String {
     unescape_selected(input, |char| char.is_ascii_punctuation())
 }
 
@@ -6064,15 +6049,15 @@ pub(crate) fn normalize_label(label: &str) -> String {
         .to_lowercase()
 }
 
-fn find_definition<'a>(definitions: &'a [DefinitionRef], label: &str) -> Option<&'a DefinitionRef> {
+fn definition_exists(definitions: &[String], label: &str) -> bool {
     if label.is_empty() || !reference_label_is_within_limit(label) {
-        return None;
+        return false;
     }
 
     let identifier = normalize_label(label);
     definitions
         .iter()
-        .find(|definition| definition.identifier == identifier)
+        .any(|definition| definition == &identifier)
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
@@ -6857,7 +6842,7 @@ fn likely_block_start(input: &str, options: &ResolvedSyntaxOptions) -> bool {
         })
         .is_some()
         || (options.constructs.html_block && line_starts_interrupting_html_block(input))
-        || (options.constructs.math_block && is_math_block_fence(trimmed))
+        || (options.constructs.math_block && math_block_fence_length(trimmed).is_some())
         || (options.constructs.directive_container && trimmed.starts_with(":::"))
         || (options.constructs.directive_leaf && trimmed.starts_with("::"))
         || (options.constructs.footnote_definition && line_starts_footnote_definition(trimmed))

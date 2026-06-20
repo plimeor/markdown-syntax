@@ -11,7 +11,7 @@ use crate::ast::{
 };
 
 use super::escape::{attr_escape, escape_text};
-use super::inlines::{apply_tagfilter, render_inlines, safe_raw_html};
+use super::inlines::{directive_attrs, render_inlines, render_raw_html};
 use super::refs::flatten_alt;
 use super::tables::render_table;
 use super::{Ctx, TasklistAttrOrder};
@@ -60,7 +60,7 @@ pub fn render_block(block: &Block, ctx: &Ctx) -> String {
         Block::CodeBlock(cb) => render_code_block(cb),
 
         // 9. HtmlBlock.
-        Block::HtmlBlock(hb) => render_html_block(&hb.value, ctx),
+        Block::HtmlBlock(hb) => render_raw_html(&hb.value, ctx),
 
         // 10. Definition — emits nothing (feeds reference resolution).
         Block::Definition(_) => String::new(),
@@ -347,18 +347,6 @@ fn preferred_code_line_ending(value: &str) -> &str {
     "\n"
 }
 
-/// First whitespace-delimited token of the info string, text-escaped; `None`
-/// when info is absent or empty.
-fn language_class(info: Option<&str>) -> Option<String> {
-    let info = info?;
-    let token = info.split(|c: char| c.is_ascii_whitespace()).next()?;
-    if token.is_empty() {
-        None
-    } else {
-        Some(escape_text(token))
-    }
-}
-
 /// Raw (un-escaped) first whitespace-delimited token of the info string.
 fn info_first_token(info: Option<&str>) -> Option<&str> {
     let token = info?.split(|c: char| c.is_ascii_whitespace()).next()?;
@@ -371,10 +359,11 @@ fn info_first_token(info: Option<&str>) -> Option<&str> {
 
 fn render_code_block(cb: &CodeBlock) -> String {
     let body = code_body(&cb.value);
-    match language_class(cb.info.as_deref()) {
-        Some(lang) => {
+    match info_first_token(cb.info.as_deref()) {
+        Some(token) => {
+            let lang = escape_text(token);
             // GFM math: a ```math fence carries the display marker.
-            let math_attr = if info_first_token(cb.info.as_deref()) == Some("math") {
+            let math_attr = if token == "math" {
                 " data-math-style=\"display\""
             } else {
                 ""
@@ -388,18 +377,6 @@ fn render_code_block(cb: &CodeBlock) -> String {
 fn render_math_block(mb: &MathBlock, _ctx: &Ctx) -> String {
     let body = code_body(&mb.value);
     format!("<pre><code class=\"language-math\" data-math-style=\"display\">{body}</code></pre>")
-}
-
-fn render_html_block(value: &str, ctx: &Ctx) -> String {
-    if ctx.allow_dangerous_html {
-        if ctx.gfm_tagfilter {
-            return apply_tagfilter(value);
-        }
-        return String::from(value);
-    }
-    // Safe mode: GFM emits the `<!-- raw HTML omitted -->` placeholder;
-    // CommonMark text-escapes the raw block.
-    safe_raw_html(value, ctx)
 }
 
 /// LeafDirective [CONV]: a self-describing classed `<div>` carrying the name,
@@ -416,15 +393,7 @@ fn render_leaf_directive(d: &LeafDirective, ctx: &Ctx) -> String {
 /// ContainerDirective: oracle-backed `<div class="name">…</div>` core plus the
 /// convention data-* attribute and label additions.
 fn render_container_directive(d: &ContainerDirective, ctx: &Ctx) -> String {
-    let mut attrs = String::new();
-    for attr in &d.attributes {
-        let value = attr.value.as_deref().unwrap_or("");
-        attrs.push_str(&format!(
-            " data-{}=\"{}\"",
-            attr_escape(&attr.name),
-            attr_escape(value)
-        ));
-    }
+    let mut attrs = directive_attrs(&d.attributes);
     if !d.label.is_empty() {
         attrs.push_str(&format!(
             " data-directive-label=\"{}\"",
@@ -441,19 +410,4 @@ fn render_container_directive(d: &ContainerDirective, ctx: &Ctx) -> String {
         "<div class=\"{}\"{attrs}>{body}\n</div>",
         attr_escape(&d.name)
     )
-}
-
-/// Shared directive data-* attribute serializer (LeafDirective / TextDirective
-/// use the same ` data-{name}="{value}"` form).
-fn directive_attrs(attributes: &[crate::ast::DirectiveAttribute]) -> String {
-    let mut out = String::new();
-    for attr in attributes {
-        let value = attr.value.as_deref().unwrap_or("");
-        out.push_str(&format!(
-            " data-{}=\"{}\"",
-            attr_escape(&attr.name),
-            attr_escape(value)
-        ));
-    }
-    out
 }

@@ -21,37 +21,6 @@ pub enum Category {
     Gfm,
 }
 
-/// Routing flags captured by the extractor so the runner can exclude tuples it
-/// cannot fairly run, instead of silently dropping them (zero-omission intent).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TupleFlags {
-    /// MDX case needing an external SWC parser hook the crate does not embed.
-    pub mdx_needs_swc: bool,
-    /// GFM `html_opts_i(.., |opts| { .. })` — options set by a Rust closure
-    /// (header-id-prefix string, url-rewriter Arc) not portable.
-    pub gfm_closure: bool,
-    /// GFM math case whose expected HTML the extractor already rebuilt by
-    /// replaying the per-fn `.replace("<math>", ..)` chain.
-    pub math_transform: bool,
-    /// Tuple was expanded from a GFM `for example in examples` array loop.
-    pub array_expanded: bool,
-    /// Expected HTML uses a form this renderer deliberately does not emit
-    /// (e.g. the CommonMark `user-content-`/`aria-describedby` footnote shape).
-    pub form_divergent: bool,
-    /// Construct the crate's parser cannot produce (GFM greentext, subtext,
-    /// cjk_friendly_emphasis, phoenix_heex, smart punctuation, multiline block
-    /// quotes, escaped-char-spans render mode, sourcepos attributes, …).
-    pub parser_unsupported: bool,
-}
-
-impl TupleFlags {
-    /// True when the tuple cannot be run+compared and must be recorded as
-    /// `skipped`, excluded from the headline denominator.
-    pub fn is_unrunnable(&self) -> bool {
-        self.mdx_needs_swc || self.gfm_closure || self.form_divergent || self.parser_unsupported
-    }
-}
-
 /// One extracted `(markdown input → expected HTML)` oracle case.
 #[derive(Clone, Debug)]
 pub struct OracleTuple {
@@ -70,6 +39,4 @@ pub struct OracleTuple {
     /// `"render.unsafe_"`, `"ParseOptions::mdx"`, `"closure"`, `"math"`.
     /// The runner interprets these into parse options + [`markdown_syntax::HtmlOptions`].
     pub option_tokens: Vec<String>,
-    /// Routing flags (see [`TupleFlags`]).
-    pub flags: TupleFlags,
 }

@@ -18,9 +18,6 @@ pub enum Outcome {
         expected: String,
         actual: String,
     },
-    /// Excluded from the denominator with a reason (unsupported option, mdx-SWC,
-    /// closure, engine-divergent form, convention-only node, …).
-    Skip(&'static str),
     /// The parser returned an error for this input (config or strict failure).
     ParseError(String),
 }
@@ -41,7 +38,6 @@ struct Tally {
     pass_raw: usize,
     pass_norm: usize,
     fail: usize,
-    skip: usize,
     parse_error: usize,
 }
 
@@ -51,12 +47,9 @@ impl Tally {
             Outcome::PassRaw => self.pass_raw += 1,
             Outcome::PassNormalized => self.pass_norm += 1,
             Outcome::Fail { .. } => self.fail += 1,
-            Outcome::Skip(_) => self.skip += 1,
             Outcome::ParseError(_) => self.parse_error += 1,
         }
     }
-    /// Denominator = everything that actually ran (pass + fail + parse_error);
-    /// skips are excluded.
     fn ran(&self) -> usize {
         self.pass_raw + self.pass_norm + self.fail + self.parse_error
     }
@@ -77,7 +70,6 @@ impl Report {
     pub fn print_summary(&self) {
         let mut by_suite: BTreeMap<&'static str, Tally> = BTreeMap::new();
         let mut by_file: BTreeMap<&'static str, Tally> = BTreeMap::new();
-        let mut skip_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
         let mut total = Tally::default();
 
         for r in &self.results {
@@ -85,19 +77,15 @@ impl Report {
             by_suite.entry(sname).or_default().add(&r.outcome);
             by_file.entry(r.source_file).or_default().add(&r.outcome);
             total.add(&r.outcome);
-            if let Outcome::Skip(reason) = r.outcome {
-                *skip_reasons.entry(reason).or_default() += 1;
-            }
         }
 
         println!("\n================ AST→HTML CONFORMANCE ================");
         println!(
-            "total cases: {}   ran: {}   passed: {}   failed: {}   skipped: {}   parse-errors: {}",
+            "total cases: {}   ran: {}   passed: {}   failed: {}   parse-errors: {}",
             self.results.len(),
             total.ran(),
             total.passed(),
             total.fail,
-            total.skip,
             total.parse_error,
         );
         println!(
@@ -112,19 +100,13 @@ impl Report {
         println!("\n-- by suite --");
         for (suite, t) in &by_suite {
             println!(
-                "  {suite:<12} ran {:>5}  pass {:>5} ({:.2}%)  fail {:>5}  skip {:>5}  perr {:>4}",
+                "  {suite:<12} ran {:>5}  pass {:>5} ({:.2}%)  fail {:>5}  perr {:>4}",
                 t.ran(),
                 t.passed(),
                 t.pct(),
                 t.fail,
-                t.skip,
                 t.parse_error,
             );
-        }
-
-        println!("\n-- skip reasons --");
-        for (reason, n) in &skip_reasons {
-            println!("  {n:>5}  {reason}");
         }
 
         println!("\n-- files with failures (file: fail/ran, parse-errors) --");

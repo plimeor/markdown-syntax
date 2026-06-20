@@ -9,6 +9,30 @@ mod validation {
     use markdown_syntax::*;
 
     #[test]
+    fn empty_table_is_invalid() {
+        let document = Document {
+            meta: NodeMeta::default(),
+            children: vec![Block::Table(Table {
+                meta: NodeMeta::default(),
+                alignments: vec![],
+                rows: vec![],
+            })],
+        };
+
+        let diagnostics = validate_document(&document);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message,
+            "table must contain at least a header row"
+        );
+
+        assert!(matches!(
+            to_markdown(&document),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+    }
+
+    #[test]
     fn zero_width_table_is_invalid() {
         let document = Document {
             meta: NodeMeta::default(),
@@ -60,6 +84,27 @@ mod review_validate {
             meta: NodeMeta::default(),
             value: value.into(),
         })
+    }
+
+    #[test]
+    fn zero_dollar_inline_math_is_invalid() {
+        let bad = paragraph(vec![Inline::Math(MathInline {
+            meta: NodeMeta::default(),
+            value: "x".into(),
+            kind: MathInlineKind::Dollar { dollars: 0 },
+        })]);
+        assert!(!validate_document(&bad).is_empty());
+        assert!(matches!(
+            to_markdown(&bad),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+
+        let good = paragraph(vec![Inline::Math(MathInline {
+            meta: NodeMeta::default(),
+            value: "x".into(),
+            kind: MathInlineKind::Dollar { dollars: 1 },
+        })]);
+        assert!(validate_document(&good).is_empty());
     }
 
     // SR6 — empty-children emphasis-like inline containers serialize to bare

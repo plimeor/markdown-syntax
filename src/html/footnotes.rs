@@ -75,36 +75,34 @@ impl FootnoteContext {
 
 /// Pre-pass: build the footnote context from the whole document.
 pub fn build(blocks: &[Block]) -> FootnoteContext {
-    let mut order: Vec<String> = Vec::new();
-    let mut numbers: BTreeMap<String, usize> = BTreeMap::new();
-    let mut ref_totals: BTreeMap<String, usize> = BTreeMap::new();
-    let mut referenced: BTreeSet<String> = BTreeSet::new();
-    let mut defs: BTreeMap<String, Vec<Block>> = BTreeMap::new();
     let mut display_labels: BTreeMap<String, String> = BTreeMap::new();
+    let mut refs = RefBuilder {
+        order: Vec::new(),
+        numbers: BTreeMap::new(),
+        ref_totals: BTreeMap::new(),
+        referenced: BTreeSet::new(),
+        defs: BTreeMap::new(),
+        inline_counter: 0,
+    };
 
     // First collect all regular definitions (anywhere in the tree).
-    collect_defs(blocks, &mut defs, &mut display_labels);
+    collect_defs(blocks, &mut refs.defs, &mut display_labels);
 
     // Then walk in document order to learn reference order + inline bodies.
-    let mut inline_counter = 0usize;
-    walk_refs(
-        blocks,
-        &mut order,
-        &mut numbers,
-        &mut ref_totals,
-        &mut referenced,
-        &mut defs,
-        &mut inline_counter,
-    );
+    refs.walk_blocks(blocks);
 
-    let seen_during_render = order.iter().map(|id| (id.clone(), Cell::new(0))).collect();
+    let seen_during_render = refs
+        .order
+        .iter()
+        .map(|id| (id.clone(), Cell::new(0)))
+        .collect();
 
     FootnoteContext {
-        order,
-        numbers,
-        defs,
-        ref_totals,
-        referenced,
+        order: refs.order,
+        numbers: refs.numbers,
+        defs: refs.defs,
+        ref_totals: refs.ref_totals,
+        referenced: refs.referenced,
         display_labels,
         seen_during_render,
         inline_emitted: Cell::new(0),
@@ -146,331 +144,98 @@ fn collect_defs(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn walk_refs(
-    blocks: &[Block],
-    order: &mut Vec<String>,
-    numbers: &mut BTreeMap<String, usize>,
-    ref_totals: &mut BTreeMap<String, usize>,
-    referenced: &mut BTreeSet<String>,
-    defs: &mut BTreeMap<String, Vec<Block>>,
-    inline_counter: &mut usize,
-) {
-    for block in blocks {
-        match block {
-            Block::Paragraph(p) => walk_inline_refs(
-                &p.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Block::Heading(h) => walk_inline_refs(
-                &h.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Block::BlockQuote(bq) => walk_refs(
-                &bq.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Block::Alert(a) => walk_refs(
-                &a.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Block::List(list) => {
-                for item in &list.children {
-                    walk_refs(
-                        &item.children,
-                        order,
-                        numbers,
-                        ref_totals,
-                        referenced,
-                        defs,
-                        inline_counter,
-                    );
-                }
-            }
-            Block::DescriptionList(dl) => {
-                for item in &dl.children {
-                    walk_inline_refs(
-                        &item.term,
-                        order,
-                        numbers,
-                        ref_totals,
-                        referenced,
-                        defs,
-                        inline_counter,
-                    );
-                    for details in &item.details {
-                        walk_refs(
-                            &details.children,
-                            order,
-                            numbers,
-                            ref_totals,
-                            referenced,
-                            defs,
-                            inline_counter,
-                        );
+struct RefBuilder {
+    order: Vec<String>,
+    numbers: BTreeMap<String, usize>,
+    defs: BTreeMap<String, Vec<Block>>,
+    ref_totals: BTreeMap<String, usize>,
+    referenced: BTreeSet<String>,
+    inline_counter: usize,
+}
+
+impl RefBuilder {
+    fn walk_blocks(&mut self, blocks: &[Block]) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(p) => self.walk_inlines(&p.children),
+                Block::Heading(h) => self.walk_inlines(&h.children),
+                Block::BlockQuote(bq) => self.walk_blocks(&bq.children),
+                Block::Alert(a) => self.walk_blocks(&a.children),
+                Block::List(list) => {
+                    for item in &list.children {
+                        self.walk_blocks(&item.children);
                     }
                 }
-            }
-            Block::Table(table) => {
-                for row in &table.rows {
-                    for cell in &row.cells {
-                        walk_inline_refs(
-                            &cell.children,
-                            order,
-                            numbers,
-                            ref_totals,
-                            referenced,
-                            defs,
-                            inline_counter,
-                        );
+                Block::DescriptionList(dl) => {
+                    for item in &dl.children {
+                        self.walk_inlines(&item.term);
+                        for details in &item.details {
+                            self.walk_blocks(&details.children);
+                        }
                     }
                 }
-            }
-            Block::FootnoteDefinition(fd) => walk_refs(
-                &fd.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Block::ContainerDirective(dir) => {
-                walk_inline_refs(
-                    &dir.label,
-                    order,
-                    numbers,
-                    ref_totals,
-                    referenced,
-                    defs,
-                    inline_counter,
-                );
-                walk_refs(
-                    &dir.children,
-                    order,
-                    numbers,
-                    ref_totals,
-                    referenced,
-                    defs,
-                    inline_counter,
-                );
-            }
-            Block::LeafDirective(dir) => walk_inline_refs(
-                &dir.label,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            _ => {}
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn walk_inline_refs(
-    inlines: &[Inline],
-    order: &mut Vec<String>,
-    numbers: &mut BTreeMap<String, usize>,
-    ref_totals: &mut BTreeMap<String, usize>,
-    referenced: &mut BTreeSet<String>,
-    defs: &mut BTreeMap<String, Vec<Block>>,
-    inline_counter: &mut usize,
-) {
-    for inline in inlines {
-        match inline {
-            Inline::FootnoteReference(fr) => {
-                // Only register a reference that resolves to a definition; an
-                // undefined `[^x]` is rendered as literal text, not numbered.
-                if defs.contains_key(&fr.identifier) {
-                    register_ref(&fr.identifier, order, numbers, ref_totals, referenced);
+                Block::Table(table) => {
+                    for row in &table.rows {
+                        for cell in &row.cells {
+                            self.walk_inlines(&cell.children);
+                        }
+                    }
                 }
+                Block::FootnoteDefinition(fd) => self.walk_blocks(&fd.children),
+                Block::ContainerDirective(dir) => {
+                    self.walk_inlines(&dir.label);
+                    self.walk_blocks(&dir.children);
+                }
+                Block::LeafDirective(dir) => self.walk_inlines(&dir.label),
+                _ => {}
             }
-            Inline::InlineFootnote(node) => {
-                *inline_counter += 1;
-                let id = format!("__inline_{}", inline_counter);
-                defs.insert(id.clone(), block_wrap_inline(&node.children));
-                register_ref(&id, order, numbers, ref_totals, referenced);
-                // Inline-footnote children may themselves contain footnotes.
-                walk_inline_refs(
-                    &node.children,
-                    order,
-                    numbers,
-                    ref_totals,
-                    referenced,
-                    defs,
-                    inline_counter,
-                );
-            }
-            Inline::Emphasis(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Strong(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Underline(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Delete(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Insert(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Mark(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Subscript(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Superscript(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Spoiler(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::Link(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::LinkReference(n) => recurse_inline(
-                &n.children,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            Inline::TextDirective(d) => recurse_inline(
-                &d.label,
-                order,
-                numbers,
-                ref_totals,
-                referenced,
-                defs,
-                inline_counter,
-            ),
-            _ => {}
         }
     }
-}
 
-#[allow(clippy::too_many_arguments)]
-fn recurse_inline(
-    inlines: &[Inline],
-    order: &mut Vec<String>,
-    numbers: &mut BTreeMap<String, usize>,
-    ref_totals: &mut BTreeMap<String, usize>,
-    referenced: &mut BTreeSet<String>,
-    defs: &mut BTreeMap<String, Vec<Block>>,
-    inline_counter: &mut usize,
-) {
-    walk_inline_refs(
-        inlines,
-        order,
-        numbers,
-        ref_totals,
-        referenced,
-        defs,
-        inline_counter,
-    );
-}
-
-fn register_ref(
-    id: &str,
-    order: &mut Vec<String>,
-    numbers: &mut BTreeMap<String, usize>,
-    ref_totals: &mut BTreeMap<String, usize>,
-    referenced: &mut BTreeSet<String>,
-) {
-    if !numbers.contains_key(id) {
-        order.push(String::from(id));
-        numbers.insert(String::from(id), order.len());
+    fn walk_inlines(&mut self, inlines: &[Inline]) {
+        for inline in inlines {
+            match inline {
+                Inline::FootnoteReference(fr) => {
+                    // Only register a reference that resolves to a definition; an
+                    // undefined `[^x]` is rendered as literal text, not numbered.
+                    if self.defs.contains_key(&fr.identifier) {
+                        self.register_ref(&fr.identifier);
+                    }
+                }
+                Inline::InlineFootnote(node) => {
+                    self.inline_counter += 1;
+                    let id = format!("__inline_{}", self.inline_counter);
+                    self.defs
+                        .insert(id.clone(), block_wrap_inline(&node.children));
+                    self.register_ref(&id);
+                    // Inline-footnote children may themselves contain footnotes.
+                    self.walk_inlines(&node.children);
+                }
+                Inline::Emphasis(n) => self.walk_inlines(&n.children),
+                Inline::Strong(n) => self.walk_inlines(&n.children),
+                Inline::Underline(n) => self.walk_inlines(&n.children),
+                Inline::Delete(n) => self.walk_inlines(&n.children),
+                Inline::Insert(n) => self.walk_inlines(&n.children),
+                Inline::Mark(n) => self.walk_inlines(&n.children),
+                Inline::Subscript(n) => self.walk_inlines(&n.children),
+                Inline::Superscript(n) => self.walk_inlines(&n.children),
+                Inline::Spoiler(n) => self.walk_inlines(&n.children),
+                Inline::Link(n) => self.walk_inlines(&n.children),
+                Inline::LinkReference(n) => self.walk_inlines(&n.children),
+                Inline::TextDirective(d) => self.walk_inlines(&d.label),
+                _ => {}
+            }
+        }
     }
-    *ref_totals.entry(String::from(id)).or_insert(0) += 1;
-    referenced.insert(String::from(id));
+
+    fn register_ref(&mut self, id: &str) {
+        if !self.numbers.contains_key(id) {
+            self.order.push(String::from(id));
+            self.numbers.insert(String::from(id), self.order.len());
+        }
+        *self.ref_totals.entry(String::from(id)).or_insert(0) += 1;
+        self.referenced.insert(String::from(id));
+    }
 }
 
 fn block_wrap_inline(children: &[Inline]) -> Vec<Block> {

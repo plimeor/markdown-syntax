@@ -3,7 +3,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use crate::ast::{AutolinkKind, Inline, MathInlineKind};
+use crate::ast::{AutolinkKind, DirectiveAttribute, Inline, MathInlineKind};
 
 use super::escape::{
     attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
@@ -223,15 +223,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
 
         // 29. TextDirective [CONV] — classed span carrying name + attrs.
         Inline::TextDirective(d) => {
-            let mut attrs = String::new();
-            for attr in &d.attributes {
-                let value = attr.value.as_deref().unwrap_or("");
-                attrs.push_str(&format!(
-                    " data-{}=\"{}\"",
-                    attr_escape(&attr.name),
-                    attr_escape(value)
-                ));
-            }
+            let attrs = directive_attrs(&d.attributes);
             format!(
                 "<span class=\"directive directive-text\" data-directive-name=\"{}\"{attrs}>{}</span>",
                 attr_escape(&d.name),
@@ -290,7 +282,7 @@ fn footnote_marker(id: &str, ctx: &Ctx) -> String {
     )
 }
 
-fn render_raw_html(value: &str, ctx: &Ctx) -> String {
+pub(super) fn render_raw_html(value: &str, ctx: &Ctx) -> String {
     if ctx.allow_dangerous_html {
         if ctx.gfm_tagfilter {
             return apply_tagfilter(value);
@@ -298,6 +290,20 @@ fn render_raw_html(value: &str, ctx: &Ctx) -> String {
         return String::from(value);
     }
     safe_raw_html(value, ctx)
+}
+
+/// Shared directive data-* attribute serializer.
+pub(super) fn directive_attrs(attributes: &[DirectiveAttribute]) -> String {
+    let mut out = String::new();
+    for attr in attributes {
+        let value = attr.value.as_deref().unwrap_or("");
+        out.push_str(&format!(
+            " data-{}=\"{}\"",
+            attr_escape(&attr.name),
+            attr_escape(value)
+        ));
+    }
+    out
 }
 
 /// Safe-mode raw HTML: the gfm suite replaces it with a fixed placeholder; the

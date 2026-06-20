@@ -40,7 +40,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::{Category, OracleTuple, TupleFlags};
+use crate::types::{Category, OracleTuple};
 
 const SUITE_ROOT: &str = "tests/fixtures/conformance";
 
@@ -163,8 +163,6 @@ fn parse_file(path: &Path, category: Category) -> Vec<OracleTuple> {
             input: input.to_string(),
             expected_html: expected.to_string(),
             option_tokens: parsed.option_tokens,
-            // The fixtures store only runnable cases, so flags are always clear.
-            flags: TupleFlags::default(),
         });
 
         cursor = expected_end + "\n--- end\n".len();

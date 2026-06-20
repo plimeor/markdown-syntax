@@ -845,12 +845,6 @@ fn assert_semantic_manifest_matches(root: &Path, stats: &DerivedCorpusStats) {
 
 struct DerivedMetadata {
     origin: String,
-    /// Provenance attribution carried in the `.cases` headers. The vendored
-    /// upstream `.rs` sources have been removed (the conformance bench owns its
-    /// data under `conformance/`); this is kept only as a historical record, no
-    /// longer cross-checked against an on-disk file.
-    #[allow(dead_code)]
-    source: String,
     role: Option<String>,
     count: usize,
 }
@@ -859,7 +853,7 @@ fn read_derived_metadata(path: &Path) -> DerivedMetadata {
     let source =
         fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let mut origin = None;
-    let mut source_path = None;
+    let mut source_seen = false;
     let mut role = None;
     let mut count = None;
 
@@ -869,8 +863,8 @@ fn read_derived_metadata(path: &Path) -> DerivedMetadata {
         }
         if let Some(value) = line.strip_prefix("origin: ") {
             origin = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("source: ") {
-            source_path = Some(value.to_string());
+        } else if line.strip_prefix("source: ").is_some() {
+            source_seen = true;
         } else if let Some(value) = line.strip_prefix("role: ") {
             role = Some(value.to_string());
         } else if let Some(value) = line.strip_prefix("count: ") {
@@ -883,10 +877,12 @@ fn read_derived_metadata(path: &Path) -> DerivedMetadata {
         }
     }
 
+    if !source_seen {
+        panic!("{}: missing source metadata", path.display());
+    }
+
     DerivedMetadata {
         origin: origin.unwrap_or_else(|| panic!("{}: missing origin metadata", path.display())),
-        source: source_path
-            .unwrap_or_else(|| panic!("{}: missing source metadata", path.display())),
         role,
         count: count.unwrap_or_else(|| panic!("{}: missing count metadata", path.display())),
     }
