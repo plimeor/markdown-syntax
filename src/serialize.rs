@@ -1,3 +1,9 @@
+//! AST to canonical Markdown. The verbs live on [`Document`]
+//! ([`to_markdown`](Document::to_markdown) /
+//! [`to_markdown_with`](Document::to_markdown_with)); [`SerializeOptions`] tunes
+//! the output style. The document is validated first, so serialization can fail
+//! with a [`SerializeError`].
+
 use alloc::{
     format,
     string::{String, ToString},
@@ -11,9 +17,12 @@ use crate::{
     validate::validate_document,
 };
 
+/// The newline style emitted by the serializer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineEnding {
+    /// Unix `\n`.
     Lf,
+    /// Windows `\r\n`.
     CrLf,
 }
 
@@ -26,13 +35,20 @@ impl LineEnding {
     }
 }
 
+/// Output-style options for serialization. Defaults: LF, trailing newline, `-`
+/// bullets, `.` ordered markers, and backtick code fences.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct SerializeOptions {
+    /// Newline style to emit.
     pub line_ending: LineEnding,
+    /// Whether to end the output with a trailing newline.
     pub final_newline: bool,
+    /// The bullet marker for unordered lists.
     pub bullet: ListDelimiter,
+    /// The delimiter for ordered-list markers (e.g. `.` → `1.`).
     pub ordered_delimiter: ListDelimiter,
+    /// The fence character for fenced code blocks.
     pub fence_marker: FenceMarker,
 }
 
@@ -48,9 +64,12 @@ impl Default for SerializeOptions {
     }
 }
 
+/// Why serialization failed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SerializeError {
+    /// The AST failed validation; carries the validation diagnostics.
     InvalidDocument(Vec<Diagnostic>),
+    /// A node kind that the serializer does not support was encountered.
     UnsupportedNode(&'static str),
 }
 

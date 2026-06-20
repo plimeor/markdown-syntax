@@ -1,3 +1,8 @@
+//! Markdown source to AST. The entry points are the free [`parse`] function
+//! (maximal default dialect) and the [`SyntaxOptions::parse`] /
+//! [`SyntaxOptions::parse_strict`] methods. Parsing is tolerant: problems are
+//! collected as [`Diagnostic`]s rather than aborting.
+
 use alloc::{borrow::Cow, string::String, vec, vec::Vec};
 
 use crate::{
@@ -9,15 +14,22 @@ use crate::{
     validate::is_directive_name,
 };
 
+/// The result of a tolerant parse: the document plus any diagnostics gathered
+/// along the way (empty on a clean parse).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseOutput {
+    /// The parsed document tree.
     pub document: Document,
+    /// Diagnostics collected during parsing.
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// The error returned by [`SyntaxOptions::parse_strict`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseStrictError {
+    /// The options themselves were contradictory.
     Config(SyntaxConfigError),
+    /// An error-severity diagnostic was promoted to a hard failure.
     Diagnostic(Diagnostic),
 }
 

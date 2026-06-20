@@ -18,6 +18,7 @@ use crate::{ast::Document, diagnostic::Diagnostic, validate::validate_document};
 use self::footnotes::FootnoteContext;
 use self::refs::DefMap;
 
+/// How raw HTML is handled in safe mode (when `allow_dangerous_html` is off).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SafeRawHtmlForm {
@@ -29,6 +30,8 @@ pub enum SafeRawHtmlForm {
     OmitPlaceholder,
 }
 
+/// The attribute order on disabled task-list checkbox inputs (an oracle-parity
+/// convention).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TasklistAttrOrder {
@@ -38,6 +41,8 @@ pub enum TasklistAttrOrder {
     CheckedFirst,
 }
 
+/// HTML rendering options. The default is safe: raw HTML is escaped, dangerous
+/// link/image protocols are blanked, and task-list checkboxes are disabled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct HtmlOptions {
@@ -71,6 +76,7 @@ impl Default for HtmlOptions {
     }
 }
 
+/// Why HTML rendering failed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HtmlError {
     /// The AST failed validation before rendering.

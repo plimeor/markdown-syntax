@@ -1,3 +1,7 @@
+//! AST validation: [`Document::validate`] walks the tree and reports each
+//! invalid or unsupported node shape as a [`Diagnostic`]. Serialization and HTML
+//! rendering run this first and refuse an invalid document.
+
 use alloc::vec::Vec;
 
 use crate::{

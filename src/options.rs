@@ -1,13 +1,33 @@
+//! Parser configuration: which Markdown constructs are recognized and how.
+//!
+//! [`SyntaxOptions`] is the entry point — pick a preset, optionally tune it with
+//! the [`Construct`] builder, then call [`SyntaxOptions::parse`]. [`Constructs`]
+//! is the exhaustive per-feature flag set behind it, and [`ParseOptions`] holds
+//! the lexing knobs.
+
 use alloc::string::String;
 
+/// The full set of syntactic constructs the parser may recognize, one boolean
+/// per feature. This is the exhaustive escape hatch; most callers use the
+/// [`Constructs::commonmark`]/[`gfm`](Constructs::gfm)/[`mdx`](Constructs::mdx)/
+/// [`max`](Constructs::max) presets or the [`Construct`] builder instead of
+/// setting fields directly.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Constructs {
+    /// Raw HTML blocks, e.g. a `<div>…</div>` block at the top level.
     pub html_block: bool,
+    /// Raw inline HTML, e.g. `<span>` within a paragraph.
     pub html_inline: bool,
+    /// Indented code blocks (each line indented four spaces or a tab).
     pub indented_code: bool,
+    /// GFM pipe tables: a `| a | b |` row over a `|---|---|` delimiter row.
     pub gfm_table: bool,
+    /// GFM task list items: `- [ ]` (unchecked) and `- [x]` (checked).
     pub gfm_task_list_item: bool,
+    /// GFM strikethrough: `~~text~~`.
     pub gfm_strikethrough: bool,
+    /// GFM literal autolinks: a bare `https://…`, `www.…`, or email becomes a
+    /// link without angle brackets.
     pub gfm_autolink_literal: bool,
     /// cmark-gfm "relaxed" URL autolinks: bare `scheme://` URLs (and a bare
     /// leading `://`) are auto-linkified without angle brackets, e.g. `smb://`,
@@ -15,34 +35,65 @@ pub struct Constructs {
     /// defines only `http(s)://`/`www.`/email); on by default in `gfm()` for
     /// GitHub/cmark-gfm parity. The angle form `<scheme:…>` works regardless.
     pub relaxed_autolinks: bool,
+    /// GFM alerts: a `> [!NOTE]` (TIP/IMPORTANT/WARNING/CAUTION) blockquote.
     pub gfm_alert: bool,
+    /// Underline spans: `__text__`. This overrides CommonMark's `__`-as-strong,
+    /// so it is off in the [`max`](Constructs::max) default.
     pub underline: bool,
+    /// CriticMarkup-style insertions: `++text++`.
     pub insert: bool,
+    /// Highlight / "mark" spans: `==text==`.
     pub highlight: bool,
+    /// Subscript: a single-tilde span `~text~` (no spaces).
     pub subscript: bool,
+    /// Superscript: `^text^`.
     pub superscript: bool,
+    /// Spoiler spans: `||text||`.
     pub spoiler: bool,
+    /// Emoji-style shortcodes: `:tada:`.
     pub shortcode: bool,
+    /// Description (definition) lists: a term followed by `:`-led details.
     pub description_list: bool,
+    /// Footnote definitions: `[^1]: the footnote body`.
     pub footnote_definition: bool,
+    /// Footnote references: `[^1]` in running text.
     pub footnote_reference: bool,
+    /// Inline footnotes: `^[the note inline]` (also needs `footnote_reference`).
     pub inline_footnote: bool,
+    /// Block math: a `$$ … $$` fenced block.
     pub math_block: bool,
+    /// Inline math: `$x$` (and the math-code form `` $`x`$ ``).
     pub math_inline: bool,
+    /// A leading frontmatter block at the start of the document: `---` YAML or
+    /// `+++` TOML.
     pub frontmatter: bool,
+    /// Wikilinks with the display title after the pipe: `[[target|title]]`
+    /// (the Obsidian convention). Mutually exclusive with the before-pipe order.
     pub wikilink_title_after_pipe: bool,
+    /// Wikilinks with the display title before the pipe: `[[title|target]]`.
+    /// Mutually exclusive with the after-pipe order.
     pub wikilink_title_before_pipe: bool,
+    /// MDX ESM: `import`/`export` statement lines.
     pub mdx_esm: bool,
+    /// MDX block-level `{ … }` expressions.
     pub mdx_expression_block: bool,
+    /// MDX inline `{ … }` expressions within text.
     pub mdx_expression_inline: bool,
+    /// MDX block-level JSX: `<Component/>` as a block. Conflicts with raw HTML.
     pub mdx_jsx_block: bool,
+    /// MDX inline JSX: `<Component/>` within text. Conflicts with raw HTML.
     pub mdx_jsx_inline: bool,
+    /// Inline directive: `:name[label]{key=val}`. A directive, not MDX.
     pub directive_text: bool,
+    /// Leaf directive: `::name[label]{key=val}` on its own line. A directive,
+    /// not MDX.
     pub directive_leaf: bool,
+    /// Container directive: a `:::name … :::` fenced block. A directive, not MDX.
     pub directive_container: bool,
 }
 
 impl Constructs {
+    /// The CommonMark baseline: raw HTML and indented code, no extensions.
     pub const fn commonmark() -> Self {
         Self {
             html_block: true,
@@ -81,6 +132,8 @@ impl Constructs {
         }
     }
 
+    /// GitHub Flavored Markdown: CommonMark plus tables, task lists,
+    /// strikethrough, literal autolinks, and footnotes.
     pub const fn gfm() -> Self {
         let mut constructs = Self::commonmark();
         constructs.gfm_table = true;
@@ -93,6 +146,8 @@ impl Constructs {
         constructs
     }
 
+    /// MDX: CommonMark with raw HTML and indented code off, and MDX ESM,
+    /// expressions, and JSX on.
     pub const fn mdx() -> Self {
         let mut constructs = Self::commonmark();
         constructs.html_block = false;
@@ -156,20 +211,37 @@ impl Default for Constructs {
     }
 }
 
+/// Lexing knobs that tune how existing constructs are read or how source text is
+/// preserved, separate from which constructs are recognized ([`Constructs`]).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParseOptions {
+    /// Treat a single `~text~` as strikethrough (in addition to `~~text~~`).
+    /// Inert unless `gfm_strikethrough` is also enabled.
     pub single_tilde_strikethrough: bool,
+    /// Keep backslash character escapes (e.g. `\*`) as `Escape` nodes instead of
+    /// folding them into text, so the original source can be reproduced.
     pub preserve_character_escapes: bool,
+    /// Keep character references (e.g. `&amp;`) as `CharacterReference` nodes
+    /// instead of resolving them to their value.
     pub preserve_character_references: bool,
 }
 
+/// A full syntax configuration: which [`Constructs`] are recognized plus the
+/// [`ParseOptions`] lexing knobs. Build one with a preset
+/// ([`commonmark`](SyntaxOptions::commonmark)/[`gfm`](SyntaxOptions::gfm)/
+/// [`mdx`](SyntaxOptions::mdx)/[`default`](SyntaxOptions::default)), optionally
+/// tune it with [`enable`](SyntaxOptions::enable)/[`disable`](SyntaxOptions::disable),
+/// then call [`parse`](SyntaxOptions::parse).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxOptions {
+    /// Which syntactic constructs are recognized.
     pub constructs: Constructs,
+    /// Lexing / source-preservation knobs.
     pub parse: ParseOptions,
 }
 
 impl SyntaxOptions {
+    /// The strict CommonMark dialect.
     pub fn commonmark() -> Self {
         Self {
             constructs: Constructs::commonmark(),
@@ -177,6 +249,7 @@ impl SyntaxOptions {
         }
     }
 
+    /// GitHub Flavored Markdown (also enables single-tilde strikethrough).
     pub fn gfm() -> Self {
         Self {
             constructs: Constructs::gfm(),
@@ -188,6 +261,7 @@ impl SyntaxOptions {
         }
     }
 
+    /// The MDX dialect (JSX, expressions, ESM; no raw HTML).
     pub fn mdx() -> Self {
         Self {
             constructs: Constructs::mdx(),
@@ -209,6 +283,9 @@ impl SyntaxOptions {
         self
     }
 
+    /// Check for contradictory construct combinations (MDX JSX with raw HTML;
+    /// both wikilink title orders). Returns `Ok(())` for every preset; only a
+    /// hand-built config can trip a [`SyntaxConfigError`].
     pub fn validate(&self) -> Result<(), SyntaxConfigError> {
         if (self.constructs.mdx_jsx_block || self.constructs.mdx_jsx_inline)
             && (self.constructs.html_block || self.constructs.html_inline)
@@ -250,25 +327,39 @@ pub enum WikiLinkOrder {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Construct {
+    /// GFM pipe tables: `| a | b |` over `|---|---|`.
     Table,
+    /// GFM task list items: `- [ ]` / `- [x]`.
     TaskList,
+    /// Strikethrough: `~~text~~`.
     Strikethrough,
     /// GFM literal autolinks plus the cmark relaxed `scheme://` extension.
     Autolink,
+    /// GFM alerts: `> [!NOTE]` callouts.
     Alert,
     /// Footnote definitions, references, and inline footnotes.
     Footnotes,
     /// Inline and block math.
     Math,
+    /// A leading `---`/`+++` frontmatter block.
     Frontmatter,
+    /// Underline: `__text__` (overrides CommonMark strong).
     Underline,
+    /// Insertions: `++text++`.
     Insert,
+    /// Highlight / mark: `==text==`.
     Highlight,
+    /// Subscript: `~text~`.
     Subscript,
+    /// Superscript: `^text^`.
     Superscript,
+    /// Spoilers: `||text||`.
     Spoiler,
+    /// Emoji-style shortcodes: `:tada:`.
     Shortcode,
+    /// Description / definition lists.
     DescriptionList,
+    /// Wikilinks `[[…]]` with the given title order.
     Wikilinks(WikiLinkOrder),
     /// MDX JSX (block and inline). Conflicts with raw HTML; pair with
     /// `disable`-ing HTML or start from [`SyntaxOptions::mdx`].
@@ -333,13 +424,18 @@ impl Construct {
     }
 }
 
+/// A contradictory [`SyntaxOptions`] configuration, reported by
+/// [`SyntaxOptions::validate`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SyntaxConfigError {
+    /// MDX JSX and raw HTML were both enabled; they both claim `<`.
     MdxHtmlConflict,
+    /// Both wikilink title orders (before- and after-pipe) were enabled.
     WikilinkTitleOrderConflict,
 }
 
 impl SyntaxConfigError {
+    /// A human-readable description of the conflict.
     pub fn message(&self) -> String {
         match self {
             Self::MdxHtmlConflict => "MDX JSX and raw HTML syntax cannot both be enabled".into(),
