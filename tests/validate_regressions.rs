@@ -19,7 +19,7 @@ mod validation {
             })],
         };
 
-        let diagnostics = validate_document(&document);
+        let diagnostics = document.validate();
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
             diagnostics[0].message,
@@ -27,7 +27,7 @@ mod validation {
         );
 
         assert!(matches!(
-            to_markdown(&document),
+            document.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
     }
@@ -46,7 +46,7 @@ mod validation {
             })],
         };
 
-        let diagnostics = validate_document(&document);
+        let diagnostics = document.validate();
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
             diagnostics[0].message,
@@ -54,7 +54,7 @@ mod validation {
         );
 
         assert!(matches!(
-            to_markdown(&document),
+            document.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
     }
@@ -93,9 +93,9 @@ mod review_validate {
             value: "x".into(),
             kind: MathInlineKind::Dollar { dollars: 0 },
         })]);
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
         assert!(matches!(
-            to_markdown(&bad),
+            bad.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
 
@@ -104,7 +104,7 @@ mod review_validate {
             value: "x".into(),
             kind: MathInlineKind::Dollar { dollars: 1 },
         })]);
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod review_validate {
         for container in empty_containers {
             let document = paragraph(vec![container]);
             assert!(
-                !validate_document(&document).is_empty(),
+                !document.validate().is_empty(),
                 "empty container should be rejected"
             );
         }
@@ -162,7 +162,7 @@ mod review_validate {
             children: vec![],
         })]);
         assert!(matches!(
-            to_markdown(&bad),
+            bad.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
 
@@ -170,7 +170,7 @@ mod review_validate {
             meta: NodeMeta::default(),
             children: vec![text("a")],
         })]);
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     // SR7 — an escape of a non-ASCII-punctuation char serializes `\x` which the
@@ -181,14 +181,14 @@ mod review_validate {
             meta: NodeMeta::default(),
             value: 'a',
         })]);
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
 
         // Escaping an ASCII punctuation char is valid.
         let good = paragraph(vec![Inline::Escape(Escape {
             meta: NodeMeta::default(),
             value: '*',
         })]);
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     // SR8 — an autolink destination containing whitespace or angle brackets cannot
@@ -202,7 +202,7 @@ mod review_validate {
                 kind: AutolinkKind::Angle,
             })]);
             assert!(
-                !validate_document(&bad).is_empty(),
+                !bad.validate().is_empty(),
                 "autolink `{dest}` should be rejected"
             );
         }
@@ -212,7 +212,7 @@ mod review_validate {
             destination: "https://example.com/path?q=1".into(),
             kind: AutolinkKind::Angle,
         })]);
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     // SR9 — inline code stored as a raw passthrough whose backtick run is at least
@@ -225,7 +225,7 @@ mod review_validate {
             raw: "a`b".into(),
             fence_length: 1,
         })]);
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
 
         // A raw run shorter than the fence is safe.
         let shorter = paragraph(vec![Inline::Code(CodeInline {
@@ -234,7 +234,7 @@ mod review_validate {
             raw: "a`b".into(),
             fence_length: 2,
         })]);
-        assert!(validate_document(&shorter).is_empty());
+        assert!(shorter.validate().is_empty());
 
         // A raw run LONGER than the fence is also inert (a fence of length N closes
         // only on a run of exactly N) — this is the `` ` `` ` `` code-span shape.
@@ -244,7 +244,7 @@ mod review_validate {
             raw: " `` ".into(),
             fence_length: 1,
         })]);
-        assert!(validate_document(&longer).is_empty());
+        assert!(longer.validate().is_empty());
 
         // The value path (no raw passthrough) is always safe.
         let value_only = paragraph(vec![Inline::Code(CodeInline {
@@ -253,7 +253,7 @@ mod review_validate {
             raw: String::new(),
             fence_length: 0,
         })]);
-        assert!(validate_document(&value_only).is_empty());
+        assert!(value_only.validate().is_empty());
     }
 
     // SR4 — an ordered list start beyond the parser's 9-digit marker cap round-trips
@@ -278,9 +278,9 @@ mod review_validate {
                 }],
             })],
         };
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
         assert!(matches!(
-            to_markdown(&bad),
+            bad.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
 
@@ -303,7 +303,7 @@ mod review_validate {
                 }],
             })],
         };
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     // SR5 — a hard line break as the final inline of a container serializes to a
@@ -317,7 +317,7 @@ mod review_validate {
                 kind: LineBreakKind::Backslash,
             }),
         ]);
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
 
         // A mid-paragraph hard break (followed by content) is fine.
         let good = paragraph(vec![
@@ -328,7 +328,7 @@ mod review_validate {
             }),
             text("bar"),
         ]);
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 
     // L5 (AST side) — a definition with an empty/blank identifier, parity with the
@@ -347,7 +347,7 @@ mod review_validate {
                 title_kind: None,
             })],
         };
-        assert!(!validate_document(&bad).is_empty());
+        assert!(!bad.validate().is_empty());
 
         let good = Document {
             meta: NodeMeta::default(),
@@ -361,6 +361,6 @@ mod review_validate {
                 title_kind: None,
             })],
         };
-        assert!(validate_document(&good).is_empty());
+        assert!(good.validate().is_empty());
     }
 }

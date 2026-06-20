@@ -4,14 +4,14 @@ use crate::{
     ast::*,
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     entities::named_character_reference,
-    options::{ResolvedSyntaxOptions, SyntaxConfigError, SyntaxOptions, SyntaxProfile},
+    options::{SyntaxConfigError, SyntaxOptions},
     span::Span,
     validate::is_directive_name,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParseOutput<T = Document> {
-    pub document: T,
+pub struct ParseOutput {
+    pub document: Document,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -80,26 +80,49 @@ enum HtmlBlockKind {
     UntilBlank,
 }
 
-pub fn parse(input: &str) -> ParseOutput<Document> {
-    match parse_with_options(input, &SyntaxOptions::commonmark()) {
-        Ok(output) => output,
-        Err(error) => ParseOutput {
-            document: Document::default(),
-            diagnostics: vec![Diagnostic::new(
-                DiagnosticSeverity::Error,
-                DiagnosticCode::StrictParse,
-                Span::new(0, input.len()),
-                error.message(),
-            )],
-        },
+/// Parse `input` under the maximal default dialect ([`SyntaxOptions::default`]).
+/// Infallible and tolerant; sugar for `SyntaxOptions::default().parse(input)`.
+pub fn parse(input: &str) -> ParseOutput {
+    SyntaxOptions::default().parse(input)
+}
+
+impl SyntaxOptions {
+    /// Parse `input` under these options. Infallible and tolerant: a config
+    /// conflict (reachable only by hand-building contradictory `Constructs`) is
+    /// surfaced as an error diagnostic rather than a hard error. Call
+    /// [`SyntaxOptions::validate`] first for fail-fast config checking.
+    pub fn parse(&self, input: &str) -> ParseOutput {
+        match parse_checked(input, self) {
+            Ok(output) => output,
+            Err(error) => ParseOutput {
+                document: Document::default(),
+                diagnostics: vec![Diagnostic::new(
+                    DiagnosticSeverity::Error,
+                    DiagnosticCode::StrictParse,
+                    Span::new(0, input.len()),
+                    error.message(),
+                )],
+            },
+        }
+    }
+
+    /// Parse `input`, promoting a config conflict or any error-severity
+    /// diagnostic to a hard [`ParseStrictError`].
+    pub fn parse_strict(&self, input: &str) -> Result<ParseOutput, ParseStrictError> {
+        let output = parse_checked(input, self).map_err(ParseStrictError::Config)?;
+        if let Some(diagnostic) = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        {
+            return Err(ParseStrictError::Diagnostic(diagnostic.clone()));
+        }
+        Ok(output)
     }
 }
 
-pub fn parse_with_options(
-    input: &str,
-    options: &SyntaxOptions,
-) -> Result<ParseOutput<Document>, SyntaxConfigError> {
-    let resolved = options.resolve()?;
+fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, SyntaxConfigError> {
+    options.validate()?;
     // CommonMark treats a leading UTF-8 BOM (U+FEFF) as document-start noise, not
     // content. Strip a single leading BOM; an interior BOM is left untouched.
     let input = input.strip_prefix('\u{feff}').unwrap_or(input);
@@ -112,8 +135,8 @@ pub fn parse_with_options(
     };
     let input = input.as_ref();
     let mut diagnostics = Vec::new();
-    let definitions = collect_definitions(input, &resolved);
-    let children = parse_blocks(input, 0, true, &resolved, &definitions, &mut diagnostics);
+    let definitions = collect_definitions(input, options);
+    let children = parse_blocks(input, 0, true, options, &definitions, &mut diagnostics);
 
     Ok(ParseOutput {
         document: Document {
@@ -124,26 +147,11 @@ pub fn parse_with_options(
     })
 }
 
-pub fn parse_strict_with_options(
-    input: &str,
-    options: &SyntaxOptions,
-) -> Result<ParseOutput<Document>, ParseStrictError> {
-    let output = parse_with_options(input, options).map_err(ParseStrictError::Config)?;
-    if let Some(diagnostic) = output
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-    {
-        return Err(ParseStrictError::Diagnostic(diagnostic.clone()));
-    }
-    Ok(output)
-}
-
 fn parse_blocks(
     input: &str,
     base_offset: usize,
     allow_frontmatter: bool,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Block> {
@@ -154,7 +162,7 @@ fn parse_blocks(
 fn parse_blocks_from_lines(
     lines: &[Line<'_>],
     allow_frontmatter: bool,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Block> {
@@ -352,7 +360,7 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
     lines
 }
 
-fn collect_definitions(input: &str, options: &ResolvedSyntaxOptions) -> Vec<String> {
+fn collect_definitions(input: &str, options: &SyntaxOptions) -> Vec<String> {
     let mut diagnostics = Vec::new();
     let blocks = parse_blocks(input, 0, true, options, &[], &mut diagnostics);
     let mut definitions = Vec::new();
@@ -403,7 +411,7 @@ fn collect_definition_refs_from_blocks(blocks: &[Block], definitions: &mut Vec<S
 fn parse_frontmatter(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(Block, usize)> {
     if !options.constructs.frontmatter {
         return None;
@@ -442,7 +450,7 @@ fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
 fn parse_container_directive(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -583,7 +591,7 @@ fn directive_container_closing_fence(input: &str, min_len: usize) -> Option<usiz
 fn parse_math_block(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(Block, usize)> {
     if !options.constructs.math_block {
         return None;
@@ -670,7 +678,7 @@ fn math_block_fence_closes(input: &str, length: usize) -> bool {
 fn parse_fenced_code(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(Block, usize)> {
     let line = fence_line(lines[index].text, options)?;
     let (marker, length) = fence_start(line)?;
@@ -737,7 +745,7 @@ fn parse_fenced_code(
     ))
 }
 
-fn fence_line<'a>(line: &'a str, options: &ResolvedSyntaxOptions) -> Option<&'a str> {
+fn fence_line<'a>(line: &'a str, options: &SyntaxOptions) -> Option<&'a str> {
     if options.constructs.indented_code {
         trim_up_to_three_spaces(line)
     } else {
@@ -750,14 +758,14 @@ fn container_closed_after_unclosed_fence(
     cursor: usize,
     last_content_index: usize,
     content: &str,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> bool {
     !lines[last_content_index].eol.is_empty()
         && (cursor >= lines.len() || lines[cursor].text.trim().is_empty())
         && content_has_unclosed_fenced_code(content, options)
 }
 
-fn content_has_unclosed_fenced_code(content: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> bool {
     let lines = collect_lines(content, 0);
     let mut open_fence = None;
     for line in lines {
@@ -796,7 +804,7 @@ fn content_has_unclosed_fenced_code(content: &str, options: &ResolvedSyntaxOptio
 /// what lets a lazy line continue a paragraph buried inside several quotes).
 /// Indented code, blank lines, HTML blocks, and every other block start are
 /// reported as NOT-an-open-paragraph.
-fn block_quote_content_paragraph_open(content: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) -> bool {
     let Some(trimmed) = trim_up_to_three_spaces(content) else {
         // >= 4 columns of indentation: indented code, never a paragraph.
         return false;
@@ -820,7 +828,7 @@ fn block_quote_content_paragraph_open(content: &str, options: &ResolvedSyntaxOpt
 /// block start — including the type-7 "complete tag" form that cannot interrupt
 /// a paragraph with a marker present — blocks lazy continuation. A bare `<a>`
 /// after `> a` must close the quote, not be absorbed as paragraph text.
-fn lazy_line_starts_block(input: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn lazy_line_starts_block(input: &str, options: &SyntaxOptions) -> bool {
     likely_block_start(input, options)
         || (options.constructs.html_block && line_starts_html_block(input))
         // A lazy line that almost opens a fenced code block — any fence-char
@@ -833,7 +841,7 @@ fn lazy_line_starts_block(input: &str, options: &ResolvedSyntaxOptions) -> bool 
 fn parse_block_quote(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -977,7 +985,7 @@ fn parse_alert_from_block_quote(
     content: &str,
     base_offset: usize,
     span: Span,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
@@ -1032,7 +1040,7 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
     ))
 }
 
-fn block_quote_table_body_row(line: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn block_quote_table_body_row(line: &str, options: &SyntaxOptions) -> bool {
     table_indent_line(line, options.constructs.indented_code).is_some_and(|row| {
         !row.trim().is_empty() && contains_unescaped_pipe(row, options.constructs.spoiler)
     })
@@ -1041,7 +1049,7 @@ fn block_quote_table_body_row(line: &str, options: &ResolvedSyntaxOptions) -> bo
 fn parse_list(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -1315,7 +1323,7 @@ fn block_span(block: &Block) -> Option<Span> {
 fn list_item_paragraph_stays_open(
     previous_open: Option<bool>,
     line: &str,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> bool {
     if line.trim().is_empty() {
         return false;
@@ -1329,7 +1337,7 @@ fn list_item_paragraph_stays_open(
 fn parse_description_list(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -1437,7 +1445,7 @@ fn parse_description_details(
     lines: &[Line<'_>],
     index: usize,
     marker: DescriptionMarker<'_>,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(DescriptionDetails, usize, bool)> {
@@ -1521,7 +1529,7 @@ fn parse_description_details(
 fn description_term(
     lines: &[Line<'_>],
     term_index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<DescriptionTerm> {
     if term_index >= lines.len() || !is_description_term_line(lines[term_index].text, options) {
         return None;
@@ -1555,7 +1563,7 @@ fn description_term(
     )
 }
 
-fn is_description_term_line(line: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn is_description_term_line(line: &str, options: &SyntaxOptions) -> bool {
     leading_indent_columns(line) <= 3
         && !line.trim().is_empty()
         && description_marker(line).is_none()
@@ -1591,7 +1599,7 @@ fn description_marker(line: &str) -> Option<DescriptionMarker<'_>> {
 /// A paragraph inside an indent-continuation container (footnote/description
 /// detail) keeps absorbing the next line as long as it is non-blank and does
 /// not itself begin a new block.
-fn paragraph_stays_open(line: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn paragraph_stays_open(line: &str, options: &SyntaxOptions) -> bool {
     !line.trim().is_empty() && !likely_block_start(line, options)
 }
 
@@ -1604,7 +1612,7 @@ fn strip_indent_continuation(input: &str) -> Option<&str> {
 
 fn parse_atx_heading(
     line: Line<'_>,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
 ) -> Option<Block> {
     let text = trim_up_to_three_spaces(line.text)?;
@@ -1675,7 +1683,7 @@ fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
 fn parse_definition(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     allow_subsequent_indent: bool,
 ) -> Option<(Block, usize)> {
     let line = lines[index];
@@ -1811,7 +1819,7 @@ fn trim_definition_start(input: &str, allow_subsequent_indent: bool) -> Option<&
 fn parse_footnote_definition(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -1886,7 +1894,7 @@ fn is_footnote_continuation(input: &str) -> bool {
 
 fn parse_leaf_directive(
     line: Line<'_>,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
@@ -1929,7 +1937,7 @@ fn parse_leaf_directive(
 fn parse_html_block(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(Block, usize)> {
     if !options.constructs.html_block {
         return None;
@@ -2218,7 +2226,7 @@ fn is_declaration_start(input: &str) -> bool {
 fn parse_mdx_flow(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if options.constructs.mdx_esm {
@@ -2995,7 +3003,7 @@ fn collect_line_range(lines: &[Line<'_>], start: usize, end: usize) -> String {
 fn parse_indented_code(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(Block, usize)> {
     if !options.constructs.indented_code || strip_indented_code_prefix(lines[index].text).is_none()
     {
@@ -3068,7 +3076,7 @@ fn strip_indented_code_prefix(input: &str) -> Option<&str> {
 fn parse_table(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
@@ -3158,7 +3166,7 @@ fn parse_table(
 fn parse_setext_heading(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
 ) -> Option<(Block, usize)> {
     if index + 1 >= lines.len() || lines[index].text.trim().is_empty() {
@@ -3236,7 +3244,7 @@ fn setext_underline_depth(input: &str) -> Option<u8> {
 fn parse_paragraph(
     lines: &[Line<'_>],
     index: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Block, usize) {
@@ -3660,7 +3668,7 @@ fn trim_delimiter_text_head(node: &mut Inline, count: usize) {
 fn parse_inlines(
     input: &str,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
@@ -3688,7 +3696,7 @@ impl Default for InlineContext {
 fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
     context: InlineContext,
@@ -3974,7 +3982,6 @@ fn parse_inlines_with_context(
                     index,
                     options.constructs.gfm_autolink_literal,
                     options.constructs.relaxed_autolinks,
-                    options.profile,
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(Inline::Autolink(Autolink {
@@ -4281,7 +4288,6 @@ fn parse_inlines_with_context(
                 index,
                 options.constructs.gfm_autolink_literal,
                 options.constructs.relaxed_autolinks,
-                options.profile,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Autolink(Autolink {
@@ -4442,7 +4448,7 @@ fn parse_wikilink(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
 ) -> Option<(usize, Inline)> {
     let configured_order = if options.constructs.wikilink_title_after_pipe {
         WikiLinkLabelOrder::AfterPipe
@@ -4558,7 +4564,7 @@ fn parse_image(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(usize, Inline)> {
@@ -4649,7 +4655,7 @@ fn parse_link(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
     context: InlineContext,
@@ -4785,7 +4791,7 @@ fn find_reference_label_end(input: &str, open: usize) -> Option<usize> {
 fn label_contains_link(
     label_source: &str,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
 ) -> bool {
     let mut diagnostics = Vec::new();
@@ -4864,7 +4870,7 @@ fn parse_text_directive(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(usize, Inline)> {
@@ -5274,7 +5280,7 @@ fn single_tilde_can_close_delete(input: &str, index: usize) -> bool {
 }
 
 fn single_tilde_delete_takes_precedence(
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     input: &str,
     index: usize,
 ) -> bool {
@@ -6004,12 +6010,12 @@ fn flush_text(nodes: &mut Vec<Inline>, text: &mut String, text_start: usize, end
 fn gfm_link_label_preserves_url_dot_escape(
     text: &str,
     escaped: char,
-    options: &ResolvedSyntaxOptions,
+    options: &SyntaxOptions,
     context: InlineContext,
 ) -> bool {
     escaped == '.'
         && !context.allow_links
-        && options.profile == SyntaxProfile::Gfm
+        && options.constructs.gfm_autolink_literal
         && (text.starts_with("www.") || text.starts_with("http://") || text.starts_with("https://"))
 }
 
@@ -6701,7 +6707,7 @@ fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
     cells
 }
 
-fn table_can_start(lines: &[Line<'_>], index: usize, options: &ResolvedSyntaxOptions) -> bool {
+fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) -> bool {
     if !options.constructs.gfm_table || index + 1 >= lines.len() {
         return false;
     }
@@ -6819,7 +6825,7 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
     false
 }
 
-fn likely_block_start(input: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
     // Block-structure markers (ATX, fences, thematic breaks, list markers, math
     // fences, directives, …) only begin a block when indented at most 3 columns.
     // At >=4 columns the line is indented code, which never interrupts a
@@ -6868,7 +6874,7 @@ fn list_marker_can_interrupt_paragraph(input: &str) -> bool {
 // table also ends on a list marker with EMPTY content (`-`, `*`, `1.`), which
 // `likely_block_start` deliberately ignores for paragraphs. Used only by the
 // table body loop; `likely_block_start` itself is left untouched.
-fn table_body_line_ends_table(line: &str, options: &ResolvedSyntaxOptions) -> bool {
+fn table_body_line_ends_table(line: &str, options: &SyntaxOptions) -> bool {
     likely_block_start(line, options)
         || list_marker_info(line).is_some()
         || (options.constructs.html_block && line_starts_html_block(line))
@@ -7074,7 +7080,6 @@ fn parse_literal_autolink(
     index: usize,
     gfm: bool,
     relaxed: bool,
-    profile: SyntaxProfile,
 ) -> Option<(usize, String)> {
     let rest = &input[index..];
 
@@ -7107,7 +7112,7 @@ fn parse_literal_autolink(
                 if end <= index + scheme_len {
                     return None;
                 }
-                if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, profile) {
+                if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
                     return None;
                 }
                 return Some((end, input[index..end].into()));
@@ -7130,7 +7135,7 @@ fn parse_literal_autolink(
             {
                 return None;
             }
-            if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, profile) {
+            if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
                 return None;
             }
             let mut destination = String::from("http://");
@@ -7159,9 +7164,7 @@ fn parse_literal_autolink(
                 }
                 let end = autolink_url_end(input, body_start, body_start, true);
                 if end > index {
-                    if literal_autolink_suppressed_by_link_label(
-                        input, index, end, relaxed, profile,
-                    ) {
+                    if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
                         return None;
                     }
                     return Some((end, input[index..end].into()));
@@ -7244,7 +7247,7 @@ fn literal_autolink_suppressed_by_link_label(
     index: usize,
     end: usize,
     relaxed: bool,
-    profile: SyntaxProfile,
+    gfm_autolink_literal: bool,
 ) -> bool {
     if !has_unclosed_link_label_opener(input, index) {
         return false;
@@ -7252,9 +7255,7 @@ fn literal_autolink_suppressed_by_link_label(
     if input[end..].starts_with("](") && !link_resource_tail_has_close(input, end + 2) {
         return true;
     }
-    !relaxed
-        && profile != SyntaxProfile::Gfm
-        && input.as_bytes().get(end).is_some_and(|byte| *byte == b']')
+    !relaxed && !gfm_autolink_literal && input.as_bytes().get(end).is_some_and(|byte| *byte == b']')
 }
 
 fn has_unclosed_link_label_opener(input: &str, index: usize) -> bool {

@@ -569,3 +569,238 @@ pub struct DirectiveAttribute {
     pub name: String,
     pub value: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// Ergonomic accessors and a minimal construction layer.
+//
+// Every node carries a `meta: NodeMeta`, so `meta()`/`span()` are uniform across
+// the enums and free callers from writing an exhaustive match just to read a
+// span. `From`/`new` collapse the `Variant(Struct { meta, .. })` boilerplate for
+// hand-built ASTs; the raw struct literals remain available for full control.
+// ---------------------------------------------------------------------------
+
+macro_rules! impl_meta_accessors {
+    ($enum:ident { $($variant:ident),+ $(,)? }) => {
+        impl $enum {
+            /// Borrow this node's [`NodeMeta`].
+            pub fn meta(&self) -> &NodeMeta {
+                match self { $( $enum::$variant(node) => &node.meta, )+ }
+            }
+
+            /// This node's source span, if it carries one.
+            pub fn span(&self) -> Option<Span> {
+                self.meta().span
+            }
+        }
+    };
+}
+
+macro_rules! impl_from_variants {
+    ($enum:ident { $($variant:ident($ty:ty)),+ $(,)? }) => {
+        $(
+            impl From<$ty> for $enum {
+                fn from(node: $ty) -> Self {
+                    $enum::$variant(node)
+                }
+            }
+        )+
+    };
+}
+
+impl_meta_accessors!(Block {
+    Paragraph,
+    Heading,
+    ThematicBreak,
+    BlockQuote,
+    Alert,
+    List,
+    DescriptionList,
+    CodeBlock,
+    HtmlBlock,
+    Definition,
+    FootnoteDefinition,
+    Table,
+    MathBlock,
+    Frontmatter,
+    MdxEsm,
+    MdxExpression,
+    MdxJsx,
+    LeafDirective,
+    ContainerDirective,
+});
+
+impl_from_variants!(Block {
+    Paragraph(Paragraph), Heading(Heading), ThematicBreak(ThematicBreak),
+    BlockQuote(BlockQuote), Alert(Alert), List(List), DescriptionList(DescriptionList),
+    CodeBlock(CodeBlock), HtmlBlock(HtmlBlock), Definition(Definition),
+    FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
+    Frontmatter(Frontmatter), MdxEsm(MdxEsm), MdxExpression(MdxExpression),
+    MdxJsx(MdxJsx), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
+});
+
+impl_meta_accessors!(Inline {
+    Text,
+    Escape,
+    CharacterReference,
+    Emphasis,
+    Strong,
+    Underline,
+    Delete,
+    Insert,
+    Mark,
+    Subscript,
+    Superscript,
+    Spoiler,
+    Shortcode,
+    Code,
+    Link,
+    Image,
+    LinkReference,
+    ImageReference,
+    Autolink,
+    Html,
+    SoftBreak,
+    LineBreak,
+    Math,
+    FootnoteReference,
+    InlineFootnote,
+    WikiLink,
+    MdxExpression,
+    MdxJsx,
+    TextDirective,
+});
+
+impl_from_variants!(Inline {
+    Text(Text), Escape(Escape), CharacterReference(CharacterReference),
+    Emphasis(Emphasis), Strong(Strong), Underline(Underline), Delete(Delete),
+    Insert(Insert), Mark(Mark), Subscript(Subscript), Superscript(Superscript),
+    Spoiler(Spoiler), Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
+    LinkReference(LinkReference), ImageReference(ImageReference), Autolink(Autolink),
+    Html(HtmlInline), SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
+    FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
+    MdxExpression(MdxExpressionInline), MdxJsx(MdxJsxInline), TextDirective(TextDirective),
+});
+
+impl Inline {
+    /// The inline subtree of this node, or an empty slice for a leaf. Covers the
+    /// `alt`/`label` fields uniformly, so a generic walker never silently skips
+    /// an image's alt text or a directive's label.
+    pub fn children(&self) -> &[Inline] {
+        match self {
+            Inline::Emphasis(n) => &n.children,
+            Inline::Strong(n) => &n.children,
+            Inline::Underline(n) => &n.children,
+            Inline::Delete(n) => &n.children,
+            Inline::Insert(n) => &n.children,
+            Inline::Mark(n) => &n.children,
+            Inline::Subscript(n) => &n.children,
+            Inline::Superscript(n) => &n.children,
+            Inline::Spoiler(n) => &n.children,
+            Inline::Link(n) => &n.children,
+            Inline::Image(n) => &n.alt,
+            Inline::LinkReference(n) => &n.children,
+            Inline::ImageReference(n) => &n.alt,
+            Inline::InlineFootnote(n) => &n.children,
+            Inline::TextDirective(n) => &n.label,
+            _ => &[],
+        }
+    }
+}
+
+impl Text {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            value: value.into(),
+        }
+    }
+}
+
+impl From<&str> for Text {
+    fn from(value: &str) -> Self {
+        Text::new(value)
+    }
+}
+
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Text::new(value)
+    }
+}
+
+impl Paragraph {
+    pub fn new<I, T>(children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Inline>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            children: children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl Heading {
+    /// An ATX heading of the given depth.
+    pub fn new<I, T>(depth: u8, children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Inline>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            depth,
+            kind: HeadingKind::Atx,
+            children: children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl Link {
+    /// A bare-destination link with no title.
+    pub fn new<I, T>(destination: impl Into<String>, children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Inline>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            destination: destination.into(),
+            destination_kind: LinkDestinationKind::Bare,
+            title: None,
+            title_kind: None,
+            children: children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl CodeInline {
+    /// An inline code span with a single-backtick fence.
+    pub fn new(value: impl Into<String>) -> Self {
+        let value = value.into();
+        Self {
+            meta: NodeMeta::default(),
+            raw: value.clone(),
+            value,
+            fence_length: 1,
+        }
+    }
+}
+
+impl List {
+    /// A tight, dash-delimited bullet list.
+    pub fn new<I>(children: I) -> Self
+    where
+        I: IntoIterator<Item = ListItem>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            ordered: false,
+            start: None,
+            delimiter: ListDelimiter::Dash,
+            tight: true,
+            children: children.into_iter().collect(),
+        }
+    }
+}

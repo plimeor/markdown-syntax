@@ -19,24 +19,44 @@ The AST is an owned enum tree using `alloc` types. Source locations are optional
 half-open byte spans into the original input. Human-readable line and column
 positions are derived with `LineIndex`.
 
-The parser is tolerant by default:
+The parser is tolerant by default. `parse` recognizes the maximal non-MDX
+dialect (GFM plus footnotes, math, frontmatter, wikilinks, directives, and the
+extra inline marks), and the verbs live on the values you hold: configure
+`SyntaxOptions`, then ask the resulting `Document`.
 
 ```rust
 use markdown_syntax::parse;
 
 let output = parse("# Title\n\nHello *world*.");
-let markdown = markdown_syntax::to_markdown(&output.document)?;
+let markdown = output.document.to_markdown()?;
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 
-`parse_strict_with_options` promotes configured extension diagnostics to a hard
-error. Parser diagnostics, AST validation diagnostics, and serializer errors are
-separate domains.
+To pin a specific dialect, build a preset and call `.parse`; to tune one, chain
+the `Construct` builder:
 
-When built with `--features html`, the crate also exposes `to_html`,
-`to_html_with_options`, `HtmlOptions`, `HtmlError`, `SafeRawHtmlForm`, and
-`TasklistAttrOrder`. The default HTML options validate the AST first, escape raw
-HTML, and filter dangerous link/image protocols.
+```rust
+use markdown_syntax::{SyntaxOptions, Construct};
+
+let gfm = SyntaxOptions::gfm().parse("~~done~~ https://example.com");
+let no_math = SyntaxOptions::default().disable(Construct::Math).parse("price $5");
+# let _ = (gfm, no_math);
+```
+
+`SyntaxOptions::{commonmark, gfm, mdx}` are the named presets; `parse(input)` is
+sugar for `SyntaxOptions::default().parse(input)`. `SyntaxOptions::parse` is
+infallible — a contradictory hand-built config surfaces as a diagnostic — while
+`SyntaxOptions::parse_strict` promotes any error-severity diagnostic to a hard
+error, and `SyntaxOptions::validate` checks a config up front. Parser
+diagnostics, AST validation, and serializer errors are separate domains that
+share one `Diagnostic` type.
+
+`Document` owns the output verbs: `to_markdown` / `to_markdown_with`,
+`validate`, and — under `--features html` — `to_html` / `to_html_with`. The
+default HTML options validate the AST first, escape raw HTML, and filter
+dangerous link/image protocols; the `html` feature also exposes `HtmlOptions`,
+`HtmlError`, `SafeRawHtmlForm`, and `TasklistAttrOrder`. `use
+markdown_syntax::prelude::*` imports the common surface in one line.
 
 ## Syntax Scope
 

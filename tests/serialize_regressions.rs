@@ -27,23 +27,32 @@ mod serializer {
         let mut constructs = Constructs::commonmark();
         constructs.math_block = true;
         constructs.math_inline = true;
-        SyntaxOptions::custom(constructs, ParseOptions::default())
+        SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        }
     }
 
     fn directive_options() -> SyntaxOptions {
         let mut constructs = Constructs::commonmark();
         constructs.directive_container = true;
-        SyntaxOptions::custom(constructs, ParseOptions::default())
+        SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        }
     }
 
     fn underline_options() -> SyntaxOptions {
         let mut constructs = Constructs::commonmark();
         constructs.underline = true;
-        SyntaxOptions::custom(constructs, ParseOptions::default())
+        SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        }
     }
 
     fn parse_document(markdown: &str, options: &SyntaxOptions) -> Document {
-        let output = parse_with_options(markdown, options).expect("markdown parses");
+        let output = options.parse(markdown);
         assert_eq!(output.diagnostics, Vec::new());
         output.document
     }
@@ -79,7 +88,7 @@ mod serializer {
         let input = "- a\n\n+ b\n\n* c\n";
         let document = parse_document(input, &SyntaxOptions::commonmark());
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, input);
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
@@ -91,7 +100,8 @@ mod serializer {
 
         let mut options = SerializeOptions::default();
         options.bullet = ListDelimiter::Plus;
-        let overridden = to_markdown_with_options(&document, &options)
+        let overridden = document
+            .to_markdown_with(&options)
             .expect("document serializes with options");
         assert_eq!(overridden, "+ a\n\n+ b\n\n+ c\n");
     }
@@ -113,7 +123,7 @@ mod serializer {
             ],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("$$$$\n$$\n$$$\na $$ b\n$$$$"));
         assert!(markdown.contains("$`a $$ b`$"));
 
@@ -142,7 +152,7 @@ mod serializer {
         };
 
         assert!(matches!(
-            to_markdown(&document),
+            document.to_markdown(),
             Err(SerializeError::UnsupportedNode(message))
                 if message.contains("inline math")
         ));
@@ -169,7 +179,7 @@ mod serializer {
             })],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.starts_with(":::::note\n"));
 
         let reparsed = parse_document(&markdown, &directive_options());
@@ -236,7 +246,7 @@ mod serializer {
             })],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains(r#"b\|c "t\|u""#));
         assert!(markdown.contains(r#"y\|z "i\|j""#));
 
@@ -278,7 +288,7 @@ mod serializer {
             })])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "**_em_**\n");
 
         let reparsed = parse_document(&markdown, &underline_options());
@@ -303,7 +313,7 @@ mod serializer {
         let document = parse_document(input, &SyntaxOptions::gfm());
         assert_single_tilde_delete_with_internal_runs_shape(&document);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(
             markdown,
             "This ~text\\~\\~\\~\\~ is \\~\\~\\~\\~curious~.\n"
@@ -325,7 +335,7 @@ mod serializer {
             })] if matches!(&children[..], [Inline::Text(Text { value, .. })] if value == "a ~~two/one~ b")
         ));
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "a \\~\\~two/one~ b\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
@@ -349,7 +359,7 @@ mod serializer {
             })])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.starts_with("~~"));
         assert!(markdown.trim_end().ends_with("~~"));
     }
@@ -365,7 +375,7 @@ mod serializer {
             })])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "~text\\~\\~\\~\\~ is \\~\\~\\~\\~curious~\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
@@ -437,7 +447,9 @@ mod serializer {
         options.ordered_delimiter = ListDelimiter::Paren;
         options.fence_marker = FenceMarker::Tilde;
 
-        let markdown = to_markdown_with_options(&document, &options).expect("document serializes");
+        let markdown = document
+            .to_markdown_with(&options)
+            .expect("document serializes");
         assert_eq!(
             markdown,
             concat!(
@@ -487,7 +499,7 @@ mod serializer {
             ],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(
             markdown,
             "[foo]: <my url> 'single title'\n\n[angle](<foo bar> (paren title)) ![empty]( \"empty title\")\n"
@@ -580,11 +592,13 @@ mod serializer {
         assert_eq!(definition.title.as_deref(), Some(""));
         assert_eq!(definition.title_kind, Some(LinkTitleKind::DoubleQuote));
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, input);
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
-        let second = to_markdown(&reparsed).expect("reparsed document serializes");
+        let second = reparsed
+            .to_markdown()
+            .expect("reparsed document serializes");
         assert_eq!(second, markdown);
     }
 
@@ -595,16 +609,16 @@ mod serializer {
             children: vec![paragraph(vec![text("This@that.")])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "This@that.\n");
 
-        let options = SyntaxOptions::custom(
-            Constructs::commonmark(),
-            ParseOptions {
+        let options = SyntaxOptions {
+            constructs: Constructs::commonmark(),
+            parse: ParseOptions {
                 preserve_character_escapes: true,
                 ..ParseOptions::default()
             },
-        );
+        };
         let reparsed = parse_document(&markdown, &options);
         assert!(matches!(
             &reparsed.children[..],
@@ -641,7 +655,7 @@ mod serializer {
             ],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("[a\\]b\\\\c\\[d]: /bracket"));
         assert!(markdown.contains("[line&#xA;break]: /newline"));
 
@@ -695,7 +709,7 @@ mod serializer {
             ],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("[^a\\]b\\\\c\\[d]"));
         assert!(markdown.contains("[^white&#x20;space]"));
 
@@ -758,19 +772,19 @@ mod serializer_escape {
     }
 
     fn parse_document(markdown: &str, options: &SyntaxOptions) -> Document {
-        let output = parse_with_options(markdown, options).expect("markdown parses");
+        let output = options.parse(markdown);
         assert_eq!(output.diagnostics, Vec::new());
         output.document
     }
 
     fn preserve_escape_options(constructs: Constructs) -> SyntaxOptions {
-        SyntaxOptions::custom(
-            constructs,
-            ParseOptions {
+        SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions {
                 preserve_character_escapes: true,
                 ..ParseOptions::default()
             },
-        )
+        }
     }
 
     fn table_extension_options() -> SyntaxOptions {
@@ -778,7 +792,10 @@ mod serializer_escape {
         constructs.directive_text = true;
         constructs.math_inline = true;
         constructs.spoiler = true;
-        SyntaxOptions::custom(constructs, ParseOptions::default())
+        SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        }
     }
 
     fn assert_single_text(document: &Document, expected: &str) {
@@ -799,7 +816,7 @@ mod serializer_escape {
             children: vec![paragraph(vec![text(value)])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, format!("{value}\n"));
 
         let reparsed = parse_document(
@@ -817,7 +834,7 @@ mod serializer_escape {
             children: vec![paragraph(vec![text(value)])],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "Invalid \\&unknown; &copy and &#x; stay text.\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
@@ -958,7 +975,7 @@ mod serializer_escape {
             ],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("a&#x7C;b"));
         assert!(markdown.contains(r"`c\|d`"));
         assert!(markdown.contains(r"$`x\|y`$"));
@@ -1046,7 +1063,7 @@ mod serializer_escape {
             })],
         };
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "| Result |\n| --- |\n| ||visible|| |\n");
 
         let reparsed = parse_document(&markdown, &table_extension_options());
@@ -1106,7 +1123,7 @@ mod review_serialize {
     }
 
     fn parse(markdown: &str, options: &SyntaxOptions) -> Document {
-        let output = parse_with_options(markdown, options).expect("markdown parses");
+        let output = options.parse(markdown);
         assert_eq!(output.diagnostics, Vec::new());
         output.document
     }
@@ -1116,7 +1133,9 @@ mod review_serialize {
     /// is checked through the serializer (which is span-agnostic and idempotent):
     /// the reparsed document must serialize back to exactly the same markdown.
     fn assert_round_trip_fixpoint(original_markdown: &str, reparsed: &Document) {
-        let reserialized = to_markdown(reparsed).expect("reparsed document serializes");
+        let reserialized = reparsed
+            .to_markdown()
+            .expect("reparsed document serializes");
         assert_eq!(reserialized, original_markdown);
     }
 
@@ -1126,7 +1145,10 @@ mod review_serialize {
             preserve_character_references: true,
             ..ParseOptions::default()
         };
-        SyntaxOptions::custom(constructs, parse)
+        SyntaxOptions {
+            constructs: constructs,
+            parse: parse,
+        }
     }
 
     // --- SR1: entity-encoded shortcut/collapsed references stay implicit --------
@@ -1141,7 +1163,7 @@ mod review_serialize {
         // expanding it to `[f&#246;o][f&#246;o]`.
         let document = parse("[f&#246;o]\n\n[f&#246;o]: /url\n", &options);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "[f&#246;o]\n\n[f&#246;o]: /url\n");
 
         let reparsed = parse(&markdown, &options);
@@ -1154,7 +1176,7 @@ mod review_serialize {
     fn l3_full_reference_preserves_label_case() {
         let document = parse("[text][Ref]\n\n[ref]: /url\n", &SyntaxOptions::commonmark());
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "[text][Ref]\n\n[ref]: /url\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1168,7 +1190,7 @@ mod review_serialize {
             &SyntaxOptions::commonmark(),
         );
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         // The parsed (source) label is emitted verbatim — no re-escaping of the
         // `\]` or re-encoding of `&amp;`.
         assert!(markdown.contains("[text][Foo\\]]"));
@@ -1190,7 +1212,7 @@ mod review_serialize {
             }),
         ]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "intro\n\n---\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1214,14 +1236,17 @@ mod review_serialize {
             marker: ThematicBreakMarker::Dash,
         })]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         // A contiguous `---` at the document start would open frontmatter, so the
         // spaced form is used; it still re-parses as a dash thematic break.
         assert_eq!(markdown, "- - -\n");
 
         let mut constructs = Constructs::commonmark();
         constructs.frontmatter = true;
-        let frontmatter = SyntaxOptions::custom(constructs, ParseOptions::default());
+        let frontmatter = SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        };
         let reparsed = parse(&markdown, &frontmatter);
         assert!(matches!(
             reparsed.children.as_slice(),
@@ -1246,7 +1271,7 @@ mod review_serialize {
             value: "code".into(),
         })]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "~~~\ncode\n~~~\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1272,7 +1297,7 @@ mod review_serialize {
             emphasis(vec![text("b")]),
         ])]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         // The second run switches to `_` so the two runs do not fuse into `*a**b*`.
         assert_eq!(markdown, "*a*_b_\n");
 
@@ -1289,7 +1314,7 @@ mod review_serialize {
     fn s4_emphasis_then_text_starting_with_delimiter_does_not_merge() {
         let document = document(vec![paragraph(vec![emphasis(vec![text("a")]), text("*b")])]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "*a*\\*b\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1315,7 +1340,7 @@ mod review_serialize {
             children: vec![text("foo #")],
         })]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "# foo \\#\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1338,7 +1363,7 @@ mod review_serialize {
             children: vec![text("foo")],
         })]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "### foo\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1361,7 +1386,7 @@ mod review_serialize {
             children: vec![text("foo"), soft_break(), text("bar")],
         })]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "foo\nbar\n=======\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
@@ -1394,7 +1419,7 @@ mod review_serialize {
         });
         let document = document(vec![list]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         // `* ***` would escape the list as a top-level thematic break, so the item
         // body is rewritten to a dash break that stays inside the list.
         assert_eq!(markdown, "* ---\n");
@@ -1439,7 +1464,7 @@ mod review_serialize {
         });
         let document = document(vec![outer]);
 
-        let markdown = to_markdown(&document).expect("document serializes");
+        let markdown = document.to_markdown().expect("document serializes");
         // A genuine nested bullet (`* *`) has interior whitespace and must NOT be
         // rewritten into a thematic break.
         assert!(!markdown.contains("---"));

@@ -3,9 +3,8 @@ mod support;
 use std::path::Path;
 
 use markdown_syntax::{
-    parse_strict_with_options, parse_with_options, to_markdown, validate_document, Block,
-    Constructs, DiagnosticCode, DiagnosticSeverity, Document, Inline, LineIndex, ParseOptions,
-    ParseStrictError, SerializeError, Span, SyntaxConfigError, SyntaxOptions,
+    Block, Constructs, DiagnosticCode, DiagnosticSeverity, Document, Inline, LineIndex,
+    ParseOptions, ParseStrictError, SerializeError, Span, SyntaxConfigError, SyntaxOptions,
 };
 
 use support::fixtures::{
@@ -133,14 +132,14 @@ fn extension_fixture_snapshots_and_roundtrips() {
     constructs.shortcode = true;
     constructs.description_list = true;
     constructs.inline_footnote = true;
-    let options = SyntaxOptions::custom(
-        constructs,
-        ParseOptions {
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions {
             single_tilde_strikethrough: true,
             preserve_character_escapes: false,
             preserve_character_references: false,
         },
-    );
+    };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/table_math_directive",
         options.clone(),
@@ -149,24 +148,24 @@ fn extension_fixture_snapshots_and_roundtrips() {
         "tests/fixtures/roundtrip/extensions/math_edges",
         options.clone(),
     );
-    let escape_options = SyntaxOptions::custom(
-        Constructs::commonmark(),
-        ParseOptions {
+    let escape_options = SyntaxOptions {
+        constructs: Constructs::commonmark(),
+        parse: ParseOptions {
             preserve_character_escapes: true,
             ..ParseOptions::default()
         },
-    );
+    };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_escapes_preserved",
         escape_options,
     );
-    let reference_options = SyntaxOptions::custom(
-        Constructs::commonmark(),
-        ParseOptions {
+    let reference_options = SyntaxOptions {
+        constructs: Constructs::commonmark(),
+        parse: ParseOptions {
             preserve_character_references: true,
             ..ParseOptions::default()
         },
-    );
+    };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_references_preserved",
         reference_options,
@@ -289,7 +288,10 @@ fn mdx_fixture_snapshot_and_roundtrip() {
 fn wikilink_fixture_snapshots_and_roundtrips() {
     let mut after_constructs = Constructs::gfm();
     after_constructs.wikilink_title_after_pipe = true;
-    let after_options = SyntaxOptions::custom(after_constructs, ParseOptions::default());
+    let after_options = SyntaxOptions {
+        constructs: after_constructs,
+        parse: ParseOptions::default(),
+    };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/wikilinks_after_pipe",
         after_options,
@@ -297,7 +299,10 @@ fn wikilink_fixture_snapshots_and_roundtrips() {
 
     let mut before_constructs = Constructs::gfm();
     before_constructs.wikilink_title_before_pipe = true;
-    let before_options = SyntaxOptions::custom(before_constructs, ParseOptions::default());
+    let before_options = SyntaxOptions {
+        constructs: before_constructs,
+        parse: ParseOptions::default(),
+    };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/wikilinks_before_pipe",
         before_options,
@@ -373,7 +378,7 @@ fn html_syntax_nodes_are_preserved() {
         "\n",
         "Text <span data-x=\"1\">ok</span> and <!-- inline -->.\n"
     );
-    let output = parse_with_options(input, &SyntaxOptions::commonmark()).unwrap();
+    let output = SyntaxOptions::commonmark().parse(input);
     assert_eq!(output.diagnostics, Vec::new());
     assert!(matches!(
         output.document.children.first(),
@@ -382,8 +387,8 @@ fn html_syntax_nodes_are_preserved() {
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<span data-x=\\\"1\\\">\""));
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<!-- inline -->\""));
 
-    let markdown = to_markdown(&output.document).unwrap();
-    let reparsed = parse_with_options(&markdown, &SyntaxOptions::commonmark()).unwrap();
+    let markdown = output.document.to_markdown().unwrap();
+    let reparsed = SyntaxOptions::commonmark().parse(&markdown);
     assert_eq!(
         snapshot_document(&reparsed.document),
         snapshot_document(&output.document)
@@ -395,11 +400,7 @@ fn gfm_footnote_label_length_limit_is_enforced() {
     let valid = "x".repeat(999);
     let invalid = "x".repeat(1000);
 
-    let valid_output = parse_with_options(
-        &format!("[^{valid}].\n\n[^{valid}]: ok\n"),
-        &SyntaxOptions::gfm(),
-    )
-    .unwrap();
+    let valid_output = SyntaxOptions::gfm().parse(&format!("[^{valid}].\n\n[^{valid}]: ok\n"));
     assert!(matches!(
         valid_output.document.children.first(),
         Some(Block::Paragraph(_))
@@ -410,11 +411,8 @@ fn gfm_footnote_label_length_limit_is_enforced() {
         .iter()
         .any(|block| matches!(block, Block::FootnoteDefinition(_))));
 
-    let invalid_output = parse_with_options(
-        &format!("[^{invalid}].\n\n[^{invalid}]: nope\n"),
-        &SyntaxOptions::gfm(),
-    )
-    .unwrap();
+    let invalid_output =
+        SyntaxOptions::gfm().parse(&format!("[^{invalid}].\n\n[^{invalid}]: nope\n"));
     assert!(!invalid_output
         .document
         .children
@@ -427,16 +425,17 @@ fn gfm_footnote_label_length_limit_is_enforced() {
 fn wikilink_label_length_limit_is_enforced() {
     let mut constructs = Constructs::commonmark();
     constructs.wikilink_title_after_pipe = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
     let valid = "x".repeat(999);
     let invalid = "x".repeat(1000);
 
-    let valid_output =
-        parse_with_options(&format!("[[{valid}]]\n"), &options).expect("valid wikilink parse");
+    let valid_output = options.parse(&format!("[[{valid}]]\n"));
     assert!(snapshot_document(&valid_output.document).contains("WikiLink"));
 
-    let invalid_output =
-        parse_with_options(&format!("[[{invalid}]]\n"), &options).expect("valid fallback parse");
+    let invalid_output = options.parse(&format!("[[{invalid}]]\n"));
     assert!(!snapshot_document(&invalid_output.document).contains("WikiLink"));
 }
 
@@ -444,15 +443,17 @@ fn wikilink_label_length_limit_is_enforced() {
 fn gfm_alerts_allow_empty_and_nested_blockquote_positions() {
     let mut constructs = Constructs::commonmark();
     constructs.gfm_alert = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
 
-    let empty = parse_with_options("> [!note]\n", &options).expect("valid alert parse");
+    let empty = options.parse("> [!note]\n");
     let empty_snapshot = snapshot_document(&empty.document);
     assert!(empty_snapshot.contains("Alert kind=note title=none"));
     assert!(!empty_snapshot.contains("Paragraph"));
 
-    let nested = parse_with_options("- item one\n\n  > [!note]\n  > Pay attention\n", &options)
-        .expect("valid nested alert parse");
+    let nested = options.parse("- item one\n\n  > [!note]\n  > Pay attention\n");
     let nested_snapshot = snapshot_document(&nested.document);
     assert!(nested_snapshot.contains("Alert kind=note title=none"));
     assert!(nested_snapshot.contains("Text \"Pay attention\""));
@@ -462,8 +463,11 @@ fn gfm_alerts_allow_empty_and_nested_blockquote_positions() {
 fn subscript_does_not_imply_strikethrough() {
     let mut constructs = Constructs::commonmark();
     constructs.subscript = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
-    let output = parse_with_options("~~H~2~O~~\n", &options).expect("valid subscript parse");
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
+    let output = options.parse("~~H~2~O~~\n");
     let snapshot = snapshot_document(&output.document);
 
     assert!(snapshot.contains("Subscript"));
@@ -475,15 +479,15 @@ fn strikethrough_can_contain_subscript() {
     let mut constructs = Constructs::commonmark();
     constructs.gfm_strikethrough = true;
     constructs.subscript = true;
-    let options = SyntaxOptions::custom(
-        constructs,
-        ParseOptions {
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions {
             single_tilde_strikethrough: false,
             preserve_character_escapes: false,
             preserve_character_references: false,
         },
-    );
-    let output = parse_with_options("~~H~2~O~~\n", &options).expect("valid strikethrough parse");
+    };
+    let output = options.parse("~~H~2~O~~\n");
     let snapshot = snapshot_document(&output.document);
 
     assert!(snapshot.contains("Delete"));
@@ -494,30 +498,33 @@ fn strikethrough_can_contain_subscript() {
 fn description_list_markers_need_a_term_and_content() {
     let mut constructs = Constructs::commonmark();
     constructs.description_list = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
 
-    let marker_only = parse_with_options(": foo\n", &options).expect("valid fallback parse");
+    let marker_only = options.parse(": foo\n");
     assert!(!snapshot_document(&marker_only.document).contains("DescriptionList"));
 
-    let empty_details = parse_with_options("a\n:\n", &options).expect("valid fallback parse");
+    let empty_details = options.parse("a\n:\n");
     assert!(!snapshot_document(&empty_details.document).contains("DescriptionList"));
 }
 
 #[test]
 fn frontmatter_is_extension_only_and_document_start_only() {
-    let commonmark = parse_with_options("---\ntitle: Jupyter\n---\n", &SyntaxOptions::commonmark())
-        .expect("valid CommonMark parse");
+    let commonmark = SyntaxOptions::commonmark().parse("---\ntitle: Jupyter\n---\n");
     assert!(!snapshot_document(&commonmark.document).contains("Frontmatter"));
 
     let mut constructs = Constructs::commonmark();
     constructs.frontmatter = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
-    let after_content = parse_with_options("## Neptune\n---\n---\n", &options)
-        .expect("valid frontmatter-extension parse");
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
+    let after_content = options.parse("## Neptune\n---\n---\n");
     assert!(!snapshot_document(&after_content.document).contains("Frontmatter"));
 
-    let in_container =
-        parse_with_options("> ---\n> ---\n", &options).expect("valid frontmatter-extension parse");
+    let in_container = options.parse("> ---\n> ---\n");
     assert!(!snapshot_document(&in_container.document).contains("Frontmatter"));
 }
 
@@ -526,7 +533,7 @@ fn invalid_options_fail_closed() {
     let mut options = SyntaxOptions::mdx();
     options.constructs.html_inline = true;
     assert_eq!(
-        parse_with_options("<X />", &options).unwrap_err(),
+        options.validate().unwrap_err(),
         SyntaxConfigError::MdxHtmlConflict
     );
 
@@ -534,7 +541,7 @@ fn invalid_options_fail_closed() {
     options.constructs.wikilink_title_after_pipe = true;
     options.constructs.wikilink_title_before_pipe = true;
     assert_eq!(
-        parse_with_options("[[target]]", &options).unwrap_err(),
+        options.validate().unwrap_err(),
         SyntaxConfigError::WikilinkTitleOrderConflict
     );
 }
@@ -543,8 +550,11 @@ fn invalid_options_fail_closed() {
 fn strict_parse_promotes_extension_diagnostics() {
     let mut constructs = Constructs::commonmark();
     constructs.directive_leaf = true;
-    let options = SyntaxOptions::custom(constructs, ParseOptions::default());
-    let err = parse_strict_with_options("::1bad\n", &options).unwrap_err();
+    let options = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
+    let err = options.parse_strict("::1bad\n").unwrap_err();
     match err {
         ParseStrictError::Diagnostic(diagnostic) => {
             assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
@@ -569,10 +579,10 @@ fn validation_and_serializer_reject_invalid_ast() {
             })],
         }));
 
-    let diagnostics = validate_document(&document);
+    let diagnostics = document.validate();
     assert_eq!(diagnostics.len(), 1);
     assert!(matches!(
-        to_markdown(&document).unwrap_err(),
+        document.to_markdown().unwrap_err(),
         SerializeError::InvalidDocument(_)
     ));
 }

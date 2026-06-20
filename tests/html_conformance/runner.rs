@@ -8,10 +8,7 @@
 //! The fixtures store only runnable cases, so there is no skip path here: every
 //! case maps to a `(SyntaxOptions, HtmlOptions)` and is run.
 
-use markdown_syntax::{
-    parse_with_options, to_html_with_options, HtmlOptions, SafeRawHtmlForm, SyntaxOptions,
-    TasklistAttrOrder,
-};
+use markdown_syntax::{HtmlOptions, SafeRawHtmlForm, SyntaxOptions, TasklistAttrOrder};
 
 use crate::extractor;
 use crate::normalizer::compare;
@@ -172,25 +169,23 @@ pub fn run_all() -> Report {
 
     for t in &tuples {
         let (opts, cfg) = plan(t);
-        let outcome = match parse_with_options(&t.input, &opts) {
-            Ok(output) => match to_html_with_options(&output.document, &cfg) {
-                Ok(html) => {
-                    let cmp = compare(&html, &t.expected_html);
-                    if cmp.raw_match {
-                        Outcome::PassRaw
-                    } else if cmp.normalized_match {
-                        Outcome::PassNormalized
-                    } else {
-                        Outcome::Fail {
-                            input: t.input.clone(),
-                            expected: t.expected_html.clone(),
-                            actual: html,
-                        }
+        let output = opts.parse(&t.input);
+        let outcome = match output.document.to_html_with(&cfg) {
+            Ok(html) => {
+                let cmp = compare(&html, &t.expected_html);
+                if cmp.raw_match {
+                    Outcome::PassRaw
+                } else if cmp.normalized_match {
+                    Outcome::PassNormalized
+                } else {
+                    Outcome::Fail {
+                        input: t.input.clone(),
+                        expected: t.expected_html.clone(),
+                        actual: html,
                     }
                 }
-                Err(e) => Outcome::ParseError(format!("html render error: {e:?}")),
-            },
-            Err(e) => Outcome::ParseError(format!("{e:?}")),
+            }
+            Err(e) => Outcome::ParseError(format!("html render error: {e:?}")),
         };
         results.push(CaseResult {
             source_file: t.source_file,

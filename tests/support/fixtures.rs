@@ -5,8 +5,8 @@ use std::{
 };
 
 use markdown_syntax::{
-    parse_with_options, to_markdown, to_markdown_with_options, AutolinkKind, Block, Constructs,
-    DiagnosticSeverity, Document, Inline, ParseOptions, SerializeOptions, SyntaxOptions,
+    AutolinkKind, Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions,
+    SerializeOptions, SyntaxOptions,
 };
 
 pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
@@ -18,30 +18,45 @@ pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
             let mut constructs = Constructs::commonmark();
             constructs.math_block = true;
             constructs.math_inline = true;
-            SyntaxOptions::custom(constructs, ParseOptions::default())
+            SyntaxOptions {
+                constructs: constructs,
+                parse: ParseOptions::default(),
+            }
         }
         "frontmatter" => {
             let mut constructs = Constructs::commonmark();
             constructs.frontmatter = true;
-            SyntaxOptions::custom(constructs, ParseOptions::default())
+            SyntaxOptions {
+                constructs: constructs,
+                parse: ParseOptions::default(),
+            }
         }
-        "preserve-escapes" => SyntaxOptions::custom(
-            Constructs::commonmark(),
-            ParseOptions {
+        "preserve-escapes" => SyntaxOptions {
+            constructs: Constructs::commonmark(),
+            parse: ParseOptions {
                 preserve_character_escapes: true,
                 ..ParseOptions::default()
             },
-        ),
-        "extras" => SyntaxOptions::custom(extra_constructs(), extra_parse_options()),
+        },
+        "extras" => SyntaxOptions {
+            constructs: extra_constructs(),
+            parse: extra_parse_options(),
+        },
         "wikilink-after" => {
             let mut constructs = extra_constructs();
             constructs.wikilink_title_after_pipe = true;
-            SyntaxOptions::custom(constructs, extra_parse_options())
+            SyntaxOptions {
+                constructs: constructs,
+                parse: extra_parse_options(),
+            }
         }
         "wikilink-before" => {
             let mut constructs = extra_constructs();
             constructs.wikilink_title_before_pipe = true;
-            SyntaxOptions::custom(constructs, extra_parse_options())
+            SyntaxOptions {
+                constructs: constructs,
+                parse: extra_parse_options(),
+            }
         }
         other => panic!("unknown derived corpus profile: {other}"),
     }
@@ -82,30 +97,35 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
     let expected_markdown =
         normalize_expected_markdown(&read_fixture(&format!("{stem}.canonical.md")));
 
-    let output = parse_with_options(&input, &options).expect("valid syntax options");
+    let output = options.parse(&input);
     assert_eq!(output.diagnostics, Vec::new());
     assert_eq!(
         snapshot_document(&output.document),
         trim_final_newline(&expected_ast)
     );
 
-    let markdown = to_markdown_with_options(&output.document, &SerializeOptions::default())
+    let markdown = output
+        .document
+        .to_markdown_with(&SerializeOptions::default())
         .expect("document serializes");
     assert_eq!(markdown, expected_markdown);
 
-    let reparsed = parse_with_options(&markdown, &options).expect("serialized markdown parses");
+    let reparsed = options.parse(&markdown);
     assert_eq!(
         snapshot_document(&reparsed.document),
         snapshot_document(&output.document)
     );
 
-    let second = to_markdown(&reparsed.document).expect("reparsed document serializes");
+    let second = reparsed
+        .document
+        .to_markdown()
+        .expect("reparsed document serializes");
     assert_eq!(second, markdown);
 }
 
 pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions) {
     let input = read_fixture(path);
-    let output = parse_with_options(&input, options).expect("valid syntax options");
+    let output = options.parse(&input);
     assert!(
         output
             .diagnostics
@@ -115,15 +135,18 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
         output.diagnostics
     );
 
-    let markdown = to_markdown(&output.document).expect("document serializes");
-    let reparsed = parse_with_options(&markdown, options).expect("serialized markdown parses");
+    let markdown = output.document.to_markdown().expect("document serializes");
+    let reparsed = options.parse(&markdown);
     assert_eq!(
         snapshot_document(&reparsed.document),
         snapshot_document(&output.document),
         "{path}: AST changed after serialize/reparse"
     );
 
-    let second = to_markdown(&reparsed.document).expect("reparsed document serializes");
+    let second = reparsed
+        .document
+        .to_markdown()
+        .expect("reparsed document serializes");
     assert_eq!(second, markdown, "{path}: serializer is not idempotent");
 }
 
@@ -387,19 +410,12 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, String, usize) {
 }
 
 fn assert_source_stable(source: &str, path: &Path, index: usize, options: &SyntaxOptions) {
-    let output = parse_with_options(source, options)
-        .unwrap_or_else(|error| panic!("{}#{index}: {}", path.display(), error.message()));
+    let output = options.parse(source);
 
-    let markdown = to_markdown(&output.document).unwrap_or_else(|error| {
+    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
         panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
     });
-    let reparsed = parse_with_options(&markdown, options).unwrap_or_else(|error| {
-        panic!(
-            "{}#{index}: reparse failed: {}",
-            path.display(),
-            error.message()
-        )
-    });
+    let reparsed = options.parse(&markdown);
     assert_eq!(
         snapshot_document(&reparsed.document),
         snapshot_document(&output.document),

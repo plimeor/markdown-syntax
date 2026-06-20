@@ -13,10 +13,7 @@ mod tables;
 
 use alloc::{string::String, vec::Vec};
 
-use crate::{
-    ast::Document,
-    validate::{validate_document, ValidationDiagnostic},
-};
+use crate::{ast::Document, diagnostic::Diagnostic, validate::validate_document};
 
 use self::footnotes::FootnoteContext;
 use self::refs::DefMap;
@@ -77,12 +74,12 @@ impl Default for HtmlOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HtmlError {
     /// The AST failed validation before rendering.
-    InvalidDocument(Vec<ValidationDiagnostic>),
+    InvalidDocument(Vec<Diagnostic>),
 }
 
 /// Render-time context threaded through the block/inline renderers. Holds the
 /// resolved definition map, the footnote document state, and the config flags.
-pub struct Ctx<'a> {
+pub(crate) struct Ctx<'a> {
     pub defs: &'a DefMap,
     pub footnotes: &'a FootnoteContext,
     pub allow_dangerous_html: bool,
@@ -106,20 +103,21 @@ impl<'a> Ctx<'a> {
     }
 }
 
-pub fn to_html(document: &Document) -> Result<String, HtmlError> {
-    to_html_with_options(document, &HtmlOptions::default())
-}
-
-pub fn to_html_with_options(
-    document: &Document,
-    options: &HtmlOptions,
-) -> Result<String, HtmlError> {
-    let diagnostics = validate_document(document);
-    if !diagnostics.is_empty() {
-        return Err(HtmlError::InvalidDocument(diagnostics));
+impl Document {
+    /// Render this document to safe-by-default HTML with default options.
+    pub fn to_html(&self) -> Result<String, HtmlError> {
+        self.to_html_with(&HtmlOptions::default())
     }
 
-    Ok(render_document(document, options))
+    /// Render this document to HTML with explicit options.
+    pub fn to_html_with(&self, options: &HtmlOptions) -> Result<String, HtmlError> {
+        let diagnostics = validate_document(self);
+        if !diagnostics.is_empty() {
+            return Err(HtmlError::InvalidDocument(diagnostics));
+        }
+
+        Ok(render_document(self, options))
+    }
 }
 
 /// Render a whole validated document to HTML.

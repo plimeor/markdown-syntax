@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 use crate::{
     ast::{
@@ -6,25 +6,19 @@ use crate::{
         Document, Escape, Heading, Inline, LeafDirective, List, MathInlineKind, Table,
         TextDirective,
     },
+    diagnostic::Diagnostic,
     span::Span,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ValidationDiagnostic {
-    pub span: Option<Span>,
-    pub message: String,
-}
-
-impl ValidationDiagnostic {
-    pub fn new(span: Option<Span>, message: impl Into<String>) -> Self {
-        Self {
-            span,
-            message: message.into(),
-        }
+impl Document {
+    /// Validate this document's AST shape, returning a diagnostic for each
+    /// invalid or unsupported node (empty when the document is well-formed).
+    pub fn validate(&self) -> Vec<Diagnostic> {
+        validate_document(self)
     }
 }
 
-pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
+pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for block in &document.children {
         validate_block(block, &mut diagnostics);
@@ -32,7 +26,7 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
     diagnostics
 }
 
-fn validate_block(block: &Block, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
     match block {
         Block::Paragraph(paragraph) => validate_inlines(&paragraph.children, diagnostics),
         Block::Heading(heading) => validate_heading(heading, diagnostics),
@@ -58,7 +52,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<ValidationDiagnostic>) {
             for item in &list.children {
                 validate_inlines(&item.term, diagnostics);
                 if item.details.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         item.meta.span,
                         "description item must contain at least one details block",
                     ));
@@ -73,7 +67,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<ValidationDiagnostic>) {
         Block::Table(table) => validate_table(table, diagnostics),
         Block::FootnoteDefinition(definition) => {
             if definition.identifier.is_empty() {
-                diagnostics.push(ValidationDiagnostic::new(
+                diagnostics.push(Diagnostic::invalid(
                     definition.meta.span,
                     "footnote definition identifier cannot be empty",
                 ));
@@ -84,7 +78,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<ValidationDiagnostic>) {
         }
         Block::Definition(definition) => {
             if definition.identifier.trim().is_empty() {
-                diagnostics.push(ValidationDiagnostic::new(
+                diagnostics.push(Diagnostic::invalid(
                     definition.meta.span,
                     "definition identifier cannot be empty",
                 ));
@@ -105,9 +99,9 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<ValidationDiagnostic>) {
     }
 }
 
-fn validate_heading(heading: &Heading, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_heading(heading: &Heading, diagnostics: &mut Vec<Diagnostic>) {
     if heading.depth == 0 || heading.depth > 6 {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             heading.meta.span,
             "heading depth must be in the range 1..=6",
         ));
@@ -115,9 +109,9 @@ fn validate_heading(heading: &Heading, diagnostics: &mut Vec<ValidationDiagnosti
     validate_inlines(&heading.children, diagnostics);
 }
 
-fn validate_table(table: &Table, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_table(table: &Table, diagnostics: &mut Vec<Diagnostic>) {
     if table.rows.is_empty() {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             table.meta.span,
             "table must contain at least a header row",
         ));
@@ -126,14 +120,14 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<ValidationDiagnostic>) {
 
     let width = table.rows[0].cells.len();
     if width == 0 {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             table.meta.span,
             "table header row must contain at least one cell",
         ));
     }
 
     if table.alignments.len() != width {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             table.meta.span,
             "table alignment count must match header width",
         ));
@@ -141,7 +135,7 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<ValidationDiagnostic>) {
 
     for row in &table.rows {
         if row.cells.len() != width {
-            diagnostics.push(ValidationDiagnostic::new(
+            diagnostics.push(Diagnostic::invalid(
                 row.meta.span,
                 "table row width must match header width",
             ));
@@ -152,16 +146,13 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<ValidationDiagnostic>) {
     }
 }
 
-fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Vec<Diagnostic>) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inlines(&directive.label, diagnostics);
 }
 
-fn validate_container_directive(
-    directive: &ContainerDirective,
-    diagnostics: &mut Vec<ValidationDiagnostic>,
-) {
+fn validate_container_directive(directive: &ContainerDirective, diagnostics: &mut Vec<Diagnostic>) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inlines(&directive.label, diagnostics);
@@ -170,9 +161,9 @@ fn validate_container_directive(
     }
 }
 
-fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
     if let Some(Inline::LineBreak(node)) = inlines.last() {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             node.meta.span,
             "hard line break cannot be the final inline of its container",
         ));
@@ -208,7 +199,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             }
             Inline::Shortcode(node) => {
                 if node.name.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "shortcode name cannot be empty",
                     ));
@@ -218,7 +209,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             Inline::Image(node) => validate_inlines(&node.alt, diagnostics),
             Inline::LinkReference(node) => {
                 if node.identifier.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "link reference identifier cannot be empty",
                     ));
@@ -227,7 +218,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             }
             Inline::ImageReference(node) => {
                 if node.identifier.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "image reference identifier cannot be empty",
                     ));
@@ -237,13 +228,13 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             Inline::Escape(node) => validate_escape(node, diagnostics),
             Inline::CharacterReference(node) => {
                 if node.reference.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "character reference source cannot be empty",
                     ));
                 }
                 if node.value.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "character reference value cannot be empty",
                     ));
@@ -252,7 +243,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             Inline::TextDirective(node) => validate_text_directive(node, diagnostics),
             Inline::FootnoteReference(node) => {
                 if node.identifier.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "footnote reference identifier cannot be empty",
                     ));
@@ -261,7 +252,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             Inline::InlineFootnote(node) => validate_inlines(&node.children, diagnostics),
             Inline::WikiLink(node) => {
                 if node.target.is_empty() {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "wikilink target cannot be empty",
                     ));
@@ -271,7 +262,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
             Inline::Autolink(node) => validate_autolink(node, diagnostics),
             Inline::Math(node) => {
                 if let MathInlineKind::Dollar { dollars: 0 } = node.kind {
-                    diagnostics.push(ValidationDiagnostic::new(
+                    diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "dollar-fenced inline math must have a fence length of at least 1",
                     ));
@@ -290,10 +281,10 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<ValidationDiagnost
 fn validate_emphasis_container(
     children: &[Inline],
     span: Option<Span>,
-    diagnostics: &mut Vec<ValidationDiagnostic>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) {
     if children.is_empty() {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             span,
             "emphasis-like inline container cannot have empty children",
         ));
@@ -301,16 +292,16 @@ fn validate_emphasis_container(
     validate_inlines(children, diagnostics);
 }
 
-fn validate_escape(escape: &Escape, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
     if !escape.value.is_ascii_punctuation() {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             escape.meta.span,
             "escaped value must be an ASCII punctuation character",
         ));
     }
 }
 
-fn validate_autolink(autolink: &Autolink, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_autolink(autolink: &Autolink, diagnostics: &mut Vec<Diagnostic>) {
     // GFM literal autolinks carry a synthesized destination that MAY contain
     // `>` (the renderer percent-encodes it). Only angle-bracket autolinks
     // forbid whitespace, `<`, and `>` in the destination.
@@ -322,14 +313,14 @@ fn validate_autolink(autolink: &Autolink, diagnostics: &mut Vec<ValidationDiagno
         .chars()
         .any(|char| char.is_whitespace() || char == '<' || char == '>')
     {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             autolink.meta.span,
             "autolink destination cannot contain whitespace, `<`, or `>`",
         ));
     }
 }
 
-fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<Diagnostic>) {
     if code.fence_length == 0 {
         return;
     }
@@ -337,7 +328,7 @@ fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<ValidationDiagn
     // length N. A run shorter or longer than the fence is inert, so only an
     // exactly-matching interior run would close the raw passthrough early.
     if raw_has_backtick_run(&code.raw, code.fence_length) {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             code.meta.span,
             "inline code raw passthrough contains a backtick run equal to its fence length",
         ));
@@ -359,7 +350,7 @@ fn raw_has_backtick_run(input: &str, length: usize) -> bool {
     current == length
 }
 
-fn validate_list_start(list: &List, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {
     if !list.ordered {
         return;
     }
@@ -367,26 +358,22 @@ fn validate_list_start(list: &List, diagnostics: &mut Vec<ValidationDiagnostic>)
         return;
     };
     if start > 999_999_999 {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             list.meta.span,
             "ordered list start must be representable in at most 9 digits",
         ));
     }
 }
 
-fn validate_text_directive(directive: &TextDirective, diagnostics: &mut Vec<ValidationDiagnostic>) {
+fn validate_text_directive(directive: &TextDirective, diagnostics: &mut Vec<Diagnostic>) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inlines(&directive.label, diagnostics);
 }
 
-fn validate_directive_name(
-    span: Option<Span>,
-    name: &str,
-    diagnostics: &mut Vec<ValidationDiagnostic>,
-) {
+fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Vec<Diagnostic>) {
     if !is_directive_name(name) {
-        diagnostics.push(ValidationDiagnostic::new(
+        diagnostics.push(Diagnostic::invalid(
             span,
             "directive name must start with a letter and contain letters, digits, `_`, or `-`",
         ));
@@ -395,11 +382,11 @@ fn validate_directive_name(
 
 fn validate_directive_attributes(
     attributes: &[DirectiveAttribute],
-    diagnostics: &mut Vec<ValidationDiagnostic>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) {
     for attribute in attributes {
         if !is_attribute_name(&attribute.name) {
-            diagnostics.push(ValidationDiagnostic::new(
+            diagnostics.push(Diagnostic::invalid(
                 None,
                 "directive attribute name must start with a letter, `_`, or `-`",
             ));

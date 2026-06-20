@@ -1,15 +1,17 @@
 #![cfg(feature = "html")]
 
 use markdown_syntax::{
-    parse_with_options, to_html, to_html_with_options, Block, Constructs, Document, Heading,
-    HeadingKind, HtmlError, HtmlOptions, NodeMeta, ParseOptions, SafeRawHtmlForm, SyntaxOptions,
-    TasklistAttrOrder,
+    Block, Constructs, Document, Heading, HeadingKind, HtmlError, HtmlOptions, NodeMeta,
+    ParseOptions, SafeRawHtmlForm, SyntaxOptions, TasklistAttrOrder,
 };
 
 fn parse_render(markdown: &str, syntax: &SyntaxOptions, html: &HtmlOptions) -> String {
-    let output = parse_with_options(markdown, syntax).expect("markdown parses");
+    let output = syntax.parse(markdown);
     assert_eq!(output.diagnostics, Vec::new());
-    to_html_with_options(&output.document, html).expect("document renders")
+    output
+        .document
+        .to_html_with(html)
+        .expect("document renders")
 }
 
 fn extension_options() -> SyntaxOptions {
@@ -27,13 +29,13 @@ fn extension_options() -> SyntaxOptions {
     constructs.math_inline = true;
     constructs.inline_footnote = true;
     constructs.wikilink_title_after_pipe = true;
-    SyntaxOptions::custom(
-        constructs,
-        ParseOptions {
+    SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions {
             single_tilde_strikethrough: false,
             ..ParseOptions::default()
         },
-    )
+    }
 }
 
 fn gfm_html_options() -> HtmlOptions {
@@ -183,7 +185,10 @@ fn directives_render_through_public_options() {
     constructs.directive_text = true;
     constructs.directive_leaf = true;
     constructs.directive_container = true;
-    let syntax = SyntaxOptions::custom(constructs, ParseOptions::default());
+    let syntax = SyntaxOptions {
+        constructs: constructs,
+        parse: ParseOptions::default(),
+    };
     let markdown = concat!(
         "::leaf[Label]{key=\"v\"}\n",
         "\n",
@@ -268,7 +273,7 @@ fn html_options_and_validate_first_are_public_contract() {
         })],
     };
     assert!(matches!(
-        to_html(&invalid),
+        invalid.to_html(),
         Err(HtmlError::InvalidDocument(diagnostics))
             if diagnostics.iter().any(|d| d.message.contains("heading depth"))
     ));

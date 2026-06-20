@@ -12,15 +12,14 @@ mod review_block {
     //! AST shape against the live parser.
 
     use markdown_syntax::{
-        parse_with_options, Block, CodeBlockKind, HeadingKind, Inline, ListDelimiter, SyntaxOptions,
+        Block, CodeBlockKind, HeadingKind, Inline, ListDelimiter, SyntaxOptions,
     };
 
     /// B1: a multi-line paragraph followed by a setext underline is a setext
     /// heading whose content spans every paragraph line, not one flat paragraph.
     #[test]
     fn setext_heading_absorbs_multiline_paragraph() {
-        let output = parse_with_options("Foo\nbar\n===\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("Foo\nbar\n===\n");
 
         let [Block::Heading(heading)] = output.document.children.as_slice() else {
             panic!(
@@ -43,8 +42,7 @@ mod review_block {
     /// not break the original one-line case).
     #[test]
     fn setext_heading_single_line_still_parses() {
-        let output =
-            parse_with_options("Foo\n---\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("Foo\n---\n");
         let [Block::Heading(heading)] = output.document.children.as_slice() else {
             panic!(
                 "expected a single setext heading: {:?}",
@@ -60,8 +58,7 @@ mod review_block {
     /// the setext heading from forming.
     #[test]
     fn setext_heading_rejected_when_continuation_is_block_start() {
-        let output = parse_with_options("Foo\n# heading\n===\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("Foo\n# heading\n===\n");
         assert!(
             !output.document.children.iter().any(
                 |block| matches!(block, Block::Heading(heading) if heading.kind == HeadingKind::Setext)
@@ -75,11 +72,7 @@ mod review_block {
     /// items, not three separate lists or a single item.
     #[test]
     fn bullets_with_too_few_spaces_are_siblings_not_sublists() {
-        let output = parse_with_options(
-            "- foo\n - bar\n  - baz\n   - boo\n",
-            &SyntaxOptions::commonmark(),
-        )
-        .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("- foo\n - bar\n  - baz\n   - boo\n");
 
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected one bullet list: {:?}", output.document.children);
@@ -107,8 +100,7 @@ mod review_block {
     /// sublists (the indent threshold must keep real nesting working).
     #[test]
     fn bullets_with_enough_spaces_still_nest() {
-        let output = parse_with_options("- foo\n  - bar\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("- foo\n  - bar\n");
 
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected one bullet list: {:?}", output.document.children);
@@ -132,8 +124,7 @@ mod review_block {
     /// B2 guard: a delimiter change still splits one list into two.
     #[test]
     fn delimiter_change_still_splits_lists() {
-        let output =
-            parse_with_options("- a\n+ b\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("- a\n+ b\n");
         let lists = output
             .document
             .children
@@ -151,8 +142,7 @@ mod review_block {
     /// paragraph, not a paragraph plus an empty list.
     #[test]
     fn empty_list_item_does_not_interrupt_paragraph() {
-        let output =
-            parse_with_options("foo\n*\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("foo\n*\n");
         let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
             panic!(
                 "expected a single paragraph: {:?}",
@@ -170,7 +160,7 @@ mod review_block {
     /// list.
     #[test]
     fn empty_list_at_block_start_still_parses() {
-        let output = parse_with_options("*\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("*\n");
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected an empty list: {:?}", output.document.children);
         };
@@ -181,8 +171,7 @@ mod review_block {
     /// B3 guard: a non-empty list item still interrupts a paragraph.
     #[test]
     fn non_empty_list_item_still_interrupts_paragraph() {
-        let output =
-            parse_with_options("foo\n- bar\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("foo\n- bar\n");
         assert!(matches!(
             output.document.children.as_slice(),
             [Block::Paragraph(_), Block::List(_)]
@@ -193,8 +182,7 @@ mod review_block {
     /// each content line.
     #[test]
     fn fenced_code_strips_opening_indent_from_content() {
-        let output = parse_with_options(" ```\n aaa\naaa\n```\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse(" ```\n aaa\naaa\n```\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one fenced code block: {:?}",
@@ -208,11 +196,7 @@ mod review_block {
     /// B4 guard: only up to N spaces are removed; deeper indentation is preserved.
     #[test]
     fn fenced_code_keeps_indent_beyond_opening() {
-        let output = parse_with_options(
-            "   ```\n   aaa\n    aaa\n  aaa\n   ```\n",
-            &SyntaxOptions::commonmark(),
-        )
-        .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("   ```\n   aaa\n    aaa\n  aaa\n   ```\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one fenced code block: {:?}",
@@ -228,8 +212,7 @@ mod review_block {
     /// interior blanks and the final content line ending stay.
     #[test]
     fn indented_code_trims_trailing_blank_lines() {
-        let output = parse_with_options("    foo\n    \n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("    foo\n    \n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one indented code block: {:?}",
@@ -243,8 +226,7 @@ mod review_block {
     /// B5 guard: interior blank lines are preserved.
     #[test]
     fn indented_code_keeps_interior_blank_lines() {
-        let output = parse_with_options("    foo\n\n    bar\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("    foo\n\n    bar\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one indented code block: {:?}",
@@ -257,18 +239,13 @@ mod review_block {
 
 mod parser {
     use markdown_syntax::{
-        parse_strict_with_options, parse_with_options, Block, Constructs, DiagnosticCode, Inline,
-        LinkDestinationKind, LinkTitleKind, ParseOptions, ParseStrictError, ReferenceKind, Span,
-        SyntaxOptions,
+        Block, Constructs, DiagnosticCode, Inline, LinkDestinationKind, LinkTitleKind,
+        ParseOptions, ParseStrictError, ReferenceKind, Span, SyntaxOptions,
     };
 
     #[test]
     fn reference_definitions_are_collected_from_real_blocks_only() {
-        let output = parse_with_options(
-            "```\n[foo]: /url\n```\n\n[foo]\n",
-            &SyntaxOptions::commonmark(),
-        )
-        .expect("valid CommonMark parse");
+        let output = SyntaxOptions::commonmark().parse("```\n[foo]: /url\n```\n\n[foo]\n");
 
         assert!(matches!(
             output.document.children.first(),
@@ -284,8 +261,7 @@ mod parser {
 
     #[test]
     fn reference_definitions_support_multiline_destination() {
-        let output = parse_with_options("[foo]:\n /url\n\n[foo]\n", &SyntaxOptions::commonmark())
-            .expect("valid CommonMark parse");
+        let output = SyntaxOptions::commonmark().parse("[foo]:\n /url\n\n[foo]\n");
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected link reference definition");
@@ -304,17 +280,14 @@ mod parser {
 
     #[test]
     fn ordered_list_markers_follow_commonmark_interrupt_rules() {
-        let interrupted =
-            parse_with_options("a\n2. b\n", &SyntaxOptions::commonmark()).expect("valid parse");
+        let interrupted = SyntaxOptions::commonmark().parse("a\n2. b\n");
         assert_eq!(interrupted.document.children.len(), 1);
         assert!(matches!(
             interrupted.document.children.as_slice(),
             [Block::Paragraph(_)]
         ));
 
-        let too_many_digits =
-            parse_with_options("1234567890. not ok\n", &SyntaxOptions::commonmark())
-                .expect("valid parse");
+        let too_many_digits = SyntaxOptions::commonmark().parse("1234567890. not ok\n");
         assert!(matches!(
             too_many_digits.document.children.as_slice(),
             [Block::Paragraph(_)]
@@ -323,8 +296,7 @@ mod parser {
 
     #[test]
     fn html_block_starts_interrupt_paragraphs_when_commonmark_allows() {
-        let output = parse_with_options("foo\n<div>\nbar\n", &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse("foo\n<div>\nbar\n");
 
         assert!(matches!(
             output.document.children.as_slice(),
@@ -335,7 +307,7 @@ mod parser {
     #[test]
     fn raw_html_block_close_requires_matching_raw_tag_name() {
         let source = "<script>\nnot closed by </scripture>\nstill raw\n</script>\n";
-        let output = parse_with_options(source, &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse(source);
 
         let [Block::HtmlBlock(block)] = output.document.children.as_slice() else {
             panic!("expected one raw HTML block");
@@ -350,8 +322,7 @@ mod parser {
     fn reference_labels_allow_999_characters() {
         let label = "x".repeat(999);
         let source = format!("[{label}]: /url\n\n[full][{label}]\n[{label}][]\n[{label}]\n");
-        let output =
-            parse_with_options(&source, &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse(&source);
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected max-length definition");
@@ -382,9 +353,7 @@ mod parser {
     fn reference_labels_reject_1000_character_labels() {
         let overlong = format!("x{}", " ".repeat(999));
         let definition_source = format!("[{overlong}]: /url\n\n[x]\n");
-        let definition_output =
-            parse_with_options(&definition_source, &SyntaxOptions::commonmark())
-                .expect("valid parse");
+        let definition_output = SyntaxOptions::commonmark().parse(&definition_source);
 
         assert!(definition_output
             .document
@@ -403,8 +372,7 @@ mod parser {
 
         let reference_source =
             format!("[x]: /url\n\n[full][{overlong}]\n[{overlong}][]\n[{overlong}]\n");
-        let reference_output = parse_with_options(&reference_source, &SyntaxOptions::commonmark())
-            .expect("valid parse");
+        let reference_output = SyntaxOptions::commonmark().parse(&reference_source);
 
         assert!(matches!(
             reference_output.document.children.first(),
@@ -421,7 +389,7 @@ mod parser {
 
     #[test]
     fn strict_mdx_reports_unclosed_jsx_blocks() {
-        let err = parse_strict_with_options("<A>\n", &SyntaxOptions::mdx()).unwrap_err();
+        let err = SyntaxOptions::mdx().parse_strict("<A>\n").unwrap_err();
 
         let ParseStrictError::Diagnostic(diagnostic) = err else {
             panic!("expected strict parse diagnostic");
@@ -433,9 +401,11 @@ mod parser {
     fn directive_openers_scan_escaped_labels_and_quoted_attributes() {
         let mut constructs = Constructs::commonmark();
         constructs.directive_text = true;
-        let options = SyntaxOptions::custom(constructs, ParseOptions::default());
-        let output = parse_with_options(":note[has \\] bracket]{title=\"x } y\"}\n", &options)
-            .expect("valid directive parse");
+        let options = SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        };
+        let output = options.parse(":note[has \\] bracket]{title=\"x } y\"}\n");
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -455,14 +425,14 @@ mod parser {
     fn named_character_references_cover_common_html5_entities() {
         let source =
             "&semi; &trade; &NotEqualTilde; &CounterClockwiseContourIntegral; &acE; &nGg; &fjlig; &AMP;\n";
-        let options = SyntaxOptions::custom(
-            Constructs::commonmark(),
-            ParseOptions {
+        let options = SyntaxOptions {
+            constructs: Constructs::commonmark(),
+            parse: ParseOptions {
                 preserve_character_references: true,
                 ..ParseOptions::default()
             },
-        );
-        let output = parse_with_options(source, &options).expect("valid parse");
+        };
+        let output = options.parse(source);
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -491,8 +461,7 @@ mod parser {
             ]
         );
 
-        let resolved =
-            parse_with_options(source, &SyntaxOptions::commonmark()).expect("valid resolved parse");
+        let resolved = SyntaxOptions::commonmark().parse(source);
         let Some(Block::Paragraph(paragraph)) = resolved.document.children.first() else {
             panic!("expected resolved paragraph");
         };
@@ -506,9 +475,7 @@ mod parser {
     fn asterisk_runs_open_emphasis_only_as_whole_left_flanking_runs() {
         // CommonMark example 397: a `**` run followed by whitespace is not
         // left-flanking, so no single `*` may be peeled off to open emphasis.
-        let space = parse_with_options("** foo bar**\n", &SyntaxOptions::commonmark())
-            .expect("valid parse")
-            .document;
+        let space = SyntaxOptions::commonmark().parse("** foo bar**\n").document;
         assert!(
             matches!(
                 space.children.as_slice(),
@@ -520,9 +487,7 @@ mod parser {
 
         // CommonMark example 399: an interior `**` run is not left-flanking next to
         // punctuation, and the second asterisk of a run can never open on its own.
-        let punctuation = parse_with_options("a**\"foo\"**\n", &SyntaxOptions::commonmark())
-            .expect("valid parse")
-            .document;
+        let punctuation = SyntaxOptions::commonmark().parse("a**\"foo\"**\n").document;
         assert!(
             matches!(
                 punctuation.children.as_slice(),
@@ -534,9 +499,7 @@ mod parser {
 
         // Guard against over-restriction: a genuinely left-flanking `**` run still
         // opens strong emphasis.
-        let strong = parse_with_options("**foo bar**\n", &SyntaxOptions::commonmark())
-            .expect("valid parse")
-            .document;
+        let strong = SyntaxOptions::commonmark().parse("**foo bar**\n").document;
         assert!(
             matches!(
                 strong.children.as_slice(),
@@ -560,14 +523,14 @@ mod parser {
         // characters.
         let source =
             "&#x41; &#9; &#10; &#0; &#1; &#127; &#128; &#xFDD0; &#xFFFE; &#xD800; &#x110000;\n";
-        let options = SyntaxOptions::custom(
-            Constructs::commonmark(),
-            ParseOptions {
+        let options = SyntaxOptions {
+            constructs: Constructs::commonmark(),
+            parse: ParseOptions {
                 preserve_character_references: true,
                 ..ParseOptions::default()
             },
-        );
-        let output = parse_with_options(source, &options).expect("valid parse");
+        };
+        let output = options.parse(source);
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -602,11 +565,7 @@ mod parser {
 
     #[test]
     fn link_resources_preserve_destination_and_title_kinds_in_ast() {
-        let output = parse_with_options(
-            "[foo]: <my url> 'title'\n\n[angle](<foo bar> 'single') [paren](url (paren title)) [empty]( \"title\")\n",
-            &SyntaxOptions::commonmark(),
-        )
-        .expect("valid CommonMark parse");
+        let output = SyntaxOptions::commonmark().parse("[foo]: <my url> 'title'\n\n[angle](<foo bar> 'single') [paren](url (paren title)) [empty]( \"title\")\n");
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected definition");
@@ -644,8 +603,7 @@ mod parser {
 
     #[test]
     fn localized_source_spans_track_trimmed_markers() {
-        let heading =
-            parse_with_options("# foo #\n", &SyntaxOptions::commonmark()).expect("valid heading");
+        let heading = SyntaxOptions::commonmark().parse("# foo #\n");
         let Some(Block::Heading(node)) = heading.document.children.first() else {
             panic!("expected heading");
         };
@@ -654,8 +612,7 @@ mod parser {
             [Inline::Text(text)] if text.meta.span == Some(Span::new(2, 5))
         ));
 
-        let blockquote =
-            parse_with_options("> **a**\n", &SyntaxOptions::commonmark()).expect("valid quote");
+        let blockquote = SyntaxOptions::commonmark().parse("> **a**\n");
         let Some(Block::BlockQuote(quote)) = blockquote.document.children.first() else {
             panic!("expected blockquote");
         };
@@ -669,8 +626,11 @@ mod parser {
 
         let mut constructs = Constructs::commonmark();
         constructs.directive_text = true;
-        let options = SyntaxOptions::custom(constructs, ParseOptions::default());
-        let directive = parse_with_options(":note[*x*]\n", &options).expect("valid directive");
+        let options = SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        };
+        let directive = options.parse(":note[*x*]\n");
         let Some(Block::Paragraph(paragraph)) = directive.document.children.first() else {
             panic!("expected directive paragraph");
         };

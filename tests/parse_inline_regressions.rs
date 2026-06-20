@@ -14,11 +14,11 @@ mod emphasis {
     //! consumes (or vice versa): the leftover delimiters must stay outside the
     //! emphasis, and closers must bind to the nearest preceding compatible opener.
 
-    use markdown_syntax::{parse_with_options, Block, Inline, SyntaxOptions};
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
 
     /// Parses `input` as CommonMark and returns the inlines of the first paragraph.
     fn paragraph_inlines(input: &str) -> Vec<Inline> {
-        let output = parse_with_options(input, &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse(input);
         match output.document.children.into_iter().next() {
             Some(Block::Paragraph(paragraph)) => paragraph.children,
             other => panic!("expected a paragraph, got {other:?}"),
@@ -171,9 +171,7 @@ mod emphasis {
 }
 
 mod inline_delimiter {
-    use markdown_syntax::{
-        parse_with_options, Block, Constructs, DeleteMarker, Inline, ParseOptions, SyntaxOptions,
-    };
+    use markdown_syntax::{Block, Constructs, DeleteMarker, Inline, ParseOptions, SyntaxOptions};
 
     #[test]
     fn asterisk_mixed_runs_nest_emphasis_and_strong() {
@@ -273,24 +271,24 @@ mod inline_delimiter {
         assert_eq!(suffix.value, " c");
 
         let mut constructs = Constructs::gfm();
-        let disabled = SyntaxOptions::custom(
-            constructs.clone(),
-            ParseOptions {
+        let disabled = SyntaxOptions {
+            constructs: constructs.clone(),
+            parse: ParseOptions {
                 single_tilde_strikethrough: false,
                 ..ParseOptions::default()
             },
-        );
+        };
         let inlines = paragraph("a ~one~ b\n", &disabled);
         assert_text(inlines.as_slice(), "a ~one~ b");
 
         constructs.subscript = true;
-        let with_subscript = SyntaxOptions::custom(
-            constructs,
-            ParseOptions {
+        let with_subscript = SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions {
                 single_tilde_strikethrough: true,
                 ..ParseOptions::default()
             },
-        );
+        };
         let inlines = paragraph("H~2~O and ~gone~\n", &with_subscript);
         assert!(matches!(
             &inlines[..],
@@ -307,7 +305,10 @@ mod inline_delimiter {
     fn underline_extension_keeps_double_underscore_precedence() {
         let mut constructs = Constructs::commonmark();
         constructs.underline = true;
-        let options = SyntaxOptions::custom(constructs, ParseOptions::default());
+        let options = SyntaxOptions {
+            constructs: constructs,
+            parse: ParseOptions::default(),
+        };
 
         let inlines = paragraph("___foo___\n", &options);
         let [Inline::Emphasis(emphasis)] = inlines.as_slice() else {
@@ -320,7 +321,7 @@ mod inline_delimiter {
     }
 
     fn paragraph(source: &str, options: &SyntaxOptions) -> Vec<Inline> {
-        let output = parse_with_options(source, options).expect("valid parse options");
+        let output = options.parse(source);
         assert!(
             output.diagnostics.is_empty(),
             "expected no parse diagnostics: {:?}",
@@ -341,9 +342,7 @@ mod inline_delimiter {
 }
 
 mod review_inline {
-    use markdown_syntax::{
-        parse_with_options, Block, Inline, LineBreakKind, LinkDestinationKind, SyntaxOptions,
-    };
+    use markdown_syntax::{Block, Inline, LineBreakKind, LinkDestinationKind, SyntaxOptions};
 
     fn parse_blocks(input: &str, gfm: bool) -> Vec<Block> {
         let options = if gfm {
@@ -351,10 +350,7 @@ mod review_inline {
         } else {
             SyntaxOptions::commonmark()
         };
-        parse_with_options(input, &options)
-            .expect("valid parse")
-            .document
-            .children
+        options.parse(input).document.children
     }
 
     fn only_paragraph(input: &str, gfm: bool) -> Vec<Inline> {
@@ -561,10 +557,10 @@ mod review_unicode {
     //! categories as punctuation (not only ASCII), and reference-label matching
     //! uses a Unicode case fold (not ASCII lowercasing).
 
-    use markdown_syntax::{parse_with_options, Block, Inline, SyntaxOptions};
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
 
     fn paragraph_inlines(input: &str) -> Vec<Inline> {
-        let output = parse_with_options(input, &SyntaxOptions::commonmark()).expect("valid parse");
+        let output = SyntaxOptions::commonmark().parse(input);
         match output.document.children.into_iter().next() {
             Some(Block::Paragraph(paragraph)) => paragraph.children,
             other => panic!("expected a paragraph, got {other:?}"),

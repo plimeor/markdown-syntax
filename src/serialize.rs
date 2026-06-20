@@ -6,8 +6,9 @@ use alloc::{
 
 use crate::{
     ast::*,
+    diagnostic::Diagnostic,
     parse::{gfm_table_can_start_source, line_starts_html_block},
-    validate::{validate_document, ValidationDiagnostic},
+    validate::validate_document,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,23 +50,31 @@ impl Default for SerializeOptions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SerializeError {
-    InvalidDocument(Vec<ValidationDiagnostic>),
+    InvalidDocument(Vec<Diagnostic>),
     UnsupportedNode(&'static str),
 }
 
-pub fn to_markdown(document: &Document) -> Result<String, SerializeError> {
-    to_markdown_with_options(document, &SerializeOptions::default())
+impl Document {
+    /// Serialize this document to canonical Markdown with default options.
+    pub fn to_markdown(&self) -> Result<String, SerializeError> {
+        self.to_markdown_with(&SerializeOptions::default())
+    }
+
+    /// Serialize this document to canonical Markdown with explicit options.
+    pub fn to_markdown_with(&self, options: &SerializeOptions) -> Result<String, SerializeError> {
+        let diagnostics = validate_document(self);
+        if !diagnostics.is_empty() {
+            return Err(SerializeError::InvalidDocument(diagnostics));
+        }
+
+        serialize_document_body(self, options)
+    }
 }
 
-pub fn to_markdown_with_options(
+fn serialize_document_body(
     document: &Document,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let diagnostics = validate_document(document);
-    if !diagnostics.is_empty() {
-        return Err(SerializeError::InvalidDocument(diagnostics));
-    }
-
     let mut output = serialize_blocks_at_start(&document.children, options, true)?;
     if options.line_ending == LineEnding::CrLf {
         output = output.replace('\n', "\r\n");
