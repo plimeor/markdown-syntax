@@ -8,8 +8,9 @@
   the default build.
 - Hard invariants (do not break without an explicit decision): empty default
   features (`[features] default = []`), zero runtime dependencies, `#![no_std]`
-  (+ `extern crate alloc`), MSRV 1.82, `publish = false`. The default build
-  surface stays byte-stable.
+  (+ `extern crate alloc`), MSRV 1.82. The default build surface stays
+  byte-stable. (The crate is published to crates.io as of 0.1.0; the
+  zero-dependency/`no_std`/MSRV invariants now also protect downstream users.)
 
 ## Commands
 

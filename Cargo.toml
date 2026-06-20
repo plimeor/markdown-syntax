@@ -9,8 +9,6 @@ repository = "https://github.com/plimeor/markdown-syntax"
 license = "MIT OR Apache-2.0"
 keywords = ["markdown", "commonmark", "gfm", "parser", "ast"]
 categories = ["parser-implementations", "text-processing", "no-std"]
-# Flip this to publish; left on as a guard until the first release is intended.
-publish = false
 
 # The published package ships only the library, license, and readme. The vendored
 # conformance corpus under tests/ is dev-only and is intentionally NOT
