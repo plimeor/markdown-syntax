@@ -1,6 +1,6 @@
 [package]
 name = "markdown-syntax"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.82"
 description = "no_std + alloc Markdown syntax parser and serializer"
