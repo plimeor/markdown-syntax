@@ -135,17 +135,6 @@ impl SyntaxOptions {
 
 fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, SyntaxConfigError> {
     options.validate()?;
-    // CommonMark treats a leading UTF-8 BOM (U+FEFF) as document-start noise, not
-    // content. Strip a single leading BOM; an interior BOM is left untouched.
-    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
-    // CommonMark replaces U+0000 with U+FFFD during input preprocessing. Only
-    // allocate when a NUL is actually present; otherwise borrow the original.
-    let input: Cow<'_, str> = if input.contains('\u{0}') {
-        Cow::Owned(input.replace('\u{0}', "\u{fffd}"))
-    } else {
-        Cow::Borrowed(input)
-    };
-    let input = input.as_ref();
     let mut diagnostics = Vec::new();
     let definitions = collect_definitions(input, options);
     let children = parse_blocks(input, 0, true, options, &definitions, &mut diagnostics);

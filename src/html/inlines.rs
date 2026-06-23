@@ -25,7 +25,7 @@ pub fn render_inlines(children: &[Inline], ctx: &Ctx) -> String {
 /// explicitly — there is no catch-all.
 pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
     match inline {
-        // 1. Text — value already parser-normalized; just text-escape.
+        // 1. Text — escape the parsed text value.
         Inline::Text(t) => escape_text(&t.value),
 
         // 2. Escape — the single escaped char, text-escaped.

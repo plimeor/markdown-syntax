@@ -1,7 +1,7 @@
 //! Escaping + URL-encoding helpers shared by the inline/block renderers.
 //!
-//! All inputs are assumed parser-normalized (e.g. NUL already folded to
-//! U+FFFD); the renderer never re-decodes or re-trims.
+//! Inputs are already-decoded Rust strings; the renderer never re-decodes or
+//! re-trims them.
 
 use alloc::string::String;
 

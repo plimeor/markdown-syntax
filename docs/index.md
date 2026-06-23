@@ -19,4 +19,5 @@ graphs, or active execution cursors. Derive current behavior from `README.md`,
 
 | Path | Status | Purpose |
 | --- | --- | --- |
+| `plans/2026-06-23-markdown-truth-parse-contract-plan.md` | completed | Lean implementation plan for the Markdown-truth parse contract: remove BOM/NUL input preprocessing, keep spans in original source coordinates, add focused top-level span-contract tests, and preserve default `no_std + alloc` / zero-dependency / MSRV 1.82 invariants. |
 | `plans/2026-06-20-public-api-ergonomics-plan.md` | completed | Implementation plan for `decisions/005`: 9 risk-ordered slices (maximal-config characterization first, then the irreducible deletions/refactors), regression evidence per slice. Executed on branch `api-ergonomics`; maximal-dialect behavior locked by `tests/maximal_default.rs`. |
