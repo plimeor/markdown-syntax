@@ -22,6 +22,20 @@
 - wasm check: `cargo build --target wasm32-unknown-unknown`
   (`rustup target add wasm32-unknown-unknown` first)
 
+## Release
+
+<!-- 2026-07-05: release-plz is configured and non-Conventional commits were observed landing in CHANGELOG.md under `Other`. -->
+- Commits, PR titles, and squash titles that can land on `main` must use
+  Conventional Commits: `<type>[optional scope]: <description>`.
+- Use a specific release-plz-friendly type: `feat`, `fix`, `perf`,
+  `refactor`, `docs`, `test`, `ci`, `build`, `chore`, `style`, or `revert`;
+  prefer `feat` / `fix` / `perf` for user-visible released behavior so the
+  generated `CHANGELOG.md` does not collapse into `Other`.
+- Mark SemVer-breaking changes with `!` after the type/scope or a
+  `BREAKING CHANGE:` footer.
+- Enable the local commit-message hook with `cog install-hook commit-msg`;
+  `cog.toml` owns the executable check for this rule.
+
 ## Conformance
 
 - `tests/html_conformance/` is a measurement bench (AST→HTML vs vendored
