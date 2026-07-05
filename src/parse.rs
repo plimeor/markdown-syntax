@@ -256,6 +256,14 @@ fn parse_blocks_from_lines(
             continue;
         }
 
+        if let Some((block, next)) =
+            parse_html_container(lines, index, options, definitions, diagnostics)
+        {
+            blocks.push(block);
+            index = next;
+            continue;
+        }
+
         if let Some((block, next)) = parse_html_block(lines, index, options) {
             blocks.push(block);
             index = next;
@@ -400,6 +408,11 @@ fn collect_definition_refs_from_blocks(blocks: &[Block], definitions: &mut Vec<S
             }
             Block::FootnoteDefinition(node) => {
                 collect_definition_refs_from_blocks(&node.children, definitions);
+            }
+            Block::HtmlContainer(node) => {
+                if let HtmlContainerContent::Blocks(children) = &node.content {
+                    collect_definition_refs_from_blocks(children, definitions);
+                }
             }
             Block::ContainerDirective(node) => {
                 collect_definition_refs_from_blocks(&node.children, definitions);
@@ -1307,6 +1320,7 @@ fn block_span(block: &Block) -> Option<Span> {
         Block::DescriptionList(node) => &node.meta,
         Block::CodeBlock(node) => &node.meta,
         Block::HtmlBlock(node) => &node.meta,
+        Block::HtmlContainer(node) => &node.meta,
         Block::Definition(node) => &node.meta,
         Block::FootnoteDefinition(node) => &node.meta,
         Block::Table(node) => &node.meta,
@@ -1935,6 +1949,354 @@ fn parse_leaf_directive(
     }))
 }
 
+fn parse_html_container(
+    lines: &[Line<'_>],
+    index: usize,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(Block, usize)> {
+    if !options.constructs.html_container {
+        return None;
+    }
+
+    let (opening, leading_summary) =
+        parse_details_container_opening_line(lines[index], options, definitions, diagnostics)?;
+    let close_index = find_html_container_close(lines, index + 1, "details")?;
+    let closing =
+        parse_html_container_tag_line(lines[close_index], "details", HtmlContainerTag::Closing)?;
+    let children = parse_details_container_children(
+        &lines[index + 1..close_index],
+        leading_summary,
+        options,
+        definitions,
+        diagnostics,
+    );
+
+    Some((
+        Block::HtmlContainer(HtmlContainer {
+            meta: NodeMeta::new(Some(Span::new(
+                opening
+                    .meta
+                    .span
+                    .map(|span| span.start)
+                    .unwrap_or(lines[index].start),
+                lines[close_index].end_with_eol,
+            ))),
+            opening,
+            content: HtmlContainerContent::Blocks(children),
+            closing,
+        }),
+        close_index + 1,
+    ))
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum HtmlContainerTag {
+    Opening,
+    Closing,
+}
+
+#[derive(Clone, Copy)]
+struct HtmlContainerFence {
+    marker: FenceMarker,
+    length: usize,
+}
+
+fn parse_details_container_children(
+    lines: &[Line<'_>],
+    leading_summary: Option<Block>,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Block> {
+    let mut children = Vec::new();
+    if let Some(summary) = leading_summary {
+        children.push(summary);
+        children.extend(parse_blocks_from_lines(
+            lines,
+            false,
+            options,
+            definitions,
+            diagnostics,
+        ));
+        return children;
+    }
+
+    let Some(summary_index) = lines.iter().position(|line| !line.text.trim().is_empty()) else {
+        return children;
+    };
+
+    if let Some((summary, next)) =
+        parse_summary_container(lines, summary_index, options, definitions, diagnostics)
+    {
+        children.push(summary);
+        children.extend(parse_blocks_from_lines(
+            &lines[next..],
+            false,
+            options,
+            definitions,
+            diagnostics,
+        ));
+        return children;
+    }
+
+    parse_blocks_from_lines(lines, false, options, definitions, diagnostics)
+}
+
+fn parse_summary_container(
+    lines: &[Line<'_>],
+    index: usize,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(Block, usize)> {
+    let line = lines[index];
+    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    parse_summary_container_source(
+        trimmed,
+        line.start + indent_bytes,
+        options,
+        definitions,
+        diagnostics,
+    )
+    .map(|block| (block, index + 1))
+}
+
+fn parse_details_container_opening_line(
+    line: Line<'_>,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(HtmlTag, Option<Block>)> {
+    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    let (open_end, name) = parse_html_tag(trimmed, 0)?;
+    if !name.eq_ignore_ascii_case("details")
+        || html_tag_is_closing(trimmed, 0)
+        || html_tag_is_self_closing(&trimmed[..open_end])
+    {
+        return None;
+    }
+
+    let tag_start = line.start + indent_bytes;
+    let rest_start = open_end + leading_ascii_whitespace_len(&trimmed[open_end..]);
+    let summary = if trimmed[rest_start..].is_empty() {
+        None
+    } else {
+        Some(parse_summary_container_source(
+            &trimmed[rest_start..],
+            tag_start + rest_start,
+            options,
+            definitions,
+            diagnostics,
+        )?)
+    };
+
+    Some((
+        HtmlTag {
+            meta: NodeMeta::new(Some(Span::new(tag_start, tag_start + open_end))),
+            name: "details".into(),
+            raw: trimmed[..open_end].into(),
+        },
+        summary,
+    ))
+}
+
+fn parse_summary_container_source(
+    source: &str,
+    base_offset: usize,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Block> {
+    let (open_end, open_name) = parse_html_tag(source, 0)?;
+    if !open_name.eq_ignore_ascii_case("summary")
+        || html_tag_is_closing(source, 0)
+        || html_tag_is_self_closing(&source[..open_end])
+    {
+        return None;
+    }
+
+    let close_start = source[open_end..]
+        .find("</")
+        .map(|offset| open_end + offset)?;
+    let (close_end, close_name) = parse_html_tag(source, close_start)?;
+    if !close_name.eq_ignore_ascii_case("summary")
+        || !html_tag_is_closing(source, close_start)
+        || !source[close_end..].trim().is_empty()
+    {
+        return None;
+    }
+
+    let content = &source[open_end..close_start];
+    let content_base = base_offset + open_end;
+    let opening = HtmlTag {
+        meta: NodeMeta::new(Some(Span::new(base_offset, base_offset + open_end))),
+        name: "summary".into(),
+        raw: source[..open_end].into(),
+    };
+    let closing = HtmlTag {
+        meta: NodeMeta::new(Some(Span::new(
+            base_offset + close_start,
+            base_offset + close_end,
+        ))),
+        name: "summary".into(),
+        raw: source[close_start..close_end].into(),
+    };
+
+    Some(Block::HtmlContainer(HtmlContainer {
+        meta: NodeMeta::new(Some(Span::new(base_offset, base_offset + source.len()))),
+        opening,
+        content: HtmlContainerContent::Inlines(parse_inlines(
+            content,
+            content_base,
+            options,
+            definitions,
+            diagnostics,
+        )),
+        closing,
+    }))
+}
+
+fn find_html_container_close(lines: &[Line<'_>], mut cursor: usize, tag: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut fence = None;
+
+    while cursor < lines.len() {
+        let line = lines[cursor].text;
+        if let Some(open_fence) = fence {
+            if html_container_fence_closes(line, open_fence) {
+                fence = None;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        if let Some(open_fence) = html_container_fence_opens(line) {
+            fence = Some(open_fence);
+            cursor += 1;
+            continue;
+        }
+
+        if parse_html_container_tag_line(lines[cursor], tag, HtmlContainerTag::Closing).is_some() {
+            depth -= 1;
+            if depth == 0 {
+                return Some(cursor);
+            }
+        } else if parse_html_container_opening_line(lines[cursor], tag).is_some() {
+            depth += 1;
+        }
+
+        cursor += 1;
+    }
+
+    None
+}
+
+fn parse_html_container_tag_line(
+    line: Line<'_>,
+    tag: &str,
+    kind: HtmlContainerTag,
+) -> Option<HtmlTag> {
+    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    let (end, name) = parse_html_tag(trimmed, 0)?;
+    if !name.eq_ignore_ascii_case(tag) || !trimmed[end..].trim().is_empty() {
+        return None;
+    }
+
+    let closing = html_tag_is_closing(trimmed, 0);
+    if (kind == HtmlContainerTag::Opening && closing)
+        || (kind == HtmlContainerTag::Closing && !closing)
+        || html_tag_is_self_closing(&trimmed[..end])
+    {
+        return None;
+    }
+
+    let start = line.start + indent_bytes;
+    Some(HtmlTag {
+        meta: NodeMeta::new(Some(Span::new(start, start + end))),
+        name: tag.into(),
+        raw: trimmed[..end].into(),
+    })
+}
+
+fn parse_html_container_opening_line(line: Line<'_>, tag: &str) -> Option<HtmlTag> {
+    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    let (end, name) = parse_html_tag(trimmed, 0)?;
+    if !name.eq_ignore_ascii_case(tag)
+        || html_tag_is_closing(trimmed, 0)
+        || html_tag_is_self_closing(&trimmed[..end])
+    {
+        return None;
+    }
+
+    let rest_start = end + leading_ascii_whitespace_len(&trimmed[end..]);
+    if !trimmed[rest_start..].is_empty() && !html_container_line_has_summary(&trimmed[rest_start..])
+    {
+        return None;
+    }
+
+    let start = line.start + indent_bytes;
+    Some(HtmlTag {
+        meta: NodeMeta::new(Some(Span::new(start, start + end))),
+        name: tag.into(),
+        raw: trimmed[..end].into(),
+    })
+}
+
+fn html_container_line_has_summary(input: &str) -> bool {
+    let Some((open_end, name)) = parse_html_tag(input, 0) else {
+        return false;
+    };
+    if !name.eq_ignore_ascii_case("summary")
+        || html_tag_is_closing(input, 0)
+        || html_tag_is_self_closing(&input[..open_end])
+    {
+        return false;
+    }
+    let Some(close_start) = input[open_end..].find("</").map(|offset| open_end + offset) else {
+        return false;
+    };
+    let Some((close_end, close_name)) = parse_html_tag(input, close_start) else {
+        return false;
+    };
+    close_name.eq_ignore_ascii_case("summary")
+        && html_tag_is_closing(input, close_start)
+        && input[close_end..].trim().is_empty()
+}
+
+fn trim_html_container_line(input: &str) -> Option<(&str, usize)> {
+    let trimmed = trim_up_to_three_spaces(input)?;
+    Some((trimmed, input.len() - trimmed.len()))
+}
+
+fn leading_ascii_whitespace_len(input: &str) -> usize {
+    input
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count()
+}
+
+fn html_tag_is_closing(input: &str, index: usize) -> bool {
+    input.as_bytes().get(index + 1) == Some(&b'/')
+}
+
+fn html_tag_is_self_closing(input: &str) -> bool {
+    input.trim_end().ends_with("/>")
+}
+
+fn html_container_fence_opens(line: &str) -> Option<HtmlContainerFence> {
+    let trimmed = trim_up_to_three_spaces(line)?;
+    let (marker, length) = fence_start(trimmed)?;
+    Some(HtmlContainerFence { marker, length })
+}
+
+fn html_container_fence_closes(line: &str, fence: HtmlContainerFence) -> bool {
+    trim_up_to_three_spaces(line)
+        .is_some_and(|trimmed| fence_close(trimmed, fence.marker, fence.length))
+}
+
 fn parse_html_block(
     lines: &[Line<'_>],
     index: usize,
@@ -2041,6 +2403,18 @@ pub(crate) fn line_starts_html_block(input: &str) -> bool {
     trim_up_to_three_spaces(input)
         .and_then(html_block_start)
         .is_some()
+}
+
+fn line_starts_html_container(input: &str) -> bool {
+    let line = Line {
+        text: input,
+        eol: "",
+        start: 0,
+        end: input.len(),
+        end_with_eol: input.len(),
+        lazy: false,
+    };
+    parse_html_container_opening_line(line, "details").is_some()
 }
 
 fn raw_html_tag_start(input: &str) -> bool {
@@ -6848,6 +7222,7 @@ fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
             lazy: false,
         })
         .is_some()
+        || (options.constructs.html_container && line_starts_html_container(input))
         || (options.constructs.html_block && line_starts_interrupting_html_block(input))
         || (options.constructs.math_block && math_block_fence_length(trimmed).is_some())
         || (options.constructs.directive_container && trimmed.starts_with(":::"))
@@ -6878,6 +7253,7 @@ fn list_marker_can_interrupt_paragraph(input: &str) -> bool {
 fn table_body_line_ends_table(line: &str, options: &SyntaxOptions) -> bool {
     likely_block_start(line, options)
         || list_marker_info(line).is_some()
+        || (options.constructs.html_container && line_starts_html_container(line))
         || (options.constructs.html_block && line_starts_html_block(line))
 }
 

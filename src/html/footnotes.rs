@@ -18,7 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::Cell;
 
-use crate::ast::{Block, Inline};
+use crate::ast::{Block, HtmlContainerContent, Inline};
 
 use super::escape::{attr_escape_gfm, encode_href};
 
@@ -139,6 +139,11 @@ fn collect_defs(
                 }
             }
             Block::ContainerDirective(dir) => collect_defs(&dir.children, defs, display_labels),
+            Block::HtmlContainer(container) => {
+                if let HtmlContainerContent::Blocks(children) = &container.content {
+                    collect_defs(children, defs, display_labels);
+                }
+            }
             _ => {}
         }
     }
@@ -186,6 +191,10 @@ impl RefBuilder {
                     self.walk_inlines(&dir.label);
                     self.walk_blocks(&dir.children);
                 }
+                Block::HtmlContainer(container) => match &container.content {
+                    HtmlContainerContent::Blocks(children) => self.walk_blocks(children),
+                    HtmlContainerContent::Inlines(children) => self.walk_inlines(children),
+                },
                 Block::LeafDirective(dir) => self.walk_inlines(&dir.label),
                 _ => {}
             }

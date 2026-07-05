@@ -1,4 +1,4 @@
-//! All 19 `Block` arms plus the nested `ListItem` / `DescriptionItem` /
+//! All 20 `Block` arms plus the nested `ListItem` / `DescriptionItem` /
 //! `DescriptionDetails` helpers they dispatch to.
 
 use alloc::format;
@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::ast::{
     Alert, AlertKind, Block, BlockQuote, CodeBlock, ContainerDirective, DescriptionList, Heading,
-    LeafDirective, List, ListItem, MathBlock, Paragraph,
+    HtmlContainer, HtmlContainerContent, LeafDirective, List, ListItem, MathBlock, Paragraph,
 };
 
 use super::escape::{attr_escape, escape_text};
@@ -62,35 +62,66 @@ pub fn render_block(block: &Block, ctx: &Ctx) -> String {
         // 9. HtmlBlock.
         Block::HtmlBlock(hb) => render_raw_html(&hb.value, ctx),
 
-        // 10. Definition — emits nothing (feeds reference resolution).
+        // 10. HtmlContainer.
+        Block::HtmlContainer(container) => render_html_container(container, ctx),
+
+        // 11. Definition — emits nothing (feeds reference resolution).
         Block::Definition(_) => String::new(),
 
-        // 11. FootnoteDefinition — hoisted to the doc-end section; nothing here.
+        // 12. FootnoteDefinition — hoisted to the doc-end section; nothing here.
         Block::FootnoteDefinition(_) => String::new(),
 
-        // 12. Table (GFM).
+        // 13. Table (GFM).
         Block::Table(t) => render_table(t, ctx),
 
-        // 13. MathBlock — GFM display wrapper.
+        // 14. MathBlock — GFM display wrapper.
         Block::MathBlock(mb) => render_math_block(mb, ctx),
 
-        // 14. Frontmatter — no HTML.
+        // 15. Frontmatter — no HTML.
         Block::Frontmatter(_) => String::new(),
 
-        // 15. MdxEsm — no HTML.
+        // 16. MdxEsm — no HTML.
         Block::MdxEsm(_) => String::new(),
 
-        // 16. MdxExpression (flow) — no HTML.
+        // 17. MdxExpression (flow) — no HTML.
         Block::MdxExpression(_) => String::new(),
 
-        // 17. MdxJsx (flow) — no HTML (node carries no children).
+        // 18. MdxJsx (flow) — no HTML (node carries no children).
         Block::MdxJsx(_) => String::new(),
 
-        // 18. LeafDirective [CONV].
+        // 19. LeafDirective [CONV].
         Block::LeafDirective(d) => render_leaf_directive(d, ctx),
 
-        // 19. ContainerDirective.
+        // 20. ContainerDirective.
         Block::ContainerDirective(d) => render_container_directive(d, ctx),
+    }
+}
+
+fn render_html_container(container: &HtmlContainer, ctx: &Ctx) -> String {
+    match &container.content {
+        HtmlContainerContent::Blocks(children) => {
+            let inner = render_blocks_joined(children, ctx);
+            if inner.is_empty() {
+                format!(
+                    "{}\n{}",
+                    render_raw_html(&container.opening.raw, ctx),
+                    render_raw_html(&container.closing.raw, ctx)
+                )
+            } else {
+                format!(
+                    "{}\n{}\n{}",
+                    render_raw_html(&container.opening.raw, ctx),
+                    inner,
+                    render_raw_html(&container.closing.raw, ctx)
+                )
+            }
+        }
+        HtmlContainerContent::Inlines(children) => format!(
+            "{}{}{}",
+            render_raw_html(&container.opening.raw, ctx),
+            render_inlines(children, ctx),
+            render_raw_html(&container.closing.raw, ctx)
+        ),
     }
 }
 

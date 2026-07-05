@@ -239,8 +239,8 @@ mod review_block {
 
 mod parser {
     use markdown_syntax::{
-        Block, Constructs, DiagnosticCode, Inline, LinkDestinationKind, LinkTitleKind,
-        ParseOptions, ParseStrictError, ReferenceKind, Span, SyntaxOptions,
+        Block, Constructs, DiagnosticCode, HtmlContainerContent, Inline, LinkDestinationKind,
+        LinkTitleKind, ParseOptions, ParseStrictError, ReferenceKind, Span, SyntaxOptions,
     };
 
     #[test]
@@ -316,6 +316,119 @@ mod parser {
             block.value,
             "<script>\nnot closed by </scripture>\nstill raw\n</script>"
         );
+    }
+
+    #[test]
+    fn default_parses_details_summary_as_html_containers() {
+        let source = "<details>\n<summary>Install</summary>\n\nRun `cargo test`.\n\n</details>\n";
+        let output = SyntaxOptions::default().parse(source);
+
+        let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
+            panic!(
+                "expected one details container: {:?}",
+                output.document.children
+            );
+        };
+        assert_eq!(details.opening.name, "details");
+        let HtmlContainerContent::Blocks(children) = &details.content else {
+            panic!("details should contain block content");
+        };
+        let [Block::HtmlContainer(summary), Block::Paragraph(_)] = children.as_slice() else {
+            panic!("expected summary plus paragraph: {children:?}");
+        };
+        assert_eq!(summary.opening.name, "summary");
+        assert!(matches!(
+            &summary.content,
+            HtmlContainerContent::Inlines(inlines)
+                if matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == "Install")
+        ));
+    }
+
+    #[test]
+    fn default_parses_compact_details_summary_line_as_html_container() {
+        let source = "<details><summary>Compact</summary>\n\nbody\n\n</details>\n";
+        let output = SyntaxOptions::default().parse(source);
+
+        let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
+            panic!(
+                "expected one details container: {:?}",
+                output.document.children
+            );
+        };
+        let HtmlContainerContent::Blocks(children) = &details.content else {
+            panic!("details should contain block content");
+        };
+        let [Block::HtmlContainer(summary), Block::Paragraph(_)] = children.as_slice() else {
+            panic!("expected summary plus paragraph: {children:?}");
+        };
+        assert!(matches!(
+            &summary.content,
+            HtmlContainerContent::Inlines(inlines)
+                if matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == "Compact")
+        ));
+    }
+
+    #[test]
+    fn commonmark_keeps_details_as_raw_html_blocks() {
+        let source = "<details>\n\nbody\n\n</details>\n";
+        let output = SyntaxOptions::commonmark().parse(source);
+
+        assert!(matches!(
+            output.document.children.as_slice(),
+            [
+                Block::HtmlBlock(_),
+                Block::Paragraph(_),
+                Block::HtmlBlock(_)
+            ]
+        ));
+    }
+
+    #[test]
+    fn html_container_construct_can_interrupt_without_html_block() {
+        let mut constructs = Constructs::commonmark();
+        constructs.html_block = false;
+        constructs.html_inline = false;
+        constructs.html_container = true;
+        let output = SyntaxOptions {
+            constructs,
+            parse: Default::default(),
+        }
+        .parse("before\n<details>\n\nbody\n\n</details>\n");
+
+        assert!(matches!(
+            output.document.children.as_slice(),
+            [Block::Paragraph(_), Block::HtmlContainer(_)]
+        ));
+    }
+
+    #[test]
+    fn unclosed_details_falls_back_to_raw_html_block() {
+        let source = "<details>\n<summary>Open</summary>\n";
+        let output = SyntaxOptions::default().parse(source);
+
+        assert!(matches!(
+            output.document.children.as_slice(),
+            [Block::HtmlBlock(_)]
+        ));
+    }
+
+    #[test]
+    fn details_container_scan_ignores_closing_tag_inside_fenced_code() {
+        let source = "<details>\n<summary>Log</summary>\n\n```\n</details>\n```\n\n</details>\n";
+        let output = SyntaxOptions::default().parse(source);
+
+        let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
+            panic!(
+                "expected one details container: {:?}",
+                output.document.children
+            );
+        };
+        let HtmlContainerContent::Blocks(children) = &details.content else {
+            panic!("details should contain block content");
+        };
+        assert!(children
+            .iter()
+            .any(|block| matches!(block, Block::CodeBlock(_))));
     }
 
     #[test]

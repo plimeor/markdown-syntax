@@ -4,7 +4,7 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
-use crate::ast::{Block, Definition, Inline};
+use crate::ast::{Block, Definition, HtmlContainerContent, Inline};
 
 use super::escape::escape_text;
 
@@ -52,6 +52,11 @@ fn collect_defs(blocks: &[Block], out: &mut BTreeMap<String, Definition>) {
                 }
             }
             Block::FootnoteDefinition(fd) => collect_defs(&fd.children, out),
+            Block::HtmlContainer(container) => {
+                if let HtmlContainerContent::Blocks(children) = &container.content {
+                    collect_defs(children, out);
+                }
+            }
             Block::ContainerDirective(dir) => collect_defs(&dir.children, out),
             _ => {}
         }

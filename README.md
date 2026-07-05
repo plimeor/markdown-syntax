@@ -97,7 +97,7 @@ let with_wikilinks = SyntaxOptions::commonmark()
 let _ = (no_math, with_wikilinks);
 ```
 
-[`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) is a typo-proof front door over the full [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) flag set. Grouped constructs (`Math`, `Footnotes`, `Directives`) flip a whole family at once, and `Wikilinks` is the one parameterized variant.
+[`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) is a typo-proof front door over the full [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) flag set. Grouped constructs (`Math`, `Footnotes`, `Directives`) flip a whole family at once, `HtmlContainers` recognizes Markdown-compatible HTML containers, and `Wikilinks` is the one parameterized variant.
 
 ### Walk the AST
 
@@ -240,9 +240,9 @@ See [`HtmlOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/html/
 | `commonmark` | `SyntaxOptions::commonmark()` | CommonMark core only |
 | `gfm` | `SyntaxOptions::gfm()` | CommonMark + tables, task lists, strikethrough, autolinks, footnotes |
 | `mdx` | `SyntaxOptions::mdx()` | MDX JSX/expressions/ESM on; raw HTML off |
-| `default` (== max) | `SyntaxOptions::default()` / `parse` | Maximal non-MDX dialect (see below) |
+| `default` (== max) | `SyntaxOptions::default()` / `parse` | Maximal non-MDX dialect, including Markdown-compatible HTML containers (see below) |
 
-`underline` (`__text__`) is **off** in `default` because it would override CommonMark strong; **MDX is off** by default and conflicts with raw HTML; wikilinks default to title-after-pipe. For the full `Construct` (~21 variants) and `Constructs` (~33 fields) surface, see [`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) and [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) on docs.rs.
+`underline` (`__text__`) is **off** in `default` because it would override CommonMark strong; **MDX is off** by default and conflicts with raw HTML; wikilinks default to title-after-pipe. For the full `Construct` and `Constructs` surface, see [`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) and [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) on docs.rs.
 
 Cargo features:
 
@@ -260,13 +260,13 @@ Cargo features:
 
 ## Scope & limitations
 
-In scope — the maximal default dialect: GFM (tables, task lists, strikethrough, literal/relaxed autolinks, alerts), footnotes (incl. inline), inline + block math, frontmatter (`---` / `+++`), wikilinks (title-after-pipe default), the extra inline marks (insert `++`, highlight `==`, subscript `~`, superscript `^`, spoiler `||`, shortcodes `:tada:`), description lists, and the `:name` / `::name` / `:::name` directive family.
+In scope — the maximal default dialect: GFM (tables, task lists, strikethrough, literal/relaxed autolinks, alerts), footnotes (incl. inline), inline + block math, frontmatter (`---` / `+++`), wikilinks (title-after-pipe default), the extra inline marks (insert `++`, highlight `==`, subscript `~`, superscript `^`, spoiler `||`, shortcodes `:tada:`), description lists, Markdown-compatible HTML containers (`details` / `summary`), and the `:name` / `::name` / `:::name` directive family.
 
 Non-goals:
 
 - `underline` (`__text__`) is **off** by default — it would override CommonMark strong.
 - **MDX** (JSX / expressions / ESM) is **off** by default and conflicts with raw HTML.
-- Raw HTML and MDX are represented **only** as Markdown syntax nodes — no HTML rendering/sanitization, no MDX evaluation, no syntax highlighting, and no DOM post-processing in the default build.
+- Raw HTML, HTML containers, and MDX are represented **only** as Markdown syntax nodes — no HTML rendering/sanitization, no MDX evaluation, no syntax highlighting, and no DOM post-processing in the default build.
 - The serializer performs **no** HTML safety filtering and does **not** preserve byte-for-byte authoring style from a bare AST.
 - Validation is conservative and does not prove every semantic invariant of a hand-written AST.
 - **Directives** (`:name` / `::name` / `:::name`) are a distinct family and are **never** MDX.

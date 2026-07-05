@@ -580,6 +580,28 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
             indent,
             format!("HtmlBlock {}", quote_trimmed(&node.value)),
         ),
+        Block::HtmlContainer(node) => {
+            push(
+                lines,
+                indent,
+                format!(
+                    "HtmlContainer tag={} open={} close={}",
+                    node.opening.name,
+                    quote(&node.opening.raw),
+                    quote(&node.closing.raw)
+                ),
+            );
+            match &node.content {
+                markdown_syntax::HtmlContainerContent::Blocks(children) => {
+                    for child in children {
+                        snapshot_block(child, indent + 1, lines);
+                    }
+                }
+                markdown_syntax::HtmlContainerContent::Inlines(children) => {
+                    snapshot_inlines(children, indent + 1, lines);
+                }
+            }
+        }
         Block::Definition(node) => push(
             lines,
             indent,

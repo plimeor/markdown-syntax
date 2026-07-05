@@ -130,6 +130,7 @@ fn extension_fixture_snapshots_and_roundtrips() {
     constructs.superscript = true;
     constructs.spoiler = true;
     constructs.shortcode = true;
+    constructs.html_container = true;
     constructs.description_list = true;
     constructs.inline_footnote = true;
     let options = SyntaxOptions {
@@ -212,6 +213,10 @@ fn extension_fixture_snapshots_and_roundtrips() {
     );
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/inline_markup_extras",
+        options.clone(),
+    );
+    assert_fixture(
+        "tests/fixtures/roundtrip/extensions/html_containers",
         options.clone(),
     );
     assert_fixture(

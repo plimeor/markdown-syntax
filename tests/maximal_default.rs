@@ -82,6 +82,16 @@ fn wikilink_default_is_after_pipe() {
 }
 
 #[test]
+fn html_containers_are_in_the_maximal_default() {
+    let out = parse("<details>\n<summary>Open</summary>\n\nbody\n\n</details>\n");
+
+    assert!(matches!(
+        out.document.children.as_slice(),
+        [Block::HtmlContainer(_)]
+    ));
+}
+
+#[test]
 fn build_layer_round_trips() {
     let document = Document {
         meta: NodeMeta::default(),

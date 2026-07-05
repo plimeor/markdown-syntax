@@ -195,6 +195,7 @@ fn serialize_block(
         Block::DescriptionList(node) => serialize_description_list(node, options),
         Block::CodeBlock(node) => serialize_code_block(node, options),
         Block::HtmlBlock(node) => Ok(trim_trailing_newline(&node.value).into()),
+        Block::HtmlContainer(node) => serialize_html_container(node, options),
         Block::Definition(node) => {
             let destination = serialize_destination_kind(
                 &node.destination,
@@ -267,6 +268,31 @@ fn serialize_block(
                 inner
             ))
         }
+    }
+}
+
+fn serialize_html_container(
+    node: &HtmlContainer,
+    options: &SerializeOptions,
+) -> Result<String, SerializeError> {
+    match &node.content {
+        HtmlContainerContent::Blocks(children) => {
+            let inner = serialize_blocks_at_start(children, options, false)?;
+            if inner.is_empty() {
+                Ok(format!("{}\n{}", node.opening.raw, node.closing.raw))
+            } else {
+                Ok(format!(
+                    "{}\n{}\n\n{}",
+                    node.opening.raw, inner, node.closing.raw
+                ))
+            }
+        }
+        HtmlContainerContent::Inlines(children) => Ok(format!(
+            "{}{}{}",
+            node.opening.raw,
+            serialize_inlines(children, options)?,
+            node.closing.raw
+        )),
     }
 }
 

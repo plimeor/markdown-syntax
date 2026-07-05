@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use crate::{
     ast::{
         Autolink, AutolinkKind, Block, CodeInline, ContainerDirective, DirectiveAttribute,
-        Document, Escape, Heading, Inline, LeafDirective, List, MathInlineKind, Table,
-        TextDirective,
+        Document, Escape, Heading, HtmlContainer, HtmlContainerContent, Inline, LeafDirective,
+        List, MathInlineKind, Table, TextDirective,
     },
     diagnostic::Diagnostic,
     span::Span,
@@ -92,6 +92,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
         Block::ContainerDirective(directive) => {
             validate_container_directive(directive, diagnostics)
         }
+        Block::HtmlContainer(container) => validate_html_container(container, diagnostics),
         Block::ThematicBreak(_)
         | Block::CodeBlock(_)
         | Block::HtmlBlock(_)
@@ -100,6 +101,48 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
         | Block::MdxEsm(_)
         | Block::MdxExpression(_)
         | Block::MdxJsx(_) => {}
+    }
+}
+
+fn validate_html_container(container: &HtmlContainer, diagnostics: &mut Vec<Diagnostic>) {
+    if container.opening.name.is_empty() {
+        diagnostics.push(Diagnostic::invalid(
+            container.opening.meta.span,
+            "HTML container opening tag name cannot be empty",
+        ));
+    }
+    if container.closing.name.is_empty() {
+        diagnostics.push(Diagnostic::invalid(
+            container.closing.meta.span,
+            "HTML container closing tag name cannot be empty",
+        ));
+    }
+    if container.opening.name != container.closing.name {
+        diagnostics.push(Diagnostic::invalid(
+            container.meta.span,
+            "HTML container opening and closing tag names must match",
+        ));
+    }
+    if container.opening.raw.is_empty() {
+        diagnostics.push(Diagnostic::invalid(
+            container.opening.meta.span,
+            "HTML container opening tag source cannot be empty",
+        ));
+    }
+    if container.closing.raw.is_empty() {
+        diagnostics.push(Diagnostic::invalid(
+            container.closing.meta.span,
+            "HTML container closing tag source cannot be empty",
+        ));
+    }
+
+    match &container.content {
+        HtmlContainerContent::Blocks(children) => {
+            for child in children {
+                validate_block(child, diagnostics);
+            }
+        }
+        HtmlContainerContent::Inlines(children) => validate_inlines(children, diagnostics),
     }
 }
 

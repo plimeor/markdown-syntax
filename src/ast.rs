@@ -52,6 +52,8 @@ pub enum Block {
     CodeBlock(CodeBlock),
     /// A raw HTML block.
     HtmlBlock(HtmlBlock),
+    /// A structured raw HTML container whose interior is parsed as Markdown.
+    HtmlContainer(HtmlContainer),
     /// A link reference definition: `[label]: url "title"`.
     Definition(Definition),
     /// A footnote definition: `[^id]: text`.
@@ -280,6 +282,39 @@ pub struct HtmlBlock {
     pub meta: NodeMeta,
     /// The literal HTML source.
     pub value: String,
+}
+
+/// A structured raw HTML container, such as `<details> ... </details>`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HtmlContainer {
+    /// Node metadata (source span).
+    pub meta: NodeMeta,
+    /// The opening HTML tag.
+    pub opening: HtmlTag,
+    /// The parsed container content.
+    pub content: HtmlContainerContent,
+    /// The closing HTML tag.
+    pub closing: HtmlTag,
+}
+
+/// A raw HTML tag that bounds an [`HtmlContainer`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HtmlTag {
+    /// Node metadata (source span).
+    pub meta: NodeMeta,
+    /// The normalized lowercase tag name.
+    pub name: String,
+    /// The literal tag source, including angle brackets and attributes.
+    pub raw: String,
+}
+
+/// The parsed content inside an [`HtmlContainer`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HtmlContainerContent {
+    /// Block-level Markdown content.
+    Blocks(Vec<Block>),
+    /// Inline-level Markdown content.
+    Inlines(Vec<Inline>),
 }
 
 /// A link reference definition. Source: `[label]: destination "title"`.
@@ -965,6 +1000,7 @@ impl_meta_accessors!(Block {
     DescriptionList,
     CodeBlock,
     HtmlBlock,
+    HtmlContainer,
     Definition,
     FootnoteDefinition,
     Table,
@@ -981,6 +1017,7 @@ impl_from_variants!(Block {
     Paragraph(Paragraph), Heading(Heading), ThematicBreak(ThematicBreak),
     BlockQuote(BlockQuote), Alert(Alert), List(List), DescriptionList(DescriptionList),
     CodeBlock(CodeBlock), HtmlBlock(HtmlBlock), Definition(Definition),
+    HtmlContainer(HtmlContainer),
     FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
     Frontmatter(Frontmatter), MdxEsm(MdxEsm), MdxExpression(MdxExpression),
     MdxJsx(MdxJsx), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),

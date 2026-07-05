@@ -18,6 +18,8 @@ pub struct Constructs {
     pub html_block: bool,
     /// Raw inline HTML, e.g. `<span>` within a paragraph.
     pub html_inline: bool,
+    /// Structured Markdown-compatible HTML containers such as `<details>`.
+    pub html_container: bool,
     /// Indented code blocks (each line indented four spaces or a tab).
     pub indented_code: bool,
     /// GFM pipe tables: a `| a | b |` row over a `|---|---|` delimiter row.
@@ -98,6 +100,7 @@ impl Constructs {
         Self {
             html_block: true,
             html_inline: true,
+            html_container: false,
             indented_code: true,
             gfm_table: false,
             gfm_task_list_item: false,
@@ -152,6 +155,7 @@ impl Constructs {
         let mut constructs = Self::commonmark();
         constructs.html_block = false;
         constructs.html_inline = false;
+        constructs.html_container = false;
         constructs.indented_code = false;
         constructs.mdx_esm = true;
         constructs.mdx_expression_block = true;
@@ -170,6 +174,7 @@ impl Constructs {
         Self {
             html_block: true,
             html_inline: true,
+            html_container: true,
             indented_code: true,
             gfm_table: true,
             gfm_task_list_item: true,
@@ -288,7 +293,9 @@ impl SyntaxOptions {
     /// hand-built config can trip a [`SyntaxConfigError`].
     pub fn validate(&self) -> Result<(), SyntaxConfigError> {
         if (self.constructs.mdx_jsx_block || self.constructs.mdx_jsx_inline)
-            && (self.constructs.html_block || self.constructs.html_inline)
+            && (self.constructs.html_block
+                || self.constructs.html_inline
+                || self.constructs.html_container)
         {
             return Err(SyntaxConfigError::MdxHtmlConflict);
         }
@@ -361,6 +368,8 @@ pub enum Construct {
     DescriptionList,
     /// Wikilinks `[[…]]` with the given title order.
     Wikilinks(WikiLinkOrder),
+    /// Markdown-compatible raw HTML containers such as `<details>`.
+    HtmlContainers,
     /// MDX JSX (block and inline). Conflicts with raw HTML; pair with
     /// `disable`-ing HTML or start from [`SyntaxOptions::mdx`].
     MdxJsx,
@@ -406,6 +415,7 @@ impl Construct {
                 c.wikilink_title_before_pipe =
                     on && matches!(order, WikiLinkOrder::TitleBeforePipe);
             }
+            Construct::HtmlContainers => c.html_container = on,
             Construct::MdxJsx => {
                 c.mdx_jsx_block = on;
                 c.mdx_jsx_inline = on;
