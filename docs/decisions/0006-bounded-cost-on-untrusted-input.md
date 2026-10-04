@@ -1,9 +1,24 @@
----
-date: 2026-10-04
-status: active
----
+# 0006: Bounded cost on untrusted input
 
-# Bounded Cost on Untrusted Input
+Status: Accepted
+Date: 2026-10-04
+
+## Context
+
+A recursive-descent inline parser that finds each construct's closer by
+scanning forward is quadratic in unclosed openers, cubic where a scan step
+itself scans, and exponential where a nested label is re-parsed from every
+enclosing level. Memoizing the scans keeps the parser's structure, AST, and
+output intact; each memo is checked against a plain reference scan at every
+start position of generated inputs (`src/parse/scan_tests.rs`,
+`src/serialize/escape_scan_tests.rs`), and `tests/pathological_inputs.rs` pins
+the time and stack bounds.
+
+Nesting limits are the boundary that keeps invalid states (unbounded recursion)
+out of everything downstream: once the parsed tree is shallow, the serializer,
+renderer, validator, and derived traits need no changes. Limits of 32 and 16 sit
+far above hand-written Markdown, and the deepest tree they allow fits a 2 MiB
+thread stack in an unoptimized build.
 
 ## Decision
 
@@ -43,27 +58,10 @@ abort the process; a stack overflow aborts and cannot be caught.
   inline span plus 4 KiB, after which further openers in that span stay
   literal.
 
-The README's "Bounded cost on untrusted input" section is the public contract
-for the limits and their effect on output.
+`docs/specs/untrusted-input-cost.md` is the public contract for the limits and
+their effect on output.
 
-## Rationale
-
-A recursive-descent inline parser that finds each construct's closer by
-scanning forward is quadratic in unclosed openers, cubic where a scan step
-itself scans, and exponential where a nested label is re-parsed from every
-enclosing level. Memoizing the scans keeps the parser's structure, AST, and
-output intact; each memo is checked against a plain reference scan at every
-start position of generated inputs (`src/parse/scan_tests.rs`,
-`src/serialize/escape_scan_tests.rs`), and `tests/pathological_inputs.rs` pins
-the time and stack bounds.
-
-Nesting limits are the boundary that keeps invalid states (unbounded recursion)
-out of everything downstream: once the parsed tree is shallow, the serializer,
-renderer, validator, and derived traits need no changes. Limits of 32 and 16 sit
-far above hand-written Markdown, and the deepest tree they allow fits a 2 MiB
-thread stack in an unoptimized build.
-
-## Rejected Alternatives
+## Considered options
 
 - Rewriting link parsing as the CommonMark bracket-stack algorithm: linear by
   construction, but it changes parse results in edge cases the current
@@ -87,8 +85,8 @@ thread stack in an unoptimized build.
   `no_std` crate, and a caller cannot know how deep an input nests before
   parsing it.
 
-## Non-Goals
+## Consequences
 
-- Hand-built ASTs deeper than the limits: recursion over a tree the caller
+- Hand-built ASTs deeper than the limits are not covered: recursion over a tree the caller
   built follows the caller's depth.
-- Exact CommonMark output for inputs that nest past the limits.
+- Inputs that nest past the limits do not get exact CommonMark output.

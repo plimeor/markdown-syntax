@@ -1,5 +1,5 @@
 //! Locks the maximal-default dialect and its delimiter-collision resolutions
-//! (decisions/005). `parse` enables every non-MDX construct except `underline`;
+//! (decisions/0005). `parse` enables every non-MDX construct except `underline`;
 //! these cases pin the decided picks so a future change cannot silently move them.
 
 use markdown_syntax::prelude::*;

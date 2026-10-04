@@ -1,0 +1,79 @@
+# HTML rendering
+
+## Purpose
+
+Rendering a `Document` to HTML, safe by default, for callers that opt into the
+`html` feature. Owned by `src/html/`.
+
+## Requirements
+
+### Requirement: Opt-in feature
+HTML rendering SHALL exist only with the non-default `html` feature, through
+`Document::to_html()` and `Document::to_html_with(&HtmlOptions)`.
+
+#### Scenario: Default build
+- **WHEN** the crate is built without the `html` feature
+- **THEN** no HTML rendering API is exported
+
+### Requirement: Validate before rendering
+Rendering SHALL validate the document first and return
+`HtmlError::InvalidDocument` with the validation diagnostics when it is invalid.
+
+#### Scenario: Invalid heading depth
+- **WHEN** a hand-built document holding a `Heading` of depth 0 is rendered
+- **THEN** `to_html()` returns `Err(HtmlError::InvalidDocument(_))` with a diagnostic about the heading depth
+
+### Requirement: Raw HTML is escaped by default
+With default options the renderer SHALL escape raw HTML as text;
+`safe_raw_html_form = SafeRawHtmlForm::OmitPlaceholder` SHALL emit the
+`<!-- raw HTML omitted -->` placeholder instead; `allow_dangerous_html = true`
+SHALL emit raw HTML verbatim, filtered by the GFM tagfilter when `gfm_tagfilter`
+is set.
+
+#### Scenario: Default
+- **WHEN** `"<div>x</div>"` is rendered with default options
+- **THEN** the output is `&lt;div&gt;x&lt;/div&gt;`
+
+#### Scenario: Placeholder form
+- **WHEN** `"<div>x</div>"` is rendered with `safe_raw_html_form = OmitPlaceholder`
+- **THEN** the output is `<!-- raw HTML omitted -->`
+
+### Requirement: Dangerous protocols are blanked by default
+With default options the renderer SHALL blank the `href` or `src` of links,
+autolinks, and images whose destination uses a dangerous protocol such as
+`javascript:`; `allow_dangerous_protocol` SHALL keep them and `allow_any_img_src`
+SHALL exempt image sources.
+
+#### Scenario: Link
+- **WHEN** `"[x](javascript:alert(1))"` is rendered with default options
+- **THEN** the output is `<p><a href="">x</a></p>`
+
+#### Scenario: Autolink
+- **WHEN** `"<javascript:alert(1)>"` is rendered with default options
+- **THEN** the output is `<p><a href="">javascript:alert(1)</a></p>`
+
+### Requirement: Task list checkboxes are disabled by default
+The renderer SHALL emit task list checkboxes with `disabled=""` unless
+`tasklist_checkable` is set; `tasklist_attr_order` SHALL choose whether
+`disabled` or `checked` comes first.
+
+#### Scenario: Default checkbox
+- **WHEN** `"- [x] done"` is rendered with the GFM preset and default options
+- **THEN** the item is `<li><input type="checkbox" disabled="" checked="" /> done</li>`
+
+### Requirement: MDX emits no HTML
+The renderer SHALL emit nothing for MDX ESM, expression, and JSX nodes while
+rendering the text around them.
+
+#### Scenario: Mixed MDX document
+- **WHEN** a document with an import, a flow expression, a flow JSX element, and the line `inline {x} <Y /> end` is parsed with the MDX preset and rendered
+- **THEN** the output is `<p>inline   end</p>`
+
+### Requirement: Document layout
+The renderer SHALL join rendered top-level blocks with a single `\n`, with no
+leading or trailing newline, and SHALL append the footnote section after them
+when any footnote is referenced.
+
+#### Scenario: Two paragraphs
+- **WHEN** `"a\n\nb"` is rendered
+- **THEN** the output is `<p>a</p>\n<p>b</p>`

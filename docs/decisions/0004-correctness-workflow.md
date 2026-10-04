@@ -1,9 +1,18 @@
----
-date: 2026-06-20
-status: active
----
+# 0004: Correctness workflow
 
-# Correctness Workflow
+Status: Accepted
+Date: 2026-06-20
+
+## Context
+
+Round-trip stability alone proves that parse and serialize are stable together;
+it does not prove the first parse is semantically correct. Pairing parser,
+serializer, fixture, regression, and conformance evidence makes a fix harder to
+hide behind a compensating serializer behavior.
+
+Manual review of changed goldens is required because a generated snapshot can
+faithfully record a wrong parse. The human/agent check is not "does the test
+pass"; it is "does this structure express the correct Markdown semantics."
 
 ## Decision
 
@@ -20,18 +29,7 @@ The HTML conformance bench is used as observed evidence for AST correctness
 against CommonMark/GFM expected-HTML oracles. Focused regression tests own stable
 public contracts.
 
-## Rationale
-
-Round-trip stability alone proves that parse and serialize are stable together;
-it does not prove the first parse is semantically correct. Pairing parser,
-serializer, fixture, regression, and conformance evidence makes a fix harder to
-hide behind a compensating serializer behavior.
-
-Manual review of changed goldens is required because a generated snapshot can
-faithfully record a wrong parse. The human/agent check is not "does the test
-pass"; it is "does this structure express the correct Markdown semantics."
-
-## Rejected Alternatives
+## Considered options
 
 - Parser-only fixes with no serializer review: rejected because serializer
   behavior can mask AST mistakes.
@@ -42,9 +40,9 @@ pass"; it is "does this structure express the correct Markdown semantics."
 - Relying only on the broad conformance bench: rejected because stable public
   behavior also needs focused regression tests with known expected output.
 
-## Non-Goals
+## Consequences
 
-- Encoding a full task graph for future agents.
-- Storing current conformance numbers in documentation.
-- Guaranteeing every hand-written AST invariant beyond what validators and tests
-  explicitly cover.
+- No full task graph is encoded for future agents.
+- Current conformance numbers are not stored in documentation.
+- Hand-written AST invariants are guaranteed only as far as validators and tests
+  explicitly cover them.

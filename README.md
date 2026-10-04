@@ -262,26 +262,11 @@ Cargo features:
 
 In scope — the maximal default dialect: GFM (tables, task lists, strikethrough, literal/relaxed autolinks, alerts), footnotes (incl. inline), inline + block math, frontmatter (`---` / `+++`), wikilinks (title-after-pipe default), the extra inline marks (insert `++`, highlight `==`, subscript `~`, superscript `^`, spoiler `||`, shortcodes `:tada:`), description lists, Markdown-compatible HTML containers (`details` / `summary`), and the `:name` / `::name` / `:::name` directive family.
 
-### Bounded cost on untrusted input
+Not in the default build: HTML rendering or sanitization, MDX evaluation, syntax highlighting, and byte-for-byte preservation of the source's authoring style. Directives (`:name` / `::name` / `:::name`) are their own family and are never MDX.
 
-Parsing, `to_markdown`, `to_html`, and `validate` take time linear in the input size (MDX JSX tag matching: `n log n`), and the native stack they use does not grow with how deeply the input nests: the deepest input fits a 2 MiB thread stack (the Rust default for spawned threads), in unoptimized builds too. To keep both bounds, nesting past these limits stays literal text:
+Parsing, serialization, HTML rendering, and validation take linear time and bounded stack on any input; nesting past fixed limits stays literal text.
 
-| Nesting | Limit | Past the limit |
-| --- | --- | --- |
-| Block containers: block quotes, list items, container directives, footnote definitions, HTML containers, description details | 32 levels | The markers stay leaf-block text, usually paragraph text. |
-| Inline constructs parsed as nested content: link and image labels, inline footnotes, directive labels, `++` / `==` / `~` / `^` / `\|\|` / underline spans | 32 levels | The content stays literal text. A link label first judged near the limit keeps that verdict wherever it is asked about again. |
-| `*` / `_` emphasis and strong, `~~` strikethrough, within one inline span | 16 levels | The delimiter pair stays literal text. |
-
-Within one inline span, the closer search for `++`, `==`, and underline `__` / `___` scans at most 16 bytes per byte of the span (plus 4 KiB); past that budget further openers in the span stay literal. Ordinary text never comes close to it.
-
-Non-goals:
-
-- `underline` (`__text__`) is **off** by default — it would override CommonMark strong.
-- **MDX** (JSX / expressions / ESM) is **off** by default and conflicts with raw HTML.
-- Raw HTML, HTML containers, and MDX are represented **only** as Markdown syntax nodes — no HTML rendering/sanitization, no MDX evaluation, no syntax highlighting, and no DOM post-processing in the default build.
-- The serializer performs **no** HTML safety filtering and does **not** preserve byte-for-byte authoring style from a bare AST.
-- Validation is conservative and does not prove every semantic invariant of a hand-written AST.
-- **Directives** (`:name` / `::name` / `:::name`) are a distinct family and are **never** MDX.
+The full behavior contract — syntax, serialization, validation, HTML rendering, and the cost limits — lives in [`docs/specs/`](docs/specs/).
 
 ## Compatibility
 
