@@ -3,16 +3,23 @@
 //! [`SyntaxOptions::parse_strict`] methods. Parsing is tolerant: problems are
 //! collected as [`Diagnostic`]s rather than aborting.
 
-use alloc::{borrow::Cow, string::String, vec, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, string::String, vec, vec::Vec};
 
 use crate::{
     ast::*,
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     entities::named_character_reference,
+    memo::{
+        bracket_walk, path_walk, pattern_starts, BracketMemo, BracketStep, PathMemo, PersistentMap,
+        Positions, Step,
+    },
     options::{SyntaxConfigError, SyntaxOptions},
     span::Span,
     validate::is_directive_name,
 };
+
+#[cfg(test)]
+mod scan_tests;
 
 /// The result of a tolerant parse: the document plus any diagnostics gathered
 /// along the way (empty on a clean parse).
@@ -137,7 +144,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
     options.validate()?;
     let mut diagnostics = Vec::new();
     let definitions = collect_definitions(input, options);
-    let children = parse_blocks(input, 0, true, options, &definitions, &mut diagnostics);
+    let children = parse_blocks(input, 0, true, options, &definitions, &mut diagnostics, 0);
 
     Ok(ParseOutput {
         document: Document {
@@ -148,6 +155,12 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
     })
 }
 
+/// The deepest block-container nesting (block quotes, list items, container
+/// directives, footnote definitions, HTML containers, description details) the
+/// parser opens. Deeper container markers stay leaf-block text, so recursion
+/// and the native stack it uses stay bounded.
+const MAX_BLOCK_NESTING: usize = 32;
+
 fn parse_blocks(
     input: &str,
     base_offset: usize,
@@ -155,9 +168,17 @@ fn parse_blocks(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Vec<Block> {
     let lines = collect_lines(input, base_offset);
-    parse_blocks_from_lines(&lines, allow_frontmatter, options, definitions, diagnostics)
+    parse_blocks_from_lines(
+        &lines,
+        allow_frontmatter,
+        options,
+        definitions,
+        diagnostics,
+        depth,
+    )
 }
 
 fn parse_blocks_from_lines(
@@ -166,9 +187,17 @@ fn parse_blocks_from_lines(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut index = 0;
+    // Containers open one nesting level deeper; at the limit their markers are
+    // left to the leaf blocks (mostly paragraph text).
+    let nest_containers = depth < MAX_BLOCK_NESTING;
+    // `<details>` close searches over these lines, memoized so a run of
+    // unclosed openers costs linear time.
+    let mut container_closes = BracketMemo::default();
+    let mut mdx_flow = MdxFlowScan::default();
 
     while index < lines.len() {
         let line = lines[index];
@@ -188,8 +217,11 @@ fn parse_blocks_from_lines(
             }
         }
 
-        if let Some((block, next)) =
-            parse_container_directive(lines, index, options, definitions, diagnostics)
+        if let Some((block, next)) = nest_containers
+            .then(|| {
+                parse_container_directive(lines, index, options, definitions, diagnostics, depth)
+            })
+            .flatten()
         {
             blocks.push(block);
             index = next;
@@ -208,8 +240,9 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) =
-            parse_block_quote(lines, index, options, definitions, diagnostics)
+        if let Some((block, next)) = nest_containers
+            .then(|| parse_block_quote(lines, index, options, definitions, diagnostics, depth))
+            .flatten()
         {
             blocks.push(block);
             index = next;
@@ -228,14 +261,20 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_list(lines, index, options, definitions, diagnostics) {
+        if let Some((block, next)) = nest_containers
+            .then(|| parse_list(lines, index, options, definitions, diagnostics, depth))
+            .flatten()
+        {
             blocks.push(block);
             index = next;
             continue;
         }
 
-        if let Some((block, next)) =
-            parse_footnote_definition(lines, index, options, definitions, diagnostics)
+        if let Some((block, next)) = nest_containers
+            .then(|| {
+                parse_footnote_definition(lines, index, options, definitions, diagnostics, depth)
+            })
+            .flatten()
         {
             blocks.push(block);
             index = next;
@@ -256,8 +295,19 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) =
-            parse_html_container(lines, index, options, definitions, diagnostics)
+        if let Some((block, next)) = nest_containers
+            .then(|| {
+                parse_html_container(
+                    lines,
+                    index,
+                    options,
+                    definitions,
+                    diagnostics,
+                    depth,
+                    &mut container_closes,
+                )
+            })
+            .flatten()
         {
             blocks.push(block);
             index = next;
@@ -270,7 +320,9 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_mdx_flow(lines, index, options, diagnostics) {
+        if let Some((block, next)) =
+            parse_mdx_flow(lines, index, options, diagnostics, &mut mdx_flow)
+        {
             blocks.push(block);
             index = next;
             continue;
@@ -296,8 +348,9 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) =
-            parse_description_list(lines, index, options, definitions, diagnostics)
+        if let Some((block, next)) = nest_containers
+            .then(|| parse_description_list(lines, index, options, definitions, diagnostics, depth))
+            .flatten()
         {
             blocks.push(block);
             index = next;
@@ -371,9 +424,12 @@ fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
 
 fn collect_definitions(input: &str, options: &SyntaxOptions) -> Vec<String> {
     let mut diagnostics = Vec::new();
-    let blocks = parse_blocks(input, 0, true, options, &[], &mut diagnostics);
+    let blocks = parse_blocks(input, 0, true, options, &[], &mut diagnostics, 0);
     let mut definitions = Vec::new();
     collect_definition_refs_from_blocks(&blocks, &mut definitions);
+    // Sorted and deduplicated so `definition_exists` can binary-search.
+    definitions.sort_unstable();
+    definitions.dedup();
     definitions
 }
 
@@ -381,12 +437,7 @@ fn collect_definition_refs_from_blocks(blocks: &[Block], definitions: &mut Vec<S
     for block in blocks {
         match block {
             Block::Definition(definition) => {
-                if definitions
-                    .iter()
-                    .all(|identifier| identifier != &definition.identifier)
-                {
-                    definitions.push(definition.identifier.clone());
-                }
+                definitions.push(definition.identifier.clone());
             }
             Block::BlockQuote(node) => {
                 collect_definition_refs_from_blocks(&node.children, definitions);
@@ -467,6 +518,7 @@ fn parse_container_directive(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(Block, usize)> {
     if !options.constructs.directive_container {
         return None;
@@ -516,6 +568,7 @@ fn parse_container_directive(
                     options,
                     definitions,
                     diagnostics,
+                    depth + 1,
                 );
                 return Some((
                     Block::ContainerDirective(ContainerDirective {
@@ -570,6 +623,7 @@ fn parse_container_directive(
                 options,
                 definitions,
                 diagnostics,
+                depth + 1,
             ),
         }),
         lines.len(),
@@ -819,22 +873,36 @@ fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> b
 /// Indented code, blank lines, HTML blocks, and every other block start are
 /// reported as NOT-an-open-paragraph.
 fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) -> bool {
-    let Some(trimmed) = trim_up_to_three_spaces(content) else {
-        // >= 4 columns of indentation: indented code, never a paragraph.
-        return false;
-    };
-    if trimmed.is_empty() {
-        return false;
+    // Nested `>` and list markers are peeled one per iteration. Past
+    // `MAX_BLOCK_NESTING` of them no container opens (see
+    // `parse_blocks_from_lines`), so what remains is paragraph text.
+    let mut source = Cow::Borrowed(content);
+    let mut offset = 0;
+    for _ in 0..=MAX_BLOCK_NESTING {
+        let Some(trimmed) = trim_up_to_three_spaces(&source[offset..]) else {
+            // >= 4 columns of indentation: indented code, never a paragraph.
+            return false;
+        };
+        if trimmed.is_empty() {
+            return false;
+        }
+        let rest = if let Some(rest) = trimmed.strip_prefix('>') {
+            Cow::Borrowed(rest.strip_prefix(' ').unwrap_or(rest))
+        } else if let Some(marker) = list_marker_info(trimmed) {
+            list_marker_first_content(trimmed, marker)
+        } else {
+            return !lazy_line_starts_block(trimmed, options);
+        };
+        match rest {
+            // A borrowed rest is a suffix of `source`; continue from it in place.
+            Cow::Borrowed(rest) => offset = source.len() - rest.len(),
+            Cow::Owned(rest) => {
+                source = Cow::Owned(rest);
+                offset = 0;
+            }
+        }
     }
-    if let Some(rest) = trimmed.strip_prefix('>') {
-        let rest = rest.strip_prefix(' ').unwrap_or(rest);
-        return block_quote_content_paragraph_open(rest, options);
-    }
-    if let Some(marker) = list_marker_info(trimmed) {
-        let first_content = list_marker_first_content(trimmed, marker);
-        return block_quote_content_paragraph_open(&first_content, options);
-    }
-    !lazy_line_starts_block(trimmed, options)
+    true
 }
 
 /// Whether a line starts a block for the purpose of LAZY-continuation
@@ -858,6 +926,7 @@ fn parse_block_quote(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(Block, usize)> {
     if !trim_up_to_three_spaces(lines[index].text)?.starts_with('>') {
         return None;
@@ -977,6 +1046,7 @@ fn parse_block_quote(
         options,
         definitions,
         diagnostics,
+        depth,
     ) {
         return Some((alert, cursor));
     }
@@ -985,7 +1055,14 @@ fn parse_block_quote(
     for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
         child.lazy = lazy;
     }
-    let children = parse_blocks_from_lines(&child_lines, false, options, definitions, diagnostics);
+    let children = parse_blocks_from_lines(
+        &child_lines,
+        false,
+        options,
+        definitions,
+        diagnostics,
+        depth + 1,
+    );
     Some((
         Block::BlockQuote(BlockQuote {
             meta: NodeMeta::new(Some(span)),
@@ -1002,6 +1079,7 @@ fn parse_alert_from_block_quote(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<Block> {
     if !options.constructs.gfm_alert {
         return None;
@@ -1019,6 +1097,7 @@ fn parse_alert_from_block_quote(
             options,
             definitions,
             diagnostics,
+            depth + 1,
         )
     };
     Some(Block::Alert(Alert {
@@ -1066,6 +1145,7 @@ fn parse_list(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(Block, usize)> {
     let first_marker = list_marker_info(lines[index].text)?;
     let mut items = Vec::new();
@@ -1241,8 +1321,14 @@ fn parse_list(
         for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
             child.lazy = lazy;
         }
-        let mut children =
-            parse_blocks_from_lines(&child_lines, false, options, definitions, diagnostics);
+        let mut children = parse_blocks_from_lines(
+            &child_lines,
+            false,
+            options,
+            definitions,
+            diagnostics,
+            depth + 1,
+        );
         let checked = if options.constructs.gfm_task_list_item {
             take_task_marker_from_children(&mut children)
         } else {
@@ -1355,6 +1441,7 @@ fn parse_description_list(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(Block, usize)> {
     if !options.constructs.description_list || !is_description_term_line(lines[index].text, options)
     {
@@ -1391,6 +1478,7 @@ fn parse_description_list(
                 options,
                 definitions,
                 diagnostics,
+                depth,
             )?;
             tight = tight && detail_tight;
             item_end = detail
@@ -1463,6 +1551,7 @@ fn parse_description_details(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(DescriptionDetails, usize, bool)> {
     let mut content = String::new();
     push_line(&mut content, marker.content);
@@ -1534,6 +1623,7 @@ fn parse_description_details(
                 options,
                 definitions,
                 diagnostics,
+                depth + 1,
             ),
         },
         cursor,
@@ -1837,6 +1927,7 @@ fn parse_footnote_definition(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Option<(Block, usize)> {
     if !options.constructs.footnote_definition {
         return None;
@@ -1897,6 +1988,7 @@ fn parse_footnote_definition(
                 options,
                 definitions,
                 diagnostics,
+                depth + 1,
             ),
         }),
         cursor,
@@ -1955,6 +2047,8 @@ fn parse_html_container(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+    container_closes: &mut BracketMemo,
 ) -> Option<(Block, usize)> {
     if !options.constructs.html_container {
         return None;
@@ -1962,7 +2056,9 @@ fn parse_html_container(
 
     let (opening, leading_summary) =
         parse_details_container_opening_line(lines[index], options, definitions, diagnostics)?;
-    let close_index = find_html_container_close(lines, index + 1, "details")?;
+    let close_index = container_closes.resolve(lines.len() + 1, index + 1, |cursor| {
+        html_container_close_step(lines, cursor, "details")
+    })?;
     let closing =
         parse_html_container_tag_line(lines[close_index], "details", HtmlContainerTag::Closing)?;
     let children = parse_details_container_children(
@@ -1971,6 +2067,7 @@ fn parse_html_container(
         options,
         definitions,
         diagnostics,
+        depth,
     );
 
     Some((
@@ -2009,6 +2106,7 @@ fn parse_details_container_children(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Vec<Block> {
     let mut children = Vec::new();
     if let Some(summary) = leading_summary {
@@ -2019,6 +2117,7 @@ fn parse_details_container_children(
             options,
             definitions,
             diagnostics,
+            depth + 1,
         ));
         return children;
     }
@@ -2037,11 +2136,12 @@ fn parse_details_container_children(
             options,
             definitions,
             diagnostics,
+            depth + 1,
         ));
         return children;
     }
 
-    parse_blocks_from_lines(lines, false, options, definitions, diagnostics)
+    parse_blocks_from_lines(lines, false, options, definitions, diagnostics, depth + 1)
 }
 
 fn parse_summary_container(
@@ -2158,39 +2258,26 @@ fn parse_summary_container_source(
     }))
 }
 
-fn find_html_container_close(lines: &[Line<'_>], mut cursor: usize, tag: &str) -> Option<usize> {
-    let mut depth = 1usize;
-    let mut fence = None;
-
-    while cursor < lines.len() {
-        let line = lines[cursor].text;
-        if let Some(open_fence) = fence {
-            if html_container_fence_closes(line, open_fence) {
-                fence = None;
-            }
-            cursor += 1;
-            continue;
-        }
-
-        if let Some(open_fence) = html_container_fence_opens(line) {
-            fence = Some(open_fence);
-            cursor += 1;
-            continue;
-        }
-
-        if parse_html_container_tag_line(lines[cursor], tag, HtmlContainerTag::Closing).is_some() {
-            depth -= 1;
-            if depth == 0 {
-                return Some(cursor);
-            }
-        } else if parse_html_container_opening_line(lines[cursor], tag).is_some() {
-            depth += 1;
-        }
-
-        cursor += 1;
+/// One step of the line walk to an HTML container's closing tag line: a code
+/// fence is stepped over whole, and same-name opening and closing tag lines
+/// nest.
+fn html_container_close_step(lines: &[Line<'_>], cursor: usize, tag: &str) -> BracketStep {
+    let Some(line) = lines.get(cursor) else {
+        return BracketStep::End;
+    };
+    if let Some(fence) = html_container_fence_opens(line.text) {
+        let after_fence = (cursor + 1..lines.len())
+            .find(|close| html_container_fence_closes(lines[*close].text, fence))
+            .map_or(lines.len(), |close| close + 1);
+        return BracketStep::Pass(after_fence);
     }
-
-    None
+    if parse_html_container_tag_line(*line, tag, HtmlContainerTag::Closing).is_some() {
+        return BracketStep::Close(cursor + 1);
+    }
+    if parse_html_container_opening_line(*line, tag).is_some() {
+        return BracketStep::Open(cursor + 1);
+    }
+    BracketStep::Pass(cursor + 1)
 }
 
 fn parse_html_container_tag_line(
@@ -2603,6 +2690,7 @@ fn parse_mdx_flow(
     index: usize,
     options: &SyntaxOptions,
     diagnostics: &mut Vec<Diagnostic>,
+    flow: &mut MdxFlowScan,
 ) -> Option<(Block, usize)> {
     if options.constructs.mdx_esm {
         if let Some((block, next)) = parse_mdx_esm_flow(lines, index, diagnostics) {
@@ -2614,7 +2702,7 @@ fn parse_mdx_flow(
     let trimmed = line.text.trim_start();
     if options.constructs.mdx_expression_block && trimmed.starts_with('{') {
         let open_byte = line.text.len() - trimmed.len();
-        if let Some((close_line, close_byte)) = find_mdx_expression_close(lines, index, open_byte) {
+        if let Some((close_line, close_byte)) = flow.expression_close(lines, index, open_byte) {
             return Some((
                 Block::MdxExpression(MdxExpression {
                     meta: NodeMeta::new(Some(Span::new(line.start, lines[close_line].end))),
@@ -2633,7 +2721,8 @@ fn parse_mdx_flow(
         ));
     }
     if options.constructs.mdx_jsx_block && trimmed.starts_with('<') {
-        if let Some(close_line) = find_mdx_jsx_close(lines, index) {
+        let start_byte = line.text.len() - trimmed.len();
+        if let Some(close_line) = flow.jsx_close_line(lines, index, start_byte) {
             return Some((
                 Block::MdxJsx(MdxJsx {
                     meta: NodeMeta::new(Some(Span::new(line.start, lines[close_line].end))),
@@ -2642,12 +2731,9 @@ fn parse_mdx_flow(
                 close_line + 1,
             ));
         }
-        let start_byte = line.text.len() - trimmed.len();
         if let Some(root) = mdx_jsx_tag_start(line.text, start_byte) {
             if !root.closing {
-                if let Some((_tag_end_line, _tag_end_byte, self_closing)) =
-                    find_mdx_jsx_tag_end(lines, index, start_byte)
-                {
+                if let Some(self_closing) = flow.jsx_tag_self_closing(lines, index, start_byte) {
                     if !self_closing {
                         diagnostics.push(Diagnostic::new(
                             DiagnosticSeverity::Error,
@@ -2671,16 +2757,6 @@ struct MdxEsmState {
     block_comment: bool,
     quote: Option<u8>,
     escaped: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum MdxBraceState {
-    Normal,
-    SingleQuoted,
-    DoubleQuoted,
-    Template,
-    LineComment,
-    BlockComment,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2804,147 +2880,77 @@ fn update_mdx_esm_state(line: &str, state: &mut MdxEsmState) {
         index += 1;
     }
 }
+/// Lexical states of the walk to an inline MDX expression's closing `}`.
+const MDX_BRACE_STATES: usize = 6;
+const MDX_NORMAL: usize = 0;
+const MDX_SINGLE_QUOTED: usize = 1;
+const MDX_DOUBLE_QUOTED: usize = 2;
+const MDX_TEMPLATE: usize = 3;
+const MDX_LINE_COMMENT: usize = 4;
+const MDX_BLOCK_COMMENT: usize = 5;
 
-fn find_mdx_expression_close(
-    lines: &[Line<'_>],
-    index: usize,
-    open_byte: usize,
-) -> Option<(usize, usize)> {
-    let mut depth = 0usize;
-    let mut state = MdxBraceState::Normal;
-    let mut escaped = false;
-    let mut cursor = index;
-
-    while cursor < lines.len() {
-        let bytes = lines[cursor].text.as_bytes();
-        let mut byte_index = if cursor == index { open_byte } else { 0 };
-        while byte_index < bytes.len() {
-            let byte = bytes[byte_index];
-            match state {
-                MdxBraceState::Normal => match byte {
-                    b'\'' => state = MdxBraceState::SingleQuoted,
-                    b'"' => state = MdxBraceState::DoubleQuoted,
-                    b'`' => state = MdxBraceState::Template,
-                    b'/' if bytes.get(byte_index + 1) == Some(&b'/') => {
-                        state = MdxBraceState::LineComment;
-                        break;
-                    }
-                    b'/' if bytes.get(byte_index + 1) == Some(&b'*') => {
-                        state = MdxBraceState::BlockComment;
-                        byte_index += 1;
-                    }
-                    b'{' => depth += 1,
-                    b'}' => {
-                        depth = depth.checked_sub(1)?;
-                        if depth == 0 {
-                            return lines[cursor].text[byte_index + 1..]
-                                .trim()
-                                .is_empty()
-                                .then_some((cursor, byte_index));
-                        }
-                    }
-                    _ => {}
-                },
-                MdxBraceState::SingleQuoted => {
-                    update_mdx_quote_state(byte, b'\'', &mut state, &mut escaped);
-                }
-                MdxBraceState::DoubleQuoted => {
-                    update_mdx_quote_state(byte, b'"', &mut state, &mut escaped);
-                }
-                MdxBraceState::Template => {
-                    update_mdx_quote_state(byte, b'`', &mut state, &mut escaped);
-                }
-                MdxBraceState::LineComment => break,
-                MdxBraceState::BlockComment => {
-                    if byte == b'*' && bytes.get(byte_index + 1) == Some(&b'/') {
-                        state = MdxBraceState::Normal;
-                        byte_index += 1;
-                    }
-                }
-            }
-            byte_index += 1;
+/// One step of the walk to an inline MDX expression's closing `}`, over nodes
+/// `byte position * MDX_BRACE_STATES + lexical state`: braces nest outside
+/// strings and comments, and `\` escapes the next byte inside strings.
+/// The position after the byte a `\` at `escape` escapes. In block lines joined
+/// by `\n` (`lines_joined`), a `\` ending a line escapes the first byte of the
+/// next non-empty line, as the line-by-line scan it stands for does, rather
+/// than the line break.
+fn after_escaped_byte(text: &str, escape: usize, lines_joined: bool) -> usize {
+    let mut escaped = escape + 1;
+    if lines_joined {
+        while text.as_bytes().get(escaped) == Some(&b'\n') {
+            escaped += 1;
         }
-        if state == MdxBraceState::LineComment {
-            state = MdxBraceState::Normal;
-        }
-        cursor += 1;
     }
-
-    None
+    (escaped + 1).min(text.len())
 }
 
-fn update_mdx_quote_state(byte: u8, delimiter: u8, state: &mut MdxBraceState, escaped: &mut bool) {
-    if *escaped {
-        *escaped = false;
-        return;
-    }
-    if byte == b'\\' {
-        *escaped = true;
-        return;
-    }
-    if byte == delimiter {
-        *state = MdxBraceState::Normal;
-    }
-}
-
-fn find_mdx_expression_inline_close(input: &str, open_byte: usize) -> Option<usize> {
+fn mdx_expression_step(input: &str, node: usize, lines_joined: bool) -> BracketStep {
     let bytes = input.as_bytes();
-    if bytes.get(open_byte) != Some(&b'{') {
-        return None;
-    }
-
-    let mut depth = 0usize;
-    let mut state = MdxBraceState::Normal;
-    let mut escaped = false;
-    let mut cursor = open_byte;
-    while cursor < bytes.len() {
-        let byte = bytes[cursor];
-        match state {
-            MdxBraceState::Normal => match byte {
-                b'\'' => state = MdxBraceState::SingleQuoted,
-                b'"' => state = MdxBraceState::DoubleQuoted,
-                b'`' => state = MdxBraceState::Template,
-                b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
-                    state = MdxBraceState::LineComment;
-                    cursor += 1;
-                }
-                b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
-                    state = MdxBraceState::BlockComment;
-                    cursor += 1;
-                }
-                b'{' => depth += 1,
-                b'}' => {
-                    depth = depth.checked_sub(1)?;
-                    if depth == 0 {
-                        return Some(cursor);
-                    }
-                }
-                _ => {}
+    let (cursor, state) = (node / MDX_BRACE_STATES, node % MDX_BRACE_STATES);
+    let at = |position: usize, state: usize| position.min(bytes.len()) * MDX_BRACE_STATES + state;
+    let Some(&byte) = bytes.get(cursor) else {
+        return BracketStep::End;
+    };
+    let following = bytes.get(cursor + 1).copied();
+    match state {
+        MDX_NORMAL => match byte {
+            b'\'' => BracketStep::Pass(at(cursor + 1, MDX_SINGLE_QUOTED)),
+            b'"' => BracketStep::Pass(at(cursor + 1, MDX_DOUBLE_QUOTED)),
+            b'`' => BracketStep::Pass(at(cursor + 1, MDX_TEMPLATE)),
+            b'/' if following == Some(b'/') => BracketStep::Pass(at(cursor + 2, MDX_LINE_COMMENT)),
+            b'/' if following == Some(b'*') => BracketStep::Pass(at(cursor + 2, MDX_BLOCK_COMMENT)),
+            b'{' => BracketStep::Open(at(cursor + 1, MDX_NORMAL)),
+            b'}' => BracketStep::Close(at(cursor + 1, MDX_NORMAL)),
+            _ => BracketStep::Pass(at(cursor + 1, MDX_NORMAL)),
+        },
+        MDX_LINE_COMMENT => BracketStep::Pass(at(
+            cursor + 1,
+            if byte == b'\n' {
+                MDX_NORMAL
+            } else {
+                MDX_LINE_COMMENT
             },
-            MdxBraceState::SingleQuoted => {
-                update_mdx_quote_state(byte, b'\'', &mut state, &mut escaped);
-            }
-            MdxBraceState::DoubleQuoted => {
-                update_mdx_quote_state(byte, b'"', &mut state, &mut escaped);
-            }
-            MdxBraceState::Template => {
-                update_mdx_quote_state(byte, b'`', &mut state, &mut escaped);
-            }
-            MdxBraceState::LineComment => {
-                if byte == b'\n' {
-                    state = MdxBraceState::Normal;
-                }
-            }
-            MdxBraceState::BlockComment => {
-                if byte == b'*' && bytes.get(cursor + 1) == Some(&b'/') {
-                    state = MdxBraceState::Normal;
-                    cursor += 1;
-                }
+        )),
+        MDX_BLOCK_COMMENT => {
+            if byte == b'*' && following == Some(b'/') {
+                BracketStep::Pass(at(cursor + 2, MDX_NORMAL))
+            } else {
+                BracketStep::Pass(at(cursor + 1, MDX_BLOCK_COMMENT))
             }
         }
-        cursor += 1;
+        quoted => {
+            let delimiter = [b'\'', b'"', b'`'][quoted - MDX_SINGLE_QUOTED];
+            if byte == b'\\' {
+                BracketStep::Pass(at(after_escaped_byte(input, cursor, lines_joined), quoted))
+            } else if byte == delimiter {
+                BracketStep::Pass(at(cursor + 1, MDX_NORMAL))
+            } else {
+                BracketStep::Pass(at(cursor + 1, quoted))
+            }
+        }
     }
-    None
 }
 
 fn collect_mdx_expression_value(
@@ -2974,108 +2980,6 @@ fn collect_mdx_expression_value(
         cursor += 1;
     }
     value
-}
-
-fn find_mdx_jsx_close<'a>(lines: &'a [Line<'a>], index: usize) -> Option<usize> {
-    let line = lines[index];
-    let trimmed = line.text.trim_start();
-    let start_byte = line.text.len() - trimmed.len();
-    let root = mdx_jsx_tag_start(line.text, start_byte)?;
-    if root.closing {
-        return None;
-    }
-
-    let (mut cursor_line, mut cursor_byte, self_closing) =
-        find_mdx_jsx_tag_end(lines, index, start_byte)?;
-    if self_closing {
-        return Some(cursor_line);
-    }
-
-    let mut depth = 1usize;
-    cursor_byte += 1;
-    'scan: while cursor_line < lines.len() {
-        let line = lines[cursor_line].text;
-        while cursor_byte < line.len() {
-            let Some(relative_start) = line[cursor_byte..].find('<') else {
-                break;
-            };
-            let tag_start_byte = cursor_byte + relative_start;
-            let Some(candidate) = mdx_jsx_tag_start(line, tag_start_byte) else {
-                cursor_byte = tag_start_byte + 1;
-                continue;
-            };
-            let Some((tag_end_line, tag_end_byte, candidate_self_closing)) =
-                find_mdx_jsx_tag_end(lines, cursor_line, tag_start_byte)
-            else {
-                return None;
-            };
-
-            if mdx_jsx_tag_matches(root.tag, candidate.tag) {
-                if candidate.closing {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        return Some(tag_end_line);
-                    }
-                } else if !candidate_self_closing {
-                    depth += 1;
-                }
-            }
-
-            cursor_byte = tag_end_byte + 1;
-            if tag_end_line != cursor_line {
-                cursor_line = tag_end_line;
-                continue 'scan;
-            }
-        }
-        cursor_line += 1;
-        cursor_byte = 0;
-    }
-    None
-}
-
-fn parse_mdx_jsx_inline(input: &str, index: usize) -> Option<(usize, String)> {
-    let root = mdx_jsx_tag_start(input, index)?;
-    if root.closing {
-        return None;
-    }
-
-    let (mut cursor, self_closing) = find_mdx_jsx_tag_end_in_text(input, index)?;
-    if self_closing {
-        let end = cursor + 1;
-        return Some((end, input[index..end].into()));
-    }
-
-    let mut depth = 1usize;
-    cursor += 1;
-    while cursor < input.len() {
-        let Some(relative_start) = input[cursor..].find('<') else {
-            return None;
-        };
-        let tag_start_byte = cursor + relative_start;
-        let Some(candidate) = mdx_jsx_tag_start(input, tag_start_byte) else {
-            cursor = tag_start_byte + 1;
-            continue;
-        };
-        let Some((tag_end, candidate_self_closing)) =
-            find_mdx_jsx_tag_end_in_text(input, tag_start_byte)
-        else {
-            return None;
-        };
-
-        if mdx_jsx_tag_matches(root.tag, candidate.tag) {
-            if candidate.closing {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let end = tag_end + 1;
-                    return Some((end, input[index..end].into()));
-                }
-            } else if !candidate_self_closing {
-                depth += 1;
-            }
-        }
-        cursor = tag_end + 1;
-    }
-    None
 }
 
 fn mdx_jsx_tag_start(input: &str, start: usize) -> Option<MdxJsxTagStart<'_>> {
@@ -3132,162 +3036,6 @@ fn mdx_jsx_tag_start(input: &str, start: usize) -> Option<MdxJsxTagStart<'_>> {
     })
 }
 
-fn mdx_jsx_tag_matches(left: MdxJsxTag<'_>, right: MdxJsxTag<'_>) -> bool {
-    match (left, right) {
-        (MdxJsxTag::Fragment, MdxJsxTag::Fragment) => true,
-        (MdxJsxTag::Named(left), MdxJsxTag::Named(right)) => left == right,
-        _ => false,
-    }
-}
-
-fn find_mdx_jsx_tag_end(
-    lines: &[Line<'_>],
-    start_line: usize,
-    start_byte: usize,
-) -> Option<(usize, usize, bool)> {
-    let mut line_index = start_line;
-    let mut byte_index = start_byte + 1;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut expression_depth = 0usize;
-    let mut expression_state = MdxBraceState::Normal;
-    let mut expression_escaped = false;
-
-    while line_index < lines.len() {
-        let bytes = lines[line_index].text.as_bytes();
-        while byte_index < bytes.len() {
-            let byte = bytes[byte_index];
-            if expression_depth > 0 {
-                if update_mdx_jsx_expression_state(
-                    byte,
-                    bytes.get(byte_index + 1).copied(),
-                    &mut expression_depth,
-                    &mut expression_state,
-                    &mut expression_escaped,
-                ) {
-                    byte_index += 1;
-                }
-                byte_index += 1;
-                continue;
-            }
-
-            if let Some(delimiter) = quote {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == delimiter {
-                    quote = None;
-                }
-                byte_index += 1;
-                continue;
-            }
-
-            match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'{' => {
-                    expression_depth = 1;
-                    expression_state = MdxBraceState::Normal;
-                    expression_escaped = false;
-                }
-                b'>' if expression_depth == 0 => {
-                    let self_closing =
-                        previous_nonspace_before(lines, line_index, byte_index) == Some(b'/');
-                    return Some((line_index, byte_index, self_closing));
-                }
-                _ => {}
-            }
-            byte_index += 1;
-        }
-        if expression_state == MdxBraceState::LineComment {
-            expression_state = MdxBraceState::Normal;
-        }
-        line_index += 1;
-        byte_index = 0;
-    }
-    None
-}
-
-fn previous_nonspace_before(
-    lines: &[Line<'_>],
-    line_index: usize,
-    byte_index: usize,
-) -> Option<u8> {
-    let mut cursor_line = line_index;
-    let mut cursor_byte = byte_index;
-
-    loop {
-        if let Some(byte) = lines[cursor_line].text.as_bytes()[..cursor_byte]
-            .iter()
-            .rev()
-            .copied()
-            .find(|byte| !byte.is_ascii_whitespace())
-        {
-            return Some(byte);
-        }
-        if cursor_line == 0 {
-            return None;
-        }
-        cursor_line -= 1;
-        cursor_byte = lines[cursor_line].text.len();
-    }
-}
-
-fn find_mdx_jsx_tag_end_in_text(input: &str, start_byte: usize) -> Option<(usize, bool)> {
-    let bytes = input.as_bytes();
-    let mut byte_index = start_byte + 1;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut expression_depth = 0usize;
-    let mut expression_state = MdxBraceState::Normal;
-    let mut expression_escaped = false;
-
-    while byte_index < bytes.len() {
-        let byte = bytes[byte_index];
-        if expression_depth > 0 {
-            if update_mdx_jsx_expression_state(
-                byte,
-                bytes.get(byte_index + 1).copied(),
-                &mut expression_depth,
-                &mut expression_state,
-                &mut expression_escaped,
-            ) {
-                byte_index += 1;
-            }
-            byte_index += 1;
-            continue;
-        }
-
-        if let Some(delimiter) = quote {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == delimiter {
-                quote = None;
-            }
-            byte_index += 1;
-            continue;
-        }
-
-        match byte {
-            b'\'' | b'"' => quote = Some(byte),
-            b'{' => {
-                expression_depth = 1;
-                expression_state = MdxBraceState::Normal;
-                expression_escaped = false;
-            }
-            b'>' if expression_depth == 0 => {
-                let self_closing = previous_nonspace_before_text(input, byte_index) == Some(b'/');
-                return Some((byte_index, self_closing));
-            }
-            _ => {}
-        }
-        byte_index += 1;
-    }
-    None
-}
-
 fn previous_nonspace_before_text(input: &str, byte_index: usize) -> Option<u8> {
     input.as_bytes()[..byte_index]
         .iter()
@@ -3296,58 +3044,292 @@ fn previous_nonspace_before_text(input: &str, byte_index: usize) -> Option<u8> {
         .find(|byte| !byte.is_ascii_whitespace())
 }
 
-fn update_mdx_jsx_expression_state(
-    byte: u8,
-    next: Option<u8>,
-    depth: &mut usize,
-    state: &mut MdxBraceState,
-    escaped: &mut bool,
-) -> bool {
-    match *state {
-        MdxBraceState::Normal => match byte {
-            b'\'' => *state = MdxBraceState::SingleQuoted,
-            b'"' => *state = MdxBraceState::DoubleQuoted,
-            b'`' => *state = MdxBraceState::Template,
-            b'/' if next == Some(b'/') => {
-                *state = MdxBraceState::LineComment;
-                return true;
-            }
-            b'/' if next == Some(b'*') => {
-                *state = MdxBraceState::BlockComment;
-                return true;
-            }
-            b'{' => *depth += 1,
-            b'}' => {
-                *depth = (*depth).saturating_sub(1);
-                if *depth == 0 {
-                    *state = MdxBraceState::Normal;
-                    *escaped = false;
+/// Quote states of the walk to an MDX JSX tag's closing `>`: outside quotes,
+/// inside `'…'`, inside `"…"`.
+const JSX_TAG_QUOTE_STATES: usize = 3;
+
+/// One step of the walk to an MDX JSX tag's closing `>`, over nodes
+/// `byte position * JSX_TAG_QUOTE_STATES + quote state`: quoted attribute
+/// values and `{…}` expressions (stepped over whole via `expression_close`)
+/// cannot close the tag.
+fn jsx_tag_end_step(
+    text: &str,
+    node: usize,
+    lines_joined: bool,
+    expression_close: &mut impl FnMut(usize) -> Option<usize>,
+) -> Step {
+    let (cursor, quote) = (node / JSX_TAG_QUOTE_STATES, node % JSX_TAG_QUOTE_STATES);
+    let at = |position: usize, quote: usize| Step::Next(position * JSX_TAG_QUOTE_STATES + quote);
+    let Some(&byte) = text.as_bytes().get(cursor) else {
+        return Step::Done(None);
+    };
+    if quote != 0 {
+        let delimiter = if quote == 1 { b'\'' } else { b'"' };
+        return if byte == b'\\' {
+            at(after_escaped_byte(text, cursor, lines_joined), quote)
+        } else if byte == delimiter {
+            at(cursor + 1, 0)
+        } else {
+            at(cursor + 1, quote)
+        };
+    }
+    match byte {
+        b'\'' => at(cursor + 1, 1),
+        b'"' => at(cursor + 1, 2),
+        b'{' => match expression_close(cursor) {
+            Some(close) => at(close + 1, 0),
+            None => Step::Done(None),
+        },
+        b'>' => Step::Done(Some(cursor)),
+        _ => at(cursor + 1, 0),
+    }
+}
+
+/// Closing-tag lookups for MDX JSX over one text. A tag's closing tag is found
+/// by walking from tag to tag (each stepped over whole, to its `>`) and
+/// counting only tags with its name. Every tag is indexed once: where it ends,
+/// and the next tag with its name along the walk after it, read from
+/// persistent per-name maps built from the last tag back. Matching then walks
+/// only same-name tags, memoized, so all closing-tag questions about one text
+/// cost `O(n log n)` together.
+struct JsxIndex {
+    starts: Vec<usize>,
+    closing: Vec<bool>,
+    ends: Vec<Option<usize>>,
+    self_closing: Vec<bool>,
+    /// Per tag, the index of the next tag with its name along the walk after
+    /// it, or `starts.len()` when the walk ends (or reaches a tag without an
+    /// end) first.
+    next_same_name: Vec<usize>,
+    matches: BracketMemo,
+}
+
+impl JsxIndex {
+    fn new(text: &str, lines_joined: bool, expressions: &mut BracketMemo) -> Self {
+        let bytes = text.as_bytes();
+        let mut starts = Vec::new();
+        let mut closing = Vec::new();
+        let mut names = Vec::new();
+        for (position, byte) in bytes.iter().enumerate() {
+            if *byte == b'<' {
+                if let Some(tag) = mdx_jsx_tag_start(text, position) {
+                    starts.push(position);
+                    closing.push(tag.closing);
+                    names.push(match tag.tag {
+                        MdxJsxTag::Fragment => None,
+                        MdxJsxTag::Named(name) => Some(name),
+                    });
                 }
             }
-            _ => {}
-        },
-        MdxBraceState::SingleQuoted => {
-            update_mdx_quote_state(byte, b'\'', state, escaped);
         }
-        MdxBraceState::DoubleQuoted => {
-            update_mdx_quote_state(byte, b'"', state, escaped);
+
+        let mut tag_ends = PathMemo::default();
+        let mut self_closing_by_end = BTreeMap::new();
+        let mut ends = Vec::with_capacity(starts.len());
+        let mut self_closing = Vec::with_capacity(starts.len());
+        for &start in &starts {
+            let end = tag_ends.resolve(
+                (text.len() + 1) * JSX_TAG_QUOTE_STATES,
+                (start + 1) * JSX_TAG_QUOTE_STATES,
+                |node| {
+                    jsx_tag_end_step(text, node, lines_joined, &mut |open| {
+                        expressions
+                            .resolve(
+                                (text.len() + 1) * MDX_BRACE_STATES,
+                                (open + 1) * MDX_BRACE_STATES,
+                                |node| mdx_expression_step(text, node, lines_joined),
+                            )
+                            .map(|node| node / MDX_BRACE_STATES)
+                    })
+                },
+            );
+            ends.push(end);
+            self_closing.push(end.is_some_and(|end| {
+                *self_closing_by_end
+                    .entry(end)
+                    .or_insert_with(|| previous_nonspace_before_text(text, end) == Some(b'/'))
+            }));
         }
-        MdxBraceState::Template => {
-            update_mdx_quote_state(byte, b'`', state, escaped);
+
+        let mut name_ids = BTreeMap::new();
+        for name in &names {
+            let next_id = name_ids.len();
+            name_ids.entry(*name).or_insert(next_id);
         }
-        MdxBraceState::LineComment => {
-            if byte == b'\n' {
-                *state = MdxBraceState::Normal;
-            }
+        let count = starts.len();
+        let mut maps = PersistentMap::new(name_ids.len());
+        let mut versions = alloc::vec![PersistentMap::EMPTY; count];
+        let mut next_same_name = alloc::vec![count; count];
+        for tag in (0..count).rev() {
+            // A tag without an end stops every walk that reaches it.
+            let Some(end) = ends[tag] else {
+                continue;
+            };
+            let after = starts.partition_point(|start| *start <= end);
+            let rest = versions.get(after).copied().unwrap_or(PersistentMap::EMPTY);
+            let name = name_ids[&names[tag]];
+            next_same_name[tag] = maps.get(rest, name).unwrap_or(count);
+            versions[tag] = maps.insert(rest, name, tag);
         }
-        MdxBraceState::BlockComment => {
-            if byte == b'*' && next == Some(b'/') {
-                *state = MdxBraceState::Normal;
-                return true;
-            }
+
+        Self {
+            starts,
+            closing,
+            ends,
+            self_closing,
+            next_same_name,
+            matches: BracketMemo::default(),
         }
     }
-    false
+
+    /// The `>` ending the element whose opening tag starts at `start`: its own
+    /// `>` when self-closing, else the `>` of its matching closing tag.
+    fn element_end(&mut self, start: usize) -> Option<usize> {
+        let tag = self.starts.binary_search(&start).ok()?;
+        if self.closing[tag] {
+            return None;
+        }
+        let end = self.ends[tag]?;
+        if self.self_closing[tag] {
+            return Some(end);
+        }
+        let count = self.starts.len();
+        let (closing, self_closing, next) =
+            (&self.closing, &self.self_closing, &self.next_same_name);
+        let close = self.matches.resolve(count + 1, next[tag], |tag| {
+            if tag == count {
+                BracketStep::End
+            } else if closing[tag] {
+                BracketStep::Close(next[tag])
+            } else if self_closing[tag] {
+                BracketStep::Pass(next[tag])
+            } else {
+                BracketStep::Open(next[tag])
+            }
+        })?;
+        self.ends[close]
+    }
+
+    /// The `>` ending the tag that starts at `start`, and whether the tag is
+    /// self-closing.
+    fn tag_end(&self, start: usize) -> Option<(usize, bool)> {
+        let tag = self.starts.binary_search(&start).ok()?;
+        Some((self.ends[tag]?, self.self_closing[tag]))
+    }
+}
+
+/// MDX flow lookups over one run of block lines, joined by `\n` into one text
+/// on first use so JSX and expression closes are found by the same memoized
+/// walks as inline ones.
+#[derive(Default)]
+struct MdxFlowScan {
+    joined: Option<JoinedLines>,
+}
+
+struct JoinedLines {
+    text: String,
+    line_starts: Vec<usize>,
+    expressions: BracketMemo,
+    jsx: Option<JsxIndex>,
+}
+
+impl JoinedLines {
+    fn new(lines: &[Line<'_>]) -> Self {
+        let mut text = String::new();
+        let mut line_starts = Vec::with_capacity(lines.len());
+        for (index, line) in lines.iter().enumerate() {
+            if index > 0 {
+                text.push('\n');
+            }
+            line_starts.push(text.len());
+            text.push_str(line.text);
+        }
+        Self {
+            text,
+            line_starts,
+            expressions: BracketMemo::default(),
+            jsx: None,
+        }
+    }
+
+    /// The line holding byte `position`, and the byte's offset in that line.
+    fn locate(&self, position: usize) -> (usize, usize) {
+        let line = self.line_starts.partition_point(|start| *start <= position) - 1;
+        (line, position - self.line_starts[line])
+    }
+
+    fn jsx(&mut self) -> &mut JsxIndex {
+        let Self {
+            text,
+            expressions,
+            jsx,
+            ..
+        } = self;
+        jsx.get_or_insert_with(|| JsxIndex::new(text, true, expressions))
+    }
+}
+
+impl MdxFlowScan {
+    fn joined(&mut self, lines: &[Line<'_>]) -> &mut JoinedLines {
+        self.joined.get_or_insert_with(|| JoinedLines::new(lines))
+    }
+
+    /// The line and byte of the `}` closing the expression block opening at
+    /// `open_byte` of line `index`, when nothing but whitespace follows it on
+    /// its line.
+    fn expression_close(
+        &mut self,
+        lines: &[Line<'_>],
+        index: usize,
+        open_byte: usize,
+    ) -> Option<(usize, usize)> {
+        let joined = self.joined(lines);
+        let open = joined.line_starts[index] + open_byte;
+        let text = &joined.text;
+        let start = (open + 1) * MDX_BRACE_STATES;
+        let close =
+            joined
+                .expressions
+                .resolve((text.len() + 1) * MDX_BRACE_STATES, start, |node| {
+                    mdx_expression_step(text, node, true)
+                })?
+                / MDX_BRACE_STATES;
+        let (line, byte) = joined.locate(close);
+        lines[line].text[byte + 1..]
+            .trim()
+            .is_empty()
+            .then_some((line, byte))
+    }
+
+    /// The last line of the JSX element block opening at `start_byte` of line
+    /// `index`.
+    fn jsx_close_line(
+        &mut self,
+        lines: &[Line<'_>],
+        index: usize,
+        start_byte: usize,
+    ) -> Option<usize> {
+        let joined = self.joined(lines);
+        let start = joined.line_starts[index] + start_byte;
+        let end = joined.jsx().element_end(start)?;
+        Some(joined.locate(end).0)
+    }
+
+    /// Whether the JSX tag opening at `start_byte` of line `index` ends, and if
+    /// so whether it is self-closing.
+    fn jsx_tag_self_closing(
+        &mut self,
+        lines: &[Line<'_>],
+        index: usize,
+        start_byte: usize,
+    ) -> Option<bool> {
+        let joined = self.joined(lines);
+        let start = joined.line_starts[index] + start_byte;
+        joined
+            .jsx()
+            .tag_end(start)
+            .map(|(_, self_closing)| self_closing)
+    }
 }
 
 fn is_mdx_jsx_name_start_byte(byte: u8) -> bool {
@@ -3673,8 +3655,138 @@ struct DelimMarker {
     can_close: bool,
     /// Absolute byte offset of the run's first remaining delimiter character.
     span_start: usize,
-    /// `true` once this run is consumed (fully matched) or demoted to plain text.
-    inactive: bool,
+}
+
+/// End-of-list marker for the index-linked lists used by `process_emphasis`.
+const NIL: usize = usize::MAX;
+
+/// The deepest `Emphasis`/`Strong`/`Delete` nesting one inline pass builds. A
+/// delimiter pair that would nest deeper stays literal text, which bounds the
+/// tree depth that recursive consumers (text merging, serialization, `Drop`)
+/// walk.
+const MAX_EMPHASIS_NESTING: usize = 16;
+
+/// The delimiter stack `process_emphasis` works on: live runs form a doubly
+/// linked list in source order, and each live run records the deepest emphasis
+/// nesting among the nodes between it and the next live run.
+struct DelimiterLinks {
+    prev: Vec<usize>,
+    next: Vec<usize>,
+    nesting_after: Vec<usize>,
+}
+
+impl DelimiterLinks {
+    fn new(count: usize) -> Self {
+        Self {
+            prev: (0..count).map(|index| index.wrapping_sub(1)).collect(),
+            next: (1..=count)
+                .map(|index| if index < count { index } else { NIL })
+                .collect(),
+            nesting_after: alloc::vec![0; count],
+        }
+    }
+
+    /// Unlinks `index`; the nodes after it now follow the previous live run.
+    fn unlink(&mut self, index: usize) {
+        let (before, after) = (self.prev[index], self.next[index]);
+        if before != NIL {
+            self.next[before] = after;
+            self.nesting_after[before] = self.nesting_after[before].max(self.nesting_after[index]);
+        }
+        if after != NIL {
+            self.prev[after] = before;
+        }
+    }
+
+    /// Unlinks every run strictly between `opener` and `closer` and returns the
+    /// deepest nesting among the nodes between them.
+    fn close_span(&mut self, opener: usize, closer: usize) -> usize {
+        let mut nesting = self.nesting_after[opener];
+        let mut inner = self.next[opener];
+        while inner != closer {
+            nesting = nesting.max(self.nesting_after[inner]);
+            inner = self.next[inner];
+        }
+        self.next[opener] = closer;
+        self.prev[closer] = opener;
+        nesting
+    }
+}
+
+/// The flat inline list `process_emphasis` rewrites, held as a doubly linked
+/// list over stable slots. Wrapping a matched span and dropping a consumed
+/// delimiter run cost time proportional to the wrapped nodes rather than to the
+/// whole list, and delimiter `node_index` values never need re-indexing.
+struct InlineList {
+    slots: Vec<Option<Inline>>,
+    prev: Vec<usize>,
+    next: Vec<usize>,
+    head: usize,
+}
+
+impl InlineList {
+    fn new(nodes: Vec<Inline>) -> Self {
+        let count = nodes.len();
+        Self {
+            slots: nodes.into_iter().map(Some).collect(),
+            prev: (0..count).map(|slot| slot.wrapping_sub(1)).collect(),
+            next: (1..=count)
+                .map(|slot| if slot < count { slot } else { NIL })
+                .collect(),
+            head: if count == 0 { NIL } else { 0 },
+        }
+    }
+
+    fn node_mut(&mut self, slot: usize) -> &mut Inline {
+        self.slots[slot]
+            .as_mut()
+            .expect("delimiter placeholder slot is live")
+    }
+
+    /// Replaces every node strictly between `before` and `after` with the node
+    /// `wrap` builds from them (in order).
+    fn wrap_between(
+        &mut self,
+        before: usize,
+        after: usize,
+        wrap: impl FnOnce(Vec<Inline>) -> Inline,
+    ) {
+        let mut children = Vec::new();
+        let mut cursor = self.next[before];
+        while cursor != after {
+            children.push(self.slots[cursor].take().expect("linked slot is live"));
+            cursor = self.next[cursor];
+        }
+        let slot = self.slots.len();
+        self.slots.push(Some(wrap(children)));
+        self.prev.push(before);
+        self.next.push(after);
+        self.next[before] = slot;
+        self.prev[after] = slot;
+    }
+
+    fn remove(&mut self, slot: usize) {
+        let (prev, next) = (self.prev[slot], self.next[slot]);
+        if prev == NIL {
+            self.head = next;
+        } else {
+            self.next[prev] = next;
+        }
+        if next != NIL {
+            self.prev[next] = prev;
+        }
+        self.slots[slot] = None;
+    }
+
+    fn into_vec(mut self) -> Vec<Inline> {
+        let mut nodes = Vec::new();
+        let mut cursor = self.head;
+        while cursor != NIL {
+            nodes.push(self.slots[cursor].take().expect("linked slot is live"));
+            cursor = self.next[cursor];
+        }
+        nodes
+    }
 }
 
 /// Records a `*`/`_`/`~` delimiter run as a literal text node plus a stack
@@ -3744,16 +3856,21 @@ fn record_emphasis_delimiter(
         can_open,
         can_close,
         span_start: base_offset + index,
-        inactive: false,
     });
 }
 
 /// Resolves recorded `*`/`_` delimiter runs into `Emphasis`/`Strong` nodes using
 /// the CommonMark delimiter-stack algorithm, leaving unmatched runs as text.
-fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) -> Vec<Inline> {
+fn process_emphasis(nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) -> Vec<Inline> {
     if delimiters.is_empty() {
         return nodes;
     }
+    let mut nodes = InlineList::new(nodes);
+
+    // A run that is consumed, demoted to plain text, or enclosed by a newly
+    // closed span is unlinked, so the opener walk below only ever visits live
+    // runs.
+    let mut links = DelimiterLinks::new(delimiters.len());
 
     // `openers_bottom` records, per (marker, opener-can-also-close, length % 3),
     // the lowest opener index a closer is allowed to reach. Closers below this
@@ -3762,9 +3879,11 @@ fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) ->
     let mut openers_bottom: [Option<usize>; 18] = [None; 18];
     let mut closer_idx = 0;
 
+    // Every run at or after `closer_idx` is still linked: runs are only ever
+    // unlinked at or before the current closer.
     while closer_idx < delimiters.len() {
         let closer = delimiters[closer_idx];
-        if closer.inactive || !closer.can_close {
+        if !closer.can_close {
             closer_idx += 1;
             continue;
         }
@@ -3774,22 +3893,20 @@ fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) ->
 
         // Walk back to the nearest compatible opener above the recorded bound.
         let mut opener_idx = None;
-        let mut search = closer_idx;
-        while search > 0 {
-            search -= 1;
-            if let Some(bottom) = bottom {
-                if search < bottom {
-                    break;
-                }
+        let mut search = links.prev[closer_idx];
+        while search != NIL {
+            if bottom.is_some_and(|bottom| search < bottom) {
+                break;
             }
             let candidate = delimiters[search];
-            if candidate.inactive || candidate.marker != closer.marker || !candidate.can_open {
-                continue;
-            }
-            if emphasis_delimiters_match(&candidate, &closer) {
+            if candidate.marker == closer.marker
+                && candidate.can_open
+                && emphasis_delimiters_match(&candidate, &closer)
+            {
                 opener_idx = Some(search);
                 break;
             }
+            search = links.prev[search];
         }
 
         let Some(opener_idx) = opener_idx else {
@@ -3798,7 +3915,7 @@ fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) ->
             // open is removed so it is never revisited.
             openers_bottom[key] = Some(closer_idx);
             if !closer.can_open {
-                delimiters[closer_idx].inactive = true;
+                links.unlink(closer_idx);
             }
             closer_idx += 1;
             continue;
@@ -3825,28 +3942,33 @@ fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) ->
             (used, wrap)
         };
 
-        apply_emphasis(
-            &mut nodes,
-            &mut delimiters,
-            opener_idx,
-            closer_idx,
-            used,
-            wrap,
-        );
-
         // Drop delimiters strictly between the opener and closer: they could not
         // match outward across this newly closed span.
-        let mut inner = opener_idx + 1;
-        while inner < closer_idx {
-            delimiters[inner].inactive = true;
-            inner += 1;
+        let inner_nesting = links.close_span(opener_idx, closer_idx);
+        if inner_nesting < MAX_EMPHASIS_NESTING {
+            apply_emphasis(
+                &mut nodes,
+                &mut delimiters,
+                opener_idx,
+                closer_idx,
+                used,
+                wrap,
+            );
+            links.nesting_after[opener_idx] = inner_nesting + 1;
+        } else {
+            // Too deep to wrap: the pair is consumed but its delimiters stay in
+            // their text nodes as literal text. Any span enclosing it is at
+            // least as deep, so it stays literal too.
+            delimiters[opener_idx].length -= used;
+            delimiters[closer_idx].length -= used;
+            links.nesting_after[opener_idx] = inner_nesting;
         }
 
         if delimiters[opener_idx].length == 0 {
-            delimiters[opener_idx].inactive = true;
+            links.unlink(opener_idx);
         }
         if delimiters[closer_idx].length == 0 {
-            delimiters[closer_idx].inactive = true;
+            links.unlink(closer_idx);
             closer_idx += 1;
         }
         // When the closer still has delimiters left it stays the active closer so
@@ -3856,6 +3978,7 @@ fn process_emphasis(mut nodes: Vec<Inline>, mut delimiters: Vec<DelimMarker>) ->
     // Adjacent text nodes can appear where unmatched delimiter runs ended up
     // beside literal text (`**foo*bar*` -> `**foo` + emphasis). CommonMark
     // coalesces them as the final step; do the same for the spans we created.
+    let mut nodes = nodes.into_vec();
     merge_adjacent_text(&mut nodes);
     nodes
 }
@@ -3940,10 +4063,9 @@ enum EmphasisWrap {
 }
 
 /// Wraps the nodes between two delimiter runs into an `Emphasis`/`Strong`/
-/// `Delete` node, consuming `used` characters from each side and keeping every
-/// other delimiter's `node_index` consistent with the rewritten node list.
+/// `Delete` node and consumes `used` characters from each side.
 fn apply_emphasis(
-    nodes: &mut Vec<Inline>,
+    nodes: &mut InlineList,
     delimiters: &mut [DelimMarker],
     opener_idx: usize,
     closer_idx: usize,
@@ -3955,11 +4077,11 @@ fn apply_emphasis(
 
     // Trim the consumed characters from the opener's text node (right side) and
     // the closer's text node (left side), updating their recorded lengths/spans.
-    trim_delimiter_text_tail(&mut nodes[opener_node], used);
+    trim_delimiter_text_tail(nodes.node_mut(opener_node), used);
     delimiters[opener_idx].length -= used;
     delimiters[opener_idx].span_start += used;
 
-    trim_delimiter_text_head(&mut nodes[closer_node], used);
+    trim_delimiter_text_head(nodes.node_mut(closer_node), used);
     delimiters[closer_idx].length -= used;
 
     // Span covers the consumed opener delimiters through the consumed closer
@@ -3969,13 +4091,8 @@ fn apply_emphasis(
 
     // The wrapped children are the nodes strictly between the opener and closer
     // text nodes.
-    let children_start = opener_node + 1;
-    let children_end = closer_node; // exclusive
-    let children: Vec<Inline> = nodes.drain(children_start..children_end).collect();
-    let removed = children.len();
-
     let meta = NodeMeta::new(Some(Span::new(span_start, span_end)));
-    let wrapped = match wrap {
+    nodes.wrap_between(opener_node, closer_node, |children| match wrap {
         EmphasisWrap::Strong => Inline::Strong(Strong { meta, children }),
         EmphasisWrap::Emphasis => Inline::Emphasis(Emphasis { meta, children }),
         EmphasisWrap::Delete(marker) => Inline::Delete(Delete {
@@ -3983,38 +4100,15 @@ fn apply_emphasis(
             marker,
             children,
         }),
-    };
-    nodes.insert(children_start, wrapped);
-
-    // Indices at or past the (old) closer node shift by `1 - removed`: the drain
-    // removed `removed` nodes then the insert added one. Apply this using the
-    // original `children_end` threshold before any further mutation.
-    reindex_delimiters(delimiters, children_end, 1 - removed as isize);
+    });
 
     // Drop any placeholder text node that has been fully consumed so leftover
-    // delimiters never survive as literal text. Remove the closer first because
-    // it sits at the higher index and removal shifts everything after it.
+    // delimiters never survive as literal text.
     if delimiters[closer_idx].length == 0 {
-        let pos = delimiters[closer_idx].node_index;
-        nodes.remove(pos);
-        reindex_delimiters(delimiters, pos, -1);
+        nodes.remove(closer_node);
     }
     if delimiters[opener_idx].length == 0 {
-        let pos = delimiters[opener_idx].node_index;
-        nodes.remove(pos);
-        reindex_delimiters(delimiters, pos, -1);
-    }
-}
-
-/// Adjusts `node_index` for every delimiter at or after `from` by `delta`.
-fn reindex_delimiters(delimiters: &mut [DelimMarker], from: usize, delta: isize) {
-    if delta == 0 {
-        return;
-    }
-    for delimiter in delimiters.iter_mut() {
-        if delimiter.node_index >= from {
-            delimiter.node_index = (delimiter.node_index as isize + delta) as usize;
-        }
+        nodes.remove(opener_node);
     }
 }
 
@@ -4030,13 +4124,293 @@ fn trim_delimiter_text_tail(node: &mut Inline, count: usize) {
 }
 
 /// Removes `count` leading delimiter characters from a placeholder text node.
+/// The node holds one repeated marker byte, so dropping from the front leaves
+/// the same text as truncating the back.
 fn trim_delimiter_text_head(node: &mut Inline, count: usize) {
     if let Inline::Text(text) = node {
         let count = count.min(text.value.len());
-        text.value.drain(..count);
+        text.value.truncate(text.value.len() - count);
         if let Some(span) = text.meta.span.as_mut() {
             span.start += count;
         }
+    }
+}
+
+/// Forward lookups the inline scanners ask of one input. `DirectLookups`
+/// answers each with a fresh scan, for callers that ask once; `InlineLookups`
+/// memoizes the answers for the many questions one inline pass asks. Both
+/// answer identically.
+trait Lookups {
+    /// The first occurrence of `pattern` that starts at or after `from`.
+    fn find(&mut self, pattern: &'static str, from: usize) -> Option<usize>;
+    /// The first run of exactly `len` backticks at or after `start`, which is
+    /// not inside a backtick run.
+    fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize>;
+    /// The first unescaped `<` or `>`, or line break, at or after `from`.
+    fn angle_destination_stop(&mut self, from: usize) -> Option<usize>;
+    /// The first unescaped `]` at or after `from`.
+    fn unescaped_close_bracket(&mut self, from: usize) -> Option<usize>;
+}
+
+struct DirectLookups<'a> {
+    input: &'a str,
+}
+
+impl Lookups for DirectLookups<'_> {
+    fn find(&mut self, pattern: &'static str, from: usize) -> Option<usize> {
+        self.input[from..].find(pattern).map(|offset| from + offset)
+    }
+
+    fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize> {
+        find_code_span_close(self.input, start, len)
+    }
+
+    fn angle_destination_stop(&mut self, from: usize) -> Option<usize> {
+        (from..self.input.len()).find(|index| is_angle_destination_stop(self.input, *index))
+    }
+
+    fn unescaped_close_bracket(&mut self, from: usize) -> Option<usize> {
+        find_footnote_reference_label_end(self.input, from)
+    }
+}
+
+/// The patterns `InlineLookups::find` keeps position tables for.
+const CACHED_PATTERNS: [&str; 7] = [">", "-->", "?>", "]]>", "\"", "'", "`$"];
+
+/// `Lookups` over one inline input, each answered from a table built on first
+/// use.
+struct InlineLookups<'a> {
+    input: &'a str,
+    patterns: [Positions; CACHED_PATTERNS.len()],
+    backtick_runs: Option<BTreeMap<usize, Vec<usize>>>,
+    angle_destination_stops: Positions,
+    unescaped_close_brackets: Positions,
+}
+
+impl<'a> InlineLookups<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            patterns: Default::default(),
+            backtick_runs: None,
+            angle_destination_stops: Positions::default(),
+            unescaped_close_brackets: Positions::default(),
+        }
+    }
+}
+
+impl Lookups for InlineLookups<'_> {
+    fn find(&mut self, pattern: &'static str, from: usize) -> Option<usize> {
+        let input = self.input;
+        let Some(slot) = CACHED_PATTERNS.iter().position(|cached| *cached == pattern) else {
+            return DirectLookups { input }.find(pattern, from);
+        };
+        self.patterns[slot].first_at_or_after(from, || pattern_starts(input, pattern))
+    }
+
+    fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize> {
+        let input = self.input;
+        let runs = self
+            .backtick_runs
+            .get_or_insert_with(|| backtick_runs_by_length(input));
+        let starts = runs.get(&len)?;
+        starts
+            .get(starts.partition_point(|run| *run < start))
+            .copied()
+    }
+
+    fn angle_destination_stop(&mut self, from: usize) -> Option<usize> {
+        let input = self.input;
+        self.angle_destination_stops.first_at_or_after(from, || {
+            (0..input.len())
+                .filter(|index| is_angle_destination_stop(input, *index))
+                .collect()
+        })
+    }
+
+    fn unescaped_close_bracket(&mut self, from: usize) -> Option<usize> {
+        let input = self.input;
+        self.unescaped_close_brackets.first_at_or_after(from, || {
+            (0..input.len())
+                .filter(|index| is_unescaped_close_bracket(input, *index))
+                .collect()
+        })
+    }
+}
+
+/// Start offsets of every maximal backtick run, grouped by run length.
+fn backtick_runs_by_length(input: &str) -> BTreeMap<usize, Vec<usize>> {
+    let mut runs: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut index = 0;
+    while index < input.len() {
+        if input.as_bytes()[index] == b'`' {
+            let len = backtick_run_len(input, index);
+            runs.entry(len).or_default().push(index);
+            index += len;
+        } else {
+            index += 1;
+        }
+    }
+    runs
+}
+
+fn backtick_run_len(input: &str, index: usize) -> usize {
+    input.as_bytes()[index..]
+        .iter()
+        .take_while(|byte| **byte == b'`')
+        .count()
+}
+
+fn is_unescaped_close_bracket(input: &str, index: usize) -> bool {
+    input.as_bytes()[index] == b']' && !is_escaped_at(input, index)
+}
+
+fn is_angle_destination_stop(input: &str, index: usize) -> bool {
+    match input.as_bytes()[index] {
+        b'<' | b'>' => !is_escaped_at(input, index),
+        b'\n' | b'\r' => true,
+        _ => false,
+    }
+}
+
+/// How many bytes `find_closing_delimiter` may scan per byte of one inline
+/// input, on top of `CLOSING_DELIMITER_BUDGET_BASE`. Its `__`/`++`/`==` closer
+/// search depends on where it starts, so it is not memoized; once an input's
+/// budget is spent, further openers in it are treated as unclosed, which keeps
+/// a paragraph of many unclosed openers linear.
+const CLOSING_DELIMITER_BUDGET_PER_BYTE: usize = 16;
+const CLOSING_DELIMITER_BUDGET_BASE: usize = 4096;
+
+/// Everything one `parse_inline_content` pass memoizes about its input, so its
+/// questions about closing delimiters cost amortized linear time in total.
+struct InlineScan<'a> {
+    input: &'a str,
+    lookups: InlineLookups<'a>,
+    label_ends: BracketMemo,
+    inline_footnote_ends: BracketMemo,
+    reference_label_ends: PathMemo,
+    wikilink_closes: PathMemo,
+    directive_attribute_closes: PathMemo,
+    mdx_expression_closes: BracketMemo,
+    jsx: Option<JsxIndex>,
+    single_tilde_delete_closes: Positions,
+    literal_autolinks: LiteralAutolinkScan,
+    /// Bytes `find_closing_delimiter` may still scan over this input.
+    closing_delimiter_budget: usize,
+}
+
+impl<'a> InlineScan<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            lookups: InlineLookups::new(input),
+            label_ends: BracketMemo::default(),
+            inline_footnote_ends: BracketMemo::default(),
+            reference_label_ends: PathMemo::default(),
+            wikilink_closes: PathMemo::default(),
+            directive_attribute_closes: PathMemo::default(),
+            mdx_expression_closes: BracketMemo::default(),
+            jsx: None,
+            single_tilde_delete_closes: Positions::default(),
+            literal_autolinks: LiteralAutolinkScan::default(),
+            closing_delimiter_budget: CLOSING_DELIMITER_BUDGET_PER_BYTE * input.len()
+                + CLOSING_DELIMITER_BUDGET_BASE,
+        }
+    }
+
+    /// `find_link_label_end`, memoized.
+    fn link_label_end(&mut self, open: usize) -> Option<usize> {
+        let input = self.input;
+        if input.as_bytes().get(open) != Some(&b'[') {
+            return None;
+        }
+        let lookups = &mut self.lookups;
+        self.label_ends
+            .resolve(input.len() + 1, open + 1, |cursor| {
+                link_label_step(lookups, input, cursor)
+            })
+    }
+
+    /// The `]` closing the inline footnote whose content starts at `start`.
+    fn inline_footnote_end(&mut self, start: usize) -> Option<usize> {
+        let input = self.input;
+        self.inline_footnote_ends
+            .resolve(input.len() + 1, start, |cursor| {
+                inline_footnote_step(input, cursor)
+            })
+    }
+
+    /// `find_reference_label_end`, memoized.
+    fn reference_label_end(&mut self, open: usize) -> Option<usize> {
+        let input = self.input;
+        if input.as_bytes().get(open) != Some(&b'[') {
+            return None;
+        }
+        let close = self
+            .reference_label_ends
+            .resolve(input.len() + 1, open + 1, |cursor| {
+                reference_label_step(input, cursor)
+            })?;
+        reference_label_is_within_limit(&input[open + 1..close]).then_some(close)
+    }
+
+    /// The `]]` closing the wikilink whose content starts at `start`; it must
+    /// be on the same line.
+    fn wikilink_close(&mut self, start: usize) -> Option<usize> {
+        let input = self.input;
+        self.wikilink_closes
+            .resolve(input.len() + 1, start, |cursor| {
+                wikilink_close_step(input, cursor)
+            })
+    }
+
+    /// The `}` closing the inline MDX expression opening at `open`.
+    fn mdx_expression_close(&mut self, open: usize) -> Option<usize> {
+        let input = self.input;
+        if input.as_bytes().get(open) != Some(&b'{') {
+            return None;
+        }
+        self.mdx_expression_closes
+            .resolve(
+                (input.len() + 1) * MDX_BRACE_STATES,
+                (open + 1) * MDX_BRACE_STATES,
+                |node| mdx_expression_step(input, node, false),
+            )
+            .map(|node| node / MDX_BRACE_STATES)
+    }
+
+    /// The end of the inline MDX JSX element opening at `start`.
+    fn mdx_jsx_end(&mut self, start: usize) -> Option<usize> {
+        let input = self.input;
+        let expressions = &mut self.mdx_expression_closes;
+        self.jsx
+            .get_or_insert_with(|| JsxIndex::new(input, false, expressions))
+            .element_end(start)
+            .map(|end| end + 1)
+    }
+
+    /// The first `~` at or after `start` that can close a single-tilde delete.
+    fn single_tilde_delete_close(&mut self, start: usize) -> Option<usize> {
+        let input = self.input;
+        self.single_tilde_delete_closes
+            .first_at_or_after(start, || {
+                (0..input.len())
+                    .filter(|index| is_single_tilde_delete_close(input, *index))
+                    .collect()
+            })
+    }
+
+    /// `find_directive_attributes_close`, memoized.
+    fn directive_attributes_close(&mut self, open: usize) -> Option<usize> {
+        let input = self.input;
+        if input.as_bytes().get(open) != Some(&b'{') {
+            return None;
+        }
+        self.directive_attribute_closes.resolve(
+            (input.len() + 1) * DIRECTIVE_QUOTE_STATES,
+            (open + 1) * DIRECTIVE_QUOTE_STATES,
+            |node| directive_attributes_step(input, node),
+        )
     }
 }
 
@@ -4054,6 +4428,7 @@ fn parse_inlines(
         definitions,
         diagnostics,
         InlineContext::default(),
+        &mut InlineState::default(),
     )
 }
 
@@ -4068,6 +4443,40 @@ impl Default for InlineContext {
     }
 }
 
+/// The deepest inline nesting the parser descends into. Each nested construct
+/// (a link label, an emphasis-like span, an image alt, a directive label, an
+/// inline footnote) parses its content one level deeper; content past this
+/// depth stays literal text, so recursion and the native stack it uses stay
+/// bounded. Input that nests deeper than this is parsed best-effort: a link
+/// label first judged near the limit keeps that verdict wherever it is asked
+/// about again (see `InlineState::label_has_link`).
+const MAX_INLINE_NESTING: usize = 32;
+
+/// State shared by every inline parse nested under one block-level inline
+/// parse. All nested inputs are slices of that one input, addressed by their
+/// absolute start offset.
+#[derive(Default)]
+struct InlineState {
+    /// How many inline parses enclose the current one.
+    depth: usize,
+    /// Whether a link label contains a link, keyed by (label start offset,
+    /// label length). The verdict needs a full parse of the label, and a nested
+    /// label is asked about again from every enclosing level, so without this
+    /// memo nested brackets cost time exponential in their depth. The verdict
+    /// does not depend on where the label is asked about unless the parse hits
+    /// `MAX_INLINE_NESTING`.
+    label_has_link: BTreeMap<(usize, usize), bool>,
+}
+
+/// What one inline pass threads through its construct parsers: the state it
+/// shares with enclosing passes, the memoized scans of its own input, and its
+/// context.
+struct InlinePass<'p, 'a> {
+    state: &'p mut InlineState,
+    scan: InlineScan<'a>,
+    context: InlineContext,
+}
+
 fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
@@ -4075,6 +4484,39 @@ fn parse_inlines_with_context(
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
     context: InlineContext,
+    state: &mut InlineState,
+) -> Vec<Inline> {
+    if state.depth >= MAX_INLINE_NESTING {
+        if input.is_empty() {
+            return Vec::new();
+        }
+        return vec![Inline::Text(Text {
+            meta: NodeMeta::new(Some(Span::new(base_offset, base_offset + input.len()))),
+            value: input.into(),
+        })];
+    }
+    state.depth += 1;
+    let nodes = parse_inline_content(
+        input,
+        base_offset,
+        options,
+        definitions,
+        diagnostics,
+        context,
+        state,
+    );
+    state.depth -= 1;
+    nodes
+}
+
+fn parse_inline_content(
+    input: &str,
+    base_offset: usize,
+    options: &SyntaxOptions,
+    definitions: &[String],
+    diagnostics: &mut Vec<Diagnostic>,
+    context: InlineContext,
+    state: &mut InlineState,
 ) -> Vec<Inline> {
     let bytes = input.as_bytes();
     let mut nodes = Vec::new();
@@ -4086,6 +4528,11 @@ fn parse_inlines_with_context(
     // a literal text node and record its position here so `process_emphasis` can
     // rewrite the flat node list into Emphasis/Strong (or leave it as text).
     let mut delimiters: Vec<DelimMarker> = Vec::new();
+    let mut pass = InlinePass {
+        state,
+        scan: InlineScan::new(input),
+        context,
+    };
 
     while index < bytes.len() {
         if bytes[index] == b'\\' {
@@ -4107,7 +4554,7 @@ fn parse_inlines_with_context(
                     if text.is_empty() {
                         text_start = base_offset + index;
                     }
-                    if gfm_link_label_preserves_url_dot_escape(&text, char, options, context) {
+                    if gfm_link_label_preserves_url_dot_escape(&text, char, options, pass.context) {
                         text.push('\\');
                     }
                     text.push(char);
@@ -4198,7 +4645,9 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'`' {
-            if let Some((end, code_span)) = parse_code_span(input, index) {
+            if let Some((end, code_span)) =
+                parse_code_span_with(&mut pass.scan.lookups, input, index)
+            {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Code(CodeInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
@@ -4249,7 +4698,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 2;
@@ -4281,7 +4731,14 @@ fn parse_inlines_with_context(
             && bytes.get(index + 2) == Some(&b'_')
             && can_open_underscore(input, index, 1)
         {
-            if let Some(end) = find_closing_delimiter(input, index + 3, "___", true) {
+            if let Some(end) = find_closing_delimiter(
+                &mut pass.scan.lookups,
+                input,
+                index + 3,
+                "___",
+                true,
+                &mut pass.scan.closing_delimiter_budget,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 let inner = &input[index + 3..end];
                 let underline = Inline::Underline(Underline {
@@ -4295,7 +4752,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 });
                 nodes.push(Inline::Emphasis(Emphasis {
@@ -4316,7 +4774,14 @@ fn parse_inlines_with_context(
             && bytes.get(index + 1) == Some(&b'_')
             && can_open_underscore(input, index, 2)
         {
-            if let Some(end) = find_closing_delimiter(input, index + 2, "__", true) {
+            if let Some(end) = find_closing_delimiter(
+                &mut pass.scan.lookups,
+                input,
+                index + 2,
+                "__",
+                true,
+                &mut pass.scan.closing_delimiter_budget,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 let inner = &input[index + 2..end];
                 nodes.push(Inline::Underline(Underline {
@@ -4330,7 +4795,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 2;
@@ -4350,13 +4816,14 @@ fn parse_inlines_with_context(
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
             if (options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks)
-                && context.allow_links
+                && pass.context.allow_links
             {
                 if let Some((end, destination)) = parse_literal_autolink(
                     input,
                     index,
                     options.constructs.gfm_autolink_literal,
                     options.constructs.relaxed_autolinks,
+                    &mut pass.scan.literal_autolinks,
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(Inline::Autolink(Autolink {
@@ -4396,7 +4863,14 @@ fn parse_inlines_with_context(
             && bytes.get(index + 2) != Some(&b'+')
             && can_open_delimited(input, index, 2)
         {
-            if let Some(end) = find_closing_delimiter(input, index + 2, "++", false) {
+            if let Some(end) = find_closing_delimiter(
+                &mut pass.scan.lookups,
+                input,
+                index + 2,
+                "++",
+                false,
+                &mut pass.scan.closing_delimiter_budget,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 let inner = &input[index + 2..end];
                 nodes.push(Inline::Insert(Insert {
@@ -4410,7 +4884,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 2;
@@ -4425,7 +4900,14 @@ fn parse_inlines_with_context(
             && bytes.get(index + 2) != Some(&b'=')
             && can_open_delimited(input, index, 2)
         {
-            if let Some(end) = find_closing_delimiter(input, index + 2, "==", false) {
+            if let Some(end) = find_closing_delimiter(
+                &mut pass.scan.lookups,
+                input,
+                index + 2,
+                "==",
+                false,
+                &mut pass.scan.closing_delimiter_budget,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 let inner = &input[index + 2..end];
                 nodes.push(Inline::Mark(Mark {
@@ -4439,7 +4921,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 2;
@@ -4450,7 +4933,7 @@ fn parse_inlines_with_context(
 
         if options.constructs.subscript
             && starts_exact_byte_run(input, index, b'~', 1)
-            && !single_tilde_delete_takes_precedence(options, input, index)
+            && !single_tilde_delete_takes_precedence(options, input, index, &mut pass.scan)
         {
             if let Some(end) = find_simple_inline_close(input, index + 1, b'~') {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
@@ -4466,7 +4949,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 1;
@@ -4480,7 +4964,7 @@ fn parse_inlines_with_context(
             && bytes.get(index) == Some(&b'^')
             && bytes.get(index + 1) == Some(&b'[')
         {
-            if let Some(close) = find_inline_footnote_end(input, index + 2) {
+            if let Some(close) = pass.scan.inline_footnote_end(index + 2) {
                 let inner = &input[index + 2..close];
                 if !inner.trim().is_empty() {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
@@ -4495,7 +4979,8 @@ fn parse_inlines_with_context(
                             options,
                             definitions,
                             diagnostics,
-                            context,
+                            pass.context,
+                            pass.state,
                         ),
                     }));
                     index = close + 1;
@@ -4523,7 +5008,8 @@ fn parse_inlines_with_context(
                         options,
                         definitions,
                         diagnostics,
-                        context,
+                        pass.context,
+                        pass.state,
                     ),
                 }));
                 index = end + 1;
@@ -4563,9 +5049,15 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'!' && index + 1 < bytes.len() && bytes[index + 1] == b'[' {
-            if let Some((end, image)) =
-                parse_image(input, index, base_offset, options, definitions, diagnostics)
-            {
+            if let Some((end, image)) = parse_image(
+                input,
+                index,
+                base_offset,
+                options,
+                definitions,
+                diagnostics,
+                &mut pass,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(image);
                 index = end;
@@ -4575,7 +5067,9 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'[' {
-            if let Some((end, wikilink)) = parse_wikilink(input, index, base_offset, options) {
+            if let Some((end, wikilink)) =
+                parse_wikilink(input, index, base_offset, options, &mut pass.scan)
+            {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(wikilink);
                 index = end;
@@ -4589,7 +5083,7 @@ fn parse_inlines_with_context(
                 options,
                 definitions,
                 diagnostics,
-                context,
+                &mut pass,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(link);
@@ -4601,7 +5095,7 @@ fn parse_inlines_with_context(
                 && bytes.get(index) == Some(&b'[')
                 && bytes.get(index + 1) == Some(&b'^')
             {
-                if let Some(close) = find_footnote_reference_label_end(input, index + 2) {
+                if let Some(close) = pass.scan.lookups.unescaped_close_bracket(index + 2) {
                     let label = &input[index + 2..close];
                     if is_footnote_label(label) {
                         flush_text(&mut nodes, &mut text, text_start, base_offset + index);
@@ -4622,7 +5116,9 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'$' && options.constructs.math_inline {
-            if let Some((end, value, kind)) = parse_math_inline(input, index) {
+            if let Some((end, value, kind)) =
+                parse_math_inline(&mut pass.scan.lookups, input, index)
+            {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Math(MathInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
@@ -4654,15 +5150,16 @@ fn parse_inlines_with_context(
         }
 
         // GFM bare autolinks must not fire inside an existing link's text
-        // (no links in links) — `context.allow_links` is false in label scans.
+        // (no links in links) — `pass.context.allow_links` is false in label scans.
         if (options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks)
-            && context.allow_links
+            && pass.context.allow_links
         {
             if let Some((end, destination)) = parse_literal_autolink(
                 input,
                 index,
                 options.constructs.gfm_autolink_literal,
                 options.constructs.relaxed_autolinks,
+                &mut pass.scan.literal_autolinks,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Autolink(Autolink {
@@ -4679,11 +5176,11 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'<' {
-            if let Some(end) = parse_autolink_end(input, index) {
+            if let Some(end) = pass.scan.lookups.find(">", index).map(|close| close + 1) {
                 let raw = &input[index..end];
                 if is_autolink(raw) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    if context.allow_links {
+                    if pass.context.allow_links {
                         nodes.push(Inline::Autolink(Autolink {
                             meta: NodeMeta::new(Some(Span::new(
                                 base_offset + index,
@@ -4707,7 +5204,11 @@ fn parse_inlines_with_context(
                 }
             }
             if options.constructs.mdx_jsx_inline {
-                if let Some((end, raw)) = parse_mdx_jsx_inline(input, index) {
+                if let Some((end, raw)) = pass
+                    .scan
+                    .mdx_jsx_end(index)
+                    .map(|end| (end, String::from(&input[index..end])))
+                {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(Inline::MdxJsx(MdxJsxInline {
                         meta: NodeMeta::new(Some(Span::new(
@@ -4721,15 +5222,15 @@ fn parse_inlines_with_context(
                     continue;
                 }
             }
-            if let Some((end, raw)) = parse_html_inline(input, index) {
-                if options.constructs.html_inline {
+            if options.constructs.html_inline {
+                if let Some(end) = html_inline_end(&mut pass.scan.lookups, input, index) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(Inline::Html(HtmlInline {
                         meta: NodeMeta::new(Some(Span::new(
                             base_offset + index,
                             base_offset + end,
                         ))),
-                        value: raw,
+                        value: input[index..end].into(),
                     }));
                     index = end;
                     text_start = index;
@@ -4739,7 +5240,7 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b'{' && options.constructs.mdx_expression_inline {
-            if let Some(end) = find_mdx_expression_inline_close(input, index) {
+            if let Some(end) = pass.scan.mdx_expression_close(index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::MdxExpression(MdxExpressionInline {
                     meta: NodeMeta::new(Some(Span::new(
@@ -4775,9 +5276,15 @@ fn parse_inlines_with_context(
         }
 
         if bytes[index] == b':' && options.constructs.directive_text {
-            if let Some((end, directive)) =
-                parse_text_directive(input, index, base_offset, options, definitions, diagnostics)
-            {
+            if let Some((end, directive)) = parse_text_directive(
+                input,
+                index,
+                base_offset,
+                options,
+                definitions,
+                diagnostics,
+                &mut pass,
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(directive);
                 index = end;
@@ -4824,6 +5331,7 @@ fn parse_wikilink(
     index: usize,
     base_offset: usize,
     options: &SyntaxOptions,
+    scan: &mut InlineScan,
 ) -> Option<(usize, Inline)> {
     let configured_order = if options.constructs.wikilink_title_after_pipe {
         WikiLinkLabelOrder::AfterPipe
@@ -4837,7 +5345,7 @@ fn parse_wikilink(
         return None;
     }
 
-    let close = find_wikilink_close(input, index + 2)?;
+    let close = scan.wikilink_close(index + 2)?;
     let source = &input[index + 2..close];
     if source.is_empty() || source.len() > WIKILINK_MAX_BYTES {
         return None;
@@ -4878,23 +5386,19 @@ fn parse_wikilink(
     ))
 }
 
-fn find_wikilink_close(input: &str, start: usize) -> Option<usize> {
+/// One step of the walk to a wikilink's closing `]]`, which must be on the
+/// opener's line.
+fn wikilink_close_step(input: &str, cursor: usize) -> Step {
     let bytes = input.as_bytes();
-    let mut cursor = start;
-    while cursor < input.len() {
-        match bytes[cursor] {
-            b'\\' => {
-                cursor += 1;
-                if cursor < input.len() {
-                    cursor = next_char(input, cursor)?.0;
-                }
-            }
-            b'\n' | b'\r' => return None,
-            b']' if bytes.get(cursor + 1) == Some(&b']') => return Some(cursor),
-            _ => cursor = next_char(input, cursor)?.0,
+    match bytes.get(cursor) {
+        None | Some(b'\n' | b'\r') => Step::Done(None),
+        Some(b'\\') => {
+            let escaped = cursor + 1;
+            Step::Next(next_char(input, escaped).map_or(escaped, |(after_escape, _)| after_escape))
         }
+        Some(b']') if bytes.get(cursor + 1) == Some(&b']') => Step::Done(Some(cursor)),
+        Some(_) => Step::Next(next_char(input, cursor).map_or(input.len(), |(next, _)| next)),
     }
-    None
 }
 
 fn find_wikilink_separator(input: &str) -> Option<usize> {
@@ -4942,13 +5446,14 @@ fn parse_image(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
     let label_start = index + 2;
-    let label_end = find_link_label_end(input, index + 1)?;
+    let label_end = pass.scan.link_label_end(index + 1)?;
     let alt_source = &input[label_start..label_end];
     let after_label = label_end + 1;
     if input.as_bytes().get(after_label) == Some(&b'(') {
-        let (close, resource) = parse_link_resource(input, after_label)?;
+        let (close, resource) = parse_link_resource(&mut pass.scan.lookups, input, after_label)?;
         return Some((
             close,
             Inline::Image(Image {
@@ -4957,18 +5462,20 @@ fn parse_image(
                 destination_kind: resource.destination_kind,
                 title: resource.title,
                 title_kind: resource.title_kind,
-                alt: parse_inlines(
+                alt: parse_inlines_with_context(
                     alt_source,
                     base_offset + label_start,
                     options,
                     definitions,
                     diagnostics,
+                    InlineContext::default(),
+                    pass.state,
                 ),
             }),
         ));
     }
     if input.as_bytes().get(after_label) == Some(&b'[') {
-        let close = find_reference_label_end(input, after_label)?;
+        let close = pass.scan.reference_label_end(after_label)?;
         let label = &input[after_label + 1..close];
         let identifier = if label.is_empty() { alt_source } else { label };
         if definition_exists(definitions, identifier) {
@@ -4986,12 +5493,14 @@ fn parse_image(
                     } else {
                         ReferenceKind::Full
                     },
-                    alt: parse_inlines(
+                    alt: parse_inlines_with_context(
                         alt_source,
                         base_offset + label_start,
                         options,
                         definitions,
                         diagnostics,
+                        InlineContext::default(),
+                        pass.state,
                     ),
                 }),
             ));
@@ -5013,12 +5522,14 @@ fn parse_image(
                 identifier: normalize_label(alt_source),
                 label: alt_source.into(),
                 kind: ReferenceKind::Shortcut,
-                alt: parse_inlines(
+                alt: parse_inlines_with_context(
                     alt_source,
                     base_offset + label_start,
                     options,
                     definitions,
                     diagnostics,
+                    InlineContext::default(),
+                    pass.state,
                 ),
             }),
         ));
@@ -5033,14 +5544,20 @@ fn parse_link(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
-    context: InlineContext,
+    pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
-    if !context.allow_links {
+    if !pass.context.allow_links {
         return None;
     }
-    let label_end = find_link_label_end(input, index)?;
+    let label_end = pass.scan.link_label_end(index)?;
     let label_source = &input[index + 1..label_end];
-    if label_contains_link(label_source, base_offset + index + 1, options, definitions) {
+    if label_contains_link(
+        label_source,
+        base_offset + index + 1,
+        options,
+        definitions,
+        pass.state,
+    ) {
         return None;
     }
     let after_label = label_end + 1;
@@ -5049,7 +5566,9 @@ fn parse_link(
         // CommonMark still resolves `[label]` as a shortcut reference and leaves
         // the invalid `(...)` as literal text (links 568) — so fall through to
         // the reference branches below instead of bailing out of parse_link.
-        if let Some((close, resource)) = parse_link_resource(input, after_label) {
+        if let Some((close, resource)) =
+            parse_link_resource(&mut pass.scan.lookups, input, after_label)
+        {
             return Some((
                 close,
                 Inline::Link(Link {
@@ -5065,13 +5584,14 @@ fn parse_link(
                         definitions,
                         diagnostics,
                         InlineContext { allow_links: false },
+                        pass.state,
                     ),
                 }),
             ));
         }
     }
     if input.as_bytes().get(after_label) == Some(&b'[') {
-        let close = find_reference_label_end(input, after_label)?;
+        let close = pass.scan.reference_label_end(after_label)?;
         let label = &input[after_label + 1..close];
         let identifier = if label.is_empty() {
             label_source
@@ -5100,6 +5620,7 @@ fn parse_link(
                         definitions,
                         diagnostics,
                         InlineContext { allow_links: false },
+                        pass.state,
                     ),
                 }),
             ));
@@ -5128,6 +5649,7 @@ fn parse_link(
                     definitions,
                     diagnostics,
                     InlineContext { allow_links: false },
+                    pass.state,
                 ),
             }),
         ));
@@ -5141,26 +5663,21 @@ fn find_reference_label_end(input: &str, open: usize) -> Option<usize> {
     if input.as_bytes().get(open) != Some(&b'[') {
         return None;
     }
+    let close = path_walk(open + 1, |cursor| reference_label_step(input, cursor))?;
+    reference_label_is_within_limit(&input[open + 1..close]).then_some(close)
+}
 
-    let mut cursor = open + 1;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor)?;
-        match char {
-            '\\' => {
-                cursor = next_char(input, next)
-                    .map(|(after_escape, _)| after_escape)
-                    .unwrap_or(next);
-                continue;
-            }
-            '[' => return None,
-            ']' => {
-                return reference_label_is_within_limit(&input[open + 1..cursor]).then_some(cursor);
-            }
-            _ => {}
-        }
-        cursor = next;
+/// One step of the walk to a reference label's closing `]`.
+fn reference_label_step(input: &str, cursor: usize) -> Step {
+    let Some((next, char)) = next_char(input, cursor) else {
+        return Step::Done(None);
+    };
+    match char {
+        '\\' => Step::Next(next_char(input, next).map_or(next, |(after_escape, _)| after_escape)),
+        '[' => Step::Done(None),
+        ']' => Step::Done(Some(cursor)),
+        _ => Step::Next(next),
     }
-    None
 }
 
 fn label_contains_link(
@@ -5168,7 +5685,12 @@ fn label_contains_link(
     base_offset: usize,
     options: &SyntaxOptions,
     definitions: &[String],
+    state: &mut InlineState,
 ) -> bool {
+    let key = (base_offset, label_source.len());
+    if let Some(has_link) = state.label_has_link.get(&key) {
+        return *has_link;
+    }
     let mut diagnostics = Vec::new();
     let inlines = parse_inlines_with_context(
         label_source,
@@ -5177,8 +5699,11 @@ fn label_contains_link(
         definitions,
         &mut diagnostics,
         InlineContext::default(),
+        state,
     );
-    contains_link_inline(&inlines)
+    let has_link = contains_link_inline(&inlines);
+    state.label_has_link.insert(key, has_link);
+    has_link
 }
 
 fn contains_link_inline(inlines: &[Inline]) -> bool {
@@ -5196,49 +5721,33 @@ fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
     if input.as_bytes().get(open) != Some(&b'[') {
         return None;
     }
+    let mut lookups = DirectLookups { input };
+    bracket_walk(open + 1, |cursor| {
+        link_label_step(&mut lookups, input, cursor)
+    })
+}
 
-    let mut depth = 1usize;
-    let mut cursor = open + 1;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor)?;
-        match char {
-            '\\' => {
-                cursor = next_char(input, next)
-                    .map(|(after_escape, _)| after_escape)
-                    .unwrap_or(next);
-                continue;
-            }
-            '`' => {
-                if let Some((end, _)) = parse_code_span(input, cursor) {
-                    cursor = end;
-                    continue;
-                }
-            }
-            '<' => {
-                if let Some(end) = parse_autolink_end(input, cursor) {
-                    let raw = &input[cursor..end];
-                    if is_autolink(raw) {
-                        cursor = end;
-                        continue;
-                    }
-                }
-                if let Some((end, _)) = parse_html_inline(input, cursor) {
-                    cursor = end;
-                    continue;
-                }
-            }
-            '[' => depth += 1,
-            ']' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(cursor);
-                }
-            }
-            _ => {}
+/// One step of the walk to a link label's closing `]`: escapes, code spans,
+/// autolinks, and inline HTML are stepped over whole, so brackets inside them
+/// do not count; other brackets nest.
+fn link_label_step(lookups: &mut impl Lookups, input: &str, cursor: usize) -> BracketStep {
+    let Some((next, char)) = next_char(input, cursor) else {
+        return BracketStep::End;
+    };
+    match char {
+        '\\' => {
+            BracketStep::Pass(next_char(input, next).map_or(next, |(after_escape, _)| after_escape))
         }
-        cursor = next;
+        '`' => BracketStep::Pass(code_span_end(lookups, input, cursor).unwrap_or(next)),
+        '<' => BracketStep::Pass(
+            autolink_end(lookups, input, cursor)
+                .or_else(|| html_inline_end(lookups, input, cursor))
+                .unwrap_or(next),
+        ),
+        '[' => BracketStep::Open(next),
+        ']' => BracketStep::Close(next),
+        _ => BracketStep::Pass(next),
     }
-    None
 }
 
 fn parse_text_directive(
@@ -5248,6 +5757,7 @@ fn parse_text_directive(
     options: &SyntaxOptions,
     definitions: &[String],
     diagnostics: &mut Vec<Diagnostic>,
+    pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
     if input[index..].starts_with("::") {
         return None;
@@ -5259,7 +5769,17 @@ fn parse_text_directive(
         }
     }
     let opener_source = &input[index + 1..];
-    let (name, label_source, attributes, consumed) = match parse_directive_opener(opener_source) {
+    let opener_offset = index + 1;
+    let opener = parse_directive_opener_with(opener_source, |close, open| {
+        let found = match close {
+            DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
+            DirectiveClose::Attributes => {
+                pass.scan.directive_attributes_close(opener_offset + open)
+            }
+        };
+        found.map(|position| position - opener_offset)
+    });
+    let (name, label_source, attributes, consumed) = match opener {
         Some(opener) => opener,
         None => {
             if directive_opener_looks_malformed(opener_source) {
@@ -5275,12 +5795,14 @@ fn parse_text_directive(
     };
     let label = label_source
         .map(|source| {
-            parse_inlines(
+            parse_inlines_with_context(
                 source,
                 base_offset + index + 1 + name.len() + 1,
                 options,
                 definitions,
                 diagnostics,
+                InlineContext::default(),
+                pass.state,
             )
         })
         .unwrap_or_default();
@@ -5301,6 +5823,25 @@ fn parse_text_directive(
 fn parse_directive_opener(
     input: &str,
 ) -> Option<(String, Option<&str>, Vec<DirectiveAttribute>, usize)> {
+    parse_directive_opener_with(input, |close, open| match close {
+        DirectiveClose::Label => find_link_label_end(input, open),
+        DirectiveClose::Attributes => find_directive_attributes_close(input, open),
+    })
+}
+
+/// Which closing position `parse_directive_opener_with` asks its finder for.
+#[derive(Clone, Copy)]
+enum DirectiveClose {
+    /// The `]` closing the `[label]` opening at the given position.
+    Label,
+    /// The `}` closing the `{attributes}` opening at the given position.
+    Attributes,
+}
+
+fn parse_directive_opener_with(
+    input: &str,
+    mut find_close: impl FnMut(DirectiveClose, usize) -> Option<usize>,
+) -> Option<(String, Option<&str>, Vec<DirectiveAttribute>, usize)> {
     let mut index = 0;
     while let Some((next, char)) = next_char(input, index) {
         if char.is_ascii_alphanumeric() || char == '_' || char == '-' {
@@ -5318,12 +5859,12 @@ fn parse_directive_opener(
     let mut attributes = Vec::new();
     let mut consumed = index;
     if input.as_bytes().get(consumed) == Some(&b'[') {
-        let close = find_link_label_end(input, consumed)?;
+        let close = find_close(DirectiveClose::Label, consumed)?;
         label = Some(&input[consumed + 1..close]);
         consumed = close + 1;
     }
     if input.as_bytes().get(consumed) == Some(&b'{') {
-        let close = find_directive_attributes_close(input, consumed)?;
+        let close = find_close(DirectiveClose::Attributes, consumed)?;
         attributes = parse_attributes(&input[consumed + 1..close]);
         consumed = close + 1;
     }
@@ -5345,42 +5886,39 @@ fn directive_opener_looks_malformed(input: &str) -> bool {
         && matches!(input.as_bytes().get(index), Some(b'[' | b'{'))
 }
 
+/// Quote states of the walk to a directive's closing `}`: outside quotes,
+/// inside `"…"`, inside `'…'`.
+const DIRECTIVE_QUOTE_STATES: usize = 3;
+
 fn find_directive_attributes_close(input: &str, open: usize) -> Option<usize> {
     if input.as_bytes().get(open) != Some(&b'{') {
         return None;
     }
+    path_walk((open + 1) * DIRECTIVE_QUOTE_STATES, |node| {
+        directive_attributes_step(input, node)
+    })
+}
 
+/// One step of the walk to a directive's closing `}`, over nodes
+/// `byte position * DIRECTIVE_QUOTE_STATES + quote state`: a `\` escapes the
+/// next byte, and a `}` inside quotes does not close.
+fn directive_attributes_step(input: &str, node: usize) -> Step {
     let bytes = input.as_bytes();
-    let mut cursor = open + 1;
-    let mut quote = None;
-    let mut escaped = false;
-    while cursor < input.len() {
-        let byte = bytes[cursor];
-        if escaped {
-            escaped = false;
-            cursor += 1;
-            continue;
-        }
-        if byte == b'\\' {
-            escaped = true;
-            cursor += 1;
-            continue;
-        }
-        if let Some(delimiter) = quote {
-            if byte == delimiter {
-                quote = None;
-            }
-            cursor += 1;
-            continue;
-        }
-        match byte {
-            b'"' | b'\'' => quote = Some(byte),
-            b'}' => return Some(cursor),
-            _ => {}
-        }
-        cursor += 1;
+    let (cursor, quote) = (node / DIRECTIVE_QUOTE_STATES, node % DIRECTIVE_QUOTE_STATES);
+    let at = |position: usize, quote: usize| Step::Next(position * DIRECTIVE_QUOTE_STATES + quote);
+    let Some(&byte) = bytes.get(cursor) else {
+        return Step::Done(None);
+    };
+    if byte == b'\\' {
+        return at((cursor + 2).min(bytes.len()), quote);
     }
-    None
+    match (quote, byte) {
+        (0, b'"') => at(cursor + 1, 1),
+        (0, b'\'') => at(cursor + 1, 2),
+        (0, b'}') => Step::Done(Some(cursor)),
+        (1, b'"') | (2, b'\'') => at(cursor + 1, 0),
+        _ => at(cursor + 1, quote),
+    }
 }
 
 fn parse_attributes(input: &str) -> Vec<DirectiveAttribute> {
@@ -5495,14 +6033,14 @@ struct CodeSpanSource {
     fence_length: usize,
 }
 
-fn parse_code_span(input: &str, index: usize) -> Option<(usize, CodeSpanSource)> {
-    let len = input[index..]
-        .as_bytes()
-        .iter()
-        .take_while(|byte| **byte == b'`')
-        .count();
+fn parse_code_span_with(
+    lookups: &mut impl Lookups,
+    input: &str,
+    index: usize,
+) -> Option<(usize, CodeSpanSource)> {
+    let len = backtick_run_len(input, index);
     let search_start = index + len;
-    let close = find_code_span_close(input, search_start, len)?;
+    let close = lookups.code_span_close(search_start, len)?;
     let raw = &input[search_start..close];
     Some((
         close + len,
@@ -5512,6 +6050,12 @@ fn parse_code_span(input: &str, index: usize) -> Option<(usize, CodeSpanSource)>
             fence_length: len,
         },
     ))
+}
+
+/// The end of the code span opening at `index`, as `parse_code_span` finds it.
+fn code_span_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
+    let len = backtick_run_len(input, index);
+    Some(lookups.code_span_close(index + len, len)? + len)
 }
 
 fn find_code_span_close(input: &str, start: usize, marker_len: usize) -> Option<usize> {
@@ -5578,21 +6122,30 @@ fn can_close_delimited(input: &str, index: usize, marker_len: usize) -> bool {
 }
 
 fn find_closing_delimiter(
+    lookups: &mut impl Lookups,
     input: &str,
     start: usize,
     marker: &str,
     underscore: bool,
+    budget: &mut usize,
 ) -> Option<usize> {
     let marker_len = marker.len();
     let mut cursor = start;
     let mut nested = 0usize;
     while cursor <= input.len() {
-        let candidate = input[cursor..].find(marker).map(|offset| cursor + offset)?;
+        if *budget == 0 {
+            return None;
+        }
+        let candidate = input[cursor..].find(marker).map(|offset| cursor + offset);
+        *budget = budget.saturating_sub(candidate.unwrap_or(input.len()) + 1 - cursor);
+        let candidate = candidate?;
         if is_escaped_at(input, candidate) {
             cursor = candidate + marker_len;
             continue;
         }
-        if delimiter_candidate_precedes_link_close(input, start, candidate, marker_len) {
+        if delimiter_candidate_precedes_link_close(
+            lookups, input, start, candidate, marker_len, budget,
+        ) {
             cursor = candidate + marker_len;
             continue;
         }
@@ -5628,18 +6181,10 @@ fn find_closing_delimiter(
     None
 }
 
-fn find_single_tilde_delete_close(input: &str, start: usize) -> Option<usize> {
-    let mut cursor = start;
-    while cursor < input.len() {
-        let Some(candidate) = input[cursor..].find('~').map(|index| cursor + index) else {
-            break;
-        };
-        if !is_escaped_at(input, candidate) && single_tilde_can_close_delete(input, candidate) {
-            return Some(candidate);
-        }
-        cursor = candidate + 1;
-    }
-    None
+fn is_single_tilde_delete_close(input: &str, index: usize) -> bool {
+    input.as_bytes()[index] == b'~'
+        && !is_escaped_at(input, index)
+        && single_tilde_can_close_delete(input, index)
 }
 
 fn single_tilde_can_open_delete(input: &str, index: usize) -> bool {
@@ -5658,11 +6203,12 @@ fn single_tilde_delete_takes_precedence(
     options: &SyntaxOptions,
     input: &str,
     index: usize,
+    scan: &mut InlineScan,
 ) -> bool {
     options.constructs.gfm_strikethrough
         && options.parse.single_tilde_strikethrough
         && single_tilde_can_open_delete(input, index)
-        && find_single_tilde_delete_close(input, index + 1).is_some()
+        && scan.single_tilde_delete_close(index + 1).is_some()
 }
 
 fn tilde_is_alphanumeric_interior(input: &str, index: usize) -> bool {
@@ -5754,10 +6300,12 @@ fn delimiter_run_len(input: &str, index: usize, marker: &str) -> usize {
 }
 
 fn delimiter_candidate_precedes_link_close(
+    lookups: &mut impl Lookups,
     input: &str,
     start: usize,
     candidate: usize,
     marker_len: usize,
+    budget: &mut usize,
 ) -> bool {
     let bytes = input.as_bytes();
     if bytes.get(candidate + marker_len) != Some(&b']') {
@@ -5766,6 +6314,7 @@ fn delimiter_candidate_precedes_link_close(
     if !matches!(bytes.get(candidate + marker_len + 1), Some(b'(' | b'[')) {
         return false;
     }
+    *budget = budget.saturating_sub(candidate - start);
 
     let mut depth = 0usize;
     let mut cursor = start;
@@ -5781,7 +6330,7 @@ fn delimiter_candidate_precedes_link_close(
                 continue;
             }
             '`' => {
-                if let Some((end, _)) = parse_code_span(input, cursor) {
+                if let Some(end) = code_span_end(lookups, input, cursor) {
                     cursor = end;
                     continue;
                 }
@@ -5858,8 +6407,12 @@ fn delimiter_flanking(input: &str, index: usize, marker_len: usize) -> Delimiter
 /// single-`$` form is normalized like a code span (line endings → spaces, one
 /// edge-space strip); the `$$` display form is verbatim. The `` $`…`$ `` code
 /// form takes precedence.
-fn parse_math_inline(input: &str, index: usize) -> Option<(usize, String, MathInlineKind)> {
-    if let Some((end, value)) = parse_math_code_inline(input, index) {
+fn parse_math_inline(
+    lookups: &mut impl Lookups,
+    input: &str,
+    index: usize,
+) -> Option<(usize, String, MathInlineKind)> {
+    if let Some((end, value)) = parse_math_code_inline(lookups, input, index) {
         return Some((end, value, MathInlineKind::Code));
     }
 
@@ -5980,15 +6533,17 @@ fn normalize_math_text(input: &str) -> String {
     }
 }
 
-fn parse_math_code_inline(input: &str, index: usize) -> Option<(usize, String)> {
+fn parse_math_code_inline(
+    lookups: &mut impl Lookups,
+    input: &str,
+    index: usize,
+) -> Option<(usize, String)> {
     if !input[index..].starts_with("$`") {
         return None;
     }
 
     let search_start = index + 2;
-    let close = input[search_start..]
-        .find("`$")
-        .map(|offset| search_start + offset)?;
+    let close = lookups.find("`$", search_start)?;
     if close == search_start {
         return None;
     }
@@ -5996,7 +6551,11 @@ fn parse_math_code_inline(input: &str, index: usize) -> Option<(usize, String)> 
     Some((close + 2, input[search_start..close].into()))
 }
 
-fn parse_link_resource(input: &str, open: usize) -> Option<(usize, ParsedLinkResource)> {
+fn parse_link_resource(
+    lookups: &mut impl Lookups,
+    input: &str,
+    open: usize,
+) -> Option<(usize, ParsedLinkResource)> {
     let bytes = input.as_bytes();
     if bytes.get(open) != Some(&b'(') {
         return None;
@@ -6029,7 +6588,7 @@ fn parse_link_resource(input: &str, open: usize) -> Option<(usize, ParsedLinkRes
         }
         return None;
     }
-    let (destination, destination_kind, next) = parse_link_destination(input, cursor)?;
+    let (destination, destination_kind, next) = parse_link_destination(lookups, input, cursor)?;
     let (after_destination, had_space) = skip_link_resource_space_with_info(input, next)?;
     cursor = after_destination;
     if bytes.get(cursor) == Some(&b')') {
@@ -6065,26 +6624,20 @@ fn parse_link_resource(input: &str, open: usize) -> Option<(usize, ParsedLinkRes
 }
 
 fn parse_link_destination(
+    lookups: &mut impl Lookups,
     input: &str,
     index: usize,
 ) -> Option<(String, LinkDestinationKind, usize)> {
     if input.as_bytes().get(index) == Some(&b'<') {
-        let mut cursor = index + 1;
-        while cursor < input.len() {
-            let (next, char) = next_char(input, cursor)?;
-            if char == '>' && !is_escaped_at(input, cursor) {
-                return Some((
-                    unescape_ascii_punctuation(&input[index + 1..cursor]),
-                    LinkDestinationKind::Angle,
-                    next,
-                ));
-            }
-            if (char == '<' && !is_escaped_at(input, cursor)) || char == '\n' || char == '\r' {
-                return None;
-            }
-            cursor = next;
+        let stop = lookups.angle_destination_stop(index + 1)?;
+        if input.as_bytes()[stop] != b'>' {
+            return None;
         }
-        return None;
+        return Some((
+            unescape_ascii_punctuation(&input[index + 1..stop]),
+            LinkDestinationKind::Angle,
+            stop + 1,
+        ));
     }
 
     let mut cursor = index;
@@ -6214,9 +6767,8 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         .strip_prefix("&#x")
         .or_else(|| rest.strip_prefix("&#X"))
     {
-        let digits = rest.find(';')?;
-        if digits == 0 || digits > 6 || !rest[..digits].bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
+        let digits = find_reference_terminator(rest, 6)?;
+        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return None;
         }
         let value = u32::from_str_radix(&rest[..digits], 16).ok()?;
@@ -6226,8 +6778,8 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         ));
     }
     if let Some(rest) = rest.strip_prefix("&#") {
-        let digits = rest.find(';')?;
-        if digits == 0 || digits > 7 || !rest[..digits].bytes().all(|byte| byte.is_ascii_digit()) {
+        let digits = find_reference_terminator(rest, 7)?;
+        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_digit()) {
             return None;
         }
         let value = rest[..digits].parse::<u32>().ok()?;
@@ -6237,12 +6789,22 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         ));
     }
 
-    let name_end = rest.find(';')?;
-    if name_end == 0 || name_end > 32 {
+    let name_end = find_reference_terminator(rest, 32)?;
+    if name_end == 0 {
         return None;
     }
     let name = &rest[1..name_end];
     named_character_reference(name).map(|value| (index + name_end + 1, value.into()))
+}
+
+/// Finds the `;` that ends a character reference body, looking no further than
+/// `max_len` bytes: a longer body is never a reference, so the scan stays
+/// bounded instead of running to the end of the input.
+fn find_reference_terminator(rest: &str, max_len: usize) -> Option<usize> {
+    rest.as_bytes()
+        .iter()
+        .take(max_len + 1)
+        .position(|byte| *byte == b';')
 }
 
 /// Decode a numeric character reference codepoint to its scalar value.
@@ -6282,7 +6844,8 @@ pub(crate) fn is_escaped_at(input: &str, index: usize) -> bool {
 
 fn parse_definition_destination_title(input: &str) -> Option<ParsedLinkResource> {
     let (mut cursor, _) = skip_link_resource_space_with_info(input, 0)?;
-    let (destination, destination_kind, next) = parse_link_destination(input, cursor)?;
+    let (destination, destination_kind, next) =
+        parse_link_destination(&mut DirectLookups { input }, input, cursor)?;
     cursor = next;
 
     let (next, had_space) = skip_link_resource_space_with_info(input, cursor)?;
@@ -6435,10 +6998,7 @@ fn definition_exists(definitions: &[String], label: &str) -> bool {
         return false;
     }
 
-    let identifier = normalize_label(label);
-    definitions
-        .iter()
-        .any(|definition| definition == &identifier)
+    definitions.binary_search(&normalize_label(label)).is_ok()
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
@@ -7264,34 +7824,40 @@ fn line_starts_interrupting_html_block(input: &str) -> bool {
     }
 }
 
-fn parse_autolink_end(input: &str, index: usize) -> Option<usize> {
-    input[index..].find('>').map(|end| index + end + 1)
+/// The end of the `<…>` autolink opening at `index`.
+fn autolink_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
+    let end = lookups.find(">", index)? + 1;
+    is_autolink(&input[index..end]).then_some(end)
 }
 
-fn parse_html_inline(input: &str, index: usize) -> Option<(usize, String)> {
+/// The end of the inline HTML (comment, processing instruction, CDATA,
+/// declaration, or tag) opening at `index`.
+fn html_inline_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
     let rest = &input[index..];
     if rest.starts_with("<!--") {
-        let end = rest.find("-->")? + 3;
-        return Some((index + end, rest[..end].into()));
+        return Some(lookups.find("-->", index)? + 3);
     }
     if rest.starts_with("<?") {
-        let end = rest.find("?>")? + 2;
-        return Some((index + end, rest[..end].into()));
+        return Some(lookups.find("?>", index)? + 2);
     }
     if rest.starts_with("<![CDATA[") {
-        let end = rest.find("]]>")? + 3;
-        return Some((index + end, rest[..end].into()));
+        return Some(lookups.find("]]>", index)? + 3);
     }
     if is_declaration_start(rest) {
-        let end = rest.find('>')? + 1;
-        return Some((index + end, rest[..end].into()));
+        return Some(lookups.find(">", index)? + 1);
     }
-
-    let (end, _) = parse_html_tag(input, index)?;
-    Some((end, input[index..end].into()))
+    parse_html_tag_with(lookups, input, index).map(|(end, _)| end)
 }
 
 fn parse_html_tag(input: &str, index: usize) -> Option<(usize, &str)> {
+    parse_html_tag_with(&mut DirectLookups { input }, input, index)
+}
+
+fn parse_html_tag_with<'a>(
+    lookups: &mut impl Lookups,
+    input: &'a str,
+    index: usize,
+) -> Option<(usize, &'a str)> {
     let bytes = input.as_bytes();
     if bytes.get(index) != Some(&b'<') {
         return None;
@@ -7338,7 +7904,7 @@ fn parse_html_tag(input: &str, index: usize) -> Option<(usize, &str)> {
                 let after_spaces = skip_spaces(input, cursor);
                 if bytes.get(after_spaces) == Some(&b'=') {
                     cursor = skip_spaces(input, after_spaces + 1);
-                    cursor = parse_html_attribute_value(input, cursor)?;
+                    cursor = parse_html_attribute_value(lookups, input, cursor)?;
                 } else {
                     cursor = after_name;
                 }
@@ -7350,20 +7916,15 @@ fn parse_html_tag(input: &str, index: usize) -> Option<(usize, &str)> {
     }
 }
 
-fn parse_html_attribute_value(input: &str, index: usize) -> Option<usize> {
+fn parse_html_attribute_value(
+    lookups: &mut impl Lookups,
+    input: &str,
+    index: usize,
+) -> Option<usize> {
     let bytes = input.as_bytes();
     match bytes.get(index)? {
-        b'"' | b'\'' => {
-            let quote = bytes[index];
-            let mut cursor = index + 1;
-            while cursor < bytes.len() {
-                if bytes[cursor] == quote {
-                    return Some(cursor + 1);
-                }
-                cursor += 1;
-            }
-            None
-        }
+        b'"' => Some(lookups.find("\"", index + 1)? + 1),
+        b'\'' => Some(lookups.find("'", index + 1)? + 1),
         b'=' | b'<' | b'>' | b'`' => None,
         _ => {
             let mut cursor = index;
@@ -7411,7 +7972,13 @@ fn is_autolink(input: &str) -> bool {
 }
 
 fn is_uri_autolink(input: &str) -> bool {
-    let Some(colon) = input.find(':') else {
+    // A scheme is at most 32 bytes, so the `:` ending it is within the first 33.
+    let Some(colon) = input
+        .as_bytes()
+        .iter()
+        .take(33)
+        .position(|byte| *byte == b':')
+    else {
         return false;
     };
     let scheme = &input[..colon];
@@ -7431,7 +7998,12 @@ fn is_uri_autolink(input: &str) -> bool {
 }
 
 fn is_email_autolink(input: &str) -> bool {
-    if input.chars().any(char::is_whitespace) {
+    // No email address contains `<`, and stopping at one keeps a run of `<`
+    // openers that share one later `>` linear.
+    if input
+        .chars()
+        .any(|char| char.is_whitespace() || char == '<')
+    {
         return false;
     }
     let Some(at) = input.find('@') else {
@@ -7457,6 +8029,7 @@ fn parse_literal_autolink(
     index: usize,
     gfm: bool,
     relaxed: bool,
+    scan: &mut LiteralAutolinkScan,
 ) -> Option<(usize, String)> {
     let rest = &input[index..];
 
@@ -7489,7 +8062,14 @@ fn parse_literal_autolink(
                 if end <= index + scheme_len {
                     return None;
                 }
-                if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
+                if literal_autolink_suppressed_by_link_label(
+                    input,
+                    index,
+                    end,
+                    relaxed,
+                    gfm,
+                    &mut scan.label_openers,
+                ) {
                     return None;
                 }
                 return Some((end, input[index..end].into()));
@@ -7512,7 +8092,14 @@ fn parse_literal_autolink(
             {
                 return None;
             }
-            if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
+            if literal_autolink_suppressed_by_link_label(
+                input,
+                index,
+                end,
+                relaxed,
+                gfm,
+                &mut scan.label_openers,
+            ) {
                 return None;
             }
             let mut destination = String::from("http://");
@@ -7520,7 +8107,7 @@ fn parse_literal_autolink(
             return Some((end, destination));
         }
 
-        if let Some(email) = parse_literal_email(input, index) {
+        if let Some(email) = parse_literal_email(input, index, &mut scan.email_local) {
             return Some(email);
         }
     }
@@ -7533,7 +8120,9 @@ fn parse_literal_autolink(
         // char after `://`; no host/domain validation (cmark-gfm is permissive
         // here — `smb:///path` and `://-` both linkify). The extent is balanced.
         if literal_scheme_prefix_ok(input, index) {
-            if let Some(after_slashes) = relaxed_scheme_after_slashes(rest) {
+            if let Some(after_slashes) =
+                relaxed_scheme_after_slashes(input, index, &mut scan.scheme)
+            {
                 let body_start = index + after_slashes;
                 let next = input[body_start..].chars().next();
                 if next.is_none_or(|char| char.is_whitespace()) && after_slashes == 3 {
@@ -7541,7 +8130,14 @@ fn parse_literal_autolink(
                 }
                 let end = autolink_url_end(input, body_start, body_start, true);
                 if end > index {
-                    if literal_autolink_suppressed_by_link_label(input, index, end, relaxed, gfm) {
+                    if literal_autolink_suppressed_by_link_label(
+                        input,
+                        index,
+                        end,
+                        relaxed,
+                        gfm,
+                        &mut scan.label_openers,
+                    ) {
                         return None;
                     }
                     return Some((end, input[index..end].into()));
@@ -7558,8 +8154,12 @@ fn parse_literal_autolink(
 // starts with one. No scheme length cap — cmark-gfm's relaxed autolink is
 // permissive. Returns `None` for a bare `scheme:` without `//` (that is the
 // email/angle-autolink path's job).
-fn relaxed_scheme_after_slashes(rest: &str) -> Option<usize> {
-    let bytes = rest.as_bytes();
+fn relaxed_scheme_after_slashes(
+    input: &str,
+    index: usize,
+    scheme_run: &mut ByteRun,
+) -> Option<usize> {
+    let bytes = input[index..].as_bytes();
     if bytes.starts_with(b"://") {
         return Some(3);
     }
@@ -7567,14 +8167,9 @@ fn relaxed_scheme_after_slashes(rest: &str) -> Option<usize> {
     if !first.is_ascii_alphabetic() {
         return None;
     }
-    let mut i = 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b':' => break,
-            byte if byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-') => i += 1,
-            _ => return None,
-        }
-    }
+    // The scheme is the run of scheme bytes starting here, and `://` must
+    // follow it directly.
+    let i = scheme_run.end(input, index, is_relaxed_scheme_byte) - index;
     if bytes.get(i..i + 3) == Some(b"://") {
         Some(i + 3)
     } else {
@@ -7625,8 +8220,9 @@ fn literal_autolink_suppressed_by_link_label(
     end: usize,
     relaxed: bool,
     gfm_autolink_literal: bool,
+    label_openers: &mut LabelOpenerScan,
 ) -> bool {
-    if !has_unclosed_link_label_opener(input, index) {
+    if !label_openers.has_unclosed_opener(input, index) {
         return false;
     }
     if input[end..].starts_with("](") && !link_resource_tail_has_close(input, end + 2) {
@@ -7635,32 +8231,49 @@ fn literal_autolink_suppressed_by_link_label(
     !relaxed && !gfm_autolink_literal && input.as_bytes().get(end).is_some_and(|byte| *byte == b']')
 }
 
-fn has_unclosed_link_label_opener(input: &str, index: usize) -> bool {
-    let line_start = input[..index]
-        .rfind(['\n', '\r'])
-        .map_or(0, |offset| offset + 1);
-    let mut depth = 0usize;
-    let mut cursor = line_start;
-    while cursor < index {
-        let Some((next, char)) = next_char(input, cursor) else {
-            break;
-        };
-        match char {
-            '\\' => {
-                cursor = next_char(input, next)
-                    .map(|(after_escape, _)| after_escape)
-                    .unwrap_or(next);
-                continue;
-            }
-            '[' => depth += 1,
-            ']' => {
-                depth = depth.saturating_sub(1);
-            }
-            _ => {}
+/// Whether an unclosed `[` precedes a literal autolink on its line: the
+/// `[`/`]` depth from the line start (honouring `\` escapes) is positive. The
+/// walk is kept across calls because one inline scan asks about increasing
+/// positions; it drops back to depth 0 after each line break it consumes, which
+/// is exactly the state a walk from that line's start reaches.
+#[derive(Default)]
+struct LabelOpenerScan {
+    /// The last position asked about; the walk has stopped at the first step
+    /// at or after it.
+    queried: usize,
+    cursor: usize,
+    depth: usize,
+}
+
+impl LabelOpenerScan {
+    fn has_unclosed_opener(&mut self, input: &str, index: usize) -> bool {
+        if index < self.queried {
+            *self = Self::default();
         }
-        cursor = next;
+        while self.cursor < index {
+            let Some((next, char)) = next_char(input, self.cursor) else {
+                break;
+            };
+            match char {
+                '\\' => {
+                    // An escaped line break still ends the line, so it is left
+                    // for the next step to consume as a break.
+                    self.cursor = match next_char(input, next) {
+                        Some((_, '\n' | '\r')) | None => next,
+                        Some((after_escape, _)) => after_escape,
+                    };
+                    continue;
+                }
+                '\n' | '\r' => self.depth = 0,
+                '[' => self.depth += 1,
+                ']' => self.depth = self.depth.saturating_sub(1),
+                _ => {}
+            }
+            self.cursor = next;
+        }
+        self.queried = index;
+        self.depth > 0
     }
-    depth > 0
 }
 
 fn link_resource_tail_has_close(input: &str, start: usize) -> bool {
@@ -7937,9 +8550,67 @@ fn trailing_hex_entity_run_start(bytes: &[u8], start: usize, end: usize) -> Opti
 // found by rewinding from `@` over `[A-Za-z0-9._+-]` (or a `mailto:`/`xmpp:`
 // scheme), so this only succeeds when the char before `index` is not part of
 // that left extent.
-fn parse_literal_email(input: &str, index: usize) -> Option<(usize, String)> {
+/// Scan state shared by the `parse_literal_autolink` calls of one inline pass.
+/// The pass only moves forward, so each piece lets a later start position reuse
+/// the bytes already walked for an earlier one instead of rescanning them.
+#[derive(Default)]
+struct LiteralAutolinkScan {
+    /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
+    email_local: ByteRun,
+    /// Runs of relaxed-autolink scheme bytes.
+    scheme: ByteRun,
+    label_openers: LabelOpenerScan,
+}
+
+/// The extent of one run of bytes accepted by a fixed predicate: every start
+/// position in `start..=end` stops at `end`. Each `ByteRun` is always queried
+/// with the same predicate.
+#[derive(Default)]
+struct ByteRun {
+    start: usize,
+    end: Option<usize>,
+}
+
+impl ByteRun {
+    /// Returns the first byte position at or after `index` that `in_run`
+    /// rejects, or the input length.
+    fn end(&mut self, input: &str, index: usize, in_run: fn(u8) -> bool) -> usize {
+        if let Some(end) = self.end {
+            if self.start <= index && index <= end {
+                return end;
+            }
+        }
+        let end = input.as_bytes()[index..]
+            .iter()
+            .position(|byte| !in_run(*byte))
+            .map_or(input.len(), |offset| index + offset);
+        self.start = index;
+        self.end = Some(end);
+        end
+    }
+}
+
+fn is_email_local_or_scheme_byte(byte: u8) -> bool {
+    is_gfm_email_local_byte(byte) || byte == b':'
+}
+
+fn is_relaxed_scheme_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
+}
+
+fn parse_literal_email(
+    input: &str,
+    index: usize,
+    local_run: &mut ByteRun,
+) -> Option<(usize, String)> {
     let rest = &input[index..];
-    let at = rest.find('@')?;
+    // A valid local part holds only local-part bytes behind an optional
+    // `mailto:`/`xmpp:` scheme, so the `@` must be the byte that ends that run.
+    let at_index = local_run.end(input, index, is_email_local_or_scheme_byte);
+    if input.as_bytes().get(at_index) != Some(&b'@') {
+        return None;
+    }
+    let at = at_index - index;
     if at == 0 {
         return None;
     }
@@ -8221,19 +8892,18 @@ fn find_footnote_reference_label_end(input: &str, mut cursor: usize) -> Option<u
     None
 }
 
-fn find_inline_footnote_end(input: &str, mut cursor: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor)?;
-        if !is_escaped_at(input, cursor) {
-            match char {
-                '[' => depth += 1,
-                ']' if depth == 0 => return Some(cursor),
-                ']' => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-        cursor = next;
+/// One step of the walk to an inline footnote's closing `]`: unescaped
+/// brackets nest.
+fn inline_footnote_step(input: &str, cursor: usize) -> BracketStep {
+    let Some((next, char)) = next_char(input, cursor) else {
+        return BracketStep::End;
+    };
+    if !matches!(char, '[' | ']') || is_escaped_at(input, cursor) {
+        return BracketStep::Pass(next);
     }
-    None
+    if char == '[' {
+        BracketStep::Open(next)
+    } else {
+        BracketStep::Close(next)
+    }
 }

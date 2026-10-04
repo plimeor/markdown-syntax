@@ -13,6 +13,7 @@ use alloc::{
 use crate::{
     ast::*,
     diagnostic::Diagnostic,
+    memo::{pattern_starts, PathMemo, Positions, Step},
     parse::{gfm_table_can_start_source, line_starts_html_block},
     validate::validate_document,
 };
@@ -774,6 +775,7 @@ fn serialize_inlines_with_context(
     context: InlineSerializeContext,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
+    let mut output_line = OutputLine::default();
     for (index, inline) in inlines.iter().enumerate() {
         match inline {
             Inline::Text(node) => {
@@ -811,7 +813,7 @@ fn serialize_inlines_with_context(
                     escape_body,
                     lead.is_empty()
                         && trailing_ws.len() != body.len()
-                        && output_line_len(&output) == 0,
+                        && output_line.len(&output) == 0,
                     trailing_ws.is_empty() && text_is_at_line_end(inlines, index),
                     context,
                 ));
@@ -1208,6 +1210,156 @@ fn text_is_at_line_end(inlines: &[Inline], index: usize) -> bool {
     )
 }
 
+#[cfg(test)]
+mod escape_scan_tests;
+
+/// The attention markers whose closer search `TextScan` memoizes.
+const ATTENTION_MARKERS: [&str; 5] = ["*", "_", "++", "==", "~~"];
+
+/// Memoized answers to the "could this char start a construct on reparse"
+/// questions `escape_text_with_context` asks about each char of one text. Each
+/// question looks at the rest of the text, so a fresh scan per char would make
+/// escaping one long text quadratic.
+struct TextScan<'a> {
+    input: &'a str,
+    marker_starts: [Positions; ATTENTION_MARKERS.len()],
+    marker_closers: [PathMemo; ATTENTION_MARKERS.len()],
+    last_occurrences: Vec<(&'static str, Option<usize>)>,
+    backtick_runs: Option<SameCharRuns>,
+    dollar_runs: Option<SameCharRuns>,
+    /// The byte, start, and end of the last run `run_len_from` measured.
+    current_run: Option<(u8, usize, usize)>,
+}
+
+impl<'a> TextScan<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            marker_starts: Default::default(),
+            marker_closers: Default::default(),
+            last_occurrences: Vec::new(),
+            backtick_runs: None,
+            dollar_runs: None,
+            current_run: None,
+        }
+    }
+
+    /// `same_char_run_len` for an ASCII `needle`, measuring each run once
+    /// however many of its positions ask.
+    fn run_len_from(&mut self, needle: u8, offset: usize) -> usize {
+        if let Some((byte, start, end)) = self.current_run {
+            if byte == needle && start <= offset && offset <= end {
+                return end - offset;
+            }
+        }
+        let end = offset
+            + self.input.as_bytes()[offset..]
+                .iter()
+                .take_while(|byte| **byte == needle)
+                .count();
+        self.current_run = Some((needle, offset, end));
+        end - offset
+    }
+
+    /// Whether `pattern` occurs starting at or after `from`.
+    fn occurs_from(&mut self, pattern: &'static str, from: usize) -> bool {
+        let last = match self
+            .last_occurrences
+            .iter()
+            .find(|(cached, _)| *cached == pattern)
+        {
+            Some((_, last)) => *last,
+            None => {
+                let last = self.input.rfind(pattern);
+                self.last_occurrences.push((pattern, last));
+                last
+            }
+        };
+        last.is_some_and(|last| last >= from)
+    }
+
+    /// Whether a run of `marker` that can close starts at or after `from`,
+    /// stepping from one occurrence to the position after it.
+    fn attention_closer_follows(&mut self, marker: &str, from: usize, underscore: bool) -> bool {
+        let input = self.input;
+        let slot = ATTENTION_MARKERS
+            .iter()
+            .position(|known| *known == marker)
+            .expect("attention marker");
+        let marker = ATTENTION_MARKERS[slot];
+        let starts = &mut self.marker_starts[slot];
+        self.marker_closers[slot]
+            .resolve(input.len() + 1, from, |cursor| {
+                let Some(candidate) =
+                    starts.first_at_or_after(cursor, || pattern_starts(input, marker))
+                else {
+                    return Step::Done(None);
+                };
+                if !input[candidate + marker.len()..].starts_with(marker)
+                    && text_delimiter_can_close(input, candidate, marker.len(), underscore)
+                {
+                    Step::Done(Some(candidate))
+                } else {
+                    Step::Next(candidate + marker.len())
+                }
+            })
+            .is_some()
+    }
+
+    /// Whether some position at or after `from` begins exactly `run_len`
+    /// trailing bytes of a run of `needle` (an ASCII byte).
+    fn exact_run_follows(&mut self, needle: u8, from: usize, run_len: usize) -> bool {
+        let input = self.input;
+        let runs = match needle {
+            b'`' => &mut self.backtick_runs,
+            _ => &mut self.dollar_runs,
+        }
+        .get_or_insert_with(|| SameCharRuns::new(input, needle));
+        runs.has_run_ending_at_or_after(from + run_len, run_len)
+    }
+}
+
+/// The maximal runs of one ASCII byte, ordered by end, with the longest run
+/// among each suffix.
+struct SameCharRuns {
+    ends: Vec<usize>,
+    longest_from: Vec<usize>,
+}
+
+impl SameCharRuns {
+    fn new(input: &str, needle: u8) -> Self {
+        let bytes = input.as_bytes();
+        let mut ends = Vec::new();
+        let mut lens = Vec::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == needle {
+                let start = index;
+                while bytes.get(index) == Some(&needle) {
+                    index += 1;
+                }
+                ends.push(index);
+                lens.push(index - start);
+            } else {
+                index += 1;
+            }
+        }
+        let mut longest_from = lens;
+        for index in (0..longest_from.len().saturating_sub(1)).rev() {
+            longest_from[index] = longest_from[index].max(longest_from[index + 1]);
+        }
+        Self { ends, longest_from }
+    }
+
+    /// Whether a run at least `run_len` long ends at or after `min_end`.
+    fn has_run_ending_at_or_after(&self, min_end: usize, run_len: usize) -> bool {
+        let first = self.ends.partition_point(|end| *end < min_end);
+        self.longest_from
+            .get(first)
+            .is_some_and(|longest| *longest >= run_len)
+    }
+}
+
 fn escape_text_with_context(
     input: &str,
     preserve_leading: bool,
@@ -1216,6 +1368,8 @@ fn escape_text_with_context(
 ) -> String {
     let avoid_star_edges = context.avoid_star_edges;
     let mut output = String::new();
+    let mut output_line = OutputLine::default();
+    let mut scan = TextScan::new(input);
     let mut line_digit_prefix = 0usize;
     let trailing_start = if preserve_trailing {
         input
@@ -1251,7 +1405,7 @@ fn escape_text_with_context(
             continue;
         }
         at_leading_edge = false;
-        if line_digit_prefix == output_line_len(&output) && char.is_ascii_digit() {
+        if line_digit_prefix == output_line.len(&output) && char.is_ascii_digit() {
             output.push(char);
             line_digit_prefix += 1;
             continue;
@@ -1293,7 +1447,7 @@ fn escape_text_with_context(
             line_digit_prefix = usize::MAX;
             continue;
         }
-        if output_line_len(&output) == 0
+        if output_line.len(&output) == 0
             && matches!(char, '-' | '+')
             && chars
                 .peek()
@@ -1305,7 +1459,7 @@ fn escape_text_with_context(
             line_digit_prefix = usize::MAX;
             continue;
         }
-        if output_line_len(&output) == 0
+        if output_line.len(&output) == 0
             && ((char == '-' && chars.peek().is_some_and(|(_, next)| *next == '-')) || char == '=')
         {
             output.push('\\');
@@ -1317,40 +1471,40 @@ fn escape_text_with_context(
         match char {
             '*' if avoid_star_edges => output.push_str("&#x2A;"),
             '|' if context.table_cell => output.push_str("&#x7C;"),
-            '|' if output_line_len(&output) == 0 => {
+            '|' if output_line.len(&output) == 0 => {
                 output.push('\\');
                 output.push(char);
             }
-            '`' if text_code_span_can_start(input, offset) => {
+            '`' if text_code_span_can_start(input, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '*' if text_attention_delimiter_can_start(input, offset, "*", false) => {
+            '*' if text_attention_delimiter_can_start(input, offset, "*", false, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '_' if text_attention_delimiter_can_start(input, offset, "_", true) => {
+            '_' if text_attention_delimiter_can_start(input, offset, "_", true, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '<' if text_less_than_can_start_inline(input, offset) => {
+            '<' if text_less_than_can_start_inline(input, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '>' if output_line_len(&output) == 0 => {
+            '>' if output_line.len(&output) == 0 => {
                 output.push('\\');
                 output.push(char);
             }
-            '{' if input[offset + char.len_utf8()..].contains('}') => {
+            '{' if scan.occurs_from("}", offset + char.len_utf8()) => {
                 output.push('\\');
                 output.push(char);
             }
-            '#' if text_atx_heading_can_start(input, offset, &output) => {
+            '#' if text_atx_heading_can_start(input, offset, output_line.len(&output)) => {
                 output.push('\\');
                 output.push(char);
             }
-            '|' if text_spoiler_can_start(input, offset) => output.push_str("&#x7C;"),
-            '$' if text_math_can_start(input, offset) => {
+            '|' if text_spoiler_can_start(input, offset, &mut scan) => output.push_str("&#x7C;"),
+            '$' if text_math_can_start(input, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -1358,19 +1512,19 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '~' if text_tilde_can_start(input, offset) => {
+            '~' if text_tilde_can_start(input, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '^' if text_caret_can_start(input, offset) => {
+            '^' if text_caret_can_start(input, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '+' if text_attention_delimiter_can_start(input, offset, "++", false) => {
+            '+' if text_attention_delimiter_can_start(input, offset, "++", false, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '=' if text_attention_delimiter_can_start(input, offset, "==", false) => {
+            '=' if text_attention_delimiter_can_start(input, offset, "==", false, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -1388,12 +1542,12 @@ fn escape_text_with_context(
     output
 }
 
-fn text_code_span_can_start(input: &str, offset: usize) -> bool {
-    let marker_len = same_char_run_len(input, offset, '`');
+fn text_code_span_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
+    let marker_len = scan.run_len_from(b'`', offset);
     if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
         return true;
     }
-    find_same_char_run(input, offset + marker_len, '`', marker_len).is_some()
+    scan.exact_run_follows(b'`', offset + marker_len, marker_len)
 }
 
 fn text_attention_delimiter_can_start(
@@ -1401,6 +1555,7 @@ fn text_attention_delimiter_can_start(
     offset: usize,
     marker: &str,
     underscore: bool,
+    scan: &mut TextScan,
 ) -> bool {
     if !input[offset..].starts_with(marker) {
         return false;
@@ -1414,16 +1569,7 @@ fn text_attention_delimiter_can_start(
         return false;
     }
 
-    let mut cursor = offset + marker.len();
-    while let Some(candidate) = input[cursor..].find(marker).map(|index| cursor + index) {
-        if !input[candidate + marker.len()..].starts_with(marker)
-            && text_delimiter_can_close(input, candidate, marker.len(), underscore)
-        {
-            return true;
-        }
-        cursor = candidate + marker.len();
-    }
-    false
+    scan.attention_closer_follows(marker, offset + marker.len(), underscore)
 }
 
 fn text_delimiter_can_open(
@@ -1494,21 +1640,22 @@ fn text_delimiter_flanking(input: &str, offset: usize, marker_len: usize) -> Tex
     }
 }
 
-fn text_less_than_can_start_inline(input: &str, offset: usize) -> bool {
-    let after = &input[offset + '<'.len_utf8()..];
-    if after.contains('>') {
+fn text_less_than_can_start_inline(input: &str, offset: usize, scan: &mut TextScan) -> bool {
+    let after_offset = offset + '<'.len_utf8();
+    let after = &input[after_offset..];
+    if scan.occurs_from(">", after_offset) {
         let next = after.chars().next();
         return next.is_some_and(|char| {
             char.is_ascii_alphabetic() || matches!(char, '/' | '!' | '?' | '_')
         }) || after.starts_with("http://")
             || after.starts_with("https://")
-            || after.contains('@');
+            || scan.occurs_from("@", after_offset);
     }
     false
 }
 
-fn text_atx_heading_can_start(input: &str, offset: usize, output: &str) -> bool {
-    if output_line_len(output) != 0 {
+fn text_atx_heading_can_start(input: &str, offset: usize, output_line_len: usize) -> bool {
+    if output_line_len != 0 {
         return false;
     }
     let hashes = same_char_run_len(input, offset, '#');
@@ -1519,47 +1666,50 @@ fn text_atx_heading_can_start(input: &str, offset: usize, output: &str) -> bool 
             .is_none_or(char::is_whitespace)
 }
 
-fn text_spoiler_can_start(input: &str, offset: usize) -> bool {
+fn text_spoiler_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     input[offset..].starts_with("||")
         && !input[offset + "||".len()..].starts_with('|')
-        && input[offset + "||".len()..].contains("||")
+        && scan.occurs_from("||", offset + "||".len())
 }
 
-fn text_math_can_start(input: &str, offset: usize) -> bool {
+fn text_math_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     // Mirror the parser's dollar-math start (code-span analogue): an opening run
     // of N dollars starts math when an exact-length-N closing run exists ahead.
     // Edge whitespace no longer blocks it, so a literal `$` adjacent to such a
     // run must be escaped to avoid forming math on the round trip.
-    let marker_len = same_char_run_len(input, offset, '$');
+    let marker_len = scan.run_len_from(b'$', offset);
     if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
         return true;
     }
-    let after_open = offset + marker_len;
-    find_same_char_run(input, after_open, '$', marker_len).is_some()
+    scan.exact_run_follows(b'$', offset + marker_len, marker_len)
 }
 
-fn text_tilde_can_start(input: &str, offset: usize) -> bool {
+fn text_tilde_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     if input[offset..].starts_with("~~") {
-        return text_attention_delimiter_can_start(input, offset, "~~", false)
-            || text_simple_delimiter_can_start(input, offset, '~');
+        return text_attention_delimiter_can_start(input, offset, "~~", false, scan)
+            || text_simple_delimiter_can_start(input, offset, "~", scan);
     }
-    text_simple_delimiter_can_start(input, offset, '~')
+    text_simple_delimiter_can_start(input, offset, "~", scan)
 }
 
-fn text_caret_can_start(input: &str, offset: usize) -> bool {
+fn text_caret_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     input[offset + '^'.len_utf8()..].starts_with('[')
-        || text_simple_delimiter_can_start(input, offset, '^')
+        || text_simple_delimiter_can_start(input, offset, "^", scan)
 }
 
-fn text_simple_delimiter_can_start(input: &str, offset: usize, marker: char) -> bool {
-    let marker_len = marker.len_utf8();
-    if text_char_at_edge(input, offset, marker_len)
-        || input[offset + marker_len..].starts_with(marker)
+fn text_simple_delimiter_can_start(
+    input: &str,
+    offset: usize,
+    marker: &'static str,
+    scan: &mut TextScan,
+) -> bool {
+    if text_char_at_edge(input, offset, marker.len())
+        || input[offset + marker.len()..].starts_with(marker)
         || input[..offset].ends_with(marker)
     {
         return true;
     }
-    input[offset + marker_len..].contains(marker)
+    scan.occurs_from(marker, offset + marker.len())
 }
 
 fn text_character_reference_can_start(input: &str, offset: usize) -> bool {
@@ -1602,22 +1752,6 @@ fn same_char_run_len(input: &str, offset: usize, needle: char) -> usize {
         .sum()
 }
 
-fn find_same_char_run(
-    input: &str,
-    mut offset: usize,
-    needle: char,
-    run_len: usize,
-) -> Option<usize> {
-    while offset < input.len() {
-        let candidate = input[offset..].find(needle).map(|index| offset + index)?;
-        if same_char_run_len(input, candidate, needle) == run_len {
-            return Some(candidate);
-        }
-        offset = candidate + needle.len_utf8();
-    }
-    None
-}
-
 fn at_sign_can_start_email_autolink(input: &str, offset: usize) -> bool {
     let before = input[..offset]
         .chars()
@@ -1650,11 +1784,26 @@ fn at_sign_can_start_email_autolink(input: &str, offset: usize) -> bool {
     saw_domain_char_after_dot
 }
 
-fn output_line_len(output: &str) -> usize {
-    output
-        .rsplit_once('\n')
-        .map(|(_, line)| line.len())
-        .unwrap_or_else(|| output.len())
+/// The length of the last line of an append-only output, found by scanning only
+/// the bytes appended since the previous call, so asking once per appended
+/// char stays linear on a long line.
+#[derive(Default)]
+struct OutputLine {
+    line_start: usize,
+    scanned: usize,
+}
+
+impl OutputLine {
+    fn len(&mut self, output: &str) -> usize {
+        if let Some(newline) = output.as_bytes()[self.scanned..]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+        {
+            self.line_start = self.scanned + newline + 1;
+        }
+        self.scanned = output.len();
+        output.len() - self.line_start
+    }
 }
 
 fn escape_destination_with_pipe(input: &str, escape_pipe: bool) -> String {

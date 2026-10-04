@@ -14,6 +14,7 @@ graphs, or active execution cursors. Derive current behavior from `README.md`,
 | `decisions/003-test-corpus-boundaries.md` | active | Records why fixture corpora are role-separated and why only runnable executable cases stay in the tree. |
 | `decisions/004-correctness-workflow.md` | active | Records why parser correctness work uses paired parser/serializer fixes, hand-verified goldens, and observed conformance runs. |
 | `decisions/005-public-api-ergonomics.md` | active | Consolidated ergonomics reshaping of the public surface: `parse()` = maximal non-MDX with presets via a `.parse()` method; deletes `SyntaxProfile`/`ResolvedSyntaxOptions`/`SyntaxOptions::custom`; adds a `Construct` builder; moves `to_markdown`/`to_html`/`validate` onto `Document`; unifies one `Diagnostic`; adds `meta()`/`span()`/`Inline::children()` accessors and a minimal `From`/`new` AST build layer; and curates exports behind a `prelude`. |
+| `decisions/006-bounded-cost-on-untrusted-input.md` | active | Records why parsing, serialization, rendering, and validation stay linear-time and stack-bounded on untrusted input: memoized per-input forward scans (`src/memo.rs`), the MDX JSX tag index (`n log n`), nesting limits of 32 block / 32 inline / 16 emphasis levels with literal text past them, the link-label verdict memo, and the budgeted `++`/`==`/underline closer search; and rejected alternatives. |
 
 ## Plans
 
