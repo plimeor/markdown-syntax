@@ -5855,6 +5855,15 @@ fn parse_inline_content(
         state,
         scan: InlineScan::new(input),
     };
+    // A literal autolink holds `://`, `www.`, or an email's `@`; content
+    // without any of them is not scanned for one at each position.
+    let literal_autolinks = (options.constructs.gfm_autolink_literal
+        || options.constructs.relaxed_autolinks)
+        && (bytes.contains(&b'@')
+            || input.contains("://")
+            || bytes
+                .windows(4)
+                .any(|window| window.eq_ignore_ascii_case(b"www.")));
 
     while index < bytes.len() {
         if bytes[index] == b'\\' {
@@ -6061,7 +6070,7 @@ fn parse_inline_content(
             // literal autolink before recording the `_` as an emphasis
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
-            if options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks {
+            if literal_autolinks {
                 if let Some((end, destination)) = parse_literal_autolink(
                     input,
                     index,
@@ -6371,7 +6380,7 @@ fn parse_inline_content(
 
         // A bare URL is an autolink even inside an open bracket; if the bracket
         // forms a link, `demote_links` turns it back into text.
-        if options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks {
+        if literal_autolinks {
             if let Some((end, destination)) = parse_literal_autolink(
                 input,
                 index,
