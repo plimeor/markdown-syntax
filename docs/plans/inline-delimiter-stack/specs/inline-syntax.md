@@ -6,7 +6,9 @@
 The parser SHALL pair every emphasis-like mark (`*`, `_`, `~~`, `~`, `^`, `++`,
 `==`, `||`, and underline `__`) on one delimiter stack: each closer, taken in
 source order, pairs with the nearest earlier opener it can close, and openers
-left between the two stay literal text.
+left between the two stay literal text. A run that can both open and close
+SHALL NOT close an opener outside a mark span (`++`, `==`, `||`, `~`, `^`, or
+underline `__`) that encloses it.
 
 #### Scenario: Strong closes before a highlight
 - **WHEN** `"**a ==b** c=="` is parsed with `parse`
@@ -24,6 +26,22 @@ left between the two stay literal text.
 - **WHEN** `"==a *b* c=="` is parsed with `parse`
 - **THEN** the paragraph holds a `Mark` containing `a `, an `Emphasis` containing `b`, and ` c`
 
+#### Scenario: A run that can also open stays inside its mark
+- **WHEN** `"*a ||~~*b*~~|| c*"` is parsed with `parse`
+- **THEN** the paragraph holds an `Emphasis` containing `a `, a `Spoiler` holding a `Delete` holding an `Emphasis` containing `b`, and ` c`
+
+### Requirement: Atomic constructs bind tighter than marks
+A code span, inline math, raw HTML, or autolink SHALL form before any mark
+around it pairs, and a mark delimiter inside one SHALL be part of its content.
+
+#### Scenario: Caret inside a code span
+- **WHEN** `"^a `^` b^"` is parsed with `parse`
+- **THEN** the paragraph holds a `Superscript` containing `a `, a code span `^`, and ` b`
+
+#### Scenario: Highlight delimiters inside a code span
+- **WHEN** `"==a `b== c` d=="` is parsed with `parse`
+- **THEN** the paragraph holds a `Mark` containing `a `, a code span `b== c`, and ` d`
+
 ### Requirement: Marks inside a link stay inside it
 A mark opened inside a link, image, or inline footnote label SHALL pair only
 with a closer inside the same label.
@@ -36,26 +54,24 @@ with a closer inside the same label.
 - **WHEN** `"*[foo*](/u)"` is parsed with `parse`
 - **THEN** the paragraph holds `Text("*")` followed by a `Link` whose text is `foo*`
 
-### Requirement: No literal autolinks inside brackets
-When GFM literal autolinks are enabled and relaxed autolinks are not, the parser
-SHALL NOT recognize a literal autolink while an unclosed `[` precedes it in the
-same inline content; angle-bracket autolinks SHALL be recognized as before.
+## MODIFIED Requirements
 
-#### Scenario: Bracketed URL
-- **WHEN** `"[https://foo.com]"` is parsed with the GFM preset
-- **THEN** the paragraph is the text `[https://foo.com]`
+### Requirement: Superscript and inline footnotes share the caret
+The parser SHALL read `^[…]` as an inline footnote when inline footnotes are
+enabled, unless a superscript on the same line is waiting to close at that `^`,
+and `^x^` as `Superscript` otherwise.
 
-#### Scenario: Double-bracketed URL
-- **WHEN** `"[[https://foo.com]]"` is parsed with the GFM preset
-- **THEN** the paragraph is the text `[[https://foo.com]]`
+#### Scenario: Inline footnote
+- **WHEN** `"note^[x] tail"` is parsed with `parse`
+- **THEN** the second inline is an `InlineFootnote`
 
-#### Scenario: Angle autolink in brackets
-- **WHEN** `"[<https://foo.com>]"` is parsed with the GFM preset
-- **THEN** the paragraph holds `Text("[")`, an `Autolink` to `https://foo.com`, and `Text("]")`
+#### Scenario: Superscript
+- **WHEN** `"x^2^"` is parsed with `parse`
+- **THEN** the second inline is a `Superscript`
 
-#### Scenario: Relaxed autolinks
-- **WHEN** `"[https://foo.com]"` is parsed with the GFM preset and relaxed autolinks enabled
-- **THEN** the paragraph holds `Text("[")`, an `Autolink` to `https://foo.com`, and `Text("]")`
+#### Scenario: Superscript closing before a bracket
+- **WHEN** `"a^b^[link](u)"` is parsed with `parse`
+- **THEN** the paragraph holds `Text("a")`, a `Superscript` containing `b`, and a `Link` whose text is `link`
 
 ## REMOVED Requirements
 

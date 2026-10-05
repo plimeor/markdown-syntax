@@ -59,10 +59,27 @@ fn inline_depth(nodes: &[Inline]) -> usize {
     let mut pending = vec![(nodes, 0)];
     while let Some((nodes, depth)) = pending.pop() {
         for node in nodes {
-            let children = node.children();
-            if !children.is_empty() {
+            // Every container counts, empty ones included.
+            let container = !matches!(
+                node,
+                Inline::Text(_)
+                    | Inline::Escape(_)
+                    | Inline::CharacterReference(_)
+                    | Inline::Shortcode(_)
+                    | Inline::Code(_)
+                    | Inline::Autolink(_)
+                    | Inline::Html(_)
+                    | Inline::SoftBreak(_)
+                    | Inline::LineBreak(_)
+                    | Inline::Math(_)
+                    | Inline::FootnoteReference(_)
+                    | Inline::WikiLink(_)
+                    | Inline::MdxExpression(_)
+                    | Inline::MdxJsx(_)
+            );
+            if container {
                 deepest = deepest.max(depth + 1);
-                pending.push((children, depth + 1));
+                pending.push((node.children(), depth + 1));
             }
         }
     }
@@ -285,4 +302,63 @@ fn mdx_jsx_and_expressions_parse_in_bounded_time() {
     ] {
         parse_bounded_with(name, input, SyntaxOptions::mdx());
     }
+}
+
+/// `open`/`close` around `x`, nested `levels` deep through `mid_open` /
+/// `mid_close`.
+fn nest(levels: usize, open: &str, mid_open: &str, mid_close: &str, close: &str) -> String {
+    let mut input = String::from("x");
+    for _ in 0..levels {
+        input = format!(
+            "{}{mid_open}{input}{mid_close}{}",
+            open.repeat(30),
+            close.repeat(30)
+        );
+    }
+    input
+}
+
+#[test]
+fn nesting_through_directive_labels_stops_at_the_limit() {
+    for (name, open, close) in [
+        ("images around directives", "![", "](u)"),
+        ("footnotes around directives", "^[a ", "]"),
+        ("marks around directives", "==a ", " b=="),
+    ] {
+        let document = parse_bounded(name, nest(31, open, ":d[", "]", close));
+        assert!(
+            inline_depth(first_paragraph(&document)) <= 32,
+            "{name}: inline nesting stops at the limit"
+        );
+    }
+    for leaf in ["![](u)", "[](u)", ":e[]"] {
+        let input =
+            String::from("*a :d[") + &"==a ".repeat(40) + leaf + &" b==".repeat(40) + "] b*";
+        let document = parse_bounded("empty container under directive marks", input);
+        assert!(
+            inline_depth(first_paragraph(&document)) <= 32,
+            "{leaf}: inline nesting stops at the limit"
+        );
+    }
+    parse_bounded(
+        "emphasis and marks around directives",
+        nest(31, "*a ==b ", ":d[", "]", " c== d*"),
+    );
+}
+
+#[test]
+fn emphasis_inside_marks_shares_the_inline_limit() {
+    let open = "*a ".repeat(16) + "==b ";
+    let close = String::from(" c==") + &" d*".repeat(16);
+    let input = open.repeat(32) + "x" + &close.repeat(32);
+    let document = parse_bounded("emphasis inside marks", input);
+    assert!(inline_depth(first_paragraph(&document)) <= 32);
+}
+
+#[test]
+fn tilde_closers_with_subscripts_parse_in_bounded_time() {
+    let input = "*a ".repeat(50_000) + &" ~b~~ ".repeat(50_000);
+    parse_bounded("tilde closers", input);
+    let input = String::from("~~x ") + &"*a ".repeat(50_000) + &" ~b~~ ".repeat(50_000);
+    parse_bounded("tilde closers after a strikethrough opener", input);
 }

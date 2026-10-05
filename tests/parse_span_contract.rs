@@ -18,7 +18,12 @@ fn top_level_block_spans_slice_the_original_source() {
 
 fn assert_original_source_tiling(name: &str, source: &str) {
     let output = parse(source);
-    let mut cursor = 0;
+    // A leading byte order mark is not content, so it may precede the first block.
+    let mut cursor = if source.starts_with('\u{feff}') {
+        '\u{feff}'.len_utf8()
+    } else {
+        0
+    };
 
     for (index, block) in output.document.children.iter().enumerate() {
         let span = block

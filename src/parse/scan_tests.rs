@@ -293,23 +293,6 @@ mod reference {
         None
     }
 
-    pub(super) fn find_inline_footnote_end(input: &str, mut cursor: usize) -> Option<usize> {
-        let mut depth = 0usize;
-        while cursor < input.len() {
-            let (next, char) = next_char(input, cursor)?;
-            if !is_escaped_at(input, cursor) {
-                match char {
-                    '[' => depth += 1,
-                    ']' if depth == 0 => return Some(cursor),
-                    ']' => depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-            }
-            cursor = next;
-        }
-        None
-    }
-
     pub(super) fn find_directive_attributes_close(input: &str, open: usize) -> Option<usize> {
         if input.as_bytes().get(open) != Some(&b'{') {
             return None;
@@ -680,101 +663,6 @@ mod reference {
         }
     }
 
-    pub(super) fn find_closing_delimiter(
-        input: &str,
-        start: usize,
-        marker: &str,
-        underscore: bool,
-    ) -> Option<usize> {
-        let marker_len = marker.len();
-        let mut cursor = start;
-        let mut nested = 0usize;
-        while cursor <= input.len() {
-            let candidate = input[cursor..].find(marker).map(|offset| cursor + offset)?;
-            if is_escaped_at(input, candidate) {
-                cursor = candidate + marker_len;
-                continue;
-            }
-            if delimiter_candidate_precedes_link_close(input, start, candidate, marker_len) {
-                cursor = candidate + marker_len;
-                continue;
-            }
-            if marker_len == 1
-                && nested == 0
-                && starts_longer_delimiter_run(input, candidate, marker)
-            {
-                cursor = candidate + delimiter_run_len(input, candidate, marker);
-                continue;
-            }
-
-            let can_open = if underscore {
-                can_open_underscore(input, candidate, marker_len)
-            } else {
-                can_open_delimited(input, candidate, marker_len)
-            };
-            let can_close = if underscore {
-                can_close_underscore(input, candidate, marker_len)
-            } else {
-                can_close_delimited(input, candidate, marker_len)
-            };
-
-            if can_close {
-                if nested == 0 {
-                    return Some(candidate);
-                }
-                nested -= 1;
-                cursor = candidate + marker_len;
-                continue;
-            }
-            if can_open {
-                nested += 1;
-            }
-            cursor = candidate + marker_len;
-        }
-        None
-    }
-
-    pub(super) fn delimiter_candidate_precedes_link_close(
-        input: &str,
-        start: usize,
-        candidate: usize,
-        marker_len: usize,
-    ) -> bool {
-        let bytes = input.as_bytes();
-        if bytes.get(candidate + marker_len) != Some(&b']') {
-            return false;
-        }
-        if !matches!(bytes.get(candidate + marker_len + 1), Some(b'(' | b'[')) {
-            return false;
-        }
-
-        let mut depth = 0usize;
-        let mut cursor = start;
-        while cursor < candidate {
-            let Some((next, char)) = next_char(input, cursor) else {
-                break;
-            };
-            match char {
-                '\\' => {
-                    cursor = next_char(input, next)
-                        .map(|(after_escape, _)| after_escape)
-                        .unwrap_or(next);
-                    continue;
-                }
-                '`' => {
-                    if let Some((end, _)) = parse_code_span(input, cursor) {
-                        cursor = end;
-                        continue;
-                    }
-                }
-                '[' => depth += 1,
-                ']' => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-            cursor = next;
-        }
-        depth > 0
-    }
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub(super) enum MdxBraceState {
         Normal,
@@ -1252,18 +1140,6 @@ fn wikilink_closes_match_the_reference_scan() {
 }
 
 #[test]
-fn inline_footnote_ends_match_the_reference_scan() {
-    for_each_scan(4, |input, scan, start| {
-        let expected = reference::find_inline_footnote_end(input, start);
-        assert_eq!(
-            scan.inline_footnote_end(start),
-            expected,
-            "{input:?} at {start}"
-        );
-    });
-}
-
-#[test]
 fn directive_attribute_closes_match_the_reference_scan() {
     for_each_scan(5, |input, scan, open| {
         let expected = reference::find_directive_attributes_close(input, open);
@@ -1375,17 +1251,6 @@ fn link_destinations_match_the_reference_scan() {
 }
 
 #[test]
-fn unescaped_close_brackets_match_the_reference_scan() {
-    for_each_scan(12, |input, scan, start| {
-        assert_eq!(
-            scan.lookups.unescaped_close_bracket(start),
-            find_footnote_reference_label_end(input, start),
-            "{input:?} at {start}"
-        );
-    });
-}
-
-#[test]
 fn math_code_spans_match_the_reference_scan() {
     for_each_scan(13, |input, scan, index| {
         assert_eq!(
@@ -1436,27 +1301,6 @@ fn literal_autolink_scans_match_the_reference_scan() {
             reference::has_unclosed_link_label_opener(input, index),
             "{input:?} at {index}"
         );
-    });
-}
-
-#[test]
-fn closing_delimiters_within_budget_match_the_reference_scan() {
-    for_each_scan(16, |input, scan, start| {
-        for (marker, underscore) in [("___", true), ("__", true), ("++", false), ("==", false)] {
-            let mut budget = usize::MAX;
-            assert_eq!(
-                find_closing_delimiter(
-                    &mut scan.lookups,
-                    input,
-                    start,
-                    marker,
-                    underscore,
-                    &mut budget
-                ),
-                reference::find_closing_delimiter(input, start, marker, underscore),
-                "{input:?} at {start} for {marker}"
-            );
-        }
     });
 }
 
