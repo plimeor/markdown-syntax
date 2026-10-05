@@ -755,4 +755,85 @@ mod parser {
             [Inline::Emphasis(emphasis)] if emphasis.meta.span == Some(Span::new(6, 9))
         ));
     }
+
+    /// The inline content of each body-row cell of the table `source` parses
+    /// to, written compactly.
+    fn body_cells(source: &str) -> Vec<String> {
+        let output = SyntaxOptions::default().parse(source);
+        let Some(Block::Table(table)) = output.document.children.first() else {
+            panic!("{source:?}: expected a table");
+        };
+        table.rows[1]
+            .cells
+            .iter()
+            .map(|cell| {
+                cell.children
+                    .iter()
+                    .map(|inline| match inline {
+                        Inline::Text(text) => text.value.clone(),
+                        Inline::Code(code) => format!("Code({})", code.value),
+                        Inline::Spoiler(spoiler) => format!(
+                            "Spoiler({})",
+                            spoiler
+                                .children
+                                .iter()
+                                .map(|inline| match inline {
+                                    Inline::Text(text) => text.value.clone(),
+                                    Inline::Code(code) => format!("Code({})", code.value),
+                                    other => format!("{other:?}"),
+                                })
+                                .collect::<String>()
+                        ),
+                        other => format!("{other:?}"),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn table_spoilers_pair_as_the_inline_parser_pairs_them() {
+        // A spoiler keeps the pipes between its bars in its cell.
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n| ||a | b|| | c |"),
+            ["Spoiler(a | b)", "c"]
+        );
+        // A `||` inside a code span closes no spoiler, so the opener's bars
+        // delimit.
+        assert_eq!(
+            body_cells("| w | x | y | z |\n|-|-|-|-|\n| ||a `||` | b |"),
+            ["", "", "a Code(||)", "b"]
+        );
+        // The closer is the next `||` outside code spans.
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n| ||a `||` b|| | c |"),
+            ["Spoiler(a Code(||) b)", "c"]
+        );
+        // A row may start with a spoiler instead of a border pipe.
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n||a|| | d |"),
+            ["Spoiler(a)", "d"]
+        );
+        // Escaped pipes stay literal text in their own cells: a pair that uses
+        // one never holds a pipe that delimits.
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
+            ["a || b", "or, like c || d"]
+        );
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
+            ["| a", "b |"]
+        );
+        // An escaped backtick opens no code span, so the `||` after it opens a
+        // spoiler that holds the pipe.
+        assert_eq!(
+            body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),
+            ["`Spoiler(a` | b)", ""]
+        );
+        // Bars with no closer are delimiters around an empty cell.
+        assert_eq!(
+            body_cells("| x | y | z |\n|---|---|---|\n|a||b|"),
+            ["a", "", "b"]
+        );
+    }
 }

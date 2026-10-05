@@ -1,16 +1,37 @@
----
-date: 2026-06-20
-status: active
----
+# 0005: Public API ergonomics
 
-# Public API Ergonomics
+Status: Accepted
+Date: 2026-06-20
+
+## Context
 
 A single ergonomics-driven reshaping of the public surface, spanning the
 parse-side config, the output verbs, the diagnostic taxonomy, the AST node
 types, and crate exports. The unifying goal: the common path costs one concept,
 the configured path reads as intent, and no redundant or leaked surface greets a
-caller. The final API contract lives in `README.md`; the shapes below are the
-direction, not the authoritative signatures.
+caller. The final API contract lives in `docs/specs/public-api.md`; the
+shapes below are the direction, not the authoritative signatures.
+
+The surface audit (parser/serializer/validator/HTML grep + 3-persona walk +
+ecosystem comparison) found the weight is not field count but redundant axes,
+dead twins, missing on-ramps, and inconsistent verb placement. Highlights, with
+evidence:
+
+- `SyntaxProfile` is read only as `== Gfm` (parse.rs:6012/7256); `CommonMark`/
+  `Mdx`/`Custom` are never matched, and `custom(Constructs::gfm())` stamped
+  `profile = Custom` (options.rs:169) so it diverged from `gfm()` silently — a
+  latent bug, not a feature.
+- `ResolvedSyntaxOptions` (options.rs:199-204) is a field-identical clone read by
+  nothing outside `options.rs`+`parse.rs`; `resolve()` only runs two guards then
+  copies fields.
+- `to_markdown_with_options` (serialize.rs:60) / `to_html_with_options`
+  (html/mod.rs:113) are the verbose pattern the parse side dropped; `Diagnostic`
+  (diagnostic.rs:22) vs `ValidationDiagnostic` (validate.rs:13) are two shapes for
+  one concept; `html::Ctx` (html/mod.rs:85) leaks; `pub use ast::*` dumps 74 types.
+- The `~33`-flag `Constructs` struct is *not* a problem — every flag is consumed
+  and the common path never sees it; it stays as the exhaustive escape hatch. The
+  `resolve()`/`validate()` conflict guards are a genuine, ecosystem-rare safety
+  feature and are kept.
 
 ## Decision
 
@@ -27,7 +48,7 @@ direction, not the authoritative signatures.
    adds meaning only to CommonMark-inert characters). Underline stays opt-in via
    `Construct::Underline`. This intentionally overrides the
    prior CommonMark-only default-output stability (an owner decision, cheap while
-   `publish = false`, decisions/001); every construct already ships in the default
+   `publish = false`, decisions/0001); every construct already ships in the default
    build, so default features stay empty and dependencies zero.
 2. **CommonMark / GFM / MDX are presets, not free functions**, run through a
    method on the configured options: `SyntaxOptions::gfm().parse(input)`. The verb
@@ -119,30 +140,7 @@ direction, not the authoritative signatures.
 - **Wikilink tri-state** is surfaced only as `Construct::Wikilinks(order)` at the
   builder; the two raw bools + guard stay on `Constructs` for direct-field callers.
 
-## Rationale
-
-The surface audit (parser/serializer/validator/HTML grep + 3-persona walk +
-ecosystem comparison) found the weight is not field count but redundant axes,
-dead twins, missing on-ramps, and inconsistent verb placement. Highlights, with
-evidence:
-
-- `SyntaxProfile` is read only as `== Gfm` (parse.rs:6012/7256); `CommonMark`/
-  `Mdx`/`Custom` are never matched, and `custom(Constructs::gfm())` stamped
-  `profile = Custom` (options.rs:169) so it diverged from `gfm()` silently — a
-  latent bug, not a feature.
-- `ResolvedSyntaxOptions` (options.rs:199-204) is a field-identical clone read by
-  nothing outside `options.rs`+`parse.rs`; `resolve()` only runs two guards then
-  copies fields.
-- `to_markdown_with_options` (serialize.rs:60) / `to_html_with_options`
-  (html/mod.rs:113) are the verbose pattern the parse side dropped; `Diagnostic`
-  (diagnostic.rs:22) vs `ValidationDiagnostic` (validate.rs:13) are two shapes for
-  one concept; `html::Ctx` (html/mod.rs:85) leaks; `pub use ast::*` dumps 74 types.
-- The `~33`-flag `Constructs` struct is *not* a problem — every flag is consumed
-  and the common path never sees it; it stays as the exhaustive escape hatch. The
-  `resolve()`/`validate()` conflict guards are a genuine, ecosystem-rare safety
-  feature and are kept.
-
-## Rejected Alternatives
+## Considered options
 
 - **Keep `parse()` CommonMark / GFM-only, or put MDX in the default.** Rejected:
   the owner chose maximal out-of-box recognition; MDX conflicts with raw HTML and
@@ -161,16 +159,14 @@ evidence:
   `bitflags` dependency.** Rejected: lose real power/naming, churn the AST, or add
   a dependency.
 
-## Non-Goals
+## Consequences
 
-- Changing the `Constructs` struct, the `resolve()`/`validate()` conflict guards,
+- This decision does not change the `Constructs` struct, the `resolve()`/`validate()` conflict guards,
   `parse_strict` / `ParseStrictError`, the `ParseOptions` boundary, AST node
-  field shapes, serialize/html behavior or safe-by-default policy (decisions/002),
+  field shapes, serialize/html behavior or safe-by-default policy (decisions/0002),
   or conflating `directive_*` with `mdx_*`.
 
-## Verification Notes
-
-Per the no-bless golden policy (decisions/004): making `parse()` maximal means
+Per the no-bless golden policy (decisions/0004): making `parse()` maximal means
 every `.ast`/`.canonical.md` golden produced through bare `parse()` now reflects
 maximal output and must be hand-regenerated and verified correct in the same
 commit — audit every bare `parse()` call site in `tests/` first; fixtures pinned
@@ -178,6 +174,6 @@ to a dialect via `profile_options()` are unaffected. The predicate re-key (item 
 is independently byte-identical for the presets. All output/diagnostic/AST changes
 are additive or mechanical (method moves, one diagnostic type, accessors, `From`/
 `new`); the README doc-test moves to `output.document.to_markdown()?`. `to_html*`
-stay `#[cfg(feature = "html")]` (decisions/002 boundary intact). `no_std + alloc`,
+stay `#[cfg(feature = "html")]` (decisions/0002 boundary intact). `no_std + alloc`,
 zero dependencies, empty default features, and MSRV 1.82 hold throughout; only the
 default *output* is intentionally changed.

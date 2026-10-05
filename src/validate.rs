@@ -208,6 +208,9 @@ fn validate_container_directive(directive: &ContainerDirective, diagnostics: &mu
     }
 }
 
+/// Inline content whose container ends where its line does, or with a closing
+/// delimiter that a line break before it keeps from closing: a final hard line
+/// break would not survive serialization.
 fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
     if let Some(Inline::LineBreak(node)) = inlines.last() {
         diagnostics.push(Diagnostic::invalid(
@@ -215,6 +218,12 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
             "hard line break cannot be the final inline of its container",
         ));
     }
+    validate_inline_nodes(inlines, diagnostics);
+}
+
+/// Inline content closed by a `]`, which closes after a line break as well, so
+/// it may end with a hard line break.
+fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
     for inline in inlines {
         match inline {
             Inline::Emphasis(node) => {
@@ -252,8 +261,8 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
                     ));
                 }
             }
-            Inline::Link(node) => validate_inlines(&node.children, diagnostics),
-            Inline::Image(node) => validate_inlines(&node.alt, diagnostics),
+            Inline::Link(node) => validate_inline_nodes(&node.children, diagnostics),
+            Inline::Image(node) => validate_inline_nodes(&node.alt, diagnostics),
             Inline::LinkReference(node) => {
                 if node.identifier.is_empty() {
                     diagnostics.push(Diagnostic::invalid(
@@ -261,7 +270,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
                         "link reference identifier cannot be empty",
                     ));
                 }
-                validate_inlines(&node.children, diagnostics);
+                validate_inline_nodes(&node.children, diagnostics);
             }
             Inline::ImageReference(node) => {
                 if node.identifier.is_empty() {
@@ -270,7 +279,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
                         "image reference identifier cannot be empty",
                     ));
                 }
-                validate_inlines(&node.alt, diagnostics);
+                validate_inline_nodes(&node.alt, diagnostics);
             }
             Inline::Escape(node) => validate_escape(node, diagnostics),
             Inline::CharacterReference(node) => {
@@ -296,7 +305,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
                     ));
                 }
             }
-            Inline::InlineFootnote(node) => validate_inlines(&node.children, diagnostics),
+            Inline::InlineFootnote(node) => validate_inline_nodes(&node.children, diagnostics),
             Inline::WikiLink(node) => {
                 if node.target.is_empty() {
                     diagnostics.push(Diagnostic::invalid(
@@ -415,7 +424,7 @@ fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {
 fn validate_text_directive(directive: &TextDirective, diagnostics: &mut Vec<Diagnostic>) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
-    validate_inlines(&directive.label, diagnostics);
+    validate_inline_nodes(&directive.label, diagnostics);
 }
 
 fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Vec<Diagnostic>) {

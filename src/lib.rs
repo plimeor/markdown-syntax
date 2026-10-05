@@ -5,6 +5,9 @@
 extern crate alloc;
 
 mod entities;
+mod memo;
+#[cfg(test)]
+mod test_support;
 mod unicode_punctuation;
 
 pub mod ast;

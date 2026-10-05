@@ -1,5 +1,7 @@
 # Project: markdown-syntax
 
+Read `docs/overview.md` before starting work.
+
 ## Identity
 
 - A single `no_std + alloc` Rust crate at the repo root. Parses Markdown → AST
@@ -57,11 +59,9 @@
 
 - Never conflate `:name` / `::name` / `:::name` directives with MDX.
 
-## Docs
-
-- `README.md` owns the public API, syntax scope, and stable-behavior contract.
-- `docs/decisions/` owns durable design rationale and rejected alternatives.
-  Read `docs/index.md` when you need to understand why a boundary exists.
-- Do not keep hand-maintained status ledgers for test results, conformance
-  numbers, old plans, or completed task graphs. Derive current state from
-  `README.md`, source files, fixtures, and runnable commands.
+## Docs conventions
+- `docs/overview.md`: what this project is, its principles, current focus, and non-goals. Read it before starting work. Non-goals are not to be implemented or proposed.
+- `docs/specs/`: the behavior contract of each shipped feature. Update the spec in the same change as the code. When a spec and the code disagree, the code is right and the spec gets fixed.
+- `docs/plans/`: intent for features being built or queued. Everything under it, including the spec change files in `docs/plans/<slug>/specs/`, is a proposal and not a description of current behavior. When implementing a plan, read the Tasks in its `plan.md` to find what is open, and tick each task as its work lands.
+- `docs/archive/`: shipped plans kept as history. Nothing in it describes current behavior or is work to do; its spec change files are already merged into `docs/specs/`. Read it only to learn why something was built the way it was. Its contents are not edited.
+- `docs/decisions/`: only records with `Status: Accepted` are in force. A changed decision is a new record that supersedes the old one. An approach recorded as `Rejected` is not to be proposed again.
