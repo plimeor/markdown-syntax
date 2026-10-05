@@ -44,6 +44,22 @@ specification defines them.
 - **WHEN** `"- a\n<a>"` is parsed with the CommonMark preset
 - **THEN** the document holds a `List` followed by an `HtmlBlock`
 
+#### Scenario: ATX-like line that is no heading
+- **WHEN** `"a\n#)"` is parsed with the CommonMark preset
+- **THEN** the document holds one `Paragraph` holding `Text("a")`, a `SoftBreak`, and `Text("#)")`
+
+#### Scenario: Backtick run with a backtick in its info
+- **WHEN** ``"a\n``` `` ```"`` is parsed with the CommonMark preset
+- **THEN** the document holds one `Paragraph` whose second line is a code span
+
+#### Scenario: Unclosed fence in a block quote
+- **WHEN** ``"> ```\n> x\na"`` is parsed with the CommonMark preset
+- **THEN** the document holds a `BlockQuote` whose fenced `CodeBlock` holds `"x\n"`, followed by a `Paragraph` holding `Text("a")`
+
+#### Scenario: Last line ending of indented code
+- **WHEN** `"\ta\r\tb"` is parsed with the CommonMark preset
+- **THEN** the document holds an indented `CodeBlock` whose value is `"a\rb\r"`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML

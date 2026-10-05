@@ -1579,4 +1579,59 @@ mod literal_text {
         let markdown = assert_parsed_round_trips("a |\n-", &SyntaxOptions::default());
         assert_eq!(markdown, "a \\|\n---\n");
     }
+
+    #[test]
+    fn an_empty_fenced_code_block_writes_no_content_line() {
+        let markdown = assert_parsed_round_trips("```\n```", &SyntaxOptions::default());
+        assert_eq!(markdown, "```\n```\n");
+    }
+
+    #[test]
+    fn whitespace_at_the_ends_of_an_info_string_is_written_as_references() {
+        let markdown =
+            assert_parsed_round_trips("```&#x20;a&#9;\nb\n```", &SyntaxOptions::default());
+        assert_eq!(markdown, "``` &#x20;a&#x9;\nb\n```\n");
+    }
+
+    #[test]
+    fn text_after_a_literal_autolink_does_not_extend_it() {
+        for source in ["://&amp;", "www.}", "a.b@c.d&#x5f;"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+    }
+
+    #[test]
+    fn a_paragraph_that_opens_with_a_soft_break_keeps_it() {
+        let markdown = assert_parsed_round_trips("&#x20;\na", &SyntaxOptions::default());
+        assert_eq!(markdown, "&#x20;\na\n");
+    }
+
+    #[test]
+    fn a_continuation_line_that_would_open_a_block_stays_text() {
+        for source in ["a\n\\<div>", "a\n\\<!-- b", "a\n\\::b"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+    }
+
+    #[test]
+    fn an_html_block_value_is_written_verbatim() {
+        assert_parsed_round_trips("<!--\n\n", &SyntaxOptions::default());
+        assert_parsed_round_trips("<div>\n  a  \n</div>", &SyntaxOptions::default());
+    }
+
+    #[test]
+    fn indented_code_keeps_a_carriage_return_ending_its_last_line() {
+        for source in ["\ta\r\tb", "    a\r\n    b\r\n\r\nc", "    a\r    b\r\rc"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+        let mut crlf = SerializeOptions::default();
+        crlf.line_ending = LineEnding::CrLf;
+        let document = SyntaxOptions::default()
+            .parse("```\r\na\r\n```\r\nb")
+            .document;
+        let markdown = document
+            .to_markdown_with(&crlf)
+            .expect("document serializes");
+        assert_eq!(markdown, "```\r\na\r\n```\r\n\r\nb\r\n");
+    }
 }

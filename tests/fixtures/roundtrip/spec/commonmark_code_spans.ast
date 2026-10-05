@@ -7,7 +7,7 @@ Document
     Code value=" both " raw="  both  " fence=1
     SoftBreak
     Code value="`code`" raw=" `code` " fence=2
-  Paragraph
+    SoftBreak
     Code value="``" raw=" `` " fence=3
-  Paragraph
+    SoftBreak
     Code value="a``b" raw="a``b" fence=3

@@ -1097,4 +1097,106 @@ mod container_laziness {
             "{blocks:?}"
         );
     }
+
+    fn quote_children(block: &Block) -> &[Block] {
+        match block {
+            Block::BlockQuote(quote) => &quote.children,
+            other => panic!("expected a block quote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_line_after_an_unclosed_fence_in_a_block_quote_is_not_lazy() {
+        for source in ["> ```\n> x\na", "> > ```\n> > x\na", "> ```\n> \n> x\na"] {
+            let blocks = blocks(source);
+            let [quote, paragraph] = blocks.as_slice() else {
+                panic!("{source:?}: expected a quote and a paragraph, got {blocks:?}");
+            };
+            assert!(
+                !format!("{quote:?}").contains("\"a"),
+                "{source:?}: {quote:?}"
+            );
+            assert_eq!(paragraph_texts(paragraph), ["a"], "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_after_an_html_or_math_block_in_a_block_quote_is_not_lazy() {
+        let math = SyntaxOptions::default()
+            .parse("> $$\n> x\na")
+            .document
+            .children;
+        for blocks in [blocks("> <div>\n> x\na"), blocks("> <!--\n> x\na"), math] {
+            let [quote, paragraph] = blocks.as_slice() else {
+                panic!("expected a quote and a paragraph, got {blocks:?}");
+            };
+            assert_eq!(quote_children(quote).len(), 1, "{quote:?}");
+            assert_eq!(paragraph_texts(paragraph), ["a"]);
+        }
+    }
+
+    #[test]
+    fn a_closed_fence_leaves_the_next_paragraph_open_to_lazy_lines() {
+        let blocks = blocks("> ```\n> x\n> ```\n> y\na");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::CodeBlock(_), paragraph] = quote_children(quote) else {
+            panic!("expected code and a paragraph, got {quote:?}");
+        };
+        assert_eq!(paragraph_texts(paragraph), ["y", "/", "a"]);
+    }
+
+    #[test]
+    fn a_fence_inside_a_quoted_list_item_does_not_hold_the_quote_open() {
+        let blocks = blocks("> - ```\n> x\na");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::List(_), paragraph] = quote_children(quote) else {
+            panic!("expected a list and a paragraph, got {quote:?}");
+        };
+        assert_eq!(paragraph_texts(paragraph), ["x", "/", "a"]);
+    }
+}
+
+mod paragraph_interruption {
+    //! Only a line that opens the block it looks like interrupts a paragraph.
+
+    use markdown_syntax::{Block, CodeBlock, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    #[test]
+    fn a_hash_run_that_is_not_a_heading_continues_the_paragraph() {
+        for source in ["a\n#)", "a\n#b", "a\n#######"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backtick_run_with_a_backtick_in_its_info_continues_the_paragraph() {
+        let blocks = blocks("a\n``` `` ```\n```b`");
+        assert!(
+            matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
+        for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
+            let blocks = blocks(source);
+            let [Block::CodeBlock(CodeBlock { value: actual, .. })] = blocks.as_slice() else {
+                panic!("{source:?}: expected one code block, got {blocks:?}");
+            };
+            assert_eq!(actual, value, "{source:?}");
+        }
+    }
 }

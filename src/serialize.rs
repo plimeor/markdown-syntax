@@ -14,7 +14,10 @@ use crate::{
     ast::*,
     diagnostic::Diagnostic,
     memo::{pattern_starts, PathMemo, Positions, Step},
-    parse::{gfm_table_can_start_source, line_starts_html_block},
+    parse::{
+        gfm_table_can_start_source, line_starts_html_block, line_starts_interrupting_html_block,
+        literal_autolink_extents,
+    },
     validate::validate_document,
 };
 
@@ -97,15 +100,47 @@ fn serialize_document_body(
 ) -> Result<String, SerializeError> {
     let mut output = serialize_blocks_at_start(&document.children, options, true)?;
     if options.line_ending == LineEnding::CrLf {
-        output = output.replace('\n', "\r\n");
+        output = lf_to_crlf(&output);
     }
-    if options.final_newline
-        && !output.is_empty()
-        && !output.ends_with(options.line_ending.as_str())
-    {
+    // Blocks end without a line ending, except an HTML block whose last line
+    // is empty (the final newline ends that line too) and an indented code
+    // block that keeps its value's `\r` or `\r\n` ending.
+    if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output) {
         output.push_str(options.line_ending.as_str());
     }
     Ok(output)
+}
+
+/// Rewrites each bare `\n` as `\r\n`; existing `\r\n` and `\r` endings that
+/// verbatim values carry stay as they are.
+fn lf_to_crlf(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut previous = '\0';
+    for ch in input.chars() {
+        if ch == '\n' && previous != '\r' {
+            output.push('\r');
+        }
+        output.push(ch);
+        previous = ch;
+    }
+    output
+}
+
+fn ends_with_carriage_return_ending(input: &str) -> bool {
+    input.ends_with('\r') || input.ends_with("\r\n")
+}
+
+/// Separates two blocks with one blank line. A block that already ends its
+/// last line with `\r` or `\r\n` gets only the blank line, written so that it
+/// cannot merge into that ending.
+fn push_block_gap(output: &mut String) {
+    if output.ends_with('\r') {
+        output.push('\r');
+    } else if output.ends_with("\r\n") {
+        output.push('\n');
+    } else {
+        output.push_str("\n\n");
+    }
 }
 
 /// Serialize a block sequence. `document_start` is true only for the top-level
@@ -120,7 +155,7 @@ fn serialize_blocks_at_start(
     let mut output = String::new();
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
-            output.push_str("\n\n");
+            push_block_gap(&mut output);
         }
         let at_document_start = document_start && index == 0;
         if let (
@@ -201,7 +236,10 @@ fn serialize_block(
         Block::List(node) => serialize_list(node, options),
         Block::DescriptionList(node) => serialize_description_list(node, options),
         Block::CodeBlock(node) => serialize_code_block(node, options),
-        Block::HtmlBlock(node) => Ok(trim_trailing_newline(&node.value).into()),
+        // An HTML block's lines are joined with `\n`, so a value ending in one
+        // ends with an empty line that belongs to the block (an unclosed
+        // comment, say); it is written as it is.
+        Block::HtmlBlock(node) => Ok(node.value.clone()),
         Block::HtmlContainer(node) => serialize_html_container(node, options),
         Block::Definition(node) => {
             let destination = serialize_destination_kind(
@@ -240,10 +278,7 @@ fn serialize_block(
         Block::Table(node) => serialize_table(node, options),
         Block::MathBlock(node) => {
             let fence = block_math_fence(&node.value);
-            Ok(format!(
-                "{fence}\n{}\n{fence}",
-                trim_trailing_newline(&node.value)
-            ))
+            Ok(fenced_body(&fence, &node.value, &fence))
         }
         Block::Frontmatter(node) => {
             let fence = match node.kind {
@@ -358,6 +393,11 @@ fn serialize_paragraph(
     }
     if let Some(offset) = paragraph_table_escape_offset(&output) {
         output.insert(offset, '\\');
+    }
+    if matches!(node.children.first(), Some(Inline::SoftBreak(_))) {
+        // A paragraph that opens with a soft break, as `&#x20;\n…` parses (the
+        // space before a line ending is dropped), is written the same way.
+        output.insert_str(0, "&#x20;");
     }
     Ok(output)
 }
@@ -586,7 +626,17 @@ fn serialize_code_block(
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
     match node.kind {
-        CodeBlockKind::Indented => Ok(prefix_lines(trim_trailing_newline(&node.value), "    ")),
+        CodeBlockKind::Indented => {
+            // Each value line ends with a line ending; the block gap or the
+            // final newline writes a last `\n`, so only `\r` and `\r\n` stay.
+            let body = trim_trailing_newline(&node.value);
+            let mut output = prefix_lines(body, "    ");
+            let ending = &node.value[body.len()..];
+            if matches!(ending, "\r" | "\r\n") {
+                output.push_str(ending);
+            }
+            Ok(output)
+        }
         CodeBlockKind::Fenced { marker, length } => {
             let marker = code_block_fence_marker(node, marker, options);
             let fence = fence_for(&node.value, marker, length.max(3));
@@ -595,16 +645,23 @@ fn serialize_code_block(
                 opener.push(' ');
                 opener.push_str(&escape_code_info(info));
             }
-            let mut output = opener;
-            output.push('\n');
-            output.push_str(&node.value);
-            if !ends_with_line_ending(&node.value) {
-                output.push('\n');
-            }
-            output.push_str(&fence);
-            Ok(output)
+            Ok(fenced_body(&opener, &node.value, &fence))
         }
     }
+}
+
+/// A fenced block: `opener`, then `value` (whose lines each keep their line
+/// ending, the last one optionally), then `closer`. An empty value writes no
+/// line between the fences.
+fn fenced_body(opener: &str, value: &str, closer: &str) -> String {
+    let mut output = String::from(opener);
+    output.push('\n');
+    output.push_str(value);
+    if !value.is_empty() && !ends_with_line_ending(value) {
+        output.push('\n');
+    }
+    output.push_str(closer);
+    output
 }
 
 fn code_block_fence_marker(
@@ -624,8 +681,15 @@ fn code_block_fence_marker(
 
 fn escape_code_info(input: &str) -> String {
     let mut output = String::new();
-    for char in input.chars() {
+    // The parser trims the info string, so whitespace at either end is
+    // written as a character reference.
+    let inner_start = input.len() - input.trim_start_matches([' ', '\t']).len();
+    let inner_end = input.trim_end_matches([' ', '\t']).len().max(inner_start);
+    for (offset, char) in input.char_indices() {
         match char {
+            ' ' | '\t' if offset < inner_start || offset >= inner_end => {
+                output.push_str(&format!("&#x{:X};", char as u32));
+            }
             '\n' => output.push_str("&#xA;"),
             '\r' => output.push_str("&#xD;"),
             '\t' => output.push(char),
@@ -818,22 +882,42 @@ fn is_gfm_literal_email(inline: &Inline) -> bool {
     )
 }
 
-// A GFM literal autolink's URL scan stops at whitespace, `<`, `]`, and a
-// backslash-escaped punctuation char, and trims trailing punctuation/entities.
-// A following text node whose first char is none of those — in particular a
-// non-ASCII char such as `©` decoded from `&copy;` — would otherwise be pulled
-// into the URL on reparse. Re-emit that leading char as a hex numeric character
-// reference (`&#xNN;`), which `autolink_delim` trims back off the URL and which
-// decodes to the same text, keeping the boundary stable.
-fn encode_leading_char_after_autolink(value: &str) -> Option<(String, &str)> {
-    let first = value.chars().next()?;
-    if first.is_ascii() {
-        // ASCII merge chars are handled by the text serializer's own backslash
-        // escaping (`\[`, `\&`, …) and the parser's matching `\<punct>` stop.
-        return None;
+/// The source spelling of a GFM literal autolink.
+fn literal_autolink_original(inline: &Inline) -> Option<&str> {
+    match inline {
+        Inline::Autolink(Autolink {
+            kind: AutolinkKind::GfmLiteral { original },
+            ..
+        }) => Some(original),
+        _ => None,
     }
-    let encoded = alloc::format!("&#x{:X};", first as u32);
-    Some((encoded, &value[first.len_utf8()..]))
+}
+
+/// Whether `rendered` text written right after the literal autolink
+/// `original` leaves the autolink as it is under at least one autolink dialect
+/// (GFM, or GFM plus relaxed): the parser's own scan reads exactly `original`.
+/// The dialect the document came from is not known here; the source spelling
+/// keeps it under that one.
+fn text_keeps_literal_autolink(original: &str, rendered: &str) -> bool {
+    let mut joined = String::from(original);
+    joined.push_str(rendered);
+    literal_autolink_extents(&joined).contains(&Some(original.len()))
+}
+
+/// Spellings of `value`'s first char that a literal autolink's URL scan may
+/// stop at, most readable first: a backslash escape for ASCII punctuation, then
+/// a character reference, which the scan trims back off the URL's end.
+fn leading_char_encodings(value: &str) -> Vec<(String, &str)> {
+    let Some(first) = value.chars().next() else {
+        return Vec::new();
+    };
+    let rest = &value[first.len_utf8()..];
+    let mut encodings = Vec::new();
+    if first.is_ascii_punctuation() {
+        encodings.push((alloc::format!("\\{first}"), rest));
+    }
+    encodings.push((alloc::format!("&#x{:X};", first as u32), rest));
+    encodings
 }
 
 fn serialize_inlines_with_context(
@@ -846,29 +930,13 @@ fn serialize_inlines_with_context(
     for (index, inline) in inlines.iter().enumerate() {
         match inline {
             Inline::Text(node) => {
-                let after_literal_autolink = index
+                let autolink_before = index
                     .checked_sub(1)
-                    .is_some_and(|prev| is_gfm_literal_autolink(&inlines[prev]));
+                    .and_then(|prev| literal_autolink_original(&inlines[prev]));
                 let before_literal_autolink =
                     inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
-
-                // Leading guard: a non-ASCII char abutting the END of a literal
-                // autolink would merge into its URL on reparse — encode it.
-                let after_shortcut = index
-                    .checked_sub(1)
-                    .filter(|&prev| is_shortcut_reference(&inlines[prev]));
-                let (lead, body) = match after_literal_autolink
-                    .then(|| encode_leading_char_after_autolink(&node.value))
-                    .flatten()
-                {
-                    Some((encoded, rest)) => (encoded, rest),
-                    None => match after_shortcut.and_then(|reference| {
-                        escape_leading_char_after_shortcut(&node.value, reference)
-                    }) {
-                        Some(escaped) => (escaped.into(), &node.value[1..]),
-                        None => (String::new(), node.value.as_str()),
-                    },
-                };
+                let at_line_start = output_line.len(&output) == 0;
+                let at_line_end = text_is_at_line_end(inlines, index);
 
                 // Trailing guard: when this text is immediately followed by a
                 // www/http/email literal, its trailing whitespace must survive
@@ -876,23 +944,48 @@ fn serialize_inlines_with_context(
                 // otherwise re-encoded (`&#x20;`/`&#x9;`) at an edge or as a
                 // control char, which would break the literal's left boundary on
                 // reparse — emit the trailing space/tab run literally instead.
-                let (escape_body, trailing_ws) = if before_literal_autolink {
-                    let head = body.trim_end_matches([' ', '\t']);
-                    (head, &body[head.len()..])
-                } else {
-                    (body, "")
+                let render = |lead: &str, body: &str| {
+                    let (escape_body, trailing_ws) = if before_literal_autolink {
+                        let head = body.trim_end_matches([' ', '\t']);
+                        (head, &body[head.len()..])
+                    } else {
+                        (body, "")
+                    };
+                    let mut rendered = String::from(lead);
+                    rendered.push_str(&escape_text_with_context(
+                        escape_body,
+                        lead.is_empty() && trailing_ws.len() != body.len() && at_line_start,
+                        trailing_ws.is_empty() && at_line_end,
+                        context,
+                    ));
+                    rendered.push_str(trailing_ws);
+                    rendered
                 };
 
-                output.push_str(&lead);
-                output.push_str(&escape_text_with_context(
-                    escape_body,
-                    lead.is_empty()
-                        && trailing_ws.len() != body.len()
-                        && output_line.len(&output) == 0,
-                    trailing_ws.is_empty() && text_is_at_line_end(inlines, index),
-                    context,
-                ));
-                output.push_str(trailing_ws);
+                let after_shortcut = index
+                    .checked_sub(1)
+                    .filter(|&prev| is_shortcut_reference(&inlines[prev]));
+                let mut rendered = match after_shortcut.and_then(|reference| {
+                    escape_leading_char_after_shortcut(&node.value, reference)
+                }) {
+                    Some(escaped) => render(escaped, &node.value[1..]),
+                    None => render("", &node.value),
+                };
+                // Leading guard: text right after a literal autolink must not
+                // extend its URL on reparse. When it would, its first char is
+                // written in the first form the URL scan stops at.
+                if let Some(original) = autolink_before {
+                    if !text_keeps_literal_autolink(original, &rendered) {
+                        for (lead, rest) in leading_char_encodings(&node.value) {
+                            let candidate = render(&lead, rest);
+                            if text_keeps_literal_autolink(original, &candidate) {
+                                rendered = candidate;
+                                break;
+                            }
+                        }
+                    }
+                }
+                output.push_str(&rendered);
             }
             Inline::Escape(node) => {
                 output.push('\\');
@@ -1571,6 +1664,19 @@ fn escape_text_with_context(
                 output.push(char);
             }
             '_' if text_attention_delimiter_can_start(input, offset, "_", true, &mut scan) => {
+                output.push('\\');
+                output.push(char);
+            }
+            // A text that starts a line may sit on a paragraph's continuation
+            // line, where an HTML block start (types 1–6) or a directive
+            // opener would interrupt the paragraph.
+            '<' if output_line.len(&output) == 0
+                && line_starts_interrupting_html_block(&input[offset..]) =>
+            {
+                output.push('\\');
+                output.push(char);
+            }
+            ':' if output_line.len(&output) == 0 && input[offset..].starts_with("::") => {
                 output.push('\\');
                 output.push(char);
             }

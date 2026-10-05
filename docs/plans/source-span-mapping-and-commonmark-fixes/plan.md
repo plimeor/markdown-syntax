@@ -49,18 +49,28 @@ span, an inline link, or a link reference definition.
   indented, and a blank line between two items loosens the list.
 - A complete HTML tag (a type-7 HTML block start) on a lazy line ends a list
   item, as it already ends a block quote.
+- Only a line that opens an ATX heading or a code fence interrupts a
+  paragraph: `#)` and a backtick run whose info string holds a backtick
+  continue it.
+- A line without a `>` after an unclosed fence, math block, or HTML block in a
+  block quote ends the quote rather than continuing that block, and a fence
+  that closes leaves the quote's next paragraph open to lazy lines again.
+- A code or math block that the input ends ends its last line with the value's
+  first line ending, `\n` when it has none.
+- The serializer writes these so that they reparse to the same tree: an empty
+  fenced code block, spaces and tabs at the ends of an info string, text right
+  after a literal autolink, a paragraph that opens with a soft break, an HTML
+  block value, a text line that would open an HTML block or a leaf directive,
+  and an indented code block ending in `\r` or `\r\n`. The CRLF line-ending
+  option leaves a value's `\r\n` as it is.
+- `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
+  Windows filename that `cargo package` warns about.
 
 Specs:
 - `public-api` (modified)
 - `inline-syntax` (modified)
 - `serialization` (modified)
 - `block-syntax` (modified)
-
-## Out of scope
-
-- Renaming `src/parse/nul.rs`, a reserved Windows filename that `cargo package`
-  warns about. It is a packaging fix with no behavior change and lands on its own
-  before the crate is published.
 
 ## Design
 
@@ -249,3 +259,8 @@ Specs:
 - [x] 7.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
 - [x] 7.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
 - [x] 7.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
+
+### 8. Paragraph interruption, verbatim blocks in block quotes, and round-trips
+- [x] 8.1 Add tests for "ATX-like line that is no heading", "Backtick run with a backtick in its info", "Unclosed fence in a block quote", and "Last line ending of indented code", and for each serializer case under "Escaping keeps text literal" that this group adds, with guards that a closed fence and a fence inside a quoted list item leave lazy lines as they were; verified by each failing on the group-6 code, apart from the two guards.
+- [x] 8.2 Read `#` and fence lines in `likely_block_start` with the ATX and fence opener rules; track a block quote's open fence, math block, and HTML block in `content_line_state`, which list items share; end a code or math block's last line with the value's first line ending; regenerate and read the `commonmark_code_spans`, `commonmark_blockquotes`, and `commonmark_tabs` goldens; verified by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree (792 mismatches before, 751 after, none newly mismatching; of the rest, 744 involve tabs, 6 the GH-19 rule, and 1 a blank line inside an unclosed fence of a nested item) and by conformance staying at 2233 of 2236.
+- [x] 8.3 Write the serializer cases above; verified by the round-trip fuzz over 30,000 generated inputs dropping from 812 failures at the group-6 end to 372, and by `tests/fixtures.rs` passing.

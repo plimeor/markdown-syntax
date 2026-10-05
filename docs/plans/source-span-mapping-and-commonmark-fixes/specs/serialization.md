@@ -42,3 +42,35 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 #### Scenario: Pipe ending a level-two setext heading
 - **WHEN** the document parsed from `"a |\n-"` is serialized and reparsed
 - **THEN** `to_markdown()` returns `"a \\|\n---\n"` and the reparsed document holds the same setext `Heading` and no `Table`
+
+#### Scenario: Empty fenced code block
+- **WHEN** ``parse("```\n```").document.to_markdown()`` runs
+- **THEN** it returns ``"```\n```\n"``
+
+#### Scenario: Whitespace at the ends of an info string
+- **WHEN** the document parsed from ``"```&#x20;a&#9;\nb\n```"`` is serialized
+- **THEN** `to_markdown()` returns ``"``` &#x20;a&#x9;\nb\n```\n"`` and reparsing it yields the info string `" a\t"`
+
+#### Scenario: Text right after a literal autolink
+- **WHEN** the documents parsed from `"://&amp;"` and `"www.}"` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same `Autolink` and `Text` as the parsed one
+
+#### Scenario: Paragraph that opens with a soft break
+- **WHEN** the document parsed from `"&#x20;\na"` is serialized
+- **THEN** `to_markdown()` returns `"&#x20;\na\n"`
+
+#### Scenario: Text line that would open a block
+- **WHEN** the documents parsed from `"a\n\\<div>"` and `"a\n\\::b"` are serialized and reparsed
+- **THEN** each reparsed document holds the same single `Paragraph`
+
+#### Scenario: HTML block value
+- **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
+- **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
+
+#### Scenario: Indented code ending in a carriage return
+- **WHEN** the document parsed from `"\ta\r\tb"` is serialized
+- **THEN** `to_markdown()` returns `"    a\r    b\r"` and reparsing it yields the value `"a\rb\r"`
+
+#### Scenario: CRLF output keeps a value's CRLF
+- **WHEN** the document parsed from ``"```\r\na\r\n```\r\nb"`` is serialized with `LineEnding::CrLf`
+- **THEN** the output is ``"```\r\na\r\n```\r\n\r\nb\r\n"``

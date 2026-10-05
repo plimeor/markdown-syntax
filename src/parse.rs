@@ -814,6 +814,7 @@ fn parse_math_block(
 
     // EOF closes the block (an unclosed opener runs to end of document); an
     // immediate EOF after the opener yields an empty math block.
+    end_last_line(&mut value);
     Some((
         Block::MathBlock(MathBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -862,9 +863,6 @@ fn parse_fenced_code(
     // indent, 0–3) are removed from each content line.
     let opening_indent = leading_indent_columns(lines[index].text);
     let info = line[length..].trim();
-    if marker == FenceMarker::Backtick && info.contains('`') {
-        return None;
-    }
     let info = if info.is_empty() {
         None
     } else {
@@ -907,6 +905,7 @@ fn parse_fenced_code(
         content_lines += 1;
         cursor += 1;
     }
+    end_last_line(&mut value);
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -961,11 +960,7 @@ fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> b
             }
             continue;
         }
-        let Some((marker, length)) = fence_start(trimmed) else {
-            continue;
-        };
-        let info = trimmed[length..].trim();
-        if marker != FenceMarker::Backtick || !info.contains('`') {
+        if let Some((marker, length)) = fence_start(trimmed) {
             open_fence = Some((marker, length, false));
         }
     }
@@ -985,7 +980,75 @@ enum ContentLineKind {
     Closed,
     /// A block that the following non-blank lines continue: a fence, an HTML
     /// block, or another block start.
-    Open,
+    Open(OpenBlock),
+}
+
+/// A block that a container content line opened and that the following lines
+/// continue until its end, read at the number of block quotes it sits in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OpenBlock {
+    /// How many nested block quotes the block sits in.
+    depth: usize,
+    /// Whether a list marker was passed on the way to the block, so that a
+    /// line's indentation, which this does not track, may end it sooner.
+    in_list: bool,
+    end: OpenBlockEnd,
+}
+
+/// What ends an [`OpenBlock`] besides a blank line.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenBlockEnd {
+    /// A closing code fence.
+    Fence(FenceMarker, usize),
+    /// A closing math fence of at least this many dollars.
+    Math(usize),
+    /// A line holding a raw-text closing tag (HTML block type 1).
+    RawHtml,
+    /// A line holding this text (HTML block types 2–5).
+    HtmlUntil(&'static str),
+    /// A blank line only: HTML block types 6 and 7, and any other block.
+    Blank,
+}
+
+impl OpenBlockEnd {
+    /// The end of the block that `trimmed` opens, `None` when the line also
+    /// ends it.
+    fn of_opening_line(trimmed: &str, options: &SyntaxOptions) -> Option<Self> {
+        if let Some((marker, length)) = fence_start(trimmed) {
+            return Some(Self::Fence(marker, length));
+        }
+        if options.constructs.math_block {
+            if let Some(length) = math_block_fence_length(trimmed) {
+                return Some(Self::Math(length));
+            }
+        }
+        let html = options
+            .constructs
+            .html_block
+            .then(|| html_block_start(trimmed));
+        let end = match html.flatten() {
+            Some(HtmlBlockKind::RawTag) => Self::RawHtml,
+            Some(HtmlBlockKind::Until(end)) => Self::HtmlUntil(end),
+            _ => Self::Blank,
+        };
+        (!end.ends_with(trimmed)).then_some(end)
+    }
+
+    /// Whether the content line `rest`, read at the block's quote depth, ends
+    /// the block (and belongs to it).
+    fn ends_with(self, rest: &str) -> bool {
+        match self {
+            Self::Fence(marker, length) => trim_up_to_three_spaces(rest)
+                .is_some_and(|trimmed| fence_close(trimmed, marker, length)),
+            Self::Math(length) => trim_up_to_three_spaces(rest)
+                .is_some_and(|trimmed| math_block_fence_closes(trimmed, length)),
+            Self::RawHtml => ["script", "pre", "style", "textarea"]
+                .iter()
+                .any(|tag| line_contains_raw_closing_tag(rest, tag)),
+            Self::HtmlUntil(end) => rest.contains(end),
+            Self::Blank => false,
+        }
+    }
 }
 
 /// Classifies the innermost block reachable through this (already
@@ -1004,6 +1067,8 @@ fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind 
     // `parse_blocks_from_lines`), so what remains is paragraph text.
     let mut source = Cow::Borrowed(content);
     let mut offset = 0;
+    let mut depth = 0;
+    let mut in_list = false;
     for _ in 0..=MAX_BLOCK_NESTING {
         let Some(trimmed) = trim_up_to_three_spaces(&source[offset..]) else {
             // >= 4 columns of indentation: indented code, never a paragraph.
@@ -1013,15 +1078,24 @@ fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind 
             return ContentLineKind::Empty;
         }
         let rest = if let Some(rest) = trimmed.strip_prefix('>') {
+            depth += 1;
             Cow::Borrowed(rest.strip_prefix(' ').unwrap_or(rest))
         } else if let Some(marker) = list_marker_info(trimmed) {
+            in_list = true;
             list_marker_first_content(trimmed, marker).0
         } else if parse_thematic_break(Line::detached(trimmed)).is_some()
             || is_atx_heading_line(trimmed)
         {
             return ContentLineKind::Closed;
         } else if lazy_line_starts_block(trimmed, options) {
-            return ContentLineKind::Open;
+            return match OpenBlockEnd::of_opening_line(trimmed, options) {
+                Some(end) => ContentLineKind::Open(OpenBlock {
+                    depth,
+                    in_list,
+                    end,
+                }),
+                None => ContentLineKind::Closed,
+            };
         } else {
             return ContentLineKind::Paragraph;
         };
@@ -1163,6 +1237,7 @@ fn parse_block_quote(
     let mut lazy_flags: Vec<bool> = Vec::new();
     let mut cursor = index;
     let mut paragraph_open: OpenParagraph = None;
+    let mut open_block: Option<OpenBlock> = None;
     let mut in_table = false;
     let mut last_content_line: Option<String> = None;
     while cursor < lines.len() {
@@ -1240,14 +1315,17 @@ fn parse_block_quote(
         });
         if marked && starts_table {
             paragraph_open = None;
+            open_block = None;
             in_table = true;
         } else if marked && in_table && block_quote_table_body_row(line, options) {
             paragraph_open = None;
         } else {
             in_table = false;
             // Track the innermost open paragraph across nested quote markers so a
-            // following lazy line can reach a paragraph buried in nested quotes.
-            paragraph_open = paragraph_open_after(paragraph_open, line, !marked, options);
+            // following lazy line can reach a paragraph buried in nested quotes,
+            // and the fence or HTML block that its lines continue instead.
+            (paragraph_open, open_block) =
+                content_line_state(paragraph_open, open_block, line, !marked, true, options);
         }
         last_content_line = Some(line.into());
         match inserted_escape {
@@ -1407,8 +1485,8 @@ fn parse_list(
         let mut open_fence = None;
         let (first_content, first_from) = list_marker_first_content(lines[cursor].text, marker);
         let mut last_content_line: Option<String> = Some(first_content.as_ref().into());
-        let (mut paragraph_open, mut block_open) =
-            list_item_paragraph_stays_open(None, false, &first_content, false, options);
+        let (mut paragraph_open, mut open_block) =
+            content_line_state(None, None, &first_content, false, false, options);
         // CommonMark §5.2: a list item can begin with at most one blank line.
         // When the marker has no content the item starts blank, and the first
         // following blank line ends it — later indented content cannot join
@@ -1459,7 +1537,7 @@ fn parse_list(
                 // check can tell a direct-child separator from a nested one.
                 item_blank_offsets.push(lines[cursor].start);
                 paragraph_open = None;
-                block_open = false;
+                open_block = None;
                 let blank = &lines[cursor].text[lines[cursor].text.len()..];
                 content.push_line(&lines[cursor], blank, lines[cursor].text.len());
                 lazy_flags.push(false);
@@ -1528,11 +1606,16 @@ fn parse_list(
                     options.constructs.spoiler,
                 )
             });
-            (paragraph_open, block_open) = if starts_table {
+            (paragraph_open, open_block) = if starts_table {
                 // The table's body rows continue it.
-                (None, true)
+                let table = OpenBlock {
+                    depth: 0,
+                    in_list: false,
+                    end: OpenBlockEnd::Blank,
+                };
+                (None, Some(table))
             } else {
-                list_item_paragraph_stays_open(paragraph_open, block_open, &stripped, lazy, options)
+                content_line_state(paragraph_open, open_block, &stripped, lazy, false, options)
             };
             content.push_line(&lines[cursor], &stripped, from);
             lazy_flags.push(lazy);
@@ -1644,26 +1727,55 @@ fn block_span(block: &Block) -> Option<Span> {
     meta.span
 }
 
-/// Whether a paragraph is open after a list item's content line `line`, and
-/// whether a multi-line block other than a paragraph is: a block that an
-/// earlier line opened (`block_open`) keeps going until a blank line, while
-/// after a blank, a single-line block, or a paragraph the line is read afresh.
-fn list_item_paragraph_stays_open(
+/// The open paragraph and the open block after a container's content line
+/// `line`. A block that an earlier line opened goes on until its end, a line
+/// that stops short of its block quote level, or a blank line when nothing
+/// but a blank line ends it; after any other line, the line is read afresh. A
+/// block quote (`in_quote`) skips blocks reached through a list marker and
+/// blocks other than HTML that end only at a blank line, since the item's
+/// indentation can end them on lines this does not read as theirs.
+fn content_line_state(
     paragraph_open: OpenParagraph,
-    block_open: bool,
+    open_block: Option<OpenBlock>,
     line: &str,
     lazy: bool,
+    in_quote: bool,
     options: &SyntaxOptions,
-) -> (OpenParagraph, bool) {
+) -> (OpenParagraph, Option<OpenBlock>) {
     if line.trim().is_empty() {
-        return (None, false);
+        // A blank line at its quote level belongs to a block with a closer.
+        let verbatim = open_block.filter(|block| {
+            block.end != OpenBlockEnd::Blank
+                && strip_quote_markers(line, block.depth).1 == block.depth
+        });
+        return (None, verbatim);
     }
-    if block_open && !lazy {
-        return (None, true);
+    if lazy {
+        return (paragraph_open, open_block);
     }
-    let open = paragraph_open_after(paragraph_open, line, lazy, options);
-    let opens_block = open.is_none() && content_line_kind(line, options) == ContentLineKind::Open;
-    (open, opens_block)
+    if let Some(block) = open_block {
+        let (rest, reached) = strip_quote_markers(line, block.depth);
+        if reached == block.depth {
+            return (None, (!block.end.ends_with(rest)).then_some(block));
+        }
+    }
+    let open = paragraph_open_after(paragraph_open, line, false, options);
+    if open.is_some() {
+        return (open, None);
+    }
+    let block = match content_line_kind(line, options) {
+        ContentLineKind::Open(block)
+            if in_quote && (block.in_list || block.end == OpenBlockEnd::Blank) =>
+        {
+            let html = options.constructs.html_block
+                && !block.in_list
+                && line_starts_html_block(strip_quote_markers(line, block.depth).0);
+            html.then_some(block)
+        }
+        ContentLineKind::Open(block) => Some(block),
+        _ => None,
+    };
+    (None, block)
 }
 
 fn parse_description_list(
@@ -3612,6 +3724,7 @@ fn parse_indented_code(
     }
     // Drop trailing blank lines accumulated past the last real content line.
     value.truncate(content_end_len);
+    end_last_line(&mut value);
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -7573,6 +7686,21 @@ fn push_line(output: &mut String, line: &str) {
     output.push_str(line);
 }
 
+/// Ends a code or math block's last line when the input ended without a line
+/// ending: every line of such a block's value ends with one. The added ending
+/// repeats the value's first line ending, `\n` when it has none.
+fn end_last_line(value: &mut String) {
+    if value.is_empty() || ends_with_line_ending(value) {
+        return;
+    }
+    let ending = match value.find(['\r', '\n']) {
+        Some(index) if value[index..].starts_with("\r\n") => "\r\n",
+        Some(index) if value[index..].starts_with('\r') => "\r",
+        _ => "\n",
+    };
+    value.push_str(ending);
+}
+
 fn ensure_line_separator(output: &mut String) {
     if !output.is_empty() && !ends_with_line_ending(output) {
         output.push('\n');
@@ -7650,6 +7778,8 @@ fn trim_up_to_three_spaces(input: &str) -> Option<&str> {
     }
 }
 
+/// The marker and length of the code fence that `input` opens: three or more
+/// backticks or tildes, where a backtick fence's info string holds no backtick.
 fn fence_start(input: &str) -> Option<(FenceMarker, usize)> {
     let marker = match input.as_bytes().first()? {
         b'`' => FenceMarker::Backtick,
@@ -7665,11 +7795,8 @@ fn fence_start(input: &str) -> Option<(FenceMarker, usize)> {
         .iter()
         .take_while(|item| **item == byte)
         .count();
-    if length >= 3 {
-        Some((marker, length))
-    } else {
-        None
-    }
+    let opens = length >= 3 && (byte == b'~' || !input[length..].contains('`'));
+    opens.then_some((marker, length))
 }
 
 fn fence_close(input: &str, marker: FenceMarker, length: usize) -> bool {
@@ -8588,10 +8715,9 @@ fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
     let Some(trimmed) = trim_up_to_three_spaces(input) else {
         return false;
     };
-    trimmed.starts_with('#')
+    is_atx_heading_line(trimmed)
         || trimmed.starts_with('>')
-        || trimmed.starts_with("```")
-        || trimmed.starts_with("~~~")
+        || fence_start(trimmed).is_some()
         || list_marker_can_interrupt_paragraph(input)
         || parse_thematic_break(Line::detached(input)).is_some()
         || (options.constructs.html_container && line_starts_html_container(input))
@@ -8629,7 +8755,7 @@ fn table_body_line_ends_table(line: &str, options: &SyntaxOptions) -> bool {
         || (options.constructs.html_block && line_starts_html_block(line))
 }
 
-fn line_starts_interrupting_html_block(input: &str) -> bool {
+pub(crate) fn line_starts_interrupting_html_block(input: &str) -> bool {
     match trim_up_to_three_spaces(input).and_then(html_block_start) {
         Some(HtmlBlockKind::UntilBlank) | None => false,
         Some(_) => true,
@@ -8837,6 +8963,16 @@ fn is_email_autolink(input: &str) -> bool {
 // returned destination is the synthesized href (a `http://`/`mailto:` prefix
 // may be prepended); the caller keeps `input[index..end]` as the visible
 // original.
+/// The lengths of the literal autolink that starts `input` under GFM autolinks
+/// and under GFM plus relaxed autolinks, for the serializer to check that text
+/// it writes after an autolink leaves the URL as it was.
+pub(crate) fn literal_autolink_extents(input: &str) -> [Option<usize>; 2] {
+    [false, true].map(|relaxed| {
+        parse_literal_autolink(input, 0, true, relaxed, &mut LiteralAutolinkScan::default())
+            .map(|(end, _)| end)
+    })
+}
+
 fn parse_literal_autolink(
     input: &str,
     index: usize,
