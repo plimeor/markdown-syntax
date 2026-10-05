@@ -425,32 +425,101 @@ fn serialize_paragraph(
     node: &Paragraph,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let render = |run_style: RunStyle| -> Result<String, SerializeError> {
+    let render = |run_style: RunStyle, raw_edge_tildes: bool| -> Result<String, SerializeError> {
         let context = InlineSerializeContext {
             run_style,
+            raw_edge_tildes,
             ..InlineSerializeContext::block_content()
         };
         let mut output = serialize_inlines_with_context(&node.children, options, context)?;
         keep_first_line_off_html_block(&node.children, &mut output);
         Ok(indent_block_starting_continuations(output))
     };
-    let output = render(RunStyle::Plain)?;
+    let output = render(RunStyle::Plain, false)?;
     // A strong or emphasis run abutting another splits on reparse only as its
-    // flanking allows, which the rest of the paragraph decides. When the plain
-    // rendering does not read back, the first other style that does is taken.
-    if inlines_abut_runs(&node.children) && !reparses_to(&output, &node.children) {
-        for style in [
+    // flanking allows, which the rest of the paragraph decides; one beside a
+    // `~` opens or closes only as the GFM bonus for a raw `~` allows. When the
+    // plain rendering does not read back, the first other style that does is
+    // taken.
+    let abut_runs = inlines_abut_runs(&node.children);
+    let edge_tildes = tilde_touches_run(&node.children, false);
+    if (abut_runs || edge_tildes) && !reparses_to(&output, &node.children) {
+        let styles = [
             RunStyle::StrongUnderscore,
             RunStyle::InnerUnderscore,
             RunStyle::AllStar,
-        ] {
-            let alternate = render(style)?;
+        ];
+        let alternates = abut_runs
+            .then_some(styles.map(|style| (style, false)))
+            .into_iter()
+            .flatten()
+            .chain(edge_tildes.then_some((RunStyle::Plain, true)));
+        for (style, raw_edge_tildes) in alternates {
+            let alternate = render(style, raw_edge_tildes)?;
             if reparses_to(&alternate, &node.children) {
                 return Ok(alternate);
             }
         }
     }
     Ok(output)
+}
+
+fn is_attention_run(inline: &Inline) -> bool {
+    matches!(inline, Inline::Strong(_) | Inline::Emphasis(_))
+}
+
+/// Whether a text among `inlines`, at any depth, opens or closes with a `~`
+/// right beside a strong or emphasis delimiter; `in_run` when `inlines` are a
+/// strong's or emphasis's content.
+fn tilde_touches_run(inlines: &[Inline], in_run: bool) -> bool {
+    inlines
+        .iter()
+        .enumerate()
+        .any(|(index, inline)| match inline {
+            Inline::Text(node) => {
+                (node.value.starts_with('~')
+                    && ((index == 0 && in_run)
+                        || index
+                            .checked_sub(1)
+                            .is_some_and(|previous| is_attention_run(&inlines[previous]))))
+                    || (node.value.ends_with('~')
+                        && ((index + 1 == inlines.len() && in_run)
+                            || inlines.get(index + 1).is_some_and(is_attention_run)))
+            }
+            Inline::Strong(Strong { children, .. })
+            | Inline::Emphasis(Emphasis { children, .. }) => tilde_touches_run(children, true),
+            _ => false,
+        })
+}
+
+/// `rendered` text with its escaped `~` run at the start, or at the end,
+/// written raw.
+fn unescape_edge_tildes(rendered: &str, at_start: bool, at_end: bool) -> String {
+    let mut text = rendered;
+    let mut head = String::new();
+    if at_start {
+        while let Some(rest) = text.strip_prefix("\\~") {
+            head.push('~');
+            text = rest;
+        }
+    }
+    let mut tail = 0;
+    if at_end {
+        let mut rest = text;
+        while let Some(before) = rest.strip_suffix("\\~") {
+            let backslashes = before.len() - before.trim_end_matches('\\').len();
+            if backslashes % 2 == 1 {
+                break;
+            }
+            tail += 1;
+            rest = before;
+        }
+        text = rest;
+    }
+    let mut output = head;
+    output.push_str(text);
+    output.extend(core::iter::repeat_n('~', tail));
+    output
 }
 
 /// Whether a strong or emphasis among `inlines`, at any depth, opens or
@@ -949,6 +1018,9 @@ struct InlineSerializeContext {
     /// The inlines open a span delimited by a run such as `*` or `++`, which
     /// a line ending right after it could not open.
     opens_span: bool,
+    /// A `~` run that opens or closes a text beside a strong or emphasis
+    /// delimiter is written unescaped (see `serialize_paragraph`).
+    raw_edge_tildes: bool,
 }
 
 /// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
@@ -1040,6 +1112,7 @@ impl InlineSerializeContext {
             text_opens_line: false,
             run_style: RunStyle::Plain,
             opens_span: false,
+            raw_edge_tildes: false,
         }
     }
 
@@ -1072,6 +1145,7 @@ impl InlineSerializeContext {
             text_opens_line: false,
             run_style: RunStyle::Plain,
             opens_span: false,
+            raw_edge_tildes: false,
         }
     }
 
@@ -1375,6 +1449,17 @@ fn serialize_inlines_with_context(
                     Some(escaped) => render(escaped, &node.value[1..]),
                     None => render("", &node.value),
                 };
+                if context.raw_edge_tildes {
+                    let at_start = (index == 0 && opens_span)
+                        || index
+                            .checked_sub(1)
+                            .is_some_and(|previous| is_attention_run(&inlines[previous]));
+                    let at_end = (index + 1 == inlines.len() && opens_span)
+                        || inlines.get(index + 1).is_some_and(is_attention_run);
+                    if at_start || at_end {
+                        rendered = unescape_edge_tildes(&rendered, at_start, at_end);
+                    }
+                }
                 // Leading guard: text right after a literal autolink must not
                 // extend its URL on reparse. When it would, its first char is
                 // written in the first form the URL scan stops at.
@@ -2373,11 +2458,21 @@ fn text_delimiter_can_open(
     underscore: bool,
 ) -> bool {
     let flanking = text_delimiter_flanking(input, offset, marker_len);
+    if touches_tilde_bonus(input, offset, flanking.next) {
+        return true;
+    }
     if underscore {
         flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
     } else {
         flanking.left
     }
+}
+
+/// Whether the `*` or `_` run at `offset` touches a `~` on the side whose char
+/// is `neighbour`: the GFM strikethrough bonus lets such a run open or close
+/// whatever its flanking.
+fn touches_tilde_bonus(input: &str, offset: usize, neighbour: Option<char>) -> bool {
+    neighbour == Some('~') && matches!(input.as_bytes()[offset], b'*' | b'_')
 }
 
 fn text_delimiter_can_close(
@@ -2387,6 +2482,9 @@ fn text_delimiter_can_close(
     underscore: bool,
 ) -> bool {
     let flanking = text_delimiter_flanking(input, offset, marker_len);
+    if touches_tilde_bonus(input, offset, flanking.previous) {
+        return true;
+    }
     if underscore {
         flanking.right && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation))
     } else {

@@ -230,12 +230,11 @@ Specs:
   context] → A paragraph whose `Strong` and `Emphasis` runs abut is
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
-  to round-trip in three classes: a run nested against a literal `*` text
-  that no delimiter choice separates (`***_\**#*`); a relaxed `://`
+  to round-trip in two classes: a run nested against a literal `*` text
+  that no delimiter choice separates (`***_\**#*`); and a relaxed `://`
   literal autolink whose URL scan reads into a following span's content
-  (`://*&mp;***`); and a literal `~` whose emphasis run also touches other
-  marks (`b**~\n~**`). Each needs the dialect or the parse's own delimiter
-  stack in the serializer, which this plan does not add.
+  (`://*&mp;***`). Each needs the parse's own delimiter stack in the
+  serializer, which this plan does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -339,3 +338,5 @@ Specs:
 - [x] 13.2 Reparse a paragraph whose `Strong` and `Emphasis` runs abut and, when it does not read back, take the first of `__` strong, `_` inner emphasis, and all-`*` delimiters that does; carry a literal autolink's end through the span delimiters written after it; and write a scheme char ending a text before a `://` literal autolink as an escape or a character reference; verified by the tests, by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 20–27 failures to 0–15, all in the classes listed under Risks, and by serialization of the 4 MB fixture benchmark taking 5% longer (74 ms to 78 ms median).
 - [x] 13.3 Add tests for "Bracket inside a footnote label", "Backtick after a reference's raw label", and "Bang before a wiki link"; verified by `a_footnote_label_holds_no_unescaped_bracket` and `text_after_a_reference_or_before_a_wikilink_keeps_its_parse` failing on the 13.2 code.
 - [x] 13.4 Reject a footnote label with an unescaped bracket; write a text backtick after a reference whose raw label holds a backtick as `&#96;`; escape a `!` before a wiki link; verified by the tests and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–15 failures to 0–10.
+- [x] 13.5 Add a test for "Tilde beside an attention run"; verified by `a_tilde_beside_an_attention_run_keeps_the_runs_bonus` failing on the 13.4 code.
+- [x] 13.6 Read a text `*` or `_` touching a `~` as able to open or close, as the parser's strikethrough bonus does, and add raw edge tildes to the delimiter choices a paragraph that does not read back tries; verified by the test and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–10 failures to 0–9, with no `~` case left outside the literal autolink class.

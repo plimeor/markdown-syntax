@@ -107,6 +107,10 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `"![[$[]]a$>"` with `parse` is serialized
 - **THEN** `to_markdown()` returns `"\\![[$\\[]]a$>\n"`, so the `!` cannot make the wiki link's `[` an image opener
 
+#### Scenario: Tilde beside an attention run
+- **WHEN** the documents parsed from `"b**~\n~**"` and `"a*~ **&*"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same inlines, since a text `*` or `_` touching a `~` is escaped as one the strikethrough bonus lets open or close, and a `~` run at a strong's or emphasis's edge is written raw when only the raw `~` grants the run that bonus
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

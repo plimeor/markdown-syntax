@@ -1849,4 +1849,18 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn a_tilde_beside_an_attention_run_keeps_the_runs_bonus() {
+        for source in [
+            "b**~\n~**",
+            "b_~~_~",
+            "~\nb*~***",
+            "a__~>__~",
+            "~~目*~***",
+            "a*~ **&*",
+        ] {
+            assert_round_trips(source);
+        }
+    }
 }
