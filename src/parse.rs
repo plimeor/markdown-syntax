@@ -228,10 +228,12 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         0
     };
     let source = &input[start..];
-    let definitions = collect_definitions(source, start, options);
-    let children = parse_blocks(
-        source,
-        start,
+    // Both passes read the same lines.
+    let map = SourceMap::verbatim(source.len(), start);
+    let lines = collect_lines(source, &map);
+    let definitions = collect_definitions(source, &lines, options);
+    let children = parse_blocks_from_lines(
+        &lines,
         true,
         options,
         Some(&definitions),
@@ -290,27 +292,6 @@ fn parse_derived_blocks(
 ) -> Vec<Block> {
     let lines = content.lines();
     parse_blocks_from_lines(&lines, false, options, definitions, diagnostics, depth)
-}
-
-fn parse_blocks(
-    input: &str,
-    base_offset: usize,
-    allow_frontmatter: bool,
-    options: &SyntaxOptions,
-    definitions: Option<&[String]>,
-    diagnostics: &mut Vec<Diagnostic>,
-    depth: usize,
-) -> Vec<Block> {
-    let map = SourceMap::verbatim(input.len(), base_offset);
-    let lines = collect_lines(input, &map);
-    parse_blocks_from_lines(
-        &lines,
-        allow_frontmatter,
-        options,
-        definitions,
-        diagnostics,
-        depth,
-    )
 }
 
 fn parse_blocks_from_lines(
@@ -585,15 +566,16 @@ impl<'a> LineSegments<'a> {
     }
 }
 
-/// The identifiers of the definitions in `input`, read from its block
-/// structure alone: `None` for the definitions leaves inline content unparsed.
-fn collect_definitions(input: &str, base_offset: usize, options: &SyntaxOptions) -> Vec<String> {
+/// The identifiers of the definitions in `input`, split into `lines`, read
+/// from its block structure alone: `None` for the definitions leaves inline
+/// content unparsed.
+fn collect_definitions(input: &str, lines: &[Line<'_>], options: &SyntaxOptions) -> Vec<String> {
     // A definition's label is followed right away by its colon.
     if !input.contains("]:") {
         return Vec::new();
     }
     let mut diagnostics = Vec::new();
-    let blocks = parse_blocks(input, base_offset, true, options, None, &mut diagnostics, 0);
+    let blocks = parse_blocks_from_lines(lines, true, options, None, &mut diagnostics, 0);
     let mut definitions = Vec::new();
     collect_definition_refs_from_blocks(&blocks, &mut definitions);
     // Sorted and deduplicated so `definition_exists` can binary-search.
