@@ -3896,11 +3896,16 @@ fn parse_table(
     definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
-    if !options.constructs.gfm_table || index + 1 >= lines.len() {
+    // A lazy line continues only a paragraph, so it is no delimiter row.
+    if !options.constructs.gfm_table || index + 1 >= lines.len() || lines[index + 1].lazy {
         return None;
     }
     let delimiter = table_indent_line(lines[index + 1].text, options.constructs.indented_code)?;
     if list_marker_info(delimiter).is_some() {
+        return None;
+    }
+    // A delimiter row of dashes alone is a setext underline, which wins.
+    if setext_underline_depth(lines[index + 1].text).is_some() {
         return None;
     }
     if !table_has_separator(lines[index].text, delimiter, options.constructs.spoiler) {

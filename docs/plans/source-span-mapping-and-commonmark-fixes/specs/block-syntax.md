@@ -172,3 +172,16 @@ read from.
 #### Scenario: Ordered item not starting at 1 after a definition
 - **WHEN** `"[foo]: /url\n2) a"` is parsed with the CommonMark preset
 - **THEN** the document holds the `Definition` and a `Paragraph`
+
+### Requirement: GFM table start
+A GFM table SHALL start only where the line after its header row is a
+delimiter row that is neither a lazy continuation line nor a setext
+underline; such a line keeps its other reading.
+
+#### Scenario: Delimiter row without pipes
+- **WHEN** `"| --- |\n-- "` is parsed with the GFM preset
+- **THEN** the document holds a level-2 setext `Heading`, not a `Table`
+
+#### Scenario: Lazy delimiter row
+- **WHEN** `"1. ---(\n:-:"` is parsed with the GFM preset
+- **THEN** the list item holds a `Paragraph`, not a `Table`

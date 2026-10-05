@@ -1480,3 +1480,35 @@ mod footnotes_and_directives {
         );
     }
 }
+
+mod gfm_tables {
+    use markdown_syntax::{Block, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::gfm().parse(source).document.children
+    }
+
+    #[test]
+    fn a_setext_underline_wins_over_a_delimiter_row_without_pipes() {
+        for source in ["| --- |\n-- ", "|a|\n---"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Heading(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        assert!(matches!(blocks("a\n|---").as_slice(), [Block::Table(_)]));
+    }
+
+    #[test]
+    fn a_lazy_line_is_no_delimiter_row() {
+        let blocks = blocks("1. ---(\n:-:");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+}
