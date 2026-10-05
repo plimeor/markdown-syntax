@@ -230,11 +230,10 @@ Specs:
   context] → A paragraph whose `Strong` and `Emphasis` runs abut is
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
-  to round-trip in two classes: a run nested against a literal `*` text
-  that no delimiter choice separates (`***_\**#*`); and a relaxed `://`
-  literal autolink whose URL scan reads into a following span's content
-  (`://*&mp;***`). Each needs the parse's own delimiter stack in the
-  serializer, which this plan does not add.
+  to round-trip where a relaxed `://` literal autolink's URL scan reads into
+  a following span's content (`://*&mp;***`), which needs the parse's own
+  autolink scan over the written spans in the serializer, which this plan
+  does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -340,3 +339,5 @@ Specs:
 - [x] 13.4 Reject a footnote label with an unescaped bracket; write a text backtick after a reference whose raw label holds a backtick as `&#96;`; escape a `!` before a wiki link; verified by the tests and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–15 failures to 0–10.
 - [x] 13.5 Add a test for "Tilde beside an attention run"; verified by `a_tilde_beside_an_attention_run_keeps_the_runs_bonus` failing on the 13.4 code.
 - [x] 13.6 Read a text `*` or `_` touching a `~` as able to open or close, as the parser's strikethrough bonus does, and add raw edge tildes to the delimiter choices a paragraph that does not read back tries; verified by the test and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–10 failures to 0–9, with no `~` case left outside the literal autolink class.
+- [x] 13.7 Extend `nested_attention_runs_pick_delimiters_that_reparse_to_them` with `__***/***__`, `**#****]***_**`, and `***_\**#*`; verified by each failing on the 13.6 code.
+- [x] 13.8 Add `_` for the outermost run only, and raw edge `*` text joining a run, to the delimiter choices a paragraph that does not read back tries; verified by the test and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–9 failures to 0–7, none of them a strong or emphasis run without a literal autolink or a NUL char.

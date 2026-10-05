@@ -92,8 +92,8 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **THEN** `to_markdown()` returns `"y***b***\n"`
 
 #### Scenario: Abutting attention runs
-- **WHEN** the documents parsed from `"__**)**&__"`, `"**:__$__**"`, `"****(*+***"`, and `"***_|_***"` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs, since a paragraph whose runs abut is written with the first delimiter choice that reads back
+- **WHEN** the documents parsed from `"__**)**&__"`, `"**:__$__**"`, `"****(*+***"`, `"***_|_***"`, `"__***/***__"`, `"**#****]***_**"`, and `"***_\\**#*"` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs, since a paragraph whose runs abut, or touch a text `*` or `~`, is written with the first delimiter choice that reads back, which may leave that text `*` raw to join a run
 
 #### Scenario: Text beside a literal autolink
 - **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, and `"**://**&mp;"` with `parse` are serialized and reparsed

@@ -425,37 +425,45 @@ fn serialize_paragraph(
     node: &Paragraph,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let render = |run_style: RunStyle, raw_edge_tildes: bool| -> Result<String, SerializeError> {
+    let render = |run_style: RunStyle, raw_edge: Option<char>| -> Result<String, SerializeError> {
         let context = InlineSerializeContext {
             run_style,
-            raw_edge_tildes,
+            raw_edge,
             ..InlineSerializeContext::block_content()
         };
         let mut output = serialize_inlines_with_context(&node.children, options, context)?;
         keep_first_line_off_html_block(&node.children, &mut output);
         Ok(indent_block_starting_continuations(output))
     };
-    let output = render(RunStyle::Plain, false)?;
+    let output = render(RunStyle::Plain, None)?;
     // A strong or emphasis run abutting another splits on reparse only as its
     // flanking allows, which the rest of the paragraph decides; one beside a
-    // `~` opens or closes only as the GFM bonus for a raw `~` allows. When the
-    // plain rendering does not read back, the first other style that does is
-    // taken.
+    // `~` opens or closes only as the GFM bonus for a raw `~` allows, and one
+    // beside a text `*` may take that `*` into its run. When the plain
+    // rendering does not read back, the first other style that does is taken.
     let abut_runs = inlines_abut_runs(&node.children);
-    let edge_tildes = tilde_touches_run(&node.children, false);
-    if (abut_runs || edge_tildes) && !reparses_to(&output, &node.children) {
+    let edge_tildes = char_touches_run(&node.children, '~', false);
+    let edge_stars = char_touches_run(&node.children, '*', false);
+    if (abut_runs || edge_tildes || edge_stars) && !reparses_to(&output, &node.children) {
         let styles = [
             RunStyle::StrongUnderscore,
             RunStyle::InnerUnderscore,
             RunStyle::AllStar,
+            RunStyle::OuterUnderscore,
         ];
         let alternates = abut_runs
-            .then_some(styles.map(|style| (style, false)))
+            .then_some(styles.map(|style| (style, None)))
             .into_iter()
             .flatten()
-            .chain(edge_tildes.then_some((RunStyle::Plain, true)));
-        for (style, raw_edge_tildes) in alternates {
-            let alternate = render(style, raw_edge_tildes)?;
+            .chain(edge_tildes.then_some((RunStyle::Plain, Some('~'))))
+            .chain(
+                edge_stars
+                    .then_some([RunStyle::Plain, RunStyle::AllStar].map(|style| (style, Some('*'))))
+                    .into_iter()
+                    .flatten(),
+            );
+        for (style, raw_edge) in alternates {
+            let alternate = render(style, raw_edge)?;
             if reparses_to(&alternate, &node.children) {
                 return Ok(alternate);
             }
@@ -468,57 +476,67 @@ fn is_attention_run(inline: &Inline) -> bool {
     matches!(inline, Inline::Strong(_) | Inline::Emphasis(_))
 }
 
-/// Whether a text among `inlines`, at any depth, opens or closes with a `~`
+/// Whether a text among `inlines`, at any depth, opens or closes with `edge`
 /// right beside a strong or emphasis delimiter; `in_run` when `inlines` are a
 /// strong's or emphasis's content.
-fn tilde_touches_run(inlines: &[Inline], in_run: bool) -> bool {
+fn char_touches_run(inlines: &[Inline], edge: char, in_run: bool) -> bool {
     inlines
         .iter()
         .enumerate()
         .any(|(index, inline)| match inline {
             Inline::Text(node) => {
-                (node.value.starts_with('~')
+                (node.value.starts_with(edge)
                     && ((index == 0 && in_run)
                         || index
                             .checked_sub(1)
                             .is_some_and(|previous| is_attention_run(&inlines[previous]))))
-                    || (node.value.ends_with('~')
+                    || (node.value.ends_with(edge)
                         && ((index + 1 == inlines.len() && in_run)
                             || inlines.get(index + 1).is_some_and(is_attention_run)))
             }
             Inline::Strong(Strong { children, .. })
-            | Inline::Emphasis(Emphasis { children, .. }) => tilde_touches_run(children, true),
+            | Inline::Emphasis(Emphasis { children, .. }) => char_touches_run(children, edge, true),
             _ => false,
         })
 }
 
-/// `rendered` text with its escaped `~` run at the start, or at the end,
-/// written raw.
-fn unescape_edge_tildes(rendered: &str, at_start: bool, at_end: bool) -> String {
+/// `rendered` text with the run of `edge` chars at its start, or at its end,
+/// written raw where it was escaped or written as a character reference.
+fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> String {
+    let escaped = alloc::format!("\\{edge}");
+    let reference = alloc::format!("&#x{:X};", edge as u32);
     let mut text = rendered;
-    let mut head = String::new();
+    let mut head = 0;
     if at_start {
-        while let Some(rest) = text.strip_prefix("\\~") {
-            head.push('~');
+        while let Some(rest) = text
+            .strip_prefix(escaped.as_str())
+            .or_else(|| text.strip_prefix(reference.as_str()))
+        {
+            head += 1;
             text = rest;
         }
     }
     let mut tail = 0;
     if at_end {
-        let mut rest = text;
-        while let Some(before) = rest.strip_suffix("\\~") {
-            let backslashes = before.len() - before.trim_end_matches('\\').len();
-            if backslashes % 2 == 1 {
+        loop {
+            if let Some(before) = text.strip_suffix(reference.as_str()) {
+                text = before;
+            } else if let Some(before) = text.strip_suffix(escaped.as_str()) {
+                let backslashes = before.len() - before.trim_end_matches('\\').len();
+                if backslashes % 2 == 1 {
+                    break;
+                }
+                text = before;
+            } else {
                 break;
             }
             tail += 1;
-            rest = before;
         }
-        text = rest;
     }
-    let mut output = head;
+    let mut output = String::with_capacity(rendered.len());
+    output.extend(core::iter::repeat_n(edge, head));
     output.push_str(text);
-    output.extend(core::iter::repeat_n('~', tail));
+    output.extend(core::iter::repeat_n(edge, tail));
     output
 }
 
@@ -993,6 +1011,8 @@ enum RunStyle {
     /// An emphasis with no strong or emphasis inside is written with `_`, and
     /// every other run with `*`.
     InnerUnderscore,
+    /// A run inside no other is written with `_`, and every other with `*`.
+    OuterUnderscore,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1018,9 +1038,9 @@ struct InlineSerializeContext {
     /// The inlines open a span delimited by a run such as `*` or `++`, which
     /// a line ending right after it could not open.
     opens_span: bool,
-    /// A `~` run that opens or closes a text beside a strong or emphasis
-    /// delimiter is written unescaped (see `serialize_paragraph`).
-    raw_edge_tildes: bool,
+    /// The char whose run opening or closing a text beside a strong or
+    /// emphasis delimiter is written raw (see `serialize_paragraph`).
+    raw_edge: Option<char>,
 }
 
 /// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
@@ -1112,7 +1132,7 @@ impl InlineSerializeContext {
             text_opens_line: false,
             run_style: RunStyle::Plain,
             opens_span: false,
-            raw_edge_tildes: false,
+            raw_edge: None,
         }
     }
 
@@ -1145,8 +1165,13 @@ impl InlineSerializeContext {
             text_opens_line: false,
             run_style: RunStyle::Plain,
             opens_span: false,
-            raw_edge_tildes: false,
+            raw_edge: None,
         }
+    }
+
+    /// Whether the inlines sit inside a strong or emphasis.
+    const fn inside_run(self) -> bool {
+        self.avoid_star_edges || self.in_underscore_emphasis
     }
 
     const fn avoiding_star_edges(self) -> Self {
@@ -1449,7 +1474,7 @@ fn serialize_inlines_with_context(
                     Some(escaped) => render(escaped, &node.value[1..]),
                     None => render("", &node.value),
                 };
-                if context.raw_edge_tildes {
+                if let Some(edge) = context.raw_edge {
                     let at_start = (index == 0 && opens_span)
                         || index
                             .checked_sub(1)
@@ -1457,7 +1482,7 @@ fn serialize_inlines_with_context(
                     let at_end = (index + 1 == inlines.len() && opens_span)
                         || inlines.get(index + 1).is_some_and(is_attention_run);
                     if at_start || at_end {
-                        rendered = unescape_edge_tildes(&rendered, at_start, at_end);
+                        rendered = unescape_edge(&rendered, edge, at_start, at_end);
                     }
                 }
                 // Leading guard: text right after a literal autolink must not
@@ -1551,7 +1576,10 @@ fn serialize_inlines_with_context(
                 // preceding `*`-emphasis) would otherwise merge into one run, so
                 // switch this run to `_` when that does not introduce a new
                 // `_`-collision with the children.
-                let abuts_star = ends_with_unescaped(&output, '*') && !touches_underscore;
+                // A raw edge `*` is meant to join the run.
+                let abuts_star = ends_with_unescaped(&output, '*')
+                    && !touches_underscore
+                    && context.raw_edge != Some('*');
                 // `_` neither opens after nor closes before an alphanumeric.
                 let underscore_flanks = !output
                     .chars()
@@ -1576,6 +1604,9 @@ fn serialize_inlines_with_context(
                         RunStyle::AllStar => abuts_star,
                         RunStyle::InnerUnderscore => {
                             abuts_star || (innermost && !touches_underscore)
+                        }
+                        RunStyle::OuterUnderscore => {
+                            abuts_star || (!context.inside_run() && !touches_underscore)
                         }
                     };
                 let delimiter = if prefer_underscore { '_' } else { '*' };
@@ -1604,7 +1635,8 @@ fn serialize_inlines_with_context(
                 // or following runs stay `**`: they split as written, and
                 // `__` reparses as `Underline` when that construct is enabled,
                 // which the serializer has no signal for.
-                let after_star = ends_with_unescaped(&output, '*')
+                let after_star = (ends_with_unescaped(&output, '*')
+                    && context.raw_edge != Some('*'))
                     || (context.run_style == RunStyle::StrongUnderscore
                         && (children.starts_with('*') || children.ends_with('*')));
                 let underscore_fits = !children.starts_with('_')
@@ -1614,7 +1646,13 @@ fn serialize_inlines_with_context(
                         Some(Inline::Text(next))
                             if next.value.chars().next().is_some_and(|char| char.is_alphanumeric() || char == '_')
                     );
-                let delimiter = if after_star && underscore_fits {
+                let outer_underscore = context.run_style == RunStyle::OuterUnderscore
+                    && !context.inside_run()
+                    && !output
+                        .chars()
+                        .next_back()
+                        .is_some_and(char::is_alphanumeric);
+                let delimiter = if (after_star || outer_underscore) && underscore_fits {
                     "__"
                 } else {
                     "**"

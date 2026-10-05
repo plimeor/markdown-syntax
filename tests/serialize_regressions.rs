@@ -1829,7 +1829,15 @@ mod round_trip_edges {
 
     #[test]
     fn nested_attention_runs_pick_delimiters_that_reparse_to_them() {
-        for source in ["__**)**&__", "**:__$__**", "****(*+***", "***_|_***"] {
+        for source in [
+            "__**)**&__",
+            "**:__$__**",
+            "****(*+***",
+            "***_|_***",
+            "__***/***__",
+            "**#****]***_**",
+            "***_\\**#*",
+        ] {
             assert_round_trips(source);
         }
     }
