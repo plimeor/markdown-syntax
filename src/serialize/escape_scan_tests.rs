@@ -12,14 +12,6 @@ use crate::test_support::{boundaries, generated_inputs, query_orders, Rng};
 mod reference {
     use super::super::*;
 
-    pub(super) fn text_code_span_can_start(input: &str, offset: usize) -> bool {
-        let marker_len = same_char_run_len(input, offset, '`');
-        if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
-            return true;
-        }
-        find_same_char_run(input, offset + marker_len, '`', marker_len).is_some()
-    }
-
     pub(super) fn text_attention_delimiter_can_start(
         input: &str,
         offset: usize,
@@ -181,11 +173,6 @@ fn run_and_lookahead_checks_match_the_reference_scan() {
     for_each_scan(22, |input, scan, offset| {
         let char = input[offset..].chars().next().expect("offset below len");
         match char {
-            '`' => assert_eq!(
-                text_code_span_can_start(input, offset, scan),
-                reference::text_code_span_can_start(input, offset),
-                "{input:?} at {offset}"
-            ),
             '$' => assert_eq!(
                 text_math_can_start(input, offset, scan),
                 reference::text_math_can_start(input, offset),

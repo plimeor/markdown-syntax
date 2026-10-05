@@ -108,7 +108,9 @@ Specs:
 - Each delimiter run keeps its original length beside its remaining length.
   The rule of three and the `openers_bottom` key both use the original length,
   because cmark and commonmark.js do both. The opener floor is sound only when
-  keyed on what the predicate reads.
+  keyed on what the predicate reads, so the key uses the original length for `*`
+  and `_`, whose predicate is the rule of three, and the remaining length for
+  the other marks, whose predicates read it.
   - Turned down: changing only the predicate, which leaves the floor keyed on a
     length the predicate no longer reads.
   - During planning, this change reduced mismatches against commonmark.js on
@@ -126,6 +128,12 @@ Specs:
   changed canonical output.
   - Turned down: predicting per run, which keeps output byte-stable but keeps a
     mirrored copy of parser rules.
+- Inside an `_`-delimited emphasis, the serializer escapes a `_` in text that
+  can close, as text inside `*`-delimited emphasis already encodes its `*`,
+  because the reparse would close the emphasis there. Turned down: escaping
+  every `*` / `_` that can close, or every character of an escaped run, which
+  moved canonical output for about 1,000 corpus inputs while the defect needs a
+  delimiter outside the text node.
 - After a shortcut reference, the serializer escapes the character that would
   re-read its brackets, because the AST must round-trip.
   - Turned down: writing the reference in collapsed form, which changes the
@@ -154,20 +162,21 @@ Specs:
 ## Tasks
 
 ### 1. Rule of three
-- [ ] 1.1 Add tests for "Rule of three counts whole delimiter runs" and for `***a*a*a`; verified by both failing on the current code.
-- [ ] 1.2 Keep each delimiter run's original length, and use it in `emphasis_delimiters_match` and `openers_bottom_key`; verified by:
+- [x] 1.1 Add tests for "Rule of three counts whole delimiter runs" and for `***a*a*a`; verified by both failing on the current code.
+- [x] 1.2 Keep each delimiter run's original length, and use it in `emphasis_delimiters_match` and in `openers_bottom_key` for `*` / `_`; verified by:
   - the 1.1 tests and `cargo test` passing
   - conformance not below 2233/2236
   - a parse-output comparison with the starting commit, over the fixture corpus and seeded generated inputs, differing only in the class listed under Risks
+- [x] 1.3 Escape a `_` in text that can close when the text sits inside an `_`-delimited emphasis, because the new parse produces that shape for inputs that round-tripped before; verified by `an_underscore_that_can_close_stays_inside_underscore_emphasis` (failing before) and the parse-output comparison showing no corpus input whose canonical output moves
 
 ### 2. Image fallback and text after shortcut references
-- [ ] 2.1 Add tests for "Image whose resource is invalid" and the three shortcut-reference scenarios of "Escaping keeps text literal"; verified by each failing on the current code.
-- [ ] 2.2 Delete the image-only early return in `match_link_target` and correct its doc comment; verified by the image test passing and conformance unchanged.
-- [ ] 2.3 Escape a `(` directly after a shortcut `LinkReference` or `ImageReference`, and a `:` directly after one that starts a paragraph; verified by the shortcut-reference tests and the round-trip fixtures passing.
+- [x] 2.1 Add tests for "Image whose resource is invalid" and the three shortcut-reference scenarios of "Escaping keeps text literal"; verified by each failing on the current code.
+- [x] 2.2 Delete the image-only early return in `match_link_target` and correct its doc comment; verified by the image test passing and conformance unchanged.
+- [x] 2.3 Escape a `(` directly after a shortcut `LinkReference` or `ImageReference`, and a `:` directly after one that starts a paragraph; verified by the shortcut-reference tests and the round-trip fixtures passing.
 
 ### 3. Backticks
-- [ ] 3.1 Add tests for both scenarios of "Literal backticks are always escaped"; verified by the first failing on the current code.
-- [ ] 3.2 Escape every backtick in text, and remove `text_code_span_can_start` and any scan state only it used; verified by:
+- [x] 3.1 Add tests for both scenarios of "Literal backticks are always escaped"; verified by the first failing on the current code.
+- [x] 3.2 Escape every backtick in text, and remove `text_code_span_can_start` and any scan state only it used; `ordinary_punctuation_text_does_not_reparse_as_character_escapes` drops the backtick from its sample of punctuation left unescaped; verified by:
   - the 3.1 tests and `cargo test` passing
   - every moved `.canonical.md` golden regenerated and read for correctness
   - every canonical diff from the starting commit being a backtick in text

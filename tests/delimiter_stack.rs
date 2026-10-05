@@ -359,3 +359,32 @@ fn an_image_whose_label_cannot_close_yields_to_a_wikilink() {
         paragraph.children
     );
 }
+
+#[test]
+fn the_rule_of_three_counts_whole_delimiter_runs() {
+    let commonmark = SyntaxOptions::commonmark();
+    assert_eq!(
+        parsed(&commonmark, "*a***b*"),
+        r#"Emphasis["a"]"*"Emphasis["b"]"#
+    );
+    assert_eq!(
+        parsed(&commonmark, "***a*a*a"),
+        r#""*"Emphasis[Emphasis["a"]"a"]"a""#
+    );
+}
+
+#[test]
+fn an_image_whose_resource_is_invalid_falls_back_to_a_shortcut_reference() {
+    let document = SyntaxOptions::commonmark()
+        .parse("![foo](a b)\n\n[foo]: /u")
+        .document;
+    let Some(Block::Paragraph(paragraph)) = document.children.first() else {
+        panic!("expected a paragraph");
+    };
+    assert!(
+        matches!(paragraph.children.as_slice(), [Inline::ImageReference(image), Inline::Text(rest)]
+            if image.kind == ReferenceKind::Shortcut && image.identifier == "foo" && rest.value == "(a b)"),
+        "{:?}",
+        paragraph.children
+    );
+}

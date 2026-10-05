@@ -810,7 +810,9 @@ mod serializer_escape {
 
     #[test]
     fn ordinary_punctuation_text_does_not_reparse_as_character_escapes() {
-        let value = "a+b = c, #tag, wow!, a | b, a < b, C++ and x^2 ~ y & z, one ` tick";
+        // A backtick is always escaped, like `[`, `]`, and `\`, so it is not
+        // ordinary punctuation here.
+        let value = "a+b = c, #tag, wow!, a | b, a < b, C++ and x^2 ~ y & z";
         let document = Document {
             meta: NodeMeta::default(),
             children: vec![paragraph(vec![text(value)])],
@@ -1469,5 +1471,105 @@ mod review_serialize {
         // rewritten into a thematic break.
         assert!(!markdown.contains("---"));
         assert!(markdown.contains('*'));
+    }
+}
+
+mod literal_text {
+    //! Text that the serializer must keep literal when it sits beside
+    //! delimiters and references written by other nodes.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph_document(children: Vec<Inline>) -> Document {
+        Document {
+            meta: NodeMeta::default(),
+            children: vec![Paragraph::new(children).into()],
+        }
+    }
+
+    /// Serializes `document`, reparses the output with `options`, and checks
+    /// that the reparsed blocks equal the original ones apart from spans.
+    fn assert_round_trips(document: &Document, options: &SyntaxOptions) -> String {
+        let markdown = document.to_markdown().expect("document serializes");
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            without_spans(&format!("{:?}", reparsed.children)),
+            without_spans(&format!("{:?}", document.children)),
+            "{markdown:?}"
+        );
+        markdown
+    }
+
+    /// `debug` with every `Some(Span { .. })` written as `None`.
+    fn without_spans(debug: &str) -> String {
+        let mut out = String::new();
+        let mut rest = debug;
+        while let Some(start) = rest.find("Some(Span { ") {
+            out.push_str(&rest[..start]);
+            out.push_str("None");
+            let end = rest[start..].find("})").expect("span ends") + start + 2;
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn an_underscore_that_can_close_stays_inside_underscore_emphasis() {
+        let strong = Inline::Strong(Strong {
+            meta: NodeMeta::default(),
+            children: vec![Text::from("(a b)_.").into()],
+        });
+        let emphasis = Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![strong],
+        });
+        let document = paragraph_document(vec![emphasis, Text::from("*#").into()]);
+        let markdown = assert_round_trips(&document, &SyntaxOptions::commonmark());
+        assert_eq!(markdown, "_**(a b)\\_.**_\\*#\n");
+    }
+
+    /// Parses `source` with `options`, then checks that the serialized output
+    /// reparses to the same blocks.
+    fn assert_parsed_round_trips(source: &str, options: &SyntaxOptions) -> String {
+        assert_round_trips(&options.parse(source).document, options)
+    }
+
+    #[test]
+    fn a_parenthesis_after_a_shortcut_reference_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("[foo]\\(a)\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("[foo]\\(a)\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn a_parenthesis_after_a_shortcut_image_reference_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("![foo]\\(a)\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("![foo]\\(a)\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn a_colon_after_a_shortcut_reference_that_starts_a_paragraph_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("[foo]\\: /x\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("[foo]\\: /x\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn every_backtick_in_text_is_escaped() {
+        let document = paragraph_document(vec![Text::from("b ``a`").into()]);
+        let markdown = assert_round_trips(&document, &SyntaxOptions::default());
+        assert_eq!(markdown, "b \\`\\`a\\`\n");
+    }
+
+    #[test]
+    fn paired_backticks_in_text_are_both_escaped() {
+        let markdown = SyntaxOptions::default()
+            .parse("Test \\`hello world` here.")
+            .document
+            .to_markdown()
+            .expect("document serializes");
+        assert_eq!(markdown, "Test \\`hello world\\` here.\n");
     }
 }

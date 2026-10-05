@@ -23,6 +23,10 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same text and no `Emphasis`
 
+#### Scenario: Underscore that can close inside underscore emphasis
+- **WHEN** a hand-built paragraph holding an `Emphasis` around a `Strong` around `Text("(a b)_.")`, followed by `Text("*#")`, is serialized and reparsed with the CommonMark preset
+- **THEN** `to_markdown()` returns `"_**(a b)\\_.**_\\*#\n"` and the reparsed paragraph equals the original apart from spans
+
 #### Scenario: Parenthesis after a shortcut reference
 - **WHEN** the document parsed from `"[foo]\\(a)\n\n[foo]: /u"` is serialized and reparsed
 - **THEN** the reparsed paragraph holds a shortcut `LinkReference` to `foo` followed by `Text("(a)")`

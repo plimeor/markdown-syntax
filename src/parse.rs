@@ -3691,6 +3691,10 @@ struct DelimMarker {
     marker: u8,
     /// Remaining unmatched delimiter characters in this run.
     length: usize,
+    /// The run's length as scanned. CommonMark's rule of three, and the
+    /// `openers_bottom` key that caches its verdicts, read this rather than
+    /// what is left after earlier pairings.
+    run_length: usize,
     can_open: bool,
     can_close: bool,
     /// The `~` subscript / `^` superscript roles of a run.
@@ -3972,7 +3976,6 @@ fn close_bracket(
             input,
             opener.position + 2,
             close,
-            true,
             definitions,
         );
         if let Some((end, target)) = target {
@@ -4002,7 +4005,6 @@ fn close_bracket(
             input,
             opener.position + 1,
             close,
-            false,
             definitions,
         );
         if let Some((end, target)) = target {
@@ -4086,6 +4088,7 @@ fn push_delimiter(
         node_index,
         marker,
         length,
+        run_length: length,
         can_open: roles.can_open,
         can_close: roles.can_close,
         single_open: roles.single_open,
@@ -4687,7 +4690,7 @@ fn merge_adjacent_text(nodes: &mut Vec<Inline>) {
 }
 
 /// Index into `openers_bottom` for a nested closer's (marker, both-flags,
-/// length%3) key.
+/// length % 3) key.
 fn openers_bottom_key(closer: &DelimMarker) -> usize {
     let marker = match closer.marker {
         b'_' => 1,
@@ -4697,7 +4700,14 @@ fn openers_bottom_key(closer: &DelimMarker) -> usize {
         _ => 0,
     };
     let both = usize::from(closer.can_open && closer.can_close);
-    let modulo = closer.length % 3;
+    // The key holds what `emphasis_delimiters_match` reads of the closer: the
+    // whole run's length for the rule of three on `*` / `_`, and what is left
+    // of the run for the other marks.
+    let length = match closer.marker {
+        b'*' | b'_' => closer.run_length,
+        _ => closer.length,
+    };
+    let modulo = length % 3;
     ((marker * 2) + both) * 3 + modulo
 }
 
@@ -4711,13 +4721,15 @@ fn emphasis_delimiters_match(opener: &DelimMarker, closer: &DelimMarker) -> bool
         b'+' | b'=' => opener.length >= 2 && closer.length >= 2,
         _ => {
             // Rule of three: if either delimiter can both open and close, the
-            // sum of the two run lengths must not be a multiple of three, unless
-            // both lengths are themselves multiples of three.
+            // sum of the lengths of the runs containing them must not be a
+            // multiple of three, unless both are themselves multiples of three.
+            // CommonMark counts whole runs, not what earlier pairings left.
             let opener_both = opener.can_open && opener.can_close;
             let closer_both = closer.can_open && closer.can_close;
             if opener_both || closer_both {
-                let sum = opener.length + closer.length;
-                if sum % 3 == 0 && !(opener.length % 3 == 0 && closer.length % 3 == 0) {
+                let (opener_run, closer_run) = (opener.run_length, closer.run_length);
+                let sum = opener_run + closer_run;
+                if sum % 3 == 0 && !(opener_run % 3 == 0 && closer_run % 3 == 0) {
                     return false;
                 }
             }
@@ -4852,15 +4864,14 @@ enum LinkTarget {
 
 /// Matches what follows the `]` at `close` of a link or image whose label is
 /// `input[label_start..close]`: an inline `(…)` resource, a full or collapsed
-/// reference, or a shortcut reference to a defined label. An image whose `(…)`
-/// is not a valid resource is no image; a link falls back to the reference
-/// forms. Returns the end of the construct and its target.
+/// reference, or a shortcut reference to a defined label. A `(…)` that is not a
+/// valid resource leaves the reference forms to try, for images and links
+/// alike. Returns the end of the construct and its target.
 fn match_link_target(
     scan: &mut InlineScan,
     input: &str,
     label_start: usize,
     close: usize,
-    image: bool,
     definitions: &[String],
 ) -> Option<(usize, LinkTarget)> {
     let label = &input[label_start..close];
@@ -4868,10 +4879,10 @@ fn match_link_target(
     if input.as_bytes().get(after) == Some(&b'(') {
         match parse_link_resource(&mut scan.lookups, input, after) {
             Some((end, resource)) => return Some((end, LinkTarget::Resource(resource))),
-            // A present-but-invalid `(...)` resource is not an inline link,
-            // but CommonMark still resolves `[label]` as a shortcut reference
-            // and leaves the invalid `(...)` as literal text (links 568).
-            None if image => return None,
+            // A present-but-invalid `(...)` resource is not an inline link or
+            // image, but CommonMark still resolves `[label]` as a shortcut
+            // reference and leaves the invalid `(...)` as literal text (links
+            // 568).
             None => {}
         }
     }

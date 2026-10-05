@@ -664,6 +664,9 @@ fn serialize_table_row(
 struct InlineSerializeContext {
     table_cell: bool,
     avoid_star_edges: bool,
+    /// Inside an `_`-delimited emphasis, where a `_` in text that can close
+    /// would close it on reparse.
+    in_underscore_emphasis: bool,
 }
 
 impl InlineSerializeContext {
@@ -671,13 +674,21 @@ impl InlineSerializeContext {
         Self {
             table_cell: true,
             avoid_star_edges: false,
+            in_underscore_emphasis: false,
         }
     }
 
     const fn avoiding_star_edges(self) -> Self {
         Self {
-            table_cell: self.table_cell,
             avoid_star_edges: true,
+            ..self
+        }
+    }
+
+    const fn inside_underscore_emphasis(self) -> Self {
+        Self {
+            in_underscore_emphasis: true,
+            ..self
         }
     }
 }
@@ -742,6 +753,33 @@ fn is_gfm_literal_autolink(inline: &Inline) -> bool {
     )
 }
 
+// True when `inline` is a shortcut link or image reference, whose `[label]`
+// a following `(` would turn into an inline link, and a following `:` at the
+// start of a line into a link reference definition.
+fn is_shortcut_reference(inline: &Inline) -> bool {
+    matches!(
+        inline,
+        Inline::LinkReference(LinkReference {
+            kind: ReferenceKind::Shortcut,
+            ..
+        }) | Inline::ImageReference(ImageReference {
+            kind: ReferenceKind::Shortcut,
+            ..
+        })
+    )
+}
+
+// The escaped first character of text after a shortcut reference, when that
+// character would re-read the reference's brackets: a `(` always, and a `:`
+// when the reference opens the inline sequence, where a line can start.
+fn escape_leading_char_after_shortcut(value: &str, reference_index: usize) -> Option<&str> {
+    match value.as_bytes().first() {
+        Some(b'(') => Some("\\("),
+        Some(b':') if reference_index == 0 => Some("\\:"),
+        _ => None,
+    }
+}
+
 fn is_gfm_literal_email(inline: &Inline) -> bool {
     matches!(
         inline,
@@ -787,12 +825,20 @@ fn serialize_inlines_with_context(
 
                 // Leading guard: a non-ASCII char abutting the END of a literal
                 // autolink would merge into its URL on reparse — encode it.
+                let after_shortcut = index
+                    .checked_sub(1)
+                    .filter(|&prev| is_shortcut_reference(&inlines[prev]));
                 let (lead, body) = match after_literal_autolink
                     .then(|| encode_leading_char_after_autolink(&node.value))
                     .flatten()
                 {
                     Some((encoded, rest)) => (encoded, rest),
-                    None => (String::new(), node.value.as_str()),
+                    None => match after_shortcut.and_then(|reference| {
+                        escape_leading_char_after_shortcut(&node.value, reference)
+                    }) {
+                        Some(escaped) => (escaped.into(), &node.value[1..]),
+                        None => (String::new(), node.value.as_str()),
+                    },
                 };
 
                 // Trailing guard: when this text is immediately followed by a
@@ -825,7 +871,15 @@ fn serialize_inlines_with_context(
             }
             Inline::CharacterReference(node) => output.push_str(&node.reference),
             Inline::Emphasis(node) => {
-                let children = serialize_inlines_with_context(&node.children, options, context)?;
+                // Rendered as `_` content first: the choice below reads only
+                // the children's edges and `*`s, which escaping a `_` that can
+                // close does not change, so only the `*` choice renders them
+                // again and nesting never multiplies the work.
+                let children = serialize_inlines_with_context(
+                    &node.children,
+                    options,
+                    context.inside_underscore_emphasis(),
+                )?;
                 let touches_underscore = children.starts_with('_')
                     || children.ends_with('_')
                     || children.starts_with("\\_")
@@ -1225,7 +1279,6 @@ struct TextScan<'a> {
     marker_starts: [Positions; ATTENTION_MARKERS.len()],
     marker_closers: [PathMemo; ATTENTION_MARKERS.len()],
     last_occurrences: Vec<(&'static str, Option<usize>)>,
-    backtick_runs: Option<SameCharRuns>,
     dollar_runs: Option<SameCharRuns>,
     /// The byte, start, and end of the last run `run_len_from` measured.
     current_run: Option<(u8, usize, usize)>,
@@ -1238,7 +1291,6 @@ impl<'a> TextScan<'a> {
             marker_starts: Default::default(),
             marker_closers: Default::default(),
             last_occurrences: Vec::new(),
-            backtick_runs: None,
             dollar_runs: None,
             current_run: None,
         }
@@ -1307,14 +1359,12 @@ impl<'a> TextScan<'a> {
     }
 
     /// Whether some position at or after `from` begins exactly `run_len`
-    /// trailing bytes of a run of `needle` (an ASCII byte).
-    fn exact_run_follows(&mut self, needle: u8, from: usize, run_len: usize) -> bool {
+    /// trailing bytes of a run of `$`.
+    fn exact_dollar_run_follows(&mut self, from: usize, run_len: usize) -> bool {
         let input = self.input;
-        let runs = match needle {
-            b'`' => &mut self.backtick_runs,
-            _ => &mut self.dollar_runs,
-        }
-        .get_or_insert_with(|| SameCharRuns::new(input, needle));
+        let runs = self
+            .dollar_runs
+            .get_or_insert_with(|| SameCharRuns::new(input, b'$'));
         runs.has_run_ending_at_or_after(from + run_len, run_len)
     }
 }
@@ -1367,6 +1417,7 @@ fn escape_text_with_context(
     context: InlineSerializeContext,
 ) -> String {
     let avoid_star_edges = context.avoid_star_edges;
+    let in_underscore_emphasis = context.in_underscore_emphasis;
     let mut output = String::new();
     let mut output_line = OutputLine::default();
     let mut scan = TextScan::new(input);
@@ -1475,11 +1526,18 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '`' if text_code_span_can_start(input, offset, &mut scan) => {
+            // A backslash keeps a backtick from opening a code span but not
+            // from closing one, so every backtick is escaped: a bare one could
+            // open a span that an escaped one closes.
+            '`' => {
                 output.push('\\');
                 output.push(char);
             }
             '*' if text_attention_delimiter_can_start(input, offset, "*", false, &mut scan) => {
+                output.push('\\');
+                output.push(char);
+            }
+            '_' if in_underscore_emphasis && text_delimiter_can_close(input, offset, 1, true) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -1540,14 +1598,6 @@ fn escape_text_with_context(
         }
     }
     output
-}
-
-fn text_code_span_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
-    let marker_len = scan.run_len_from(b'`', offset);
-    if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
-        return true;
-    }
-    scan.exact_run_follows(b'`', offset + marker_len, marker_len)
 }
 
 fn text_attention_delimiter_can_start(
@@ -1681,7 +1731,7 @@ fn text_math_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool 
     if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
         return true;
     }
-    scan.exact_run_follows(b'$', offset + marker_len, marker_len)
+    scan.exact_dollar_run_follows(offset + marker_len, marker_len)
 }
 
 fn text_tilde_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
