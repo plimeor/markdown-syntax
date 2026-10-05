@@ -56,10 +56,37 @@ with a closer inside the same label.
 
 ## MODIFIED Requirements
 
+### Requirement: CommonMark inlines
+The parser SHALL recognize CommonMark inline constructs (backslash escapes,
+entity and numeric character references, code spans, emphasis and strong
+emphasis, links, images, autolinks, raw HTML, and hard and soft line breaks) as
+the CommonMark specification defines them, including its precedence of code
+spans, links, and emphasis.
+
+#### Scenario: Emphasis
+- **WHEN** `"Hello *world*."` is parsed
+- **THEN** the paragraph holds `Text("Hello ")`, an `Emphasis` containing `world`, and `Text(".")`
+
+#### Scenario: Link inside a link label
+- **WHEN** `"[foo [bar](/u)](/v)"` is parsed
+- **THEN** only `[bar](/u)` becomes a link and the surrounding brackets and `(/v)` stay text
+
+#### Scenario: Shortcut reference before an unclosed label
+- **WHEN** `"[foo][bar\n\n[foo]: /u"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds a shortcut `LinkReference` to `foo` followed by `Text("[bar")`
+
+#### Scenario: CommonMark oracle cases
+- **WHEN** the inline cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
+- **THEN** the output matches the expected HTML
+
 ### Requirement: Superscript and inline footnotes share the caret
 The parser SHALL read `^[…]` as an inline footnote when inline footnotes are
-enabled, unless a superscript on the same line is waiting to close at that `^`,
-and `^x^` as `Superscript` otherwise.
+enabled, unless a `^` earlier on the same line, and not directly before it,
+opened a superscript that no `^` has closed since and that is not inside a
+bracket label resolved since, in which case that `^` closes the superscript; it
+SHALL read `^x^` as `Superscript` otherwise. Whether the superscript survives
+the marks around it is not considered: when a crossing mark leaves it unpaired,
+the closing `^` stays text.
 
 #### Scenario: Inline footnote
 - **WHEN** `"note^[x] tail"` is parsed with `parse`
@@ -72,6 +99,10 @@ and `^x^` as `Superscript` otherwise.
 #### Scenario: Superscript closing before a bracket
 - **WHEN** `"a^b^[link](u)"` is parsed with `parse`
 - **THEN** the paragraph holds `Text("a")`, a `Superscript` containing `b`, and a `Link` whose text is `link`
+
+#### Scenario: Superscript dropped by a crossing mark
+- **WHEN** `"*a ^b* ^[x]"` is parsed with `parse`
+- **THEN** the paragraph holds an `Emphasis` containing `a ^b` followed by `Text(" ^[x]")`
 
 ## REMOVED Requirements
 

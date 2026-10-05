@@ -363,4 +363,37 @@ mod review_validate {
         };
         assert!(good.validate().is_empty());
     }
+
+    // A `]` closes after a line break, so link text, alt text, an inline
+    // footnote, and a text directive label may end with a hard line break.
+    #[test]
+    fn hard_line_break_may_end_bracketed_content() {
+        for source in [
+            "[a\\\n](u)\n",
+            "[a  \n](u)\n",
+            "![a\\\n](u)\n",
+            "x^[a\\\n] y\n",
+            ":d[a\\\n] y\n",
+        ] {
+            let document = parse(source).document;
+            assert!(document.validate().is_empty(), "{source:?}");
+            let markdown = document.to_markdown().expect("document serializes");
+            assert_eq!(markdown, source);
+            assert_eq!(parse(&markdown).document.to_markdown().unwrap(), markdown);
+        }
+
+        // Emphasis closes only with a run that a line break before it does not
+        // keep from closing, so it may not end with one.
+        let bad = paragraph(vec![Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![
+                text("foo"),
+                Inline::LineBreak(LineBreak {
+                    meta: NodeMeta::default(),
+                    kind: LineBreakKind::Backslash,
+                }),
+            ],
+        })]);
+        assert!(!bad.validate().is_empty());
+    }
 }

@@ -1398,3 +1398,43 @@ fn flow_jsx_and_expression_closes_match_the_reference_scan() {
         }
     }
 }
+
+/// Rows of bars, escaped bars, backslashes, and text, and rows of `||`,
+/// escaped bars, backticks, escaped backticks, and text: every spoiler the row
+/// scan predicts forms in its cell, and no other does. (Where
+/// a code span would hold a pipe that delimits, and a spoiler also crosses it,
+/// no split agrees with the inline parse, so the generated rows leave that
+/// out.)
+#[test]
+fn table_row_spoilers_form_where_the_row_scan_predicts() {
+    const WITHOUT_CODE: &[&str] = &["|", "||", "|||", "\\|", "\\\\|", "\\", "a", " "];
+    const WITH_CODE: &[&str] = &["||", "\\|", "`", "``", "\\`", "\\\\`", "a", " "];
+    let options = SyntaxOptions::default();
+    let mut rng = Rng(0x7ab1e);
+    for pieces in [WITHOUT_CODE, WITH_CODE] {
+        for _ in 0..20_000 {
+            let mut row = String::new();
+            for _ in 0..rng.below(12) + 1 {
+                row.push_str(pieces[rng.below(pieces.len())]);
+            }
+            let row = row.trim();
+            let (delimiters, spoilers) = scan_table_row(row, true);
+            let mut start = 0;
+            for &end in delimiters.iter().chain([row.len()].iter()) {
+                let predicted = spoilers
+                    .iter()
+                    .filter(|&&(open, _)| start <= open && open < end)
+                    .count();
+                let text = table_cell_text(&row[start..end]);
+                let mut diagnostics = Vec::new();
+                let formed = parse_inlines(text.trim(), 0, &options, &[], &mut diagnostics)
+                    .iter()
+                    .filter(|inline| matches!(inline, Inline::Spoiler(_)))
+                    .count();
+                let cell = &row[start..end];
+                assert_eq!(formed, predicted, "row {row:?}, cell {cell:?}");
+                start = end + 1;
+            }
+        }
+    }
+}

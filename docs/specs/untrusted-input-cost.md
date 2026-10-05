@@ -40,15 +40,22 @@ markers past the limit SHALL stay leaf-block text, usually paragraph text.
 - **THEN** 32 levels of `BlockQuote` are produced and the remaining markers are paragraph text
 
 ### Requirement: Inline nesting limit
-Inline constructs parsed as nested content (link and image labels, inline
-footnotes, directive labels, and `++`, `==`, `~`, `^`, `||`, and underline spans)
-SHALL nest at most 32 levels; content past the limit SHALL stay literal text, and
-a link label first judged near the limit SHALL keep that verdict wherever it is
-asked about again.
+Inline containers — link and image labels, inline footnotes, directive labels,
+emphasis and strong, strikethrough, and `++`, `==`, `~`, `^`, `||`, and
+underline spans — SHALL nest at most 32 levels together; an opener past the
+limit SHALL stay literal text.
 
 #### Scenario: Deeply nested highlights
 - **WHEN** 40 nested `==` spans are parsed
-- **THEN** at most 32 levels of `Mark` are produced and deeper content is literal text
+- **THEN** at most 32 levels of `Mark` are produced and the delimiters past the limit stay literal text
+
+#### Scenario: Emphasis inside highlights
+- **WHEN** 32 nested `==` spans each holding 16 nested `*` emphasis spans are parsed
+- **THEN** the inline content nests at most 32 levels
+
+#### Scenario: Deeply nested images
+- **WHEN** 40 images nested in each other's alt text are parsed
+- **THEN** at most 32 levels of `Image` are produced and the deeper brackets stay literal text
 
 ### Requirement: Emphasis nesting limit
 `*` and `_` emphasis and strong, and `~~` strikethrough, SHALL nest at most 16
@@ -58,12 +65,3 @@ literal text.
 #### Scenario: Deep emphasis
 - **WHEN** 20 nested `*` emphasis spans are parsed
 - **THEN** at most 16 levels of emphasis are produced and the outer delimiters stay text
-
-### Requirement: Closer search budget
-Within one inline span, the closer search for `++`, `==`, and underline `__` /
-`___` SHALL scan at most 16 bytes per byte of the span plus 4 KiB; past that
-budget, further openers in the span SHALL stay literal.
-
-#### Scenario: Ordinary text
-- **WHEN** ordinary prose with balanced `==` highlights is parsed
-- **THEN** every highlight forms, since the budget is never reached

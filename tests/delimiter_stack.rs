@@ -213,6 +213,46 @@ fn a_caret_closes_a_waiting_superscript_before_a_bracket() {
 }
 
 #[test]
+fn a_superscript_dropped_by_a_crossing_mark_leaves_its_caret_as_text() {
+    assert_eq!(
+        parsed(&SyntaxOptions::default(), "*a ^b* ^[x]"),
+        r#"Emphasis["a ^b"]" ^[x]""#
+    );
+}
+
+#[test]
+fn a_caret_right_after_a_superscript_opener_opens_an_inline_footnote() {
+    let document = SyntaxOptions::default().parse("a ^^[x] b").document;
+    let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+        panic!("expected one paragraph");
+    };
+    assert!(
+        paragraph
+            .children
+            .iter()
+            .any(|inline| matches!(inline, Inline::InlineFootnote(_))),
+        "{:?}",
+        paragraph.children
+    );
+}
+
+#[test]
+fn an_unclosed_reference_label_leaves_a_shortcut_reference() {
+    let document = SyntaxOptions::commonmark()
+        .parse("[foo][bar\n\n[foo]: /u")
+        .document;
+    let Some(Block::Paragraph(paragraph)) = document.children.first() else {
+        panic!("expected a paragraph");
+    };
+    assert!(
+        matches!(paragraph.children.as_slice(), [Inline::LinkReference(link), Inline::Text(rest)]
+            if link.kind == ReferenceKind::Shortcut && link.identifier == "foo" && rest.value == "[bar"),
+        "{:?}",
+        paragraph.children
+    );
+}
+
+#[test]
 fn a_long_closing_run_reopens_with_what_it_has_left() {
     assert_eq!(
         parsed(&SyntaxOptions::default(), "*x ++a++++* b++"),

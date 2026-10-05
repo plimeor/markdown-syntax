@@ -2276,75 +2276,11 @@ fn serialize_inline_math_with_context(
     }
 }
 
+/// Whether a serialized cell would split into more cells when parsed back,
+/// judged with spoilers enabled so a spoiler's bars are never taken for
+/// delimiters.
 fn table_cell_has_unescaped_pipe(input: &str) -> bool {
-    let mut cursor = 0;
-    let mut code_fence = None;
-    let mut spoiler_open = false;
-    while cursor < input.len() {
-        let Some((next, char)) = input[cursor..]
-            .chars()
-            .next()
-            .map(|char| (cursor + char.len_utf8(), char))
-        else {
-            break;
-        };
-        // Backticks are never escapable: a preceding backslash is code-span
-        // content, so it must not suppress the code-span boundary here. Track
-        // code spans only for extension syntax such as spoilers; a single
-        // unescaped pipe still splits a table row, even inside code.
-        if char == '`' {
-            let length = input[cursor..]
-                .as_bytes()
-                .iter()
-                .take_while(|byte| **byte == b'`')
-                .count();
-            if code_fence == Some(length) {
-                code_fence = None;
-            } else if code_fence.is_none() {
-                code_fence = Some(length);
-            }
-            cursor += length;
-            continue;
-        }
-        if char == '|' && input.as_bytes().get(cursor + 1) == Some(&b'|') && code_fence.is_some() {
-            cursor += 2;
-            continue;
-        }
-        if char == '|'
-            && input.as_bytes().get(cursor + 1) == Some(&b'|')
-            && code_fence.is_none()
-            && !crate::parse::is_escaped_at(input, cursor)
-        {
-            let closes_spoiler =
-                spoiler_open && input.as_bytes().get(cursor.wrapping_sub(1)) != Some(&b'|');
-            let opens_spoiler = !spoiler_open
-                && input.as_bytes().get(cursor + 2) != Some(&b'|')
-                && find_table_cell_spoiler_close(input, cursor + 2).is_some();
-            if closes_spoiler || opens_spoiler {
-                spoiler_open = opens_spoiler;
-                cursor += 2;
-                continue;
-            }
-        }
-        if char == '|' && !spoiler_open && !crate::parse::is_escaped_at(input, cursor) {
-            return true;
-        }
-        cursor = next;
-    }
-    false
-}
-
-fn find_table_cell_spoiler_close(input: &str, mut offset: usize) -> Option<usize> {
-    while offset < input.len() {
-        let candidate = input[offset..].find("||").map(|index| offset + index)?;
-        if !crate::parse::is_escaped_at(input, candidate)
-            && input.as_bytes().get(candidate + 2) != Some(&b'|')
-        {
-            return Some(candidate);
-        }
-        offset = candidate + 2;
-    }
-    None
+    input.contains('|') && !crate::parse::table_row_delimiters(input, true).is_empty()
 }
 
 fn longest_char_streak(input: &str, needle: char) -> usize {

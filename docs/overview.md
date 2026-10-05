@@ -1,5 +1,5 @@
 # Project overview
-Updated 2026-10-04
+Updated 2026-10-05
 
 ## What this is
 
@@ -26,11 +26,14 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-Moving the inline parser's emphasis-like marks and bracket constructs onto a
-delimiter stack, and parsing a leading BOM and NUL as CommonMark preprocesses
-them while keeping spans in original source coordinates.
+Releasing the delimiter-stack inline parser and CommonMark input handling
+(leading BOM, NUL) as a SemVer-breaking version.
 
 ## Next
+
+- Inline spans on lines that carry leading whitespace inside their block are
+  offset by the stripped whitespace; spans need mapping back to source
+  coordinates.
 
 ## Non-goals
 

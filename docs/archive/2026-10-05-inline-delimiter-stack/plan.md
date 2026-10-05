@@ -7,7 +7,11 @@ only through memo tables, a closer-search budget that can drop openers, and a
 link-label verdict memo; precedence between marks and links follows branch order
 instead of the CommonMark algorithm. Separately, a leading BOM and NUL are
 parsed as written, which departs from CommonMark and from cmark, comrak, and
-micromark, and accounts for four of the seven conformance failures.
+micromark, and accounts for four of the seven conformance failures. The same
+surfaces carry four correctness defects: emphasis and strong spans miss their
+own delimiters, `[foo][bar` drops CommonMark's shortcut fallback, validation
+rejects link text ending in a hard line break, and the table-row splitter
+predicts spoilers with rules of its own.
 
 ## What changes
 
@@ -25,14 +29,28 @@ micromark, and accounts for four of the seven conformance failures.
   whether it holds a link.
 - The `++` / `==` / underline closer-search budget, the link-label verdict memo,
   and the forward scans the stack replaces are removed.
+- Emphasis and strong spans cover exactly their own delimiters and what those
+  enclose, as every other emphasis-like span already does.
+- A link or image label followed by a `[` that opens no reference label is a
+  shortcut reference, as CommonMark specifies.
+- Link text, image alt text, inline footnotes, and text directive labels may end
+  with a hard line break: validation accepts it and serialization writes it.
+- One table-row scanner decides which pipes delimit cells, for the parser and
+  the serializer alike; it pairs spoilers as the inline parser pairs them in a
+  cell, reads runs as the cell's unescaped text has them, and keeps code spans
+  within one cell.
+- The `^[` rule is stated as the lexical decision it is, with what happens when
+  a crossing mark drops the superscript that claimed the caret.
 - Decision 0006 is rewritten to describe the resulting design.
 - Parse output changes for crossing marks, BOM input, and NUL input, so the
   change is released as SemVer-breaking.
 
 Specs:
+- `block-syntax` (modified)
 - `inline-syntax` (modified)
 - `public-api` (modified)
 - `untrusted-input-cost` (modified)
+- `validation` (modified)
 
 ## Out of scope
 
@@ -125,6 +143,45 @@ Specs:
   Turned down: a normalized input buffer with an offset mapper, because every
   span construction site would have to translate between two coordinate
   systems.
+- Every emphasis-like span is cut from the text nodes of its consumed
+  delimiters: the opener's last characters through the closer's first —
+  because those nodes carry exact source positions, while counting run lengths
+  from the run's start put a strong pair's span outside the emphasis around it.
+- A `]` whose next `[` opens no reference label (unclosed, over-long, or holding
+  a bracket) falls back to the shortcut form — because CommonMark resolves the
+  reference forms in turn and only a present, valid second label suppresses the
+  shortcut.
+- Validation rejects a final hard line break only where the closing syntax
+  cannot follow a line break: block-level inline content ends with its line, and
+  emphasis-like closers do not close after one; a `]` does — because the parser
+  produces exactly that shape for `[a\` followed by a newline and `](u)`, and
+  it serializes back unchanged.
+- Table rows are split by one scanner shared with the block-quote row check and
+  the serializer's cell check: unescaped single pipes delimit, `||` runs outside
+  code spans pair first-closer style with the next run, a code span (escaped
+  backticks read as the inline parser reads them) counts only if it closes
+  before a pipe that would split the row inside it, and runs are read in the
+  cell's unescaped text, where an escaped pipe joins the bars beside it but a
+  pair using one never holds a pipe that would delimit — because the inline
+  parse of each cell is the ground truth, three diverging copies of the
+  prediction disagreed with it and with each other, and an escaped pipe must
+  never merge two cells. Turned down: never splitting at `||` when spoilers are
+  on, which needs no prediction but merges `|a||b|` empty cells; forcing the
+  predicted spoilers when a cell is parsed, which agrees by construction but
+  makes cells resolve crossing marks unlike paragraphs; and leaving escaped
+  pipes out of runs, as the old prediction did, which mispredicts `||\|||`,
+  read as one five-bar run in the cell. This is a compromise: a code span
+  holding a splitting pipe while a spoiler crosses it has no split the inline
+  parse agrees with, and a spoiler that a link, crossing mark, inline math, raw
+  HTML, or an autolink breaks in the cell leaves its bars and the pipes it held
+  as text. Rows whose cells all hold code spans and spoilers parse and
+  serialize about 12% slower than before; plain tables are unchanged.
+- The `^` of `^[` is decided when the scan reaches it: a superscript opened
+  earlier on the line, not directly before it, and still unclosed claims it — because the stack pairs
+  marks only after brackets resolve and the mark-span pass reads runs after the
+  caret, so whether that superscript survives is not known at the `^`. When a
+  crossing mark later drops it, the caret stays text. Turned down: re-deciding
+  the bracket once pairing is done, which re-parses labels.
 - Decision 0006 is rewritten in place rather than superseded — because it has
   not shipped and its intermediate design is not worth a separate record.
 
@@ -151,6 +208,10 @@ Specs:
 - [A bracket change departs from CommonMark where the conformance bench is
   silent] → the CommonMark-dialect inputs whose output changes are compared
   with comrak's rendering, and every mismatch is traced to its cause.
+- [The table-row scanner disagrees with the inline parse of a cell, or the
+  serializer accepts a cell the parser splits] → generated rows check that
+  every predicted spoiler forms in its cell and no other does, and the
+  serializer calls the parser's scanner instead of keeping its own.
 
 ## Tasks
 
@@ -178,7 +239,15 @@ Specs:
 - [x] 3.6 Compare parse output with the 3.1 baseline and read every changed golden; verified by no properly nested input regressing from its intended tree, every CommonMark-dialect diff matching comrak or traced to a cause outside this plan, each changed golden checked, and conformance at 2236/2236 or any remaining failure reported with its cause.
 - [x] 3.7 Rewrite decision 0006 to describe the delimiter-stack design, the remaining memoized forward scans, and the nesting limits, listing forward scans with memo tables and a closer budget among the considered options; verified by reading the record against the code.
 
-### 4. Integration checks
-- [x] 4.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
-- [x] 4.2 `tests/pathological_inputs.rs`, the growth sweep across all dialects and operations, and the 2 MiB stack check pass in debug and release builds.
-- [x] 4.3 The conformance bench result and a benign-document benchmark against the pre-plan commit are measured and reported with the change.
+### 4. Leftover correctness fixes
+- [x] 4.1 Cut every emphasis-like span from its consumed delimiters' text nodes; verified by `inline_container_spans_cover_their_delimiters_and_content` passing (and failing on the group-3 code) and a parse-output comparison with the group-3 end in which only `Emphasis` and `Strong` spans move.
+- [x] 4.2 Fall back to a shortcut reference when the `[` after a label opens no reference label; verified by `an_unclosed_reference_label_leaves_a_shortcut_reference` passing (and failing on the group-3 code) and conformance unchanged.
+- [x] 4.3 Let link text, alt text, inline footnotes, and text directive labels end with a hard line break in validation; verified by `hard_line_break_may_end_bracketed_content` parsing, validating, serializing, and reparsing each form, and an emphasis ending in one staying invalid.
+- [x] 4.4 Replace `split_table_row`'s spoiler prediction, `contains_unescaped_pipe`, and the serializer's `table_cell_has_unescaped_pipe` with one row scanner, removing `find_spoiler_close` and `find_table_cell_spoiler_close`; verified by `table_spoilers_pair_as_the_inline_parser_pairs_them` (failing on the group-3 code; covering held pipes, bars in and after code spans, escaped pipes, escaped backticks, and rows that start with a spoiler), `table_row_spoilers_form_where_the_row_scan_predicts` over generated rows with and without code spans, the serializer round-trip tests passing, and a table-row growth check staying linear.
+- [x] 4.5 State the `^[` caret rule lexically and pin the crossing case; verified by `a_superscript_dropped_by_a_crossing_mark_leaves_its_caret_as_text` passing.
+- [x] 4.6 Compare parse output, validation, and serialization with the group-3 end on the fixture corpus, the CommonMark examples, and seeded generated inputs; verified by every tree diff coming from 4.2 or 4.4, every span-only diff being an `Emphasis` or `Strong` span, and no input newly failing to serialize or to round-trip stably.
+
+### 5. Integration checks
+- [x] 5.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
+- [x] 5.2 `tests/pathological_inputs.rs`, the growth sweep across all dialects and operations, and the 2 MiB stack check pass in debug and release builds.
+- [x] 5.3 The conformance bench result and a benign-document benchmark against the pre-plan commit are measured and reported with the change.

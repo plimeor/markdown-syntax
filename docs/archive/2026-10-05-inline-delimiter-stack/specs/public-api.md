@@ -27,6 +27,27 @@ stay in the coordinates of the original input.
 - **WHEN** `parse("![](\\#\u{0})")` runs
 - **THEN** the paragraph holds an `Image` whose destination is `#\u{FFFD}`
 
+### Requirement: Emphasis-like spans cover their delimiters
+The span of a parsed emphasis-like container (`Emphasis`, `Strong`,
+`Underline`, `Delete`, `Insert`, `Mark`, `Spoiler`, `Subscript`, or
+`Superscript`) in a block whose lines carry no leading whitespace after their container
+markers SHALL
+run from the first character of the delimiters that open it to the last
+character of the delimiters that close it, and SHALL lie within the span of the
+node that contains it.
+
+#### Scenario: Strong inside emphasis
+- **WHEN** `parse("***a***")` runs
+- **THEN** the paragraph holds an `Emphasis` spanning bytes 0..7 that holds a `Strong` spanning bytes 1..6
+
+#### Scenario: Emphasis inside strong
+- **WHEN** `parse("x ***a* b**")` runs
+- **THEN** the paragraph holds a `Strong` spanning bytes 2..11 that holds an `Emphasis` spanning bytes 4..7
+
+#### Scenario: Leftover opening delimiter
+- **WHEN** `parse("**a*")` runs
+- **THEN** the paragraph holds `Text("*")` spanning bytes 0..1 and an `Emphasis` spanning bytes 1..4
+
 ## MODIFIED Requirements
 
 ### Requirement: Top-level spans tile the source

@@ -3704,8 +3704,6 @@ struct DelimMarker {
     /// The opener of the latest-starting mark span enclosing this run (see
     /// `assign_emphasis_roles`), or `NIL`.
     enclosed_from: usize,
-    /// Absolute byte offset of the run's first remaining delimiter character.
-    span_start: usize,
     /// Offset of the run in the inline input, for adjacency checks.
     position: usize,
     /// How many line breaks precede the run in the inline input; first-closer
@@ -4095,7 +4093,6 @@ fn push_delimiter(
         strike: roles.strike,
         recloses: roles.recloses,
         enclosed_from: NIL,
-        span_start: base_offset + index,
         position: index,
         line: lines.line_at(input, index),
     });
@@ -4764,46 +4761,33 @@ fn apply_emphasis(
     let opener_node = delimiters[opener_idx].node_index;
     let closer_node = delimiters[closer_idx].node_index;
 
-    // A mark spans exactly its consumed delimiters and what they enclose: the
+    // A span covers exactly its consumed delimiters and what they enclose: the
     // last `used` characters left in the opener's text node through the first
     // `used` left in the closer's.
-    let mark_span = (
-        nodes
-            .node_mut(opener_node)
-            .span()
-            .map(|span| span.end - used),
-        nodes
-            .node_mut(closer_node)
-            .span()
-            .map(|span| span.start + used),
-    );
+    let span_start = nodes
+        .node_mut(opener_node)
+        .span()
+        .map(|span| span.end - used);
+    let span_end = nodes
+        .node_mut(closer_node)
+        .span()
+        .map(|span| span.start + used);
     // Trim the consumed characters from the opener's text node (right side) and
     // the closer's text node (left side), updating their recorded lengths/spans.
     trim_delimiter_text_tail(nodes.node_mut(opener_node), used);
     trim_delimiter_text_head(nodes.node_mut(closer_node), used);
-    let (span_start, span_end) =
-        if let (true, (Some(start), Some(end))) = (wrap.is_mark(), mark_span) {
-            delimiters[opener_idx].length -= used;
-            let closer = &mut delimiters[closer_idx];
-            closer.length -= used;
-            closer.span_start += used;
-            closer.position += used;
-            (start, end)
-        } else {
-            // Emphasis spans run from where the opener run's consumed delimiters
-            // are counted to the end of the closer run.
-            let opener = &mut delimiters[opener_idx];
-            opener.length -= used;
-            opener.span_start += used;
-            let start = opener.span_start - used;
-            let closer = &mut delimiters[closer_idx];
-            closer.length -= used;
-            (start, closer.span_start + closer.length + used)
-        };
+    delimiters[opener_idx].length -= used;
+    let closer = &mut delimiters[closer_idx];
+    closer.length -= used;
+    closer.position += used;
 
     // The wrapped children are the nodes strictly between the opener and closer
     // text nodes.
-    let meta = NodeMeta::new(Some(Span::new(span_start, span_end)));
+    let meta = NodeMeta::new(
+        span_start
+            .zip(span_end)
+            .map(|(start, end)| Span::new(start, end)),
+    );
     nodes.wrap_between(opener_node, closer_node, |children| match wrap {
         EmphasisWrap::Strong => Inline::Strong(Strong { meta, children }),
         EmphasisWrap::Emphasis => Inline::Emphasis(Emphasis { meta, children }),
@@ -4891,8 +4875,14 @@ fn match_link_target(
             None => {}
         }
     }
-    if input.as_bytes().get(after) == Some(&b'[') {
-        let reference_close = scan.reference_label_end(after)?;
+    // A `[` that opens no reference label leaves `[label]` a shortcut
+    // reference followed by literal text.
+    let reference_close = if input.as_bytes().get(after) == Some(&b'[') {
+        scan.reference_label_end(after)
+    } else {
+        None
+    };
+    if let Some(reference_close) = reference_close {
         let reference = &input[after + 1..reference_close];
         let identifier = if reference.is_empty() {
             label
@@ -6780,30 +6770,6 @@ fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
     cursor - index
 }
 
-fn find_spoiler_close(input: &str, start: usize) -> Option<usize> {
-    let bytes = input.as_bytes();
-    let mut cursor = start;
-    while cursor + 1 < input.len() {
-        match bytes[cursor] {
-            b'\\' => {
-                cursor += 1;
-                if cursor < input.len() {
-                    cursor = next_char(input, cursor)?.0;
-                }
-            }
-            b'\n' | b'\r' => return None,
-            b'|' if bytes.get(cursor + 1) == Some(&b'|')
-                && cursor > start
-                && bytes.get(cursor.wrapping_sub(1)) != Some(&b'|') =>
-            {
-                return Some(cursor);
-            }
-            _ => cursor = next_char(input, cursor)?.0,
-        }
-    }
-    None
-}
-
 fn can_open_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
     flanking.left
@@ -7965,151 +7931,302 @@ fn table_indent_line(input: &str, indented_code: bool) -> Option<&str> {
     }
 }
 
-// True if a backtick run of `length` at `start` has a matching-length closing
-// run later in `input`. The table row scanner still treats unescaped pipes as
-// cell boundaries; this state only prevents extension syntax such as spoilers
-// from being recognized inside a code span.
-fn backtick_run_has_close(input: &str, start: usize, length: usize) -> bool {
-    let bytes = input.as_bytes();
-    let mut i = start + length;
-    while i < input.len() {
-        if bytes[i] == b'`' {
-            let run = input[i..]
-                .as_bytes()
-                .iter()
-                .take_while(|byte| **byte == b'`')
-                .count();
-            if run == length {
-                return true;
-            }
-            i += run;
-        } else {
-            i += 1;
-        }
-    }
-    false
+/// The cell-delimiter pipes of a table row, in order: every `|` that is not
+/// escaped by an odd backslash run and not held inside a cell by a code span or
+/// a spoiler.
+///
+/// A single unescaped pipe always delimits, even inside a code span; a code
+/// span only keeps the bars of a `||` from delimiting. With spoilers enabled,
+/// bar runs outside code spans pair first-closer style, as the inline parser
+/// pairs them within one cell: a run opens with its last two bars, the next run
+/// closes with its first two (and opens again with what it has left), and every
+/// pipe between the two stays in the cell. The other bars of a run, and both
+/// bars of an opener with no closer, delimit. Runs are read as the cell's text
+/// has them, where an escaped pipe has lost its backslash and joins the bars
+/// beside it; it never delimits, and a pair that uses one forms only when no
+/// pipe that delimits lies between its bars, so it never joins two cells. Code
+/// spans are matched as the inline parser matches them, and only when the span
+/// closes before any pipe that would delimit inside it, so it lies within one
+/// cell. The pairing does not consider other inline constructs.
+pub(crate) fn table_row_delimiters(row: &str, spoiler: bool) -> Vec<usize> {
+    scan_table_row(row, spoiler).0
 }
 
-fn table_backslash_pipe_run(input: &str, cursor: usize) -> Option<(usize, bool)> {
-    let bytes = input.as_bytes();
-    if bytes.get(cursor) != Some(&b'\\') {
-        return None;
+/// The delimiters of a table row and the spans of the spoilers its cells will
+/// hold, from each opener's first bar to its closer's last.
+fn scan_table_row(row: &str, spoiler: bool) -> (Vec<usize>, Vec<(usize, usize)>) {
+    let bytes = row.as_bytes();
+
+    // Every pipe, grouped into the bar runs of the cell text.
+    let mut bars: Vec<TableBar> = Vec::new();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut backticks = false;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => {
+                let backslashes = delimiter_byte_run_len(row, cursor, b'\\');
+                let pipe = cursor + backslashes;
+                if bytes.get(pipe) == Some(&b'|') && backslashes % 2 == 1 {
+                    // The cell text drops one backslash, so with exactly one
+                    // the pipe follows whatever precedes the run.
+                    let text_start = if backslashes == 1 { cursor } else { pipe };
+                    push_table_bar(&mut bars, &mut runs, pipe, text_start, true);
+                    cursor = pipe + 1;
+                } else {
+                    cursor = pipe;
+                }
+            }
+            b'|' => {
+                push_table_bar(&mut bars, &mut runs, cursor, cursor, false);
+                cursor += 1;
+            }
+            byte => {
+                backticks |= byte == b'`';
+                cursor += 1;
+            }
+        }
     }
-    let mut pipe = cursor;
-    while bytes.get(pipe) == Some(&b'\\') {
-        pipe += 1;
+    if !spoiler || (!backticks && runs.iter().all(|&(_, length)| length == 1)) {
+        // With no bar runs and no code spans, every unescaped pipe delimits.
+        let delimiters = bars
+            .iter()
+            .filter(|bar| !bar.escaped)
+            .map(|bar| bar.position)
+            .collect();
+        return (delimiters, Vec::new());
     }
-    (bytes.get(pipe) == Some(&b'|')).then_some((pipe, (pipe - cursor) % 2 == 1))
+
+    // Inside a code span, two unescaped bars side by side stay in the cell and
+    // any other unescaped bar delimits.
+    let mut code_delimits = vec![false; bars.len()];
+    for &(first, length) in &runs {
+        let mut bar = first;
+        while bar < first + length {
+            if bar + 1 < first + length && !bars[bar].escaped && !bars[bar + 1].escaped {
+                bar += 2;
+            } else {
+                code_delimits[bar] = !bars[bar].escaped;
+                bar += 1;
+            }
+        }
+    }
+
+    // A code span forms only when no bar that would delimit inside it lies
+    // before its closer.
+    let mut breaker = 0;
+    let code_spans = if backticks {
+        inline_code_spans(row, |open, close| {
+            while breaker < bars.len() && (bars[breaker].position < open || !code_delimits[breaker])
+            {
+                breaker += 1;
+            }
+            bars.get(breaker).is_none_or(|bar| close < bar.position)
+        })
+    } else {
+        Vec::new()
+    };
+
+    // Decide which bars delimit; `held` collects the ranges a spoiler keeps in
+    // its cell. `blocked` records a bar that would delimit since the opener.
+    let mut delimits = vec![false; bars.len()];
+    let mut held = Vec::new();
+    let mut opener: Option<usize> = None;
+    let mut blocked = false;
+    let mut code = code_spans.iter().peekable();
+    for (first, length) in runs {
+        let end = first + length;
+        let position = bars[first].position;
+        while code.peek().is_some_and(|&&(_, close)| close < position) {
+            code.next();
+        }
+        if code.peek().is_some_and(|&&(open, _)| open < position) {
+            delimits[first..end].copy_from_slice(&code_delimits[first..end]);
+            blocked |= code_delimits[first..end].contains(&true);
+            continue;
+        }
+        if length == 1 {
+            delimits[first] = true;
+            blocked |= !bars[first].escaped;
+            continue;
+        }
+        let mut rest = first;
+        if let Some(opened) = opener.take() {
+            let escaped = bars[opened..opened + 2]
+                .iter()
+                .chain(&bars[first..first + 2])
+                .any(|bar| bar.escaped);
+            if escaped && blocked {
+                delimits[opened..opened + 2].fill(true);
+            } else {
+                held.push((bars[opened].position, bars[first + 1].position));
+                rest = first + 2;
+            }
+        }
+        let mut open_at = end;
+        if end - rest >= 2 {
+            open_at = end - 2;
+            opener = Some(open_at);
+            blocked = false;
+        }
+        delimits[rest..open_at].fill(true);
+    }
+    if let Some(opened) = opener {
+        delimits[opened..opened + 2].fill(true);
+    }
+
+    let mut spoilers = held.iter().copied().peekable();
+    let mut delimiters = Vec::new();
+    for (bar, delimit) in bars.iter().zip(delimits) {
+        while spoilers.peek().is_some_and(|&(_, end)| end < bar.position) {
+            spoilers.next();
+        }
+        let in_spoiler = spoilers
+            .peek()
+            .is_some_and(|&(start, end)| start <= bar.position && bar.position <= end);
+        if delimit && !bar.escaped && !in_spoiler {
+            delimiters.push(bar.position);
+        }
+    }
+    (delimiters, held)
+}
+
+/// The code spans of `text` as the inline parser reads them, each as the
+/// offsets of its opening and closing backtick runs: a backtick run opens a
+/// span that the next run of the same length closes, except that outside a
+/// span an odd backslash run escapes the first backtick after it.
+/// `may_close(open, close)` can refuse a pair, leaving the opener literal; it
+/// is asked in increasing order of `open`.
+fn inline_code_spans(
+    text: &str,
+    mut may_close: impl FnMut(usize, usize) -> bool,
+) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    // Each backtick run's offset, length, and whether an odd backslash run
+    // precedes it.
+    let mut runs = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => {
+                let backslashes = delimiter_byte_run_len(text, cursor, b'\\');
+                cursor += backslashes;
+                if bytes.get(cursor) == Some(&b'`') {
+                    let length = delimiter_byte_run_len(text, cursor, b'`');
+                    runs.push((cursor, length, backslashes % 2 == 1));
+                    cursor += length;
+                }
+            }
+            b'`' => {
+                let length = delimiter_byte_run_len(text, cursor, b'`');
+                runs.push((cursor, length, false));
+                cursor += length;
+            }
+            _ => cursor += 1,
+        }
+    }
+    let longest = runs.iter().map(|&(_, length, _)| length).max().unwrap_or(0);
+    let mut by_length = vec![Vec::new(); longest + 1];
+    for (index, &(_, length, _)) in runs.iter().enumerate() {
+        by_length[length].push(index);
+    }
+
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < runs.len() {
+        let (position, length, escaped) = runs[index];
+        let (open, length) = if escaped {
+            (position + 1, length - 1)
+        } else {
+            (position, length)
+        };
+        let close = by_length[length]
+            .get(by_length[length].partition_point(|&later| later <= index))
+            .copied()
+            .filter(|_| length > 0);
+        match close {
+            Some(close) if may_close(open, runs[close].0) => {
+                spans.push((open, runs[close].0));
+                index = close + 1;
+            }
+            _ => index += 1,
+        }
+    }
+    spans
+}
+
+/// A pipe of a table row.
+struct TableBar {
+    position: usize,
+    escaped: bool,
+}
+
+/// Adds the pipe at `position` to the bar runs, joining the previous run when
+/// the cell text has the two side by side.
+fn push_table_bar(
+    bars: &mut Vec<TableBar>,
+    runs: &mut Vec<(usize, usize)>,
+    position: usize,
+    text_start: usize,
+    escaped: bool,
+) {
+    let joins = bars
+        .last()
+        .is_some_and(|previous| previous.position + 1 == text_start);
+    match runs.last_mut() {
+        Some(run) if joins => run.1 += 1,
+        _ => runs.push((bars.len(), 1)),
+    }
+    bars.push(TableBar { position, escaped });
 }
 
 fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
     let trimmed = input.trim();
+    let delimiters = table_row_delimiters(trimmed, spoiler);
     let mut cells = Vec::new();
-    let mut cell = String::new();
-    let mut cursor = 0;
-    let mut code_fence = None;
-    let mut spoiler_open = false;
-    // Byte offset just past the most recent genuine cell-delimiter pipe. When the
-    // scan ends with only whitespace after it, that pipe was a trailing border and
-    // the empty leftover cell is dropped (rather than blindly trusting that the
-    // line ends with `|`, which mis-fires on a spoiler-close `||` or a code-span
-    // pipe — see tbl-4).
-    let mut trailing_delimiter_end = None;
-
-    while cursor < trimmed.len() {
-        let (next, char) = next_char(trimmed, cursor).expect("valid UTF-8 byte index");
-        // GitHub/cmark-gfm treats an odd backslash run before `|` as a literal
-        // cell-content pipe, but an even run leaves the pipe as a delimiter. Keep
-        // the original run before an even delimiter so the inline parser resolves
-        // the visible backslashes correctly.
-        if char == '\\' {
-            if let Some((pipe, escaped)) = table_backslash_pipe_run(trimmed, cursor) {
-                if escaped {
-                    for _ in 0..pipe - cursor - 1 {
-                        cell.push('\\');
-                    }
-                    cell.push('|');
-                    cursor = pipe + 1;
-                } else {
-                    for _ in 0..pipe - cursor {
-                        cell.push('\\');
-                    }
-                    cursor = pipe;
-                }
-                continue;
-            }
-        }
-        // Backticks are never escapable, so a preceding backslash does not block a
-        // code-span boundary (a `\` directly before a closing backtick is content,
-        // not an escape — see tbl-3).
-        if char == '`' {
-            let length = trimmed[cursor..]
-                .as_bytes()
-                .iter()
-                .take_while(|byte| **byte == b'`')
-                .count();
-            if code_fence == Some(length) {
-                code_fence = None;
-            } else if code_fence.is_none() && backtick_run_has_close(trimmed, cursor, length) {
-                code_fence = Some(length);
-            }
-            cell.push_str(&trimmed[cursor..cursor + length]);
-            cursor += length;
-            continue;
-        }
-
-        if spoiler
-            && char == '|'
-            && trimmed.as_bytes().get(cursor + 1) == Some(&b'|')
-            && code_fence.is_some()
-        {
-            cell.push_str("||");
-            cursor += 2;
-            continue;
-        }
-
-        if spoiler
-            && char == '|'
-            && trimmed.as_bytes().get(cursor + 1) == Some(&b'|')
-            && code_fence.is_none()
-            && !is_escaped_at(trimmed, cursor)
-        {
-            let closes_spoiler =
-                spoiler_open && trimmed.as_bytes().get(cursor.wrapping_sub(1)) != Some(&b'|');
-            let opens_spoiler = !spoiler_open
-                && trimmed.as_bytes().get(cursor + 2) != Some(&b'|')
-                && find_spoiler_close(trimmed, cursor + 2).is_some();
-            if closes_spoiler || opens_spoiler {
-                spoiler_open = opens_spoiler;
-                cell.push_str("||");
-                cursor += 2;
-                continue;
-            }
-        }
-
-        if char == '|' && !spoiler_open && !is_escaped_at(trimmed, cursor) {
-            cells.push(core::mem::take(&mut cell));
-            // A delimiter ends the cell; spoiler state never spans a cell boundary.
-            spoiler_open = false;
-            trailing_delimiter_end = Some(next);
-        } else {
-            cell.push(char);
-        }
-        cursor = next;
+    let mut start = 0;
+    for &pipe in &delimiters {
+        cells.push(table_cell_text(&trimmed[start..pipe]));
+        start = pipe + 1;
     }
-    cells.push(cell);
+    cells.push(table_cell_text(&trimmed[start..]));
 
-    if trimmed.starts_with('|') {
+    // A delimiter at the very start or end (only whitespace after it) is a
+    // border, not the edge of an empty cell.
+    if delimiters.first() == Some(&0) {
         cells.remove(0);
     }
-    // Drop the empty cell created by a trailing border pipe: the last genuine
-    // delimiter must sit at the very end (only whitespace after it).
-    if let Some(end) = trailing_delimiter_end {
-        if trimmed[end..].trim().is_empty() {
-            cells.pop();
-        }
+    if delimiters
+        .last()
+        .is_some_and(|&pipe| trimmed[pipe + 1..].trim().is_empty())
+    {
+        cells.pop();
     }
     cells
+}
+
+/// A cell's source with each escaped pipe unescaped. GitHub/cmark-gfm treats an
+/// odd backslash run before `|` as a literal cell-content pipe; the run keeps
+/// its other backslashes so the inline parser resolves them as written.
+fn table_cell_text(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut cell = String::with_capacity(source.len());
+    let mut copied = 0;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\' {
+            let pipe = cursor + delimiter_byte_run_len(source, cursor, b'\\');
+            if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
+                cell.push_str(&source[copied..pipe - 1]);
+                copied = pipe;
+            }
+            cursor = pipe;
+        } else {
+            cursor += 1;
+        }
+    }
+    cell.push_str(&source[copied..]);
+    cell
 }
 
 fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) -> bool {
@@ -8171,63 +8288,7 @@ fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
 // Still used by `block_quote_table_body_row` to detect a table row appearing as
 // a block-quote continuation line (which DOES require a pipe).
 fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
-    let mut cursor = 0;
-    let mut code_fence = None;
-    let mut spoiler_open = false;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
-        if char == '\\' {
-            if let Some((pipe, escaped)) = table_backslash_pipe_run(input, cursor) {
-                cursor = if escaped { pipe + 1 } else { pipe };
-                continue;
-            }
-        }
-        // Backticks are never escapable; a preceding backslash is code-span content.
-        if char == '`' {
-            let length = input[cursor..]
-                .as_bytes()
-                .iter()
-                .take_while(|byte| **byte == b'`')
-                .count();
-            if code_fence == Some(length) {
-                code_fence = None;
-            } else if code_fence.is_none() {
-                code_fence = Some(length);
-            }
-            cursor += length;
-            continue;
-        }
-        if spoiler
-            && char == '|'
-            && input.as_bytes().get(cursor + 1) == Some(&b'|')
-            && code_fence.is_some()
-        {
-            cursor += 2;
-            continue;
-        }
-        if spoiler
-            && char == '|'
-            && input.as_bytes().get(cursor + 1) == Some(&b'|')
-            && code_fence.is_none()
-            && !is_escaped_at(input, cursor)
-        {
-            let closes_spoiler =
-                spoiler_open && input.as_bytes().get(cursor.wrapping_sub(1)) != Some(&b'|');
-            let opens_spoiler = !spoiler_open
-                && input.as_bytes().get(cursor + 2) != Some(&b'|')
-                && find_spoiler_close(input, cursor + 2).is_some();
-            if closes_spoiler || opens_spoiler {
-                spoiler_open = opens_spoiler;
-                cursor += 2;
-                continue;
-            }
-        }
-        if char == '|' && !spoiler_open && !is_escaped_at(input, cursor) {
-            return true;
-        }
-        cursor = next;
-    }
-    false
+    !table_row_delimiters(input, spoiler).is_empty()
 }
 
 fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
