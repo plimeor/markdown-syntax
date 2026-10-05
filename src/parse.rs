@@ -8692,6 +8692,32 @@ fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) ->
 /// would end the paragraph or make it a setext heading, a table header, or a
 /// description term under the maximal default dialect.
 pub(crate) fn continuation_line_breaks_paragraph(previous: &str, line: &str) -> bool {
+    // Each construct read here opens, after at most three columns, with one of
+    // these bytes; the most frequent line, text, opens with none of them.
+    let opens_with_marker = trim_up_to_three_spaces(line)
+        .and_then(|trimmed| trimmed.bytes().next())
+        .is_some_and(|byte| {
+            byte.is_ascii_digit()
+                || matches!(
+                    byte,
+                    b'#' | b'>'
+                        | b'`'
+                        | b'~'
+                        | b'-'
+                        | b'*'
+                        | b'+'
+                        | b'_'
+                        | b'='
+                        | b'|'
+                        | b':'
+                        | b'<'
+                        | b'$'
+                        | b'['
+                )
+        });
+    if !opens_with_marker {
+        return false;
+    }
     likely_block_start(line, &SyntaxOptions::default())
         || setext_underline_depth(line).is_some()
         || gfm_table_can_start_source(previous, line)

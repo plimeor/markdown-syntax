@@ -178,7 +178,7 @@ fn serialize_blocks_at_start(
     for (index, written) in outputs.iter().rev().enumerate() {
         if index > 0 {
             let first_line = written.split('\n').next().unwrap_or("");
-            let opens_with_html = match &blocks[index] {
+            let opens_with_html = || match &blocks[index] {
                 Block::Paragraph(paragraph) => paragraph.children.first(),
                 Block::Heading(heading) if heading.kind == HeadingKind::Setext => {
                     heading.children.first()
@@ -186,7 +186,7 @@ fn serialize_blocks_at_start(
                 _ => None,
             };
             let continues_definition = matches!(blocks[index - 1], Block::Definition(_))
-                && matches!(opens_with_html, Some(Inline::Html(_)))
+                && matches!(opens_with_html(), Some(Inline::Html(_)))
                 && line_starts_html_block(first_line);
             if continues_definition {
                 // Raw HTML that would start an HTML block opens such content
@@ -593,8 +593,9 @@ fn serialize_list_with_marker_spacing(
             continue;
         }
         let first_line = inner.split('\n').next().unwrap_or("");
+        let may_break = first_line.starts_with(['-', '*', '_']);
         if inner.starts_with([' ', '\t'])
-            || is_thematic_break_line(&format!("{marker}{first_line}"))
+            || (may_break && is_thematic_break_line(&format!("{marker}{first_line}")))
         {
             // Content after the marker's padding would move the item's content
             // column, so whitespace that opens the item's first block (an HTML
@@ -741,7 +742,8 @@ fn serialize_code_block(
 /// ending, the last one optionally), then `closer`. An empty value writes no
 /// line between the fences.
 fn fenced_body(opener: &str, value: &str, closer: &str) -> String {
-    let mut output = String::from(opener);
+    let mut output = String::with_capacity(opener.len() + value.len() + closer.len() + 2);
+    output.push_str(opener);
     output.push('\n');
     output.push_str(value);
     if !value.is_empty() && !ends_with_line_ending(value) {
@@ -866,17 +868,28 @@ struct DelimiterChars(u16);
 impl DelimiterChars {
     const CHARS: [char; 10] = ['*', '_', '~', '+', '=', '^', '|', '$', ':', '>'];
 
-    fn of_char(char: char) -> Self {
-        Self::CHARS
-            .iter()
-            .position(|known| *known == char)
-            .map_or(Self(0), |bit| Self(1 << bit))
+    /// The set holding `char` when it is one of [`Self::CHARS`], in order.
+    const fn of_char(char: char) -> Self {
+        Self(match char {
+            '*' => 1,
+            '_' => 1 << 1,
+            '~' => 1 << 2,
+            '+' => 1 << 3,
+            '=' => 1 << 4,
+            '^' => 1 << 5,
+            '|' => 1 << 6,
+            '$' => 1 << 7,
+            ':' => 1 << 8,
+            '>' => 1 << 9,
+            _ => 0,
+        })
     }
 
     fn of_str(input: &str) -> Self {
-        input
-            .chars()
-            .fold(Self(0), |set, char| set.union(Self::of_char(char)))
+        // Every char of the set is ASCII, so the bytes suffice.
+        input.bytes().fold(Self(0), |set, byte| {
+            set.union(Self::of_char(char::from(byte)))
+        })
     }
 
     const fn union(self, other: Self) -> Self {
@@ -1146,21 +1159,39 @@ fn serialize_inlines_with_context(
     let mut output = String::new();
     let mut output_line = OutputLine::default();
     // The delimiter chars the inlines from each index on may write, and those
-    // before each index, within this run and around it.
-    let written = inlines
-        .iter()
-        .map(DelimiterChars::written_by)
-        .collect::<Vec<_>>();
-    let mut written_from = vec![context.written_later; inlines.len() + 1];
-    for index in (0..inlines.len()).rev() {
-        written_from[index] = written_from[index + 1].union(written[index]);
-    }
+    // before each index, within this run and around it. A run of plain text
+    // and breaks needs no more than the chars around it, so its inlines are
+    // read only when a text holds such a char or an inline holds others.
+    let needs_written = inlines.len() > 1
+        && inlines.iter().any(|inline| match inline {
+            Inline::Text(node) => node.value.contains(DelimiterChars::CHARS),
+            Inline::SoftBreak(_) | Inline::LineBreak(_) => false,
+            _ => true,
+        });
+    // Each inline's own chars, and the chars from each index on.
+    let written = needs_written.then(|| {
+        let own = inlines
+            .iter()
+            .map(DelimiterChars::written_by)
+            .collect::<Vec<_>>();
+        let mut from = vec![context.written_later; inlines.len() + 1];
+        for index in (0..inlines.len()).rev() {
+            from[index] = from[index + 1].union(own[index]);
+        }
+        (own, from)
+    });
     let mut written_until = context.written_before;
     for (index, inline) in inlines.iter().enumerate() {
         let written_before = written_until;
-        written_until = written_until.union(written[index]);
+        let written_later = match &written {
+            Some((own, from)) => {
+                written_until = written_until.union(own[index]);
+                from[index + 1]
+            }
+            None => context.written_later,
+        };
         let context = InlineSerializeContext {
-            written_later: written_from[index + 1],
+            written_later,
             written_before,
             ..base_context
         };
@@ -1196,7 +1227,8 @@ fn serialize_inlines_with_context(
                     } else {
                         (body, "")
                     };
-                    let mut rendered = String::from(lead);
+                    let mut rendered = String::with_capacity(lead.len() + body.len() + 8);
+                    rendered.push_str(lead);
                     rendered.push_str(&escape_text_with_context(
                         escape_body,
                         lead.is_empty() && trailing_ws.len() != body.len() && at_line_start,
@@ -1881,7 +1913,7 @@ fn escape_text_with_context(
 ) -> String {
     let avoid_star_edges = context.avoid_star_edges;
     let in_underscore_emphasis = context.in_underscore_emphasis;
-    let mut output = String::new();
+    let mut output = String::with_capacity(input.len() + input.len() / 8);
     let mut output_line = OutputLine::default();
     let mut line_digit_prefix = 0usize;
     // Only the space or tab at a preserved edge is written as a reference:
@@ -2317,9 +2349,18 @@ fn referenced_chars_as_punctuation(
         (char.is_control() && char != '\t')
             || (matches!(char, ' ' | '\t') && (offset < leading_end || offset >= trailing_start))
     };
-    if !input
-        .char_indices()
-        .any(|(offset, char)| referenced(offset, char))
+    // A control char is ASCII below a space or DEL, or a C1 char, whose UTF-8
+    // form opens with 0xC2; so the bytes tell when no char is referenced.
+    let bytes = input.as_bytes();
+    let may_reference = leading_end > 0
+        || trailing_start < input.len()
+        || bytes
+            .iter()
+            .any(|byte| (*byte < b' ' && *byte != b'\t') || matches!(*byte, 0x7f | 0xc2));
+    if !may_reference
+        || !input
+            .char_indices()
+            .any(|(offset, char)| referenced(offset, char))
     {
         return Cow::Borrowed(input);
     }
@@ -2987,6 +3028,14 @@ fn serialize_inline_math_with_context(
 /// drops that backslash before the cell's inline parse.
 fn escape_cell_delimiter_pipes(cell: String) -> String {
     if !cell.contains('|') {
+        return cell;
+    }
+    // A pipe after a backslash never delimits, and the cell's own text writes
+    // its pipes as references, so most cells hold no other.
+    let bytes = cell.as_bytes();
+    if !(0..bytes.len())
+        .any(|index| bytes[index] == b'|' && (index == 0 || bytes[index - 1] != b'\\'))
+    {
         return cell;
     }
     let delimiters = crate::parse::table_row_delimiters(&cell, true);
