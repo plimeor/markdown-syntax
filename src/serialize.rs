@@ -441,27 +441,28 @@ fn serialize_paragraph(
     // `~` opens or closes only as the GFM bonus for a raw `~` allows, and one
     // beside a text `*` may take that `*` into its run. When the plain
     // rendering does not read back, the first other style that does is taken.
-    let abut_runs = inlines_abut_runs(&node.children);
-    let edge_tildes = char_touches_run(&node.children, '~', false);
-    let edge_stars = char_touches_run(&node.children, '*', false);
+    let mut runs = RunNeighbours::default();
+    runs.read(&node.children, 0);
+    let RunNeighbours {
+        abut_runs,
+        edge_tildes,
+        edge_stars,
+    } = runs;
     if (abut_runs || edge_tildes || edge_stars) && !reparses_to(&output, &node.children) {
         let styles = [
+            RunStyle::Plain,
             RunStyle::StrongUnderscore,
             RunStyle::InnerUnderscore,
             RunStyle::AllStar,
             RunStyle::OuterUnderscore,
         ];
-        let alternates = abut_runs
-            .then_some(styles.map(|style| (style, None)))
+        let raw_edges = [None, edge_tildes.then_some('~'), edge_stars.then_some('*')];
+        let alternates = raw_edges
             .into_iter()
-            .flatten()
-            .chain(edge_tildes.then_some((RunStyle::Plain, Some('~'))))
-            .chain(
-                edge_stars
-                    .then_some([RunStyle::Plain, RunStyle::AllStar].map(|style| (style, Some('*'))))
-                    .into_iter()
-                    .flatten(),
-            );
+            .enumerate()
+            .filter(|&(at, raw_edge)| at == 0 || raw_edge.is_some())
+            .flat_map(|(_, raw_edge)| styles.map(|style| (style, raw_edge)))
+            .skip(1);
         for (style, raw_edge) in alternates {
             let alternate = render(style, raw_edge)?;
             if reparses_to(&alternate, &node.children) {
@@ -472,32 +473,56 @@ fn serialize_paragraph(
     Ok(output)
 }
 
-fn is_attention_run(inline: &Inline) -> bool {
-    matches!(inline, Inline::Strong(_) | Inline::Emphasis(_))
+/// What sits beside the strong and emphasis runs of a paragraph, at any
+/// depth within runs.
+#[derive(Default)]
+struct RunNeighbours {
+    /// Two runs sit side by side, a run opens or closes right beside one
+    /// inside it, or a strong holds a strong or an emphasis an emphasis.
+    abut_runs: bool,
+    /// A text opens or closes with a `~` right beside a run's delimiter.
+    edge_tildes: bool,
+    /// The same with a `*`.
+    edge_stars: bool,
 }
 
-/// Whether a text among `inlines`, at any depth, opens or closes with `edge`
-/// right beside a strong or emphasis delimiter; `in_run` when `inlines` are a
-/// strong's or emphasis's content.
-fn char_touches_run(inlines: &[Inline], edge: char, in_run: bool) -> bool {
-    inlines
-        .iter()
-        .enumerate()
-        .any(|(index, inline)| match inline {
-            Inline::Text(node) => {
-                (node.value.starts_with(edge)
-                    && ((index == 0 && in_run)
+impl RunNeighbours {
+    /// Reads `inlines`; `inside` holds a bit for each run kind around them,
+    /// `1` for strong and `2` for emphasis.
+    fn read(&mut self, inlines: &[Inline], inside: u8) {
+        for (index, inline) in inlines.iter().enumerate() {
+            let (children, kind) = match inline {
+                Inline::Text(node) => {
+                    let after_run = (index == 0 && inside != 0)
                         || index
                             .checked_sub(1)
-                            .is_some_and(|previous| is_attention_run(&inlines[previous]))))
-                    || (node.value.ends_with(edge)
-                        && ((index + 1 == inlines.len() && in_run)
-                            || inlines.get(index + 1).is_some_and(is_attention_run)))
-            }
-            Inline::Strong(Strong { children, .. })
-            | Inline::Emphasis(Emphasis { children, .. }) => char_touches_run(children, edge, true),
-            _ => false,
-        })
+                            .is_some_and(|previous| is_attention_run(&inlines[previous]));
+                    let before_run = (index + 1 == inlines.len() && inside != 0)
+                        || inlines.get(index + 1).is_some_and(is_attention_run);
+                    let value = node.value.as_bytes();
+                    for (edge, found) in
+                        [(b'~', &mut self.edge_tildes), (b'*', &mut self.edge_stars)]
+                    {
+                        *found |= (after_run && value.first() == Some(&edge))
+                            || (before_run && value.last() == Some(&edge));
+                    }
+                    continue;
+                }
+                Inline::Strong(node) => (&node.children, 1),
+                Inline::Emphasis(node) => (&node.children, 2),
+                _ => continue,
+            };
+            self.abut_runs |= inside & kind != 0
+                || inlines.get(index + 1).is_some_and(is_attention_run)
+                || children.first().is_some_and(is_attention_run)
+                || children.last().is_some_and(is_attention_run);
+            self.read(children, inside | kind);
+        }
+    }
+}
+
+fn is_attention_run(inline: &Inline) -> bool {
+    matches!(inline, Inline::Strong(_) | Inline::Emphasis(_))
 }
 
 /// `rendered` text with the run of `edge` chars at its start, or at its end,
@@ -538,24 +563,6 @@ fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> St
     output.push_str(text);
     output.extend(core::iter::repeat_n(edge, tail));
     output
-}
-
-/// Whether a strong or emphasis among `inlines`, at any depth, opens or
-/// closes right beside another, or two sit side by side.
-fn inlines_abut_runs(inlines: &[Inline]) -> bool {
-    let is_run = |inline: &Inline| matches!(inline, Inline::Strong(_) | Inline::Emphasis(_));
-    inlines
-        .windows(2)
-        .any(|pair| is_run(&pair[0]) && is_run(&pair[1]))
-        || inlines.iter().any(|inline| match inline {
-            Inline::Strong(Strong { children, .. })
-            | Inline::Emphasis(Emphasis { children, .. }) => {
-                children.first().is_some_and(is_run)
-                    || children.last().is_some_and(is_run)
-                    || inlines_abut_runs(children)
-            }
-            _ => false,
-        })
 }
 
 /// Whether `markdown` parses, under the default dialect, to one paragraph
@@ -1105,15 +1112,41 @@ impl DelimiterChars {
             Inline::Superscript(node) => within("^", &node.children),
             Inline::Spoiler(node) => within("|", &node.children),
             // Their contents pair with nothing outside them; only a `>` in
-            // them can end raw HTML that a `<` before them opens.
-            Inline::Html(HtmlInline { value: raw, .. })
-            | Inline::Code(CodeInline { raw, .. })
-            | Inline::Math(MathInline { value: raw, .. })
+            // them can end raw HTML that a `<` before them opens. A math
+            // span's own `$` fence can close a `$` before it.
+            Inline::Math(MathInline { value, .. }) => {
+                let fence = Self::of_char('$');
+                if value.contains('>') {
+                    fence.union(Self::of_char('>'))
+                } else {
+                    fence
+                }
+            }
+            Inline::Html(HtmlInline { value: raw, .. }) | Inline::Code(CodeInline { raw, .. })
                 if raw.contains('>') =>
             {
                 Self::of_char('>')
             }
-            Inline::Autolink(_) => Self::of_char('>'),
+            // A footnote's `^` can close a superscript before it; its label
+            // or content pairs with nothing outside it but a `<`.
+            Inline::FootnoteReference(node) => {
+                let caret = Self::of_char('^');
+                if node.label.contains('>') {
+                    caret.union(Self::of_char('>'))
+                } else {
+                    caret
+                }
+            }
+            Inline::InlineFootnote(node) => {
+                let caret = Self::of_char('^');
+                if within("", &node.children).contains('>') {
+                    caret.union(Self::of_char('>'))
+                } else {
+                    caret
+                }
+            }
+            // A URL's chars are scanned after the delimiters before it pair.
+            Inline::Autolink(node) => Self::of_str(&node.destination).union(Self::of_char('>')),
             Inline::Shortcode(_) | Inline::TextDirective(_) => Self::of_char(':'),
             _ => Self(0),
         }
@@ -1398,9 +1431,12 @@ fn serialize_inlines_with_context(
     // Whether an earlier reference wrote a backtick in its raw label, which an
     // escaped backtick after it could close as a code span.
     let mut raw_backtick_before = false;
+    // Where the output of the inline before the current one starts.
+    let mut segment_start = 0;
     for (index, inline) in inlines.iter().enumerate() {
         let written_before = written_until;
-        let segment_start = output.len();
+        let previous_start = segment_start;
+        segment_start = output.len();
         let written_later = match &written {
             Some((own, from)) => {
                 written_until = written_until.union(own[index]);
@@ -1420,11 +1456,19 @@ fn serialize_inlines_with_context(
                 // and the span delimiters written after it.
                 let autolink_before = index.checked_sub(1).and_then(|prev| {
                     let original = last_literal_autolink(&inlines[prev])?;
-                    let at = output.rfind(original)?;
-                    let tail = &output[at + original.len()..];
-                    tail.chars()
-                        .all(|char| matches!(char, '*' | '_' | '~' | '=' | '+' | '^' | '|'))
-                        .then_some((original, tail))
+                    // The URL may itself end with a delimiter char, so each
+                    // split of the trailing delimiters is tried, shortest tail
+                    // first.
+                    let segment = &output[previous_start..];
+                    let delimiters = segment.len()
+                        - segment
+                            .trim_end_matches(['*', '_', '~', '=', '+', '^', '|'])
+                            .len();
+                    (0..=delimiters).find_map(|tail| {
+                        let body = &segment[..segment.len() - tail];
+                        body.ends_with(original)
+                            .then(|| (original, &segment[segment.len() - tail..]))
+                    })
                 });
                 let before_literal_autolink =
                     inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
@@ -1507,12 +1551,21 @@ fn serialize_inlines_with_context(
                         }
                     }
                 }
-                // A scheme char ending the text would join a scheme-less
-                // literal autolink after it (`://x` under the relaxed dialect).
+                // A scheme char ending the text would join the scheme of a
+                // literal autolink after it (`://x` or `p://x` under the
+                // relaxed dialect).
                 if inlines
                     .get(index + 1)
                     .and_then(literal_autolink_original)
-                    .is_some_and(|original| original.starts_with("://"))
+                    .is_some_and(|original| {
+                        let scheme = original
+                            .bytes()
+                            .take_while(|byte| {
+                                byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
+                            })
+                            .count();
+                        original[scheme..].starts_with("://")
+                    })
                 {
                     if let Some(last) = rendered.chars().next_back().filter(|char| {
                         char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-')
@@ -2237,6 +2290,7 @@ fn escape_text_with_context(
     let mut star_run = (0usize, false);
     let mut underscore_run = (0usize, false);
     let mut tilde_run = (0usize, false);
+    let mut pipe_run = (0usize, false);
     let mut chars = input.char_indices().peekable();
     let mut at_leading_edge = preserve_leading;
     while let Some((offset, char)) = chars.next() {
@@ -2412,7 +2466,14 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '|' if text_spoiler_can_start(view, offset, &mut scan) => output.push_str("&#x7C;"),
+            // A run of two or more bars opens with its last two, so every bar
+            // but the last of a run that can open is written as a reference.
+            '|' if run_escaped(view, offset, b'|', &mut scan, &mut pipe_run, |scan, at| {
+                text_spoiler_can_start(view, at, scan)
+            }) && offset + 1 < pipe_run.0 =>
+            {
+                output.push_str("&#x7C;")
+            }
             // Escaping only part of a `$` run would leave a shorter run that can
             // open math, so a run is escaped whole or not at all.
             '$' if run_escaped(

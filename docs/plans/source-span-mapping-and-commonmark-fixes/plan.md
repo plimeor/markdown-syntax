@@ -231,9 +231,9 @@ Specs:
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
   to round-trip where a relaxed `://` literal autolink's URL scan reads into
-  a following span's content (`://*&mp;***`), which needs the parse's own
-  autolink scan over the written spans in the serializer, which this plan
-  does not add.
+  a following span's content (`://*&mp;***`) or a table row, which needs the
+  parse's own autolink scan over the written spans in the serializer, which
+  this plan does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -341,3 +341,6 @@ Specs:
 - [x] 13.6 Read a text `*` or `_` touching a `~` as able to open or close, as the parser's strikethrough bonus does, and add raw edge tildes to the delimiter choices a paragraph that does not read back tries; verified by the test and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–10 failures to 0–9, with no `~` case left outside the literal autolink class.
 - [x] 13.7 Extend `nested_attention_runs_pick_delimiters_that_reparse_to_them` with `__***/***__`, `**#****]***_**`, and `***_\**#*`; verified by each failing on the 13.6 code.
 - [x] 13.8 Add `_` for the outermost run only, and raw edge `*` text joining a run, to the delimiter choices a paragraph that does not read back tries; verified by the test and by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 0–9 failures to 0–7, none of them a strong or emphasis run without a literal autolink or a NUL char.
+- [x] 13.9 Add tests for "Delimiters a following construct writes" and "Run of bars before a spoiler", and for a strong inside a strong and an emphasis touching a `~` inside an emphasis; verified by `text_before_a_construct_escapes_the_delimiters_it_writes` failing on the 13.8 code.
+- [x] 13.10 Count a math span's `$`, a footnote's `^`, and a literal autolink's URL chars among the delimiters an inline writes; guard any relaxed scheme, not only `://`, against a scheme char before it; write every bar but the last of a run that can open a spoiler as a reference; and try every delimiter choice with each raw edge char, including for a strong inside a strong; verified by the tests and by the round-trip fuzz over 200,000 generated inputs on eight seeds failing on 0–7 inputs, all a relaxed `://` literal autolink beside a span or a table.
+- [x] 13.11 Read what sits beside a paragraph's runs in one walk, find a literal autolink's end in the output of the inline before a text instead of searching the output, and scan inline content for literal autolinks only when it holds `://`, `www.`, or `@`; verified by the AST of 155,000 corpus inputs under the default and GFM presets staying byte-identical, and by instruction counts on the 400 KB fixture document: parsing at 229M against 261M before, and serialization at 48M against 46M at the group-12 end.

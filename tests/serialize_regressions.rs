@@ -1844,7 +1844,13 @@ mod round_trip_edges {
 
     #[test]
     fn text_around_a_literal_autolink_does_not_move_its_end() {
-        for source in ["a\\-://`", "ab&#99;://x", "*://*&mp;", "**://**&mp;"] {
+        for source in [
+            "a\\-://`",
+            "ab&#99;://x",
+            "*://*&mp;",
+            "**://**&mp;",
+            "://^&mp;",
+        ] {
             assert_round_trips(source);
         }
     }
@@ -1867,6 +1873,22 @@ mod round_trip_edges {
             "a__~>__~",
             "~~目*~***",
             "a*~ **&*",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn text_before_a_construct_escapes_the_delimiters_it_writes() {
+        for source in [
+            ":\\^:^[|]",
+            "|\\<!--[^-->]",
+            "*\\$#$>$",
+            "~\\$#://$",
+            "b\\-p://",
+            ")||||||\t||",
+            "**(__)__$**",
+            "*{_~_目*",
         ] {
             assert_round_trips(source);
         }

@@ -96,7 +96,7 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs, since a paragraph whose runs abut, or touch a text `*` or `~`, is written with the first delimiter choice that reads back, which may leave that text `*` raw to join a run
 
 #### Scenario: Text beside a literal autolink
-- **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, and `"**://**&mp;"` with `parse` are serialized and reparsed
+- **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, `"**://**&mp;"`, and `"://^&mp;"` with `parse` are serialized and reparsed
 - **THEN** each reparsed paragraph holds the same `Autolink` with the same text around it, since a scheme char before a `://` autolink and the first char of text after one, past any span delimiters, are written in a form the URL scan stops at
 
 #### Scenario: Backtick after a reference's raw label
@@ -110,6 +110,14 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 #### Scenario: Tilde beside an attention run
 - **WHEN** the documents parsed from `"b**~\n~**"` and `"a*~ **&*"` with `parse` are serialized and reparsed
 - **THEN** each reparsed paragraph holds the same inlines, since a text `*` or `_` touching a `~` is escaped as one the strikethrough bonus lets open or close, and a `~` run at a strong's or emphasis's edge is written raw when only the raw `~` grants the run that bonus
+
+#### Scenario: Delimiters a following construct writes
+- **WHEN** the documents parsed from `":\\^:^[|]"`, `"*\\$#$>$"`, `"~\\$#://$"`, and `"b\\-p://"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same inlines, since a text escapes a `^` that a footnote's `^` could close, a `$` that a math fence or a literal autolink's `$` could close, and a scheme char that would join a literal autolink's scheme
+
+#### Scenario: Run of bars before a spoiler
+- **WHEN** the document parsed from `")||||||\t||"` with `parse` is serialized and reparsed
+- **THEN** the reparsed paragraph holds the same `Text` and `Spoiler`, since every bar but the last of a text run that could open a spoiler is written as a reference
 
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
