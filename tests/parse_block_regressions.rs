@@ -1392,6 +1392,15 @@ mod unicode_whitespace {
     }
 
     #[test]
+    fn a_no_break_space_before_mdx_jsx_keeps_it_inline() {
+        let blocks = blocks("\u{a0} <p/>", &SyntaxOptions::mdx());
+        assert!(
+            matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
     fn a_form_feed_ending_a_paragraph_stays_its_text() {
         let blocks = blocks("a\u{c}", &SyntaxOptions::commonmark());
         let [Block::Paragraph(paragraph)] = blocks.as_slice() else {

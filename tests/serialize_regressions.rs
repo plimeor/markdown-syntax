@@ -1957,18 +1957,55 @@ mod round_trip_edges {
         }
     }
 
+    /// `assert_round_trips` under `options` alone.
+    fn assert_round_trips_under(options: &SyntaxOptions, source: &str) {
+        let document = options.parse(source).document;
+        let markdown = document.to_markdown().expect("document serializes");
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            without_spans(&format!("{:?}", reparsed.children)),
+            without_spans(&format!("{:?}", document.children)),
+            "{source:?} -> {markdown:?}"
+        );
+    }
+
     #[test]
     fn a_paragraph_opening_with_an_esm_keyword_stays_a_paragraph_under_mdx() {
-        let options = SyntaxOptions::mdx();
-        for source in [" import -", " export x"] {
-            let document = options.parse(source).document;
-            let markdown = document.to_markdown().expect("document serializes");
-            let reparsed = options.parse(&markdown).document;
-            assert_eq!(
-                without_spans(&format!("{:?}", reparsed.children)),
-                without_spans(&format!("{:?}", document.children)),
-                "{source:?} -> {markdown:?}"
-            );
+        for source in [" import -", " export x", " import *\n-"] {
+            assert_round_trips_under(&SyntaxOptions::mdx(), source);
+        }
+    }
+
+    #[test]
+    fn mdx_and_gfm_content_reads_back_under_its_preset() {
+        for source in [
+            "<!--@b>",
+            "\\{[]()}",
+            "\u{a0}&#x20;<p/>",
+            "{}&#x20;\n\\",
+            "{}&#x20; \n\\",
+        ] {
+            assert_round_trips_under(&SyntaxOptions::mdx(), source);
+        }
+        for source in ["**=* ++@b.c*", "~&#x20;://~"] {
+            assert_round_trips_under(&SyntaxOptions::gfm(), source);
+        }
+    }
+
+    #[test]
+    fn delimiters_around_autolinks_tasks_and_alerts_keep_their_parse() {
+        for source in [
+            "_`*www._",
+            "# _*www._",
+            "**://\\***[^1]",
+            "^[www.[ ]",
+            "1. >[!NOTE]\n~[^1]",
+            "+ [x]  :e",
+            "- [ ] &#x20;",
+            "***:*:**",
+            "++*++_@b.c",
+        ] {
+            assert_round_trips(source);
         }
     }
 }

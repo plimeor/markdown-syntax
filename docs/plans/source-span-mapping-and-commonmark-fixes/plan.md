@@ -230,10 +230,13 @@ Specs:
   context] → A paragraph whose `Strong` and `Emphasis` runs abut is
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
-  to round-trip where a relaxed `://` literal autolink is followed by a span
-  whose content opens with a char that only a named character reference
+  to round-trip in two classes: a relaxed `://` literal autolink followed by a
+  span whose content opens with a char that only a named character reference
   stops the URL scan before (`://~&mp;~`), which needs a reverse named
-  reference table in the serializer, which this plan does not add.
+  reference table in the serializer; and a `www` literal autolink whose
+  domain scan an escape ends early (`www.\[]_(`), where escaping the `]` after
+  it lets the scan reach a `_` that rejects the domain. This plan adds
+  neither.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -360,3 +363,7 @@ Specs:
 - [x] 16.1 Add a round-trip fuzz over block-oriented pieces (list, quote, heading, fence, directive, footnote, table, alert, HTML, MDX, and autolink pieces) under the CommonMark, default, GFM, and MDX presets, and add tests for "Directive opener inside fenced code", "Hard break on a footnote definition's first line", "Text after a bare text directive", "Email-local char before an email", "Alert title and empty container directive", and "Paragraph opening with an ESM keyword"; verified by `a_directive_opener_inside_fenced_code_is_code`, `a_footnote_definitions_first_line_keeps_a_hard_break`, and `constructs_after_a_directive_email_or_alert_keep_their_parse` failing on the group-15 code, and by the fuzz failing on 282–325 of 100,000 inputs per seed before 16.2 and 16.3.
 - [x] 16.2 Skip directive openers inside a fenced code block in a container directive, and keep the trailing spaces of a footnote definition's first line; verified by the tests, by the 155,000 corpus inputs under the default and GFM presets staying byte-identical, and by conformance staying at 2233 of 2236.
 - [x] 16.3 End a text directive with no attributes by an empty label, or an empty attribute list before a `{`, when what follows could go on with it; escape an email-local char or `@` before an email or a literal autolink and a `+` run whole; write an alert title as its source, an empty container directive without a blank line, and a paragraph's leading `import ` or `export ` with a referenced first char; read a relaxed scheme only from a run holding a letter; and try the literal autolink choices for a text at a span's end; verified by the tests, by the autolinks canonical output regenerated for `\<foo+&#x40;bar.example.com>`, which reparses to the same text under both presets, and by the block-oriented fuzz failing on 0–4 of 100,000 inputs per seed.
+
+### 17. Read-back across presets, headings, and MDX flow
+- [x] 17.1 Add tests for "No-break space before MDX JSX", "Content that reads back only under its preset", "Heading content that does not read back", "Flow-like first line under MDX", and "Task item text opening with whitespace"; verified by `a_paragraph_opening_with_an_esm_keyword_stays_a_paragraph_under_mdx`, `mdx_and_gfm_content_reads_back_under_its_preset`, and `delimiters_around_autolinks_tasks_and_alerts_keep_their_parse` failing on the group-16 code.
+- [x] 17.2 Read a flow MDX JSX line's indentation as spaces and tabs; give headings the paragraph's delimiter choices; take a choice that reads back under the default preset first, then one under GFM or MDX; count a `}` among the delimiters an inline writes; keep a paragraph's or setext heading's first line off MDX ESM and flow, and an angle-bracket autolink at its start unescaped; separate a paragraph after an alert in a tight item; write whitespace opening a task item's text raw; and try run choices for a `www` autolink after a text `*`, `_`, or `~` and the literal autolink choices for a link's or inline footnote's text; verified by the tests and by the block-oriented fuzz over 100,000 inputs on ten seeds and the inline fuzz over 200,000 inputs on eight seeds failing on 0–2 inputs per seed, each `www.\[]_(` or a relaxed `://` literal autolink before a span opening with a char only a named reference stops the URL scan before; serialization of the 400 KB fixture document stays at 50M instructions.

@@ -151,6 +151,22 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `" import -"` with the MDX preset is serialized and reparsed with it
 - **THEN** the reparsed document holds the same `Paragraph`, since a paragraph's leading `import ` or `export ` is written with its first char as a reference
 
+#### Scenario: Content that reads back only under its preset
+- **WHEN** the documents parsed from `"**=* ++@b.c*"` with the GFM preset and `"\\{[]()}"` with the MDX preset are serialized and reparsed with the same preset
+- **THEN** each reparsed paragraph holds the same inlines, since a paragraph or heading that does not read back under the default preset takes the first delimiter choice that does, and only when none does, the first that reads back under GFM or MDX
+
+#### Scenario: Heading content that does not read back
+- **WHEN** the document parsed from `"# _*www._"` with `parse` is serialized and reparsed
+- **THEN** the reparsed heading holds the same `Emphasis` and `Autolink`, since a heading's content takes the delimiter choices a paragraph's does
+
+#### Scenario: Flow-like first line under MDX
+- **WHEN** the documents parsed from `"{}&#x20;\n\\"`, `"{}&#x20; \n\\"`, and `"<!--@b>"` with the MDX preset are serialized and reparsed with it
+- **THEN** each reparsed document holds the same `Paragraph`, since a first line holding only an expression or JSX ends with a referenced space and an angle-bracket autolink that looks like an HTML block start is written as itself
+
+#### Scenario: Task item text opening with whitespace
+- **WHEN** the document parsed from `"+ [x]  :e"` with `parse` is serialized and reparsed
+- **THEN** the reparsed item holds the same `Text(" ")` and `TextDirective`, since whitespace opening a task item's text is written raw after the checkbox when content follows it on the line
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

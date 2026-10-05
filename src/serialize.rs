@@ -212,14 +212,13 @@ fn serialize_block(
 ) -> Result<String, SerializeError> {
     match block {
         Block::Paragraph(node) => serialize_paragraph(node, options),
-        Block::Heading(node) => {
-            let content = serialize_inlines(&node.children, options)?;
+        Block::Heading(node) => serialize_reading_back(&node.children, options, |content| {
             // A setext underline can only express depth 1 (`=`) or 2 (`-`); any
             // other depth must fall back to ATX, otherwise the depth is lost.
             // Multi-line content stays setext because ATX is single-line and
             // would split a heading the parser legitimately produces.
             let setext_representable = matches!(node.depth, 1 | 2);
-            Ok(match node.kind {
+            match node.kind {
                 HeadingKind::Setext if setext_representable => {
                     let marker = if node.depth == 1 { '=' } else { '-' };
                     let underline = marker.to_string().repeat(content.len().max(3));
@@ -234,6 +233,7 @@ fn serialize_block(
                     };
                     let mut content = content;
                     keep_first_line_off_html_block(&node.children, &mut content);
+                    keep_first_line_off_esm(&mut content);
                     let mut content = indent_block_starting_continuations(content);
                     if let Some(last_line_start) = content.rfind('\n').map(|end| end + 1) {
                         // A continuation line would read as a table header
@@ -250,8 +250,8 @@ fn serialize_block(
                     "#".repeat(node.depth as usize),
                     escape_atx_heading_content(&content)
                 ),
-            })
-        }
+            }
+        }),
         Block::ThematicBreak(node) => Ok(match node.marker {
             // A Dash break is normally written contiguous (`---`) — the form
             // that survives after a `-` bullet list, where the spaced `- - -`
@@ -430,6 +430,21 @@ fn serialize_paragraph(
     node: &Paragraph,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
+    serialize_reading_back(&node.children, options, |mut output| {
+        keep_first_line_off_html_block(&node.children, &mut output);
+        keep_first_line_off_esm(&mut output);
+        keep_first_line_off_mdx_flow(&node.children, &mut output);
+        indent_block_starting_continuations(output)
+    })
+}
+
+/// The block that `finish` writes around the rendering of `children`, a
+/// paragraph's or heading's content.
+fn serialize_reading_back(
+    children: &[Inline],
+    options: &SerializeOptions,
+    finish: impl Fn(String) -> String,
+) -> Result<String, SerializeError> {
     let render = |run_style: RunStyle,
                   raw_edge: Option<char>,
                   autolink_edges: AutolinkEdges|
@@ -440,24 +455,23 @@ fn serialize_paragraph(
             autolink_edges,
             ..InlineSerializeContext::block_content()
         };
-        let mut output = serialize_inlines_with_context(&node.children, options, context)?;
-        keep_first_line_off_html_block(&node.children, &mut output);
-        // Under MDX a line opening with `import ` or `export ` is ESM.
-        if output.starts_with("import ") || output.starts_with("export ") {
-            let reference = if output.starts_with('i') {
-                "&#x69;"
-            } else {
-                "&#x65;"
-            };
-            output.replace_range(..1, reference);
-        }
-        Ok(indent_block_starting_continuations(output))
+        Ok(finish(serialize_inlines_with_context(
+            children, options, context,
+        )?))
     };
     let output = render(RunStyle::Plain, None, AutolinkEdges::Plain)?;
     let mut expected = None;
-    let mut reads_back = |markdown: &str| {
-        let expected = expected.get_or_insert_with(|| without_spans(&node.children));
-        reparses_to(markdown, &node.children, expected)
+    // The dialect the content came from is not known here: a rendering that
+    // reads back under the default preset is taken first, and only when none
+    // does, one that reads back under GFM or MDX.
+    let default_preset = [crate::options::SyntaxOptions::default()];
+    let other_presets = [
+        crate::options::SyntaxOptions::gfm(),
+        crate::options::SyntaxOptions::mdx(),
+    ];
+    let mut reads_back = |markdown: &str, presets: &[crate::options::SyntaxOptions]| {
+        let expected = expected.get_or_insert_with(|| without_spans(children));
+        reparses_to(markdown, children, expected, presets)
     };
     // A strong or emphasis run abutting another splits on reparse only as its
     // flanking allows, which the rest of the paragraph decides; one beside a
@@ -467,16 +481,16 @@ fn serialize_paragraph(
     // delimiter beside it may need. When the plain rendering does not read
     // back, the first other style that does is taken.
     let mut runs = RunNeighbours::default();
-    runs.read(&node.children, 0);
+    runs.read(children, 0);
     let RunNeighbours {
         abut_runs,
         edge_tildes,
         edge_stars,
     } = runs;
-    let autolink_spaces = autolink_meets_space_in_span(&node.children, false);
-    let autolink_leads = autolink_text_runs_on(&node.children, false);
+    let autolink_spaces = autolink_meets_space_in_span(children, false);
+    let autolink_leads = autolink_text_runs_on(children, false);
     if (abut_runs || edge_tildes || edge_stars || autolink_spaces || autolink_leads)
-        && !reads_back(&output)
+        && !reads_back(&output, &default_preset)
     {
         let styles = [
             RunStyle::Plain,
@@ -501,9 +515,19 @@ fn serialize_paragraph(
         .into_iter()
         .filter(|_| autolink_spaces || autolink_leads)
         .map(|edges| (RunStyle::Plain, None, edges));
+        let mut alternates = Vec::new();
         for (style, raw_edge, spaces) in run_alternates.chain(autolink_alternates) {
             let alternate = render(style, raw_edge, spaces)?;
-            if reads_back(&alternate) {
+            if reads_back(&alternate, &default_preset) {
+                return Ok(alternate);
+            }
+            alternates.push(alternate);
+        }
+        if !reads_back(&output, &other_presets) {
+            if let Some(alternate) = alternates
+                .into_iter()
+                .find(|alternate| reads_back(alternate, &other_presets))
+            {
                 return Ok(alternate);
             }
         }
@@ -544,9 +568,13 @@ fn autolink_text_runs_on(inlines: &[Inline], in_span: bool) -> bool {
     })
 }
 
-/// The content of `inline` when it is a span such as an emphasis.
+/// The content of `inline` when it is a span such as an emphasis, or a
+/// link's or an inline footnote's text.
 fn span_children(inline: &Inline) -> Option<&[Inline]> {
     Some(match inline {
+        Inline::InlineFootnote(node) => &node.children,
+        Inline::Link(node) => &node.children,
+        Inline::LinkReference(node) => &node.children,
         Inline::Emphasis(node) => &node.children,
         Inline::Strong(node) => &node.children,
         Inline::Underline(node) => &node.children,
@@ -638,6 +666,16 @@ impl RunNeighbours {
                         *found |= (after_run && value.first() == Some(&edge))
                             || (before_run && value.last() == Some(&edge));
                     }
+                    // A `www` literal autolink needs the `*`, `_`, or `~`
+                    // before it raw, which a run's delimiter choice decides.
+                    self.abut_runs |= inside != 0
+                        && matches!(value.last(), Some(b'*' | b'_' | b'~'))
+                        && inlines
+                            .get(index + 1)
+                            .and_then(literal_autolink_original)
+                            .is_some_and(|original| {
+                                original.len() >= 3 && original[..3].eq_ignore_ascii_case("www")
+                            });
                     continue;
                 }
                 Inline::Strong(node) => (&node.children, 1),
@@ -697,9 +735,14 @@ fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> St
     output
 }
 
-/// Whether `markdown` parses, under the default dialect, to one paragraph
-/// holding `inlines`, which `expected` holds without spans.
-fn reparses_to(markdown: &str, inlines: &[Inline], expected: &[Inline]) -> bool {
+/// Whether `markdown` parses, under one of `presets`, to one paragraph or
+/// heading holding `inlines`, which `expected` holds without spans.
+fn reparses_to(
+    markdown: &str,
+    inlines: &[Inline],
+    expected: &[Inline],
+    presets: &[crate::options::SyntaxOptions],
+) -> bool {
     // The references in the paragraph resolve against definitions elsewhere
     // in the document, which a definition per label stands in for.
     let mut labels = Vec::new();
@@ -710,21 +753,22 @@ fn reparses_to(markdown: &str, inlines: &[Inline], expected: &[Inline]) -> bool 
         source.push_str(label);
         source.push_str("]: u");
     }
-    let document = crate::options::SyntaxOptions::default()
-        .parse(&source)
-        .document;
-    match document.children.as_slice() {
-        [Block::Paragraph(paragraph), definitions @ ..]
-            if definitions
-                .iter()
-                .all(|block| matches!(block, Block::Definition(_))) =>
-        {
-            let mut reparsed = paragraph.children.clone();
-            clear_spans(&mut reparsed);
-            reparsed == expected
+    presets.iter().any(|options| {
+        let document = options.parse(&source).document;
+        match document.children.as_slice() {
+            [Block::Paragraph(Paragraph { children, .. })
+            | Block::Heading(Heading { children, .. }), definitions @ ..]
+                if definitions
+                    .iter()
+                    .all(|block| matches!(block, Block::Definition(_))) =>
+            {
+                let mut reparsed = children.clone();
+                clear_spans(&mut reparsed);
+                reparsed == expected
+            }
+            _ => false,
         }
-        _ => false,
-    }
+    })
 }
 
 /// The labels of the link and image references in `inlines`, at any depth.
@@ -805,7 +849,46 @@ fn clear_spans(inlines: &mut [Inline]) {
 /// written as a reference keeps the line the paragraph's; content that is
 /// that line alone, or a tag that interrupts, follows a definition, which
 /// `serialize_blocks_at_start` writes it after.
+/// Keeps inline content opening with `import ` or `export `, which MDX reads
+/// as ESM, a paragraph, by writing its first char as a reference.
+fn keep_first_line_off_esm(output: &mut String) {
+    if output.starts_with("import ") || output.starts_with("export ") {
+        let reference = if output.starts_with('i') {
+            "&#x69;"
+        } else {
+            "&#x65;"
+        };
+        output.replace_range(..1, reference);
+    }
+}
+
+/// Keeps a first line holding only an MDX expression or JSX, which MDX reads
+/// as a flow block, the paragraph's, by ending it with a referenced space.
+fn keep_first_line_off_mdx_flow(children: &[Inline], output: &mut String) {
+    let value = match children.first() {
+        Some(Inline::MdxExpression(node)) => alloc::format!("{{{}}}", node.value),
+        Some(Inline::MdxJsx(node)) => node.value.clone(),
+        _ => return,
+    };
+    if !output.starts_with(&value) {
+        return;
+    }
+    let rest = &output[value.len()..];
+    if rest.starts_with('\n') {
+        output.insert_str(value.len(), "&#x20;");
+    } else if rest.starts_with("  \n") {
+        // A hard break's spaces keep the line flow; a referenced space
+        // before one keeps the break.
+        output.replace_range(value.len()..value.len() + 2, "&#x20; ");
+    }
+}
+
 fn keep_first_line_off_html_block(children: &[Inline], output: &mut String) {
+    // An angle-bracket autolink that looks like an HTML block start comes
+    // from a dialect without raw HTML, which reads it back as written.
+    if matches!(children.first(), Some(Inline::Autolink(_))) {
+        return;
+    }
     let Some(offset) = paragraph_html_block_escape_offset(output) else {
         return;
     };
@@ -941,6 +1024,25 @@ fn serialize_list_with_marker_spacing(
             if let Some(rest) = inner.strip_prefix("- ") {
                 inner = rest.into();
             }
+            // The checkbox keeps the whitespace after it as text, so text
+            // opening with a space or tab, which a line's start would need as
+            // a reference, is written raw there.
+            if matches!(item.children.first(), Some(Block::Paragraph(paragraph))
+                if matches!(paragraph.children.first(), Some(Inline::Text(text))
+                    if text.value.starts_with([' ', '\t'])))
+            {
+                for (reference, raw) in [("&#x20;", " "), ("&#x9;", "\t")] {
+                    // Content must follow on the line, or the paragraph's end
+                    // would drop the whitespace.
+                    if inner.starts_with(reference)
+                        && !inner[reference.len()..].starts_with(['\n', ' ', '\t'])
+                        && inner.len() > reference.len()
+                    {
+                        inner.replace_range(..reference.len(), raw);
+                        break;
+                    }
+                }
+            }
             let checkbox = if checked { "[x] " } else { "[ ] " };
             inner = format!("{checkbox}{inner}");
         }
@@ -1013,11 +1115,12 @@ fn serialize_item_blocks(
         }
         output.push_str(&serialize_block(block, options, false)?);
         if tight
-            && matches!(block, Block::BlockQuote(_))
+            && matches!(block, Block::BlockQuote(_) | Block::Alert(_))
             && matches!(blocks.get(index + 1), Some(Block::Paragraph(_)))
         {
-            // The paragraph's first line would continue the quote's paragraph
-            // lazily; an empty quote line ends that paragraph first.
+            // The paragraph's first line would continue the quote's or
+            // alert's paragraph lazily; an empty quote line ends that
+            // paragraph first.
             output.push_str("\n>");
         }
     }
@@ -1255,7 +1358,7 @@ struct InlineSerializeContext {
 struct DelimiterChars(u16);
 
 impl DelimiterChars {
-    const CHARS: [char; 10] = ['*', '_', '~', '+', '=', '^', '|', '$', ':', '>'];
+    const CHARS: [char; 11] = ['*', '_', '~', '+', '=', '^', '|', '$', ':', '>', '}'];
 
     /// The set holding `char` when it is one of [`Self::CHARS`], in order.
     const fn of_char(char: char) -> Self {
@@ -1270,6 +1373,7 @@ impl DelimiterChars {
             '$' => 1 << 7,
             ':' => 1 << 8,
             '>' => 1 << 9,
+            '}' => 1 << 10,
             _ => 0,
         })
     }
@@ -1756,7 +1860,7 @@ fn serialize_inlines_with_context(
                         )
                     };
                     let encode_lead = context.autolink_edges == AutolinkEdges::EncodedLead
-                        && index + 1 < inlines.len();
+                        && (index + 1 < inlines.len() || opens_span);
                     if encode_lead || !keeps(&rendered) {
                         for (lead, rest) in leading_char_encodings(&node.value) {
                             let candidate = render(&lead, rest);
@@ -2141,7 +2245,12 @@ fn serialize_inlines_with_context(
                         && index
                             .checked_sub(1)
                             .is_some_and(|prev| is_gfm_literal_email(&inlines[prev]));
-                    if is_bare_email && !follows_literal_email_plus {
+                    // A span's closing delimiter run is read before the
+                    // email, so only a text's last char can join it.
+                    let after_span = index
+                        .checked_sub(1)
+                        .is_some_and(|prev| span_children(&inlines[prev]).is_some());
+                    if is_bare_email && !follows_literal_email_plus && !after_span {
                         escape_trailing_email_local(&mut output);
                     } else {
                         escape_trailing_less_than(&mut output);
@@ -2724,7 +2833,7 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '{' if scan.occurs_from("}", offset + char.len_utf8()) => {
+            '{' if scan.written_later("}") || scan.occurs_from("}", offset + char.len_utf8()) => {
                 output.push('\\');
                 output.push(char);
             }

@@ -125,7 +125,8 @@ The parser SHALL read only spaces and tabs as whitespace in block structure: a
 blank line holds only spaces and tabs; indentation, the space after a block
 marker, the trailing whitespace a thematic break, setext underline, closing
 fence, ATX closing sequence, HTML block start line, definition, or table row
-allows, and the final whitespace of a paragraph are spaces and tabs. Any
+allows, the indentation before flow MDX JSX, and the final whitespace of a
+paragraph are spaces and tabs. Any
 other whitespace char, such as a no-break space or a form feed, is content.
 
 #### Scenario: Other whitespace after a thematic break
@@ -135,6 +136,10 @@ other whitespace char, such as a no-break space or a form feed, is content.
 #### Scenario: Line holding only a no-break space
 - **WHEN** `"a\n\u{a0}\nb"` is parsed with the CommonMark preset
 - **THEN** the document holds one `Paragraph`
+
+#### Scenario: No-break space before MDX JSX
+- **WHEN** `"\u{a0} <p/>"` is parsed with the MDX preset
+- **THEN** the document holds a `Paragraph`, not a flow `MdxJsx` block
 
 #### Scenario: Form feed ending a paragraph
 - **WHEN** `"a\u{c}"` is parsed with the CommonMark preset

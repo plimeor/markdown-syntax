@@ -3172,7 +3172,7 @@ fn parse_mdx_flow(
     }
 
     let line = lines[index];
-    let trimmed = line.text.trim_start();
+    let trimmed = trim_ascii_start(line.text);
     if options.constructs.mdx_expression_block && trimmed.starts_with('{') {
         let open_byte = line.text.len() - trimmed.len();
         if let Some((close_line, close_byte)) = flow.expression_close(lines, index, open_byte) {
