@@ -227,14 +227,16 @@ Specs:
 
 ### Risks
 - [Round-trip classes the serializer cannot reach without the parse's
-  context] → Generated inputs still fail to round-trip in four classes: a
-  `Strong` or `Emphasis` nested against a run of the same char (`__**)**&__`),
-  which needs `__` that the `Underline` dialect would read otherwise; a
-  relaxed literal autolink that ends at a span's closing delimiter
-  (`*://*&mp;`); a literal `~` whose emphasis run also touches other marks
-  (`a*~ **&*`); and backticks or brackets inside a wiki link or footnote
-  label (`[^`]``). Each needs the dialect or a reparse check in the
-  serializer, which this plan does not add.
+  context] → A paragraph whose `Strong` and `Emphasis` runs abut is
+  reparsed once under the default dialect, and other delimiter choices are
+  tried only when the first does not read back. Generated inputs still fail
+  to round-trip in four classes: a run nested against a literal `*` text
+  that no delimiter choice separates (`***_\\**#*`); a relaxed `://`
+  literal autolink whose URL scan reads into a following span's content
+  (`://*&mp;***`); a literal `~` whose emphasis run also touches other marks
+  (`b**~\n~**`); and backticks or brackets inside a wiki link or footnote
+  label (`[^`]``). Each needs the dialect or the parse's own delimiter
+  stack in the serializer, which this plan does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -332,3 +334,7 @@ Specs:
 - [x] 12.2 Read a quoted content line's block without the lazy-line GH-19 rule; verified by a comparison with commonmark.js and micromark, with raw HTML allowed, on 30,000 generated inline inputs (links, references, images, code spans, entities, escapes, autolinks, emphasis, raw HTML) where they agree on 29,971: 5 mismatches before and 3 after, one the GH-19 rule the conformance oracle (markdown-rs) keeps and two the link-text autolink demotion the 0.3.0 delimiter stack chose; and by the block comparison staying with no input newly mismatching.
 - [x] 12.3 Leave a list tight across a blank line that a fence opened in a nested item holds; verified by `a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight` (failing before) and by the block comparison's last non-tab, non-GH-19 mismatch matching, with none newly mismatching (286 left: 280 tab cases in nested containers and 6 under the GH-19 rule).
 - [x] 11.3 Give each line the source column it starts at, recorded by `DerivedText` for derived lines, and read tabs from it in list markers, list continuations, block quote markers, fence indentation, and the container line classification; verified by `a_tab_inside_nested_containers_spans_its_source_columns` (failing before), by the block comparison going from 286 mismatches to 8 (all under the GH-19 rule) with none newly mismatching, by the hand-written tab layouts all matching, and by conformance staying at 2233 of 2236.
+
+### 13. Abutting attention runs and literal autolink neighbours
+- [x] 13.1 Add tests for "Abutting attention runs" and "Text beside a literal autolink"; verified by `nested_attention_runs_pick_delimiters_that_reparse_to_them` and `text_around_a_literal_autolink_does_not_move_its_end` failing on the group-12 code.
+- [x] 13.2 Reparse a paragraph whose `Strong` and `Emphasis` runs abut and, when it does not read back, take the first of `__` strong, `_` inner emphasis, and all-`*` delimiters that does; carry a literal autolink's end through the span delimiters written after it; and write a scheme char ending a text before a `://` literal autolink as an escape or a character reference; verified by the tests, by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 20–27 failures to 0–15, all in the classes listed under Risks, and by serialization of the 4 MB fixture benchmark taking 5% longer (74 ms to 78 ms median).

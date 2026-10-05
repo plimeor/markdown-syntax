@@ -1826,4 +1826,18 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn nested_attention_runs_pick_delimiters_that_reparse_to_them() {
+        for source in ["__**)**&__", "**:__$__**", "****(*+***", "***_|_***"] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn text_around_a_literal_autolink_does_not_move_its_end() {
+        for source in ["a\\-://`", "ab&#99;://x", "*://*&mp;", "**://**&mp;"] {
+            assert_round_trips(source);
+        }
+    }
 }

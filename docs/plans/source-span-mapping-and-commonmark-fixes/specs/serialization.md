@@ -91,6 +91,14 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `"y***b***"` is serialized
 - **THEN** `to_markdown()` returns `"y***b***\n"`
 
+#### Scenario: Abutting attention runs
+- **WHEN** the documents parsed from `"__**)**&__"`, `"**:__$__**"`, `"****(*+***"`, and `"***_|_***"` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs, since a paragraph whose runs abut is written with the first delimiter choice that reads back
+
+#### Scenario: Text beside a literal autolink
+- **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, and `"**://**&mp;"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same `Autolink` with the same text around it, since a scheme char before a `://` autolink and the first char of text after one, past any span delimiters, are written in a form the URL scan stops at
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

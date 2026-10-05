@@ -425,9 +425,81 @@ fn serialize_paragraph(
     node: &Paragraph,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let mut output = serialize_inlines(&node.children, options)?;
-    keep_first_line_off_html_block(&node.children, &mut output);
-    Ok(indent_block_starting_continuations(output))
+    let render = |run_style: RunStyle| -> Result<String, SerializeError> {
+        let context = InlineSerializeContext {
+            run_style,
+            ..InlineSerializeContext::block_content()
+        };
+        let mut output = serialize_inlines_with_context(&node.children, options, context)?;
+        keep_first_line_off_html_block(&node.children, &mut output);
+        Ok(indent_block_starting_continuations(output))
+    };
+    let output = render(RunStyle::Plain)?;
+    // A strong or emphasis run abutting another splits on reparse only as its
+    // flanking allows, which the rest of the paragraph decides. When the plain
+    // rendering does not read back, the first other style that does is taken.
+    if inlines_abut_runs(&node.children) && !reparses_to(&output, &node.children) {
+        for style in [
+            RunStyle::StrongUnderscore,
+            RunStyle::InnerUnderscore,
+            RunStyle::AllStar,
+        ] {
+            let alternate = render(style)?;
+            if reparses_to(&alternate, &node.children) {
+                return Ok(alternate);
+            }
+        }
+    }
+    Ok(output)
+}
+
+/// Whether a strong or emphasis among `inlines`, at any depth, opens or
+/// closes right beside another, or two sit side by side.
+fn inlines_abut_runs(inlines: &[Inline]) -> bool {
+    let is_run = |inline: &Inline| matches!(inline, Inline::Strong(_) | Inline::Emphasis(_));
+    inlines
+        .windows(2)
+        .any(|pair| is_run(&pair[0]) && is_run(&pair[1]))
+        || inlines.iter().any(|inline| match inline {
+            Inline::Strong(Strong { children, .. })
+            | Inline::Emphasis(Emphasis { children, .. }) => {
+                children.first().is_some_and(is_run)
+                    || children.last().is_some_and(is_run)
+                    || inlines_abut_runs(children)
+            }
+            _ => false,
+        })
+}
+
+/// Whether `markdown` parses, under the default dialect, to one paragraph
+/// holding `inlines` (spans aside).
+fn reparses_to(markdown: &str, inlines: &[Inline]) -> bool {
+    let document = crate::options::SyntaxOptions::default()
+        .parse(markdown)
+        .document;
+    match document.children.as_slice() {
+        [Block::Paragraph(paragraph)] => {
+            debug_without_spans(&paragraph.children) == debug_without_spans(inlines)
+        }
+        _ => false,
+    }
+}
+
+/// The debug form of `inlines` with every span written as `None`.
+fn debug_without_spans(inlines: &[Inline]) -> String {
+    let debug = format!("{inlines:?}");
+    let mut out = String::with_capacity(debug.len());
+    let mut rest = debug.as_str();
+    while let Some(start) = rest.find("Some(Span { ") {
+        out.push_str(&rest[..start]);
+        out.push_str("None");
+        let end = rest[start..]
+            .find("})")
+            .map_or(rest.len(), |end| start + end + 2);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Keeps the first line of inline content that would start an HTML block
@@ -837,6 +909,23 @@ fn serialize_table_row(
     Ok(format!("| {} |", cells.join(" | ")))
 }
 
+/// How strong and emphasis runs choose between `*` and `_`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RunStyle {
+    /// Each run reads its neighbours: `_` where a `*` would join a run beside
+    /// it, `*` otherwise.
+    #[default]
+    Plain,
+    /// As `Plain`, and a strong whose content opens or closes with a `*` run
+    /// is written `__`.
+    StrongUnderscore,
+    /// Every run is written with `*` where nothing before it would join it.
+    AllStar,
+    /// An emphasis with no strong or emphasis inside is written with `_`, and
+    /// every other run with `*`.
+    InnerUnderscore,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct InlineSerializeContext {
     table_cell: bool,
@@ -854,6 +943,9 @@ struct InlineSerializeContext {
     written_before: DelimiterChars,
     /// For a text, whether it opens a line of the block.
     text_opens_line: bool,
+    /// How strong and emphasis runs choose their char (see
+    /// `serialize_paragraph`).
+    run_style: RunStyle,
     /// The inlines open a span delimited by a run such as `*` or `++`, which
     /// a line ending right after it could not open.
     opens_span: bool,
@@ -946,6 +1038,7 @@ impl InlineSerializeContext {
             written_later: DelimiterChars(0),
             written_before: DelimiterChars(0),
             text_opens_line: false,
+            run_style: RunStyle::Plain,
             opens_span: false,
         }
     }
@@ -977,6 +1070,7 @@ impl InlineSerializeContext {
             written_later: DelimiterChars(0),
             written_before: DelimiterChars(0),
             text_opens_line: false,
+            run_style: RunStyle::Plain,
             opens_span: false,
         }
     }
@@ -1103,6 +1197,27 @@ fn literal_autolink_original(inline: &Inline) -> Option<&str> {
     }
 }
 
+/// The spelling of the literal autolink that `inline` is, or that its last
+/// child is, through spans.
+fn last_literal_autolink(inline: &Inline) -> Option<&str> {
+    if let Some(original) = literal_autolink_original(inline) {
+        return Some(original);
+    }
+    let children = match inline {
+        Inline::Emphasis(node) => &node.children,
+        Inline::Strong(node) => &node.children,
+        Inline::Underline(node) => &node.children,
+        Inline::Delete(node) => &node.children,
+        Inline::Insert(node) => &node.children,
+        Inline::Mark(node) => &node.children,
+        Inline::Subscript(node) => &node.children,
+        Inline::Superscript(node) => &node.children,
+        Inline::Spoiler(node) => &node.children,
+        _ => return None,
+    };
+    last_literal_autolink(children.last()?)
+}
+
 /// How `inline` is written when that takes no escaping: a literal autolink or
 /// a shortcode, which a literal autolink's URL scan may run on into; empty
 /// for any other inline.
@@ -1197,9 +1312,17 @@ fn serialize_inlines_with_context(
         };
         match inline {
             Inline::Text(node) => {
-                let autolink_before = index
-                    .checked_sub(1)
-                    .and_then(|prev| literal_autolink_original(&inlines[prev]));
+                // A literal autolink just before the text, ending this run's
+                // previous inline or the last span inside it: its spelling,
+                // and the span delimiters written after it.
+                let autolink_before = index.checked_sub(1).and_then(|prev| {
+                    let original = last_literal_autolink(&inlines[prev])?;
+                    let at = output.rfind(original)?;
+                    let tail = &output[at + original.len()..];
+                    tail.chars()
+                        .all(|char| matches!(char, '*' | '_' | '~' | '=' | '+' | '^' | '|'))
+                        .then_some((original, tail))
+                });
                 let before_literal_autolink =
                     inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
                 let at_line_start = output_line.len(&output) == 0;
@@ -1251,15 +1374,42 @@ fn serialize_inlines_with_context(
                 // Leading guard: text right after a literal autolink must not
                 // extend its URL on reparse. When it would, its first char is
                 // written in the first form the URL scan stops at.
-                if let Some(original) = autolink_before {
+                if let Some((original, tail)) = autolink_before {
                     let following = inlines.get(index + 1).map_or(String::new(), plain_spelling);
-                    if !text_keeps_literal_autolink(original, &rendered, &following) {
+                    let keeps = |rendered: &str| {
+                        text_keeps_literal_autolink(
+                            original,
+                            &format!("{tail}{rendered}"),
+                            &following,
+                        )
+                    };
+                    if !keeps(&rendered) {
                         for (lead, rest) in leading_char_encodings(&node.value) {
                             let candidate = render(&lead, rest);
-                            if text_keeps_literal_autolink(original, &candidate, &following) {
+                            if keeps(&candidate) {
                                 rendered = candidate;
                                 break;
                             }
+                        }
+                    }
+                }
+                // A scheme char ending the text would join a scheme-less
+                // literal autolink after it (`://x` under the relaxed dialect).
+                if inlines
+                    .get(index + 1)
+                    .and_then(literal_autolink_original)
+                    .is_some_and(|original| original.starts_with("://"))
+                {
+                    if let Some(last) = rendered.chars().next_back().filter(|char| {
+                        char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-')
+                    }) {
+                        if !ends_with_unescaped(&rendered, last) || last.is_ascii_alphanumeric() {
+                            if last.is_ascii_alphanumeric() {
+                                rendered.pop();
+                                rendered.push_str(&alloc::format!("&#x{:X};", last as u32));
+                            }
+                        } else {
+                            rendered.insert(rendered.len() - 1, '\\');
                         }
                     }
                 }
@@ -1317,11 +1467,23 @@ fn serialize_inlines_with_context(
                         inlines.get(index + 1),
                         Some(Inline::Text(next)) if next.value.chars().next().is_some_and(char::is_alphanumeric)
                     );
+                let innermost = !node
+                    .children
+                    .iter()
+                    .any(|child| matches!(child, Inline::Strong(_) | Inline::Emphasis(_)));
                 let prefer_underscore = underscore_flanks
-                    && ((context.avoid_star_edges && !touches_underscore)
-                        || abuts_star
-                        || children.starts_with('*')
-                        || children.ends_with('*'));
+                    && match context.run_style {
+                        RunStyle::Plain | RunStyle::StrongUnderscore => {
+                            (context.avoid_star_edges && !touches_underscore)
+                                || abuts_star
+                                || children.starts_with('*')
+                                || children.ends_with('*')
+                        }
+                        RunStyle::AllStar => abuts_star,
+                        RunStyle::InnerUnderscore => {
+                            abuts_star || (innermost && !touches_underscore)
+                        }
+                    };
                 let delimiter = if prefer_underscore { '_' } else { '*' };
                 let children = if delimiter == '*' {
                     serialize_inlines_with_context(
@@ -1348,7 +1510,9 @@ fn serialize_inlines_with_context(
                 // or following runs stay `**`: they split as written, and
                 // `__` reparses as `Underline` when that construct is enabled,
                 // which the serializer has no signal for.
-                let after_star = ends_with_unescaped(&output, '*');
+                let after_star = ends_with_unescaped(&output, '*')
+                    || (context.run_style == RunStyle::StrongUnderscore
+                        && (children.starts_with('*') || children.ends_with('*')));
                 let underscore_fits = !children.starts_with('_')
                     && !children.ends_with('_')
                     && !matches!(
