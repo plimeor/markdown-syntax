@@ -433,3 +433,17 @@ fn a_footnote_label_holds_no_unescaped_bracket() {
     let debug = format!("{:?}", options.parse("[^a\\[b]").document.children);
     assert!(debug.contains("FootnoteReference"), "{debug}");
 }
+
+#[test]
+fn an_angle_autolink_holds_whitespace_other_than_a_space() {
+    let document = SyntaxOptions::commonmark()
+        .parse("<http://a\u{a0}b>")
+        .document;
+    let debug = format!("{:?}", document.children);
+    assert!(
+        debug.contains("destination: \"http://a\\u{a0}b\""),
+        "{debug}"
+    );
+    assert!(document.validate().is_empty());
+    assert_eq!(document.to_markdown().unwrap(), "<http://a\u{a0}b>\n");
+}

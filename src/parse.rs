@@ -9207,7 +9207,7 @@ fn is_uri_autolink(input: &str) -> bool {
     input[colon + 1..]
         .chars()
         .map(source_char)
-        .all(|char| !matches!(char, '<' | '>') && !char.is_control() && !char.is_whitespace())
+        .all(|char| !matches!(char, '<' | '>' | ' ') && !char.is_ascii_control())
 }
 
 fn is_email_autolink(input: &str) -> bool {

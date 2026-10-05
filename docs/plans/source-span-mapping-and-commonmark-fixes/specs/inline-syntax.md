@@ -64,3 +64,12 @@ space; any other whitespace char is matched as written.
 #### Scenario: No-break space in a label
 - **WHEN** `"[a\u{a0}b]\n\n[a b]: /u"` is parsed
 - **THEN** the paragraph holds no `LinkReference`
+
+### Requirement: Angle-bracket autolink URI
+The parser SHALL read `<scheme:rest>` as an autolink when the scheme is valid
+and the rest holds no space, ASCII control char, `<`, or `>`; any other
+whitespace char is part of the URI.
+
+#### Scenario: No-break space in an angle-bracket autolink
+- **WHEN** `"<http://a\u{a0}b>"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds an `Autolink` to `http://a\u{a0}b`
