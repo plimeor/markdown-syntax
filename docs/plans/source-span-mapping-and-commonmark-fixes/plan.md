@@ -92,6 +92,10 @@ span, an inline link, or a link reference definition.
   paragraph or setext heading after a definition; a line that would open
   description details; frontmatter ending in an empty line; and a literal `~`
   beside an emphasis run, which stays literal unless it could pair.
+- A tab in the indentation after a top-level block quote's marker and space,
+  or after a top-level list item's content indent, spans the columns it
+  spans in the source line, up to the four columns that decide indentation;
+  a line inside a fence or HTML block keeps its tabs.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
   Windows filename that `cargo package` warns about.
 
@@ -226,6 +230,11 @@ Specs:
   (`a*~ **&*`); and backticks or brackets inside a wiki link or footnote
   label (`[^`]``). Each needs the dialect or a reparse check in the
   serializer, which this plan does not add.
+- [Tabs inside nested containers] → A nested container reads its lines from
+  column 0 of the derived text, so a tab after a nested marker still spans
+  the columns of that position rather than the source's (282 of the 289
+  mismatches left in the block comparison). Fixing it needs each line to
+  carry its source column through every indentation check.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -313,3 +322,7 @@ Specs:
 - [x] 10.2 Skip type-7 HTML blocks right after a definition; reject table header rows indented four columns or more; drop directive attributes whose names do not validate; and skip HTML blocks of types 1–5 when looking for an unclosed fence in a closed container; verified by the tests, by conformance staying at 2233 of 2236, and by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree with no input newly mismatching.
 - [x] 10.3 Write the serializer cases above, regenerating the `commonmark_character_escapes` and `math_edges` canonical outputs (a final `~` stays literal; a `$` that a later line's `$` could close is escaped) and updating two serializer regression tests whose expected output changed for the better (a thematic-break item keeps its marker; dollar math in a table cell keeps its kind); verified by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 125–168 failures to 20–27, all in the classes listed under Risks.
 - [x] 10.4 Keep the added checks off the common path: a byte prefilter before the continuation-line and referenced-char scans, a lookup for delimiter chars, sibling char sets built only for runs that can need them, a cell pipe prefilter, and preallocated text and fence buffers; verified by the serializer's instruction count on a 400 KB document of the fixtures falling from 179M to 138M (114M at 0.3.0), parsing at 10.7% more instructions than 0.3.0 (the source maps), and linear growth of serialization over emphasis-, line-, quote-, and cell-heavy inputs up to 80,000 repetitions.
+
+### 11. Top-level tab columns
+- [x] 11.1 Add a test for "Tab after a top-level block quote marker", with guards for a list item's continuation, a tab past an indented code block's indentation, and a tab inside a fence; verified by the quote case failing on the group-10 code.
+- [x] 11.2 Expand the leading tabs of a top-level block quote's or list item's content line at their source columns, up to four columns and not inside an open fence or HTML block; verified by conformance staying at 2233 of 2236, by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree going from 751 mismatches to 289 with none newly mismatching, and by fourteen hand-written tab layouts (tab-indented code in lists and quotes, tab-separated markers, nested tab lists) all matching commonmark.js.

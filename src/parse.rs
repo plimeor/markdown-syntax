@@ -1284,6 +1284,16 @@ fn parse_block_quote(
             if rest.starts_with(' ') {
                 from += 1;
                 rest = &rest[1..];
+                if depth == 0 {
+                    if let Cow::Owned(expanded) =
+                        expand_leading_whitespace(rest, leading_indent_columns(raw) + 2)
+                    {
+                        if !continues_verbatim(open_block, &expanded) {
+                            quote_rest_owned = expanded;
+                            rest = &quote_rest_owned;
+                        }
+                    }
+                }
             } else if rest.starts_with('\t') {
                 let marker_end_column = leading_indent_columns(raw) + 1;
                 let (stripped, split) =
@@ -1625,6 +1635,17 @@ fn parse_list(
                 marker.content_indent,
                 first_marker.indent,
             );
+            let stripped = match align_top_level_tabs(stripped, lines[cursor].text, from, depth) {
+                Cow::Owned(expanded) if continues_verbatim(open_block, &expanded) => {
+                    strip_list_continuation(
+                        lines[cursor].text,
+                        marker.content_indent,
+                        first_marker.indent,
+                    )
+                    .0
+                }
+                aligned => aligned,
+            };
             let starts_table = last_content_line.as_deref().is_some_and(|previous| {
                 table_can_start_source(
                     previous,
@@ -8057,6 +8078,66 @@ fn strip_leading_indent_columns_from(
 /// `strip_leading_indent_columns_from`, also returning the byte of `input` the
 /// result starts from: a borrowed result is `input` from there on, and an owned
 /// one expands the whitespace at the start of it (beginning with a split tab).
+/// `input`, which starts at `start_column`, with each tab of its leading
+/// whitespace that starts within its first four columns written as the spaces
+/// it spans there. Those columns decide indentation; a tab past them is
+/// content, such as an indented code block's, and stays a tab.
+fn expand_leading_whitespace(input: &str, start_column: usize) -> Cow<'_, str> {
+    let leading = input.len() - trim_ascii_start(input).len();
+    if !input[..leading].contains('\t') {
+        return Cow::Borrowed(input);
+    }
+    let mut column = start_column;
+    let mut expanded = String::with_capacity(input.len() + 3 * leading);
+    let mut kept = leading;
+    for (index, byte) in input[..leading].bytes().enumerate() {
+        if column - start_column >= 4 {
+            kept = index;
+            break;
+        }
+        let width = if byte == b'\t' { 4 - column % 4 } else { 1 };
+        expanded.extend(core::iter::repeat_n(' ', width));
+        column += width;
+    }
+    expanded.push_str(&input[kept..]);
+    Cow::Owned(expanded)
+}
+
+/// A container's content line read from byte `from` of `raw`, with the tabs
+/// of its leading whitespace written as the spaces they span at their column
+/// in `raw`. Only a top-level container (`depth` 0) reads lines whose first
+/// column is the source line's; a nested one reads its lines as they are.
+fn align_top_level_tabs<'a>(
+    derived: Cow<'a, str>,
+    raw: &str,
+    from: usize,
+    depth: usize,
+) -> Cow<'a, str> {
+    match derived {
+        Cow::Borrowed(text) if depth == 0 && text.starts_with([' ', '\t']) => {
+            expand_leading_whitespace(text, columns_of(&raw[..from]))
+        }
+        derived => derived,
+    }
+}
+
+/// Whether the content line `line` continues, without ending, a block opened
+/// directly in the container, whose lines keep their tabs as written.
+fn continues_verbatim(open_block: Option<OpenBlock>, line: &str) -> bool {
+    open_block.is_some_and(|block| block.depth == 0 && !block.end.ends_with(line))
+}
+
+/// The columns `input` spans from column 0, with tab stops every four.
+fn columns_of(input: &str) -> usize {
+    input.chars().fold(0, |column, char| {
+        if char == '\t' {
+            column + 4 - column % 4
+        } else {
+            column + 1
+        }
+    })
+}
+
 fn strip_leading_indent_columns_split(
     input: &str,
     max_columns: usize,

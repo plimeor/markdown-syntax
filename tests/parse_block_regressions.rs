@@ -1247,6 +1247,47 @@ mod paragraph_interruption {
     }
 
     #[test]
+    fn a_tab_after_a_top_level_containers_marker_spans_its_source_columns() {
+        // `> ` ends at column 2, so the tab reaches column 4: two columns, a
+        // paragraph's indentation, not an indented code block.
+        let quote = blocks("> \tcode");
+        let [Block::BlockQuote(inner)] = quote.as_slice() else {
+            panic!("expected one quote, got {quote:?}");
+        };
+        assert!(
+            matches!(inner.children.as_slice(), [Block::Paragraph(_)]),
+            "{inner:?}"
+        );
+        let list = blocks("- item\n\n  \tcode");
+        let [Block::List(list)] = list.as_slice() else {
+            panic!("expected one list, got {list:?}");
+        };
+        assert!(
+            matches!(
+                list.children[0].children.as_slice(),
+                [Block::Paragraph(_), Block::Paragraph(_)]
+            ),
+            "{list:?}"
+        );
+        // A tab past the indentation an indented code block takes stays a
+        // tab of its value, and so does one inside a fence.
+        let code = blocks("- a\n\n      \tb");
+        let [Block::List(code)] = code.as_slice() else {
+            panic!("expected one list, got {code:?}");
+        };
+        assert!(
+            matches!(code.children[0].children.as_slice(),
+                [Block::Paragraph(_), Block::CodeBlock(CodeBlock { value, .. })] if value == "\tb\n"),
+            "{code:?}"
+        );
+        let fence = blocks("> ```\n> \tb\n> ```");
+        assert!(
+            format!("{fence:?}").contains("value: \"\\tb\\n\""),
+            "{fence:?}"
+        );
+    }
+
+    #[test]
     fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
         for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
             let blocks = blocks(source);

@@ -72,6 +72,10 @@ specification defines them.
 - **WHEN** `"a\n    |b\n----"` is parsed with `parse`
 - **THEN** the document holds one setext `Heading`
 
+#### Scenario: Tab after a top-level block quote marker
+- **WHEN** `"> \tcode"` is parsed with the CommonMark preset
+- **THEN** the document holds a `BlockQuote` holding a `Paragraph`, since the tab spans columns 2 to 4
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
