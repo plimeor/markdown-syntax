@@ -76,6 +76,10 @@ specification defines them.
 - **WHEN** `"> \tcode"` is parsed with the CommonMark preset
 - **THEN** the document holds a `BlockQuote` holding a `Paragraph`, since the tab spans columns 2 to 4
 
+#### Scenario: Quoted paragraph opening with backticks
+- **WHEN** `"> ``a\nb"` is parsed with the CommonMark preset
+- **THEN** the document holds one `BlockQuote` whose paragraph ends with `Text("b")`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML

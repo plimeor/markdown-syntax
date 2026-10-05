@@ -1136,6 +1136,22 @@ mod container_laziness {
     }
 
     #[test]
+    fn a_quoted_paragraph_opening_with_backticks_takes_lazy_lines() {
+        // The fence-like rule ends a quote at a lazy line, not at a quoted one.
+        let blocks = blocks("> ``a\nb");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [paragraph] = quote_children(quote) else {
+            panic!("expected one paragraph, got {quote:?}");
+        };
+        assert_eq!(
+            paragraph_texts(paragraph).last().map(String::as_str),
+            Some("b")
+        );
+    }
+
+    #[test]
     fn a_closed_fence_leaves_the_next_paragraph_open_to_lazy_lines() {
         let blocks = blocks("> ```\n> x\n> ```\n> y\na");
         let [quote] = blocks.as_slice() else {

@@ -1114,7 +1114,9 @@ fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind 
             || is_atx_heading_line(trimmed)
         {
             return ContentLineKind::Closed;
-        } else if lazy_line_starts_block(trimmed, options) {
+        } else if lazy_line_opens_block(trimmed, options) {
+            // A line read with its markers opens what it opens; the GH-19
+            // fence-like rule is for lazy lines only.
             return match OpenBlockEnd::of_opening_line(trimmed, options) {
                 Some(end) => ContentLineKind::Open(OpenBlock {
                     depth,

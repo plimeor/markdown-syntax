@@ -96,6 +96,8 @@ span, an inline link, or a link reference definition.
   or after a top-level list item's content indent, spans the columns it
   spans in the source line, up to the four columns that decide indentation;
   a line inside a fence or HTML block keeps its tabs.
+- A quoted paragraph that opens with backticks takes lazy lines; the GH-19
+  rule applies to the lazy line, not to the quoted line before it.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
   Windows filename that `cargo package` warns about.
 
@@ -326,3 +328,7 @@ Specs:
 ### 11. Top-level tab columns
 - [x] 11.1 Add a test for "Tab after a top-level block quote marker", with guards for a list item's continuation, a tab past an indented code block's indentation, and a tab inside a fence; verified by the quote case failing on the group-10 code.
 - [x] 11.2 Expand the leading tabs of a top-level block quote's or list item's content line at their source columns, up to four columns and not inside an open fence or HTML block; verified by conformance staying at 2233 of 2236, by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree going from 751 mismatches to 289 with none newly mismatching, and by fourteen hand-written tab layouts (tab-indented code in lists and quotes, tab-separated markers, nested tab lists) all matching commonmark.js.
+
+### 12. Inline comparison
+- [x] 12.1 Add a test for "Quoted paragraph opening with backticks"; verified by it failing on the group-11 code.
+- [x] 12.2 Read a quoted content line's block without the lazy-line GH-19 rule; verified by a comparison with commonmark.js and micromark, with raw HTML allowed, on 30,000 generated inline inputs (links, references, images, code spans, entities, escapes, autolinks, emphasis, raw HTML) where they agree on 29,971: 5 mismatches before and 3 after, one the GH-19 rule the conformance oracle (markdown-rs) keeps and two the link-text autolink demotion the 0.3.0 delimiter stack chose; and by the block comparison staying with no input newly mismatching.
