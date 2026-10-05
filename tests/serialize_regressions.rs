@@ -1914,4 +1914,22 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn spaces_and_text_beside_a_literal_autolink_keep_its_end() {
+        for source in [
+            "^://y ^",
+            "://~ #~",
+            "_&#x20;://_",
+            "||://y\t||",
+            "==&#x20;://<==",
+            "^http://x ^",
+            "*&#x20;http://x*",
+            "://\\~||>||",
+            "://\\)||#||",
+            "[foo]:`\n[foo]^://y\t^",
+        ] {
+            assert_round_trips(source);
+        }
+    }
 }

@@ -127,6 +127,14 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `"==&#x20; \n-=="` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Mark`, since a hard break that opens a span is written `&#x20; ` before its line ending
 
+#### Scenario: Space between a literal autolink and a span delimiter
+- **WHEN** the documents parsed from `"^://y ^"`, `"_&#x20;://_"`, and `"*&#x20;http://x*"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same span and `Autolink`, since a paragraph that does not read back also tries writing the spaces at its line edges raw, and writing a space before a literal autolink as a reference
+
+#### Scenario: Text between a literal autolink and a span
+- **WHEN** the document parsed from `"://\\~||>||"` with `parse` is serialized and reparsed
+- **THEN** the reparsed paragraph holds the same `Autolink`, `Text("~")`, and `Spoiler`, since a paragraph that does not read back also tries escaping the first char of a text after a literal autolink
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

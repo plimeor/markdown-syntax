@@ -425,22 +425,33 @@ fn serialize_paragraph(
     node: &Paragraph,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let render = |run_style: RunStyle, raw_edge: Option<char>| -> Result<String, SerializeError> {
+    let render = |run_style: RunStyle,
+                  raw_edge: Option<char>,
+                  autolink_edges: AutolinkEdges|
+     -> Result<String, SerializeError> {
         let context = InlineSerializeContext {
             run_style,
             raw_edge,
+            autolink_edges,
             ..InlineSerializeContext::block_content()
         };
         let mut output = serialize_inlines_with_context(&node.children, options, context)?;
         keep_first_line_off_html_block(&node.children, &mut output);
         Ok(indent_block_starting_continuations(output))
     };
-    let output = render(RunStyle::Plain, None)?;
+    let output = render(RunStyle::Plain, None, AutolinkEdges::Plain)?;
+    let mut expected = None;
+    let mut reads_back = |markdown: &str| {
+        let expected = expected.get_or_insert_with(|| without_spans(&node.children));
+        reparses_to(markdown, &node.children, expected)
+    };
     // A strong or emphasis run abutting another splits on reparse only as its
     // flanking allows, which the rest of the paragraph decides; one beside a
     // `~` opens or closes only as the GFM bonus for a raw `~` allows, and one
-    // beside a text `*` may take that `*` into its run. When the plain
-    // rendering does not read back, the first other style that does is taken.
+    // beside a text `*` may take that `*` into its run. A literal autolink's
+    // URL scan runs on through a space written as a reference, which a span
+    // delimiter beside it may need. When the plain rendering does not read
+    // back, the first other style that does is taken.
     let mut runs = RunNeighbours::default();
     runs.read(&node.children, 0);
     let RunNeighbours {
@@ -448,7 +459,11 @@ fn serialize_paragraph(
         edge_tildes,
         edge_stars,
     } = runs;
-    if (abut_runs || edge_tildes || edge_stars) && !reparses_to(&output, &node.children) {
+    let autolink_spaces = autolink_meets_space_in_span(&node.children, false);
+    let autolink_leads = autolink_text_before_inline(&node.children);
+    if (abut_runs || edge_tildes || edge_stars || autolink_spaces || autolink_leads)
+        && !reads_back(&output)
+    {
         let styles = [
             RunStyle::Plain,
             RunStyle::StrongUnderscore,
@@ -457,20 +472,122 @@ fn serialize_paragraph(
             RunStyle::OuterUnderscore,
         ];
         let raw_edges = [None, edge_tildes.then_some('~'), edge_stars.then_some('*')];
-        let alternates = raw_edges
+        let run_alternates = raw_edges
             .into_iter()
             .enumerate()
             .filter(|&(at, raw_edge)| at == 0 || raw_edge.is_some())
-            .flat_map(|(_, raw_edge)| styles.map(|style| (style, raw_edge)))
-            .skip(1);
-        for (style, raw_edge) in alternates {
-            let alternate = render(style, raw_edge)?;
-            if reparses_to(&alternate, &node.children) {
+            .flat_map(|(_, raw_edge)| styles.map(|style| (style, raw_edge, AutolinkEdges::Plain)))
+            .skip(1)
+            .filter(|_| abut_runs || edge_tildes || edge_stars);
+        let autolink_alternates = [
+            (AutolinkEdges::RawEdges, autolink_spaces),
+            (AutolinkEdges::EncodedBefore, autolink_spaces),
+            (AutolinkEdges::EncodedLead, autolink_leads),
+        ]
+        .into_iter()
+        .filter(|&(_, applies)| applies)
+        .map(|(edges, _)| (RunStyle::Plain, None, edges));
+        for (style, raw_edge, spaces) in run_alternates.chain(autolink_alternates) {
+            let alternate = render(style, raw_edge, spaces)?;
+            if reads_back(&alternate) {
                 return Ok(alternate);
             }
         }
     }
     Ok(output)
+}
+
+/// How a paragraph writes the text around a literal autolink (see
+/// `serialize_paragraph`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum AutolinkEdges {
+    /// A space or tab at a line's edge is a reference, one before a literal
+    /// autolink is raw, and a text after one opens as written unless the URL
+    /// scan would read on into it.
+    #[default]
+    Plain,
+    /// Every space or tab at a line's edge is raw.
+    RawEdges,
+    /// A space or tab before a literal autolink is written as at any edge.
+    EncodedBefore,
+    /// A text after a literal autolink and before another inline opens with
+    /// its first char escaped or written as a reference.
+    EncodedLead,
+}
+
+/// Whether a literal autolink among `inlines`, within spans, is followed by a
+/// text without whitespace and another inline after it, whose rendering the
+/// URL scan may read on into through the text.
+fn autolink_text_before_inline(inlines: &[Inline]) -> bool {
+    // Whitespace in the text ends the URL whatever follows it.
+    inlines.windows(3).any(|window| {
+        is_gfm_literal_autolink(&window[0])
+            && matches!(&window[1], Inline::Text(text)
+                if !text.value.contains(char::is_whitespace))
+    }) || inlines
+        .iter()
+        .any(|inline| span_children(inline).is_some_and(autolink_text_before_inline))
+}
+
+/// The content of `inline` when it is a span such as an emphasis.
+fn span_children(inline: &Inline) -> Option<&[Inline]> {
+    Some(match inline {
+        Inline::Emphasis(node) => &node.children,
+        Inline::Strong(node) => &node.children,
+        Inline::Underline(node) => &node.children,
+        Inline::Delete(node) => &node.children,
+        Inline::Insert(node) => &node.children,
+        Inline::Mark(node) => &node.children,
+        Inline::Subscript(node) => &node.children,
+        Inline::Superscript(node) => &node.children,
+        Inline::Spoiler(node) => &node.children,
+        _ => return None,
+    })
+}
+
+/// Whether `inline`, or the first (`at_start`) or last of its span content,
+/// is a text meeting that side with a space or tab; `delimited` when a span
+/// delimiter stands between.
+fn meets_space(inline: Option<&Inline>, at_start: bool, delimited: bool) -> bool {
+    match inline {
+        Some(Inline::Text(text)) => {
+            delimited
+                && if at_start {
+                    text.value.starts_with([' ', '\t'])
+                } else {
+                    text.value.ends_with([' ', '\t'])
+                }
+        }
+        Some(inline) => span_children(inline).is_some_and(|children| {
+            meets_space(
+                if at_start {
+                    children.first()
+                } else {
+                    children.last()
+                },
+                at_start,
+                true,
+            )
+        }),
+        None => false,
+    }
+}
+
+/// Whether a literal autolink among `inlines`, within spans, meets a space or
+/// tab across a span delimiter or inside a span, which the delimiter may need
+/// written as a reference; `in_span` when `inlines` are a span's content.
+fn autolink_meets_space_in_span(inlines: &[Inline], in_span: bool) -> bool {
+    inlines.iter().enumerate().any(|(index, inline)| {
+        if is_gfm_literal_autolink(inline) {
+            return meets_space(inlines.get(index + 1), true, in_span)
+                || meets_space(
+                    index.checked_sub(1).map(|previous| &inlines[previous]),
+                    false,
+                    in_span,
+                );
+        }
+        span_children(inline).is_some_and(|children| autolink_meets_space_in_span(children, true))
+    })
 }
 
 /// What sits beside the strong and emphasis runs of a paragraph, at any
@@ -566,34 +683,104 @@ fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> St
 }
 
 /// Whether `markdown` parses, under the default dialect, to one paragraph
-/// holding `inlines` (spans aside).
-fn reparses_to(markdown: &str, inlines: &[Inline]) -> bool {
+/// holding `inlines`, which `expected` holds without spans.
+fn reparses_to(markdown: &str, inlines: &[Inline], expected: &[Inline]) -> bool {
+    // The references in the paragraph resolve against definitions elsewhere
+    // in the document, which a definition per label stands in for.
+    let mut labels = Vec::new();
+    reference_labels(inlines, &mut labels);
+    let mut source = String::from(markdown);
+    for label in labels {
+        source.push_str("\n\n[");
+        source.push_str(label);
+        source.push_str("]: u");
+    }
     let document = crate::options::SyntaxOptions::default()
-        .parse(markdown)
+        .parse(&source)
         .document;
     match document.children.as_slice() {
-        [Block::Paragraph(paragraph)] => {
-            debug_without_spans(&paragraph.children) == debug_without_spans(inlines)
+        [Block::Paragraph(paragraph), definitions @ ..]
+            if definitions
+                .iter()
+                .all(|block| matches!(block, Block::Definition(_))) =>
+        {
+            let mut reparsed = paragraph.children.clone();
+            clear_spans(&mut reparsed);
+            reparsed == expected
         }
         _ => false,
     }
 }
 
-/// The debug form of `inlines` with every span written as `None`.
-fn debug_without_spans(inlines: &[Inline]) -> String {
-    let debug = format!("{inlines:?}");
-    let mut out = String::with_capacity(debug.len());
-    let mut rest = debug.as_str();
-    while let Some(start) = rest.find("Some(Span { ") {
-        out.push_str(&rest[..start]);
-        out.push_str("None");
-        let end = rest[start..]
-            .find("})")
-            .map_or(rest.len(), |end| start + end + 2);
-        rest = &rest[end..];
+/// The labels of the link and image references in `inlines`, at any depth.
+fn reference_labels<'a>(inlines: &'a [Inline], labels: &mut Vec<&'a str>) {
+    for inline in inlines {
+        let children = match inline {
+            Inline::LinkReference(node) => {
+                labels.push(&node.label);
+                &node.children
+            }
+            Inline::ImageReference(node) => {
+                labels.push(&node.label);
+                &node.alt
+            }
+            Inline::Link(node) => &node.children,
+            Inline::Image(node) => &node.alt,
+            Inline::InlineFootnote(node) => &node.children,
+            inline => match span_children(inline) {
+                Some(children) => children,
+                None => continue,
+            },
+        };
+        reference_labels(children, labels);
     }
-    out.push_str(rest);
-    out
+}
+
+/// `inlines` with every span cleared, which compare by their content.
+fn without_spans(inlines: &[Inline]) -> Vec<Inline> {
+    let mut inlines = inlines.to_vec();
+    clear_spans(&mut inlines);
+    inlines
+}
+
+fn clear_spans(inlines: &mut [Inline]) {
+    for inline in inlines {
+        let (meta, children) = match inline {
+            Inline::Text(node) => (&mut node.meta, None),
+            Inline::Escape(node) => (&mut node.meta, None),
+            Inline::SoftBreak(node) => (&mut node.meta, None),
+            Inline::LineBreak(node) => (&mut node.meta, None),
+            Inline::CharacterReference(node) => (&mut node.meta, None),
+            Inline::Emphasis(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Strong(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Underline(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Delete(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Insert(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Mark(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Subscript(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Superscript(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Spoiler(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::InlineFootnote(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Shortcode(node) => (&mut node.meta, None),
+            Inline::Code(node) => (&mut node.meta, None),
+            Inline::Link(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::Image(node) => (&mut node.meta, Some(&mut node.alt)),
+            Inline::LinkReference(node) => (&mut node.meta, Some(&mut node.children)),
+            Inline::ImageReference(node) => (&mut node.meta, Some(&mut node.alt)),
+            Inline::Autolink(node) => (&mut node.meta, None),
+            Inline::Html(node) => (&mut node.meta, None),
+            Inline::Math(node) => (&mut node.meta, None),
+            Inline::FootnoteReference(node) => (&mut node.meta, None),
+            Inline::WikiLink(node) => (&mut node.meta, None),
+            Inline::MdxExpression(node) => (&mut node.meta, None),
+            Inline::MdxJsx(node) => (&mut node.meta, None),
+            Inline::TextDirective(node) => (&mut node.meta, Some(&mut node.label)),
+        };
+        meta.span = None;
+        if let Some(children) = children {
+            clear_spans(children);
+        }
+    }
 }
 
 /// Keeps the first line of inline content that would start an HTML block
@@ -1048,6 +1235,8 @@ struct InlineSerializeContext {
     /// The char whose run opening or closing a text beside a strong or
     /// emphasis delimiter is written raw (see `serialize_paragraph`).
     raw_edge: Option<char>,
+    /// How spaces and tabs around a literal autolink are written.
+    autolink_edges: AutolinkEdges,
 }
 
 /// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
@@ -1174,6 +1363,7 @@ impl InlineSerializeContext {
             run_style: RunStyle::Plain,
             opens_span: false,
             raw_edge: None,
+            autolink_edges: AutolinkEdges::Plain,
         }
     }
 
@@ -1207,6 +1397,7 @@ impl InlineSerializeContext {
             run_style: RunStyle::Plain,
             opens_span: false,
             raw_edge: None,
+            autolink_edges: AutolinkEdges::Plain,
         }
     }
 
@@ -1478,8 +1669,10 @@ fn serialize_inlines_with_context(
                             .then(|| (original, &segment[segment.len() - tail..]))
                     })
                 });
-                let before_literal_autolink =
-                    inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
+                let before_literal_autolink = context.autolink_edges
+                    != AutolinkEdges::EncodedBefore
+                    && inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
+                let raw_edges = context.autolink_edges == AutolinkEdges::RawEdges;
                 let at_line_start = output_line.len(&output) == 0;
                 let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
                 let at_line_end = text_is_at_line_end(inlines, index);
@@ -1509,8 +1702,11 @@ fn serialize_inlines_with_context(
                     rendered.push_str(lead);
                     rendered.push_str(&escape_text_with_context(
                         escape_body,
-                        lead.is_empty() && trailing_ws.len() != body.len() && at_line_start,
-                        trailing_ws.is_empty() && at_line_end,
+                        !raw_edges
+                            && lead.is_empty()
+                            && trailing_ws.len() != body.len()
+                            && at_line_start,
+                        !raw_edges && trailing_ws.is_empty() && at_line_end,
                         text_context,
                     ));
                     rendered.push_str(trailing_ws);
@@ -1549,7 +1745,9 @@ fn serialize_inlines_with_context(
                             &following,
                         )
                     };
-                    if !keeps(&rendered) {
+                    let encode_lead = context.autolink_edges == AutolinkEdges::EncodedLead
+                        && index + 1 < inlines.len();
+                    if encode_lead || !keeps(&rendered) {
                         for (lead, rest) in leading_char_encodings(&node.value) {
                             let candidate = render(&lead, rest);
                             if keeps(&candidate) {

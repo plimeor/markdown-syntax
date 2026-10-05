@@ -230,10 +230,10 @@ Specs:
   context] → A paragraph whose `Strong` and `Emphasis` runs abut is
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
-  to round-trip where a relaxed `://` literal autolink's URL scan reads into
-  a following span's content (`://*&mp;***`) or a table row, which needs the
-  parse's own autolink scan over the written spans in the serializer, which
-  this plan does not add.
+  to round-trip where a relaxed `://` literal autolink is followed by a span
+  whose content opens with a char that only a named character reference
+  stops the URL scan before (`://~&mp;~`), which needs a reverse named
+  reference table in the serializer, which this plan does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -351,3 +351,7 @@ Specs:
 - [x] 14.3 Read only spaces and tabs as whitespace for blank lines, indentation, thematic breaks, setext underlines, fence info and closing lines, ATX content, HTML block start lines, footnote and alert lines, definition titles, table rows and cells, and the final whitespace of a paragraph; collapse only spaces, tabs, and line endings in label matching; and allow any other whitespace in a footnote label; verified by the tests, by 388 CommonMark and 54 GFM probes of up to six whitespace chars across block constructs, where all 356 structures commonmark.js, markdown-it, and micromark agree on match and the 32 disputed ones match micromark (54 of 54 GFM match micromark with its GFM extensions), by the 155,000 corpus inputs staying byte-identical, and by conformance staying at 2233 of 2236.
 - [x] 14.4 Write a line tabulation, form feed, or next-line char in text as itself, a reference or footnote label's control chars as its source, and a hard break opening a span as `&#x20; `; validate a definition's identifier as blank only when it holds spaces, tabs, and line endings alone; count a wiki link's text and a `$` in code or raw HTML among the delimiters an inline writes; escape a `:` ending a text before a span whose delimiters could name a shortcode; and let a strong's content end with an escaped `_` under `__`; verified by the tests and by the round-trip fuzz over 200,000 generated inputs on eight seeds failing on 0–7 inputs, all a relaxed `://` literal autolink beside a span.
 - [x] 14.5 Accept any char but a space, an ASCII control char, `<`, and `>` in an angle-bracket autolink's URI, as the parser and as validation; verified by `an_angle_autolink_holds_whitespace_other_than_a_space` (failing before) and by 108 inline probes of four whitespace chars, where all 84 results commonmark.js and micromark agree on match and the 24 disputed ones match micromark.
+
+### 15. Literal autolink neighbours and the reparse check
+- [x] 15.1 Add tests for "Space between a literal autolink and a span delimiter" and "Text between a literal autolink and a span"; verified by `spaces_and_text_beside_a_literal_autolink_keep_its_end` failing on the group-14 code.
+- [x] 15.2 Add raw line-edge spaces, a referenced space before a literal autolink, and an escaped first char after one to the choices a paragraph that does not read back tries, gated on a literal autolink meeting a space at a span edge or followed by a whitespace-free text and another inline; give the reparse check a stand-in definition for each reference label; and compare span-free trees instead of their debug text; verified by the tests and by the round-trip fuzz over 200,000 generated inputs on eight seeds failing on 0–1 inputs, each a relaxed `://` literal autolink followed by a span whose content opens with a char only a named reference such as `&mp;` writes, and by serialization of the 400 KB fixture document at 50M instructions against 46M at the group-12 end.
