@@ -1431,7 +1431,7 @@ fn table_row_spoilers_form_where_the_row_scan_predicts() {
                 let mut diagnostics = Vec::new();
                 let content = text.trim();
                 let map = SourceMap::verbatim(content.len(), 0);
-                let formed = parse_inlines(content, &map, &options, &[], &mut diagnostics)
+                let formed = parse_inlines(content, &map, &options, Some(&[]), &mut diagnostics)
                     .iter()
                     .filter(|inline| matches!(inline, Inline::Spoiler(_)))
                     .count();

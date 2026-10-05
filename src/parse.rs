@@ -234,7 +234,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         start,
         true,
         options,
-        &definitions,
+        Some(&definitions),
         &mut diagnostics,
         0,
     );
@@ -284,7 +284,7 @@ fn advance_columns(column: usize, text: &str) -> usize {
 fn parse_derived_blocks(
     content: &DerivedText,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -297,7 +297,7 @@ fn parse_blocks(
     base_offset: usize,
     allow_frontmatter: bool,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -317,7 +317,7 @@ fn parse_blocks_from_lines(
     lines: &[Line<'_>],
     allow_frontmatter: bool,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -585,9 +585,15 @@ impl<'a> LineSegments<'a> {
     }
 }
 
+/// The identifiers of the definitions in `input`, read from its block
+/// structure alone: `None` for the definitions leaves inline content unparsed.
 fn collect_definitions(input: &str, base_offset: usize, options: &SyntaxOptions) -> Vec<String> {
+    // A definition's label is followed right away by its colon.
+    if !input.contains("]:") {
+        return Vec::new();
+    }
     let mut diagnostics = Vec::new();
-    let blocks = parse_blocks(input, base_offset, true, options, &[], &mut diagnostics, 0);
+    let blocks = parse_blocks(input, base_offset, true, options, None, &mut diagnostics, 0);
     let mut definitions = Vec::new();
     collect_definition_refs_from_blocks(&blocks, &mut definitions);
     // Sorted and deduplicated so `definition_exists` can binary-search.
@@ -679,7 +685,7 @@ fn parse_container_directive(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -1310,7 +1316,7 @@ fn parse_block_quote(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -1479,7 +1485,7 @@ fn parse_alert_from_block_quote(
     content: &DerivedText,
     span: Span,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<Block> {
@@ -1538,7 +1544,7 @@ fn parse_list(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -1912,7 +1918,7 @@ fn parse_description_list(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -2022,7 +2028,7 @@ fn parse_description_details(
     index: usize,
     marker: DescriptionMarker<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(DescriptionDetails, usize, bool)> {
@@ -2183,7 +2189,7 @@ fn strip_indent_continuation(input: &str) -> Option<&str> {
 fn parse_atx_heading(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<Block> {
     let text = trim_up_to_three_spaces(line.text)?;
     let depth = text
@@ -2388,7 +2394,7 @@ fn parse_footnote_definition(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -2458,7 +2464,7 @@ fn is_footnote_continuation(input: &str) -> bool {
 fn parse_leaf_directive(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     if !options.constructs.directive_leaf {
@@ -2500,7 +2506,7 @@ fn parse_html_container(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
     container_closes: &mut BracketMemo,
@@ -2559,7 +2565,7 @@ fn parse_details_container_children(
     lines: &[Line<'_>],
     leading_summary: Option<Block>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -2603,7 +2609,7 @@ fn parse_summary_container(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     let line = lines[index];
@@ -2622,7 +2628,7 @@ fn parse_summary_container(
 fn parse_details_container_opening_line(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(HtmlTag, Option<Block>)> {
     let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
@@ -2668,7 +2674,7 @@ fn parse_summary_container_source(
     source: &str,
     offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     let (open_end, open_name) = parse_html_tag(source, 0)?;
@@ -3895,7 +3901,7 @@ fn parse_table(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     if !options.constructs.gfm_table || index + 1 >= lines.len() {
@@ -3979,7 +3985,7 @@ fn parse_setext_heading(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<(Block, usize)> {
     if index + 1 >= lines.len() || lines[index].text.trim().is_empty() {
         return None;
@@ -4059,7 +4065,7 @@ fn parse_paragraph(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Block, usize) {
     let mut value = DerivedText::default();
@@ -4355,7 +4361,7 @@ fn close_bracket(
     base_offset: usize,
     close: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
@@ -5297,7 +5303,7 @@ fn match_link_target(
     input: &str,
     label_start: usize,
     close: usize,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<(usize, LinkTarget)> {
     let label = &input[label_start..close];
     let after = close + 1;
@@ -5768,9 +5774,13 @@ fn parse_inlines(
     input: &str,
     map: &SourceMap,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
+    // Definitions are collected from the block structure alone.
+    if definitions.is_none() {
+        return Vec::new();
+    }
     let first_diagnostic = diagnostics.len();
     let mut nodes = parse_inlines_with_context(
         input,
@@ -5810,7 +5820,7 @@ fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -5833,7 +5843,7 @@ fn parse_inline_content(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -6801,7 +6811,7 @@ fn parse_text_directive(
     index: usize,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
@@ -7900,12 +7910,13 @@ pub(crate) fn normalize_label(label: &str) -> String {
         .to_lowercase()
 }
 
-fn definition_exists(definitions: &[String], label: &str) -> bool {
+fn definition_exists(definitions: Option<&[String]>, label: &str) -> bool {
     if label.is_empty() || !reference_label_is_within_limit(label) {
         return false;
     }
 
-    definitions.binary_search(&normalize_label(label)).is_ok()
+    definitions
+        .is_some_and(|definitions| definitions.binary_search(&normalize_label(label)).is_ok())
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
@@ -8434,6 +8445,15 @@ fn leading_trim_bytes(input: &str) -> usize {
 }
 
 fn parse_table_delimiter(input: &str, spoiler: bool) -> Option<Vec<TableAlignment>> {
+    // Every cell trims to colons around dashes, so a row with any other char
+    // is no delimiter row, whatever its cells.
+    if !input.contains('-')
+        || !input
+            .chars()
+            .all(|char| matches!(char, '|' | '-' | ':') || char.is_whitespace())
+    {
+        return None;
+    }
     let cells = split_table_row(input, spoiler);
     if cells.is_empty() {
         return None;
