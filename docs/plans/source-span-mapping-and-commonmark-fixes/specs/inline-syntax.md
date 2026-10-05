@@ -44,3 +44,14 @@ spans, links, and emphasis.
 #### Scenario: CommonMark oracle cases
 - **WHEN** the inline cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
+
+## ADDED Requirements
+
+### Requirement: Footnote labels
+The parser SHALL read `[^label]` as a footnote reference, and `[^label]:` as a
+footnote definition, only when the label is non-empty, holds no whitespace,
+and, as a link label, holds no unescaped `[` or `]`.
+
+#### Scenario: Bracket inside a footnote label
+- **WHEN** `"^*[^[^]]"` and `"[^a[b]"` are parsed with `parse`
+- **THEN** neither paragraph holds a `FootnoteReference`, while `"[^a\\[b]"` holds one

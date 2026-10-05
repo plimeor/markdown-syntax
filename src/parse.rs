@@ -10058,10 +10058,15 @@ fn is_email_domain(input: &str, min_labels: usize) -> bool {
     label_count >= min_labels
 }
 
+/// A footnote label: no whitespace and, as in a link label, no unescaped
+/// bracket.
 fn is_footnote_label(label: &str) -> bool {
     !label.is_empty()
         && reference_label_is_within_limit(label)
         && !label.chars().any(char::is_whitespace)
+        && !label
+            .match_indices(['[', ']'])
+            .any(|(index, _)| !is_escaped_at(label, index))
 }
 
 fn find_footnote_definition_label_end(input: &str) -> Option<usize> {

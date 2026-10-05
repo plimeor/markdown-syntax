@@ -1840,4 +1840,13 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn text_after_a_reference_or_before_a_wikilink_keeps_its_parse() {
+        assert_eq!(assert_round_trips("[^`]``"), "[^`]&#96;&#96;\n");
+        assert_eq!(assert_round_trips("![[$[]]a$>"), "\\![[$\\[]]a$>\n");
+        for source in ["[a`]``\n\n[a`]: x", "[^`]: x\n\n[^`]``", "://`\\`"] {
+            assert_round_trips(source);
+        }
+    }
 }

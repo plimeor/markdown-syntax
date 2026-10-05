@@ -99,6 +99,14 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, and `"**://**&mp;"` with `parse` are serialized and reparsed
 - **THEN** each reparsed paragraph holds the same `Autolink` with the same text around it, since a scheme char before a `://` autolink and the first char of text after one, past any span delimiters, are written in a form the URL scan stops at
 
+#### Scenario: Backtick after a reference's raw label
+- **WHEN** the document parsed from `"[^`]``"` with `parse` is serialized
+- **THEN** `to_markdown()` returns `"[^`]&#96;&#96;\n"`, since an escaped backtick would close a code span that the label's backtick opens
+
+#### Scenario: Bang before a wiki link
+- **WHEN** the document parsed from `"![[$[]]a$>"` with `parse` is serialized
+- **THEN** `to_markdown()` returns `"\\![[$\\[]]a$>\n"`, so the `!` cannot make the wiki link's `[` an image opener
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

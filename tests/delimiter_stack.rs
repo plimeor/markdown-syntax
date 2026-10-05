@@ -421,3 +421,15 @@ fn a_bare_destination_ends_at_a_space_inside_parentheses() {
         "{blocks:?}"
     );
 }
+
+#[test]
+fn a_footnote_label_holds_no_unescaped_bracket() {
+    let options = SyntaxOptions::default();
+    for source in ["^*[^[^]]", "[^a[b]", "[^a[b]: x\n\n[^a[b]"] {
+        let debug = format!("{:?}", options.parse(source).document.children);
+        assert!(!debug.contains("FootnoteReference"), "{source:?}: {debug}");
+        assert!(!debug.contains("FootnoteDefinition"), "{source:?}: {debug}");
+    }
+    let debug = format!("{:?}", options.parse("[^a\\[b]").document.children);
+    assert!(debug.contains("FootnoteReference"), "{debug}");
+}

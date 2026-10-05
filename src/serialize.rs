@@ -1098,7 +1098,7 @@ fn serialize_inlines(
 }
 
 /// Escape a trailing unescaped `!` already in `output` before emitting a
-/// following `[`-starting node (link / reference / footnote), so the pair does
+/// following `[`-starting node (link / reference / footnote / wikilink), so the pair does
 /// not reparse as an image (`![…]`). The within-text `!`-before-`[` escaper
 /// only sees a single text node, so this handles the cross-node boundary.
 fn escape_trailing_bang(output: &mut String) {
@@ -1296,8 +1296,12 @@ fn serialize_inlines_with_context(
         (own, from)
     });
     let mut written_until = context.written_before;
+    // Whether an earlier reference wrote a backtick in its raw label, which an
+    // escaped backtick after it could close as a code span.
+    let mut raw_backtick_before = false;
     for (index, inline) in inlines.iter().enumerate() {
         let written_before = written_until;
+        let segment_start = output.len();
         let written_later = match &written {
             Some((own, from)) => {
                 written_until = written_until.union(own[index]);
@@ -1412,6 +1416,11 @@ fn serialize_inlines_with_context(
                             rendered.insert(rendered.len() - 1, '\\');
                         }
                     }
+                }
+                // An escaped backtick still closes a code span that a raw
+                // backtick before it opens; a character reference does not.
+                if raw_backtick_before && rendered.contains("\\`") {
+                    rendered = rendered.replace("\\`", "&#96;");
                 }
                 // A `:` opening the text would close a shortcode that a bare
                 // text directive before it opens.
@@ -1768,6 +1777,7 @@ fn serialize_inlines_with_context(
                 output.push(']');
             }
             Inline::WikiLink(node) => {
+                escape_trailing_bang(&mut output);
                 output.push_str("[[");
                 let target = escape_wikilink_part(&node.target);
                 let label = escape_wikilink_part(&node.label);
@@ -1808,6 +1818,13 @@ fn serialize_inlines_with_context(
                     context,
                 ));
             }
+        }
+        if matches!(
+            inline,
+            Inline::FootnoteReference(_) | Inline::LinkReference(_) | Inline::ImageReference(_)
+        ) && output[segment_start..].contains('`')
+        {
+            raw_backtick_before = true;
         }
     }
     Ok(output)
