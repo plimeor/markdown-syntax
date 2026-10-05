@@ -198,6 +198,6 @@ Specs:
 - [x] 4.6 Add a growth check for long, nested block quotes and list items and for long tables to `tests/pathological_inputs.rs`; verified by linear growth in debug and release builds.
 
 ### 5. Integration checks
-- [ ] 5.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
-- [ ] 5.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
-- [ ] 5.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
+- [x] 5.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
+- [x] 5.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
+- [x] 5.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
