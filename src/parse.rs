@@ -321,6 +321,21 @@ fn parse_blocks_from_lines(
         let after_definition_unbroken = index > 0
             && !is_blank(lines[index - 1].text)
             && matches!(blocks.last(), Some(Block::Definition(_)));
+        // A table that ended the paragraph before it starts here, though its
+        // header row would otherwise open a block that cannot interrupt one.
+        if index > 0
+            && !is_blank(lines[index - 1].text)
+            && matches!(blocks.last(), Some(Block::Paragraph(_)))
+            && !likely_block_start(line.text, options)
+        {
+            if let Some((block, next)) =
+                parse_table(lines, index, options, definitions, diagnostics)
+            {
+                blocks.push(block);
+                index = next;
+                continue;
+            }
+        }
 
         if allow_frontmatter && index == 0 {
             if let Some((block, next)) = parse_frontmatter(lines, index, options) {
@@ -8867,7 +8882,8 @@ fn table_cell_text(source: &str) -> String {
 }
 
 fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) -> bool {
-    if !options.constructs.gfm_table || index + 1 >= lines.len() {
+    // A lazy line continues only a paragraph, so it is no delimiter row.
+    if !options.constructs.gfm_table || index + 1 >= lines.len() || lines[index + 1].lazy {
         return false;
     }
     table_can_start_source(

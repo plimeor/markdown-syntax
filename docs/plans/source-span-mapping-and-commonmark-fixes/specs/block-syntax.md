@@ -185,3 +185,7 @@ underline; such a line keeps its other reading.
 #### Scenario: Lazy delimiter row
 - **WHEN** `"1. ---(\n:-:"` is parsed with the GFM preset
 - **THEN** the list item holds a `Paragraph`, not a `Table`
+
+#### Scenario: Table header row that looks like an empty list item
+- **WHEN** `"a\n+\n|-"` is parsed with the GFM preset
+- **THEN** the document holds a `Paragraph` and a `Table` whose header cell holds `+`
