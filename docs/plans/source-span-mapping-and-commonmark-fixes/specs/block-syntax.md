@@ -139,3 +139,21 @@ other whitespace char, such as a no-break space or a form feed, is content.
 #### Scenario: Form feed ending a paragraph
 - **WHEN** `"a\u{c}"` is parsed with the CommonMark preset
 - **THEN** the paragraph holds `Text("a\u{c}")`
+
+### Requirement: Fenced code inside a container directive
+A fenced code block inside a container directive SHALL hold its lines as code:
+a line in it that looks like a directive opener opens no nested directive,
+while a closing fence of the directive still closes it.
+
+#### Scenario: Directive opener inside fenced code
+- **WHEN** `":::t\n```\n:::e\n```\n:::"` is parsed
+- **THEN** the document holds one `ContainerDirective` named `t` holding a `CodeBlock` whose value is `":::e\n"`
+
+### Requirement: Footnote definition content
+A footnote definition's content SHALL start after the spaces and tabs that
+follow its `]:` and keep the trailing spaces of its first line, which may
+make a hard break.
+
+#### Scenario: Hard break on a footnote definition's first line
+- **WHEN** `"[^1]: a  \nb"` is parsed
+- **THEN** the definition's paragraph holds `Text("a")`, a `LineBreak`, and `Text("b")`

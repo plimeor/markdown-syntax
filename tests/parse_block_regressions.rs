@@ -1412,3 +1412,43 @@ mod unicode_whitespace {
         assert!(debug.contains("FootnoteReference"), "{debug}");
     }
 }
+
+mod footnotes_and_directives {
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    #[test]
+    fn a_footnote_definitions_first_line_keeps_a_hard_break() {
+        let blocks = SyntaxOptions::default()
+            .parse("[^1]: a  \nb")
+            .document
+            .children;
+        let [Block::FootnoteDefinition(definition)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::Paragraph(paragraph)] = definition.children.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(
+                paragraph.children.as_slice(),
+                [Inline::Text(_), Inline::LineBreak(_), Inline::Text(_)]
+            ),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_directive_opener_inside_fenced_code_is_code() {
+        let blocks = SyntaxOptions::default()
+            .parse(":::t\n```\n:::e\n```\n:::")
+            .document
+            .children;
+        let [Block::ContainerDirective(directive)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(directive.children.as_slice(), [Block::CodeBlock(code)] if code.value == ":::e\n"),
+            "{blocks:?}"
+        );
+    }
+}

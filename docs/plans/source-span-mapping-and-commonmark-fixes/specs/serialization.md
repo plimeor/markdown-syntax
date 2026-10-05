@@ -135,6 +135,22 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `"://\\~||>||"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text("~")`, and `Spoiler`, since a paragraph that does not read back also tries escaping the first char of a text after a literal autolink
 
+#### Scenario: Text after a bare text directive
+- **WHEN** the documents parsed from `":e{}1"`, `":e[]www.+"`, and `":e{}[^1]"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same `TextDirective` and what follows it, since a directive with no attributes followed by anything that could go on with its name, label, or attributes ends with an empty label, or with an empty attribute list before a `{`
+
+#### Scenario: Email-local char before an email
+- **WHEN** the documents parsed from `"]\\-a@b.c"`, `"++@b.c"`, and `"\\+@b.p://"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same text and autolinks, since an email-local char before an email or an `@` takes a backslash or a reference, and a `+` run is escaped whole
+
+#### Scenario: Alert title and empty container directive
+- **WHEN** the documents parsed from `">[!NOTE]+\t*"` and `"]\n: :::e"` with `parse` are serialized and reparsed
+- **THEN** each reparsed document holds the same blocks, since an alert title is written as its source and an empty container directive takes no blank line
+
+#### Scenario: Paragraph opening with an ESM keyword
+- **WHEN** the document parsed from `" import -"` with the MDX preset is serialized and reparsed with it
+- **THEN** the reparsed document holds the same `Paragraph`, since a paragraph's leading `import ` or `export ` is written with its first char as a reference
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

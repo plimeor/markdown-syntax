@@ -338,14 +338,19 @@ fn serialize_block(
             serialize_attributes(&node.attributes)
         )),
         Block::ContainerDirective(node) => {
-            let inner = serialize_blocks_at_start(&node.children, options, false)?;
+            let mut inner = serialize_blocks_at_start(&node.children, options, false)?;
             let fence = directive_fence(&inner);
+            // Content ends with a line ending before the closing fence; an
+            // empty directive takes no blank line, which would loosen a list
+            // holding it.
+            if !inner.is_empty() {
+                inner.push('\n');
+            }
             Ok(format!(
-                "{fence}{}{}{}\n{}\n{fence}",
+                "{fence}{}{}{}\n{inner}{fence}",
                 node.name,
                 serialize_directive_label(&node.label, options)?,
                 serialize_attributes(&node.attributes),
-                inner
             ))
         }
     }
@@ -437,6 +442,15 @@ fn serialize_paragraph(
         };
         let mut output = serialize_inlines_with_context(&node.children, options, context)?;
         keep_first_line_off_html_block(&node.children, &mut output);
+        // Under MDX a line opening with `import ` or `export ` is ESM.
+        if output.starts_with("import ") || output.starts_with("export ") {
+            let reference = if output.starts_with('i') {
+                "&#x69;"
+            } else {
+                "&#x65;"
+            };
+            output.replace_range(..1, reference);
+        }
         Ok(indent_block_starting_continuations(output))
     };
     let output = render(RunStyle::Plain, None, AutolinkEdges::Plain)?;
@@ -460,7 +474,7 @@ fn serialize_paragraph(
         edge_stars,
     } = runs;
     let autolink_spaces = autolink_meets_space_in_span(&node.children, false);
-    let autolink_leads = autolink_text_before_inline(&node.children);
+    let autolink_leads = autolink_text_runs_on(&node.children, false);
     if (abut_runs || edge_tildes || edge_stars || autolink_spaces || autolink_leads)
         && !reads_back(&output)
     {
@@ -480,13 +494,13 @@ fn serialize_paragraph(
             .skip(1)
             .filter(|_| abut_runs || edge_tildes || edge_stars);
         let autolink_alternates = [
-            (AutolinkEdges::RawEdges, autolink_spaces),
-            (AutolinkEdges::EncodedBefore, autolink_spaces),
-            (AutolinkEdges::EncodedLead, autolink_leads),
+            AutolinkEdges::RawEdges,
+            AutolinkEdges::EncodedBefore,
+            AutolinkEdges::EncodedLead,
         ]
         .into_iter()
-        .filter(|&(_, applies)| applies)
-        .map(|(edges, _)| (RunStyle::Plain, None, edges));
+        .filter(|_| autolink_spaces || autolink_leads)
+        .map(|edges| (RunStyle::Plain, None, edges));
         for (style, raw_edge, spaces) in run_alternates.chain(autolink_alternates) {
             let alternate = render(style, raw_edge, spaces)?;
             if reads_back(&alternate) {
@@ -516,17 +530,18 @@ enum AutolinkEdges {
 }
 
 /// Whether a literal autolink among `inlines`, within spans, is followed by a
-/// text without whitespace and another inline after it, whose rendering the
-/// URL scan may read on into through the text.
-fn autolink_text_before_inline(inlines: &[Inline]) -> bool {
-    // Whitespace in the text ends the URL whatever follows it.
-    inlines.windows(3).any(|window| {
-        is_gfm_literal_autolink(&window[0])
-            && matches!(&window[1], Inline::Text(text)
-                if !text.value.contains(char::is_whitespace))
-    }) || inlines
-        .iter()
-        .any(|inline| span_children(inline).is_some_and(autolink_text_before_inline))
+/// text without whitespace short of its end, which leaves the URL scan to read
+/// on into what follows: another inline, a span's closing delimiter, or a
+/// space written as a reference; `in_span` when `inlines` are a span's content.
+fn autolink_text_runs_on(inlines: &[Inline], in_span: bool) -> bool {
+    inlines.windows(2).enumerate().any(|(index, pair)| {
+        is_gfm_literal_autolink(&pair[0])
+            && matches!(&pair[1], Inline::Text(text)
+                if !text.value.trim_end_matches([' ', '\t']).contains(char::is_whitespace)
+                    && (in_span || index + 2 < inlines.len()))
+    }) || inlines.iter().any(|inline| {
+        span_children(inline).is_some_and(|children| autolink_text_runs_on(children, true))
+    })
 }
 
 /// The content of `inline` when it is a span such as an emphasis.
@@ -875,16 +890,10 @@ fn alert_kind_name(kind: AlertKind) -> &'static str {
     }
 }
 
+/// An alert title is kept as written, so only a line ending, which would end
+/// its line, is written as a space.
 fn escape_alert_title(input: &str) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            '\n' | '\r' => output.push(' '),
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            _ => output.push(char),
-        }
-    }
-    output
+    input.replace(['\n', '\r'], " ")
 }
 
 fn serialize_list(node: &List, options: &SerializeOptions) -> Result<String, SerializeError> {
@@ -1461,15 +1470,16 @@ fn escape_trailing_email_local(output: &mut String) {
     let Some(last) = output.chars().next_back() else {
         return;
     };
-    // Only an ASCII alphanumeric immediately before the email forces a leftward
+    // An email-local char immediately before the email forces a leftward
     // re-anchor on reparse (the local part starts at the leftmost local-char
-    // run, and the dispatch reaches that alnum first). The punctuation
-    // local-chars (`.+-_`) are handled by the text serializer's own escaping.
-    if !last.is_ascii_alphanumeric() {
-        return;
+    // run): an ASCII alphanumeric is written as a reference, and an unescaped
+    // `.`, `+`, `-`, or `_` takes a backslash.
+    if last.is_ascii_alphanumeric() {
+        output.pop();
+        output.push_str(&alloc::format!("&#{};", last as u32));
+    } else if matches!(last, '.' | '+' | '-' | '_') && ends_with_unescaped(output, last) {
+        output.insert(output.len() - 1, '\\');
     }
-    output.pop();
-    output.push_str(&alloc::format!("&#{};", last as u32));
 }
 
 // True when `inline` is a GFM literal autolink (its raw URL serialization can
@@ -1773,8 +1783,16 @@ fn serialize_inlines_with_context(
                         original[scheme..].starts_with("://")
                     })
                 {
+                    // A relaxed scheme opens with a letter, so a run of
+                    // scheme chars without one joins nothing.
+                    let scheme_run = &rendered[rendered
+                        .trim_end_matches(|char: char| {
+                            char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-')
+                        })
+                        .len()..];
                     if let Some(last) = rendered.chars().next_back().filter(|char| {
-                        char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-')
+                        (char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-'))
+                            && scheme_run.bytes().any(|byte| byte.is_ascii_alphabetic())
                     }) {
                         if !ends_with_unescaped(&rendered, last) || last.is_ascii_alphanumeric() {
                             if last.is_ascii_alphanumeric() {
@@ -1799,6 +1817,14 @@ fn serialize_inlines_with_context(
                 }) && rendered.starts_with(':')
                 {
                     rendered.insert(0, '\\');
+                }
+                // An `@` ending the text would open an email whose domain the
+                // literal autolink after it writes.
+                if inlines.get(index + 1).is_some_and(is_gfm_literal_autolink)
+                    && rendered.ends_with('@')
+                {
+                    rendered.pop();
+                    rendered.push_str("&#x40;");
                 }
                 // A `:` ending the text would open a shortcode that a `:` in
                 // the literal autolink after it closes, or that a span after it
@@ -2210,6 +2236,28 @@ fn serialize_inlines_with_context(
                     &node.attributes,
                     context,
                 ));
+                // What follows could go on with a name char, or with a `[` or
+                // `{` the directive could read as its label or attributes, so
+                // an empty label, or an empty attribute list, ends the
+                // directive, unless a break or a text that cannot follows.
+                if node.attributes.is_empty() {
+                    let next = match inlines.get(index + 1) {
+                        None | Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => None,
+                        Some(Inline::Text(text)) => text.value.chars().next(),
+                        // Another inline may open with any of them.
+                        Some(_) => Some('a'),
+                    };
+                    if node.label.is_empty()
+                        && next.is_some_and(|char| {
+                            char.is_ascii_alphanumeric() || matches!(char, '_' | '-' | '[' | '{')
+                        })
+                    {
+                        output.push_str("[]");
+                    }
+                    if next == Some('{') {
+                        output.push_str("{}");
+                    }
+                }
             }
         }
         if matches!(
@@ -2508,6 +2556,7 @@ fn escape_text_with_context(
     let mut underscore_run = (0usize, false);
     let mut tilde_run = (0usize, false);
     let mut pipe_run = (0usize, false);
+    let mut plus_run = (0usize, false);
     let mut chars = input.char_indices().peekable();
     let mut at_leading_edge = preserve_leading;
     while let Some((offset, char)) = chars.next() {
@@ -2722,7 +2771,12 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '+' if text_attention_delimiter_can_start(view, offset, "++", false, &mut scan) => {
+            // A lone `+` left after an escaped one could open an email
+            // autolink's local part, so a run is escaped whole.
+            '+' if run_escaped(view, offset, b'+', &mut scan, &mut plus_run, |scan, at| {
+                text_attention_delimiter_can_start(view, at, "++", false, scan)
+            }) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -3063,10 +3117,11 @@ fn same_char_run_len(input: &str, offset: usize, needle: char) -> usize {
 }
 
 fn at_sign_can_start_email_autolink(input: &str, offset: usize) -> bool {
+    // Any email-local char before the `@` can make the local part.
     let before = input[..offset]
         .chars()
         .next_back()
-        .is_some_and(|char| char.is_ascii_alphanumeric());
+        .is_some_and(|char| char.is_ascii_alphanumeric() || matches!(char, '.' | '-' | '_' | '+'));
     if !before {
         return false;
     }

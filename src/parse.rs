@@ -714,6 +714,7 @@ fn parse_container_directive(
     let mut content = DerivedText::default();
     let mut cursor = index + 1;
     let mut nested_fences = Vec::new();
+    let mut code_fence = None;
     while cursor < lines.len() {
         let line = lines[cursor].text;
         let trimmed = trim_up_to_three_spaces(line);
@@ -746,7 +747,17 @@ fn parse_container_directive(
                 ));
             }
 
-            if let Some((nested_len, nested_rest)) = directive_container_opener_prefix(trimmed) {
+            // A line inside a fenced code block is code, not a nested
+            // directive's opener.
+            if let Some((marker, length)) = code_fence {
+                if fence_close(trimmed, marker, length) {
+                    code_fence = None;
+                }
+            } else if let Some(fence) = fence_start(trimmed) {
+                code_fence = Some(fence);
+            } else if let Some((nested_len, nested_rest)) =
+                directive_container_opener_prefix(trimmed)
+            {
                 if parse_directive_opener(nested_rest).is_some() {
                     nested_fences.push(nested_len);
                 }
@@ -2398,7 +2409,8 @@ fn parse_footnote_definition(
         return None;
     }
     let line = lines[index];
-    let text = line.text.trim_matches([' ', '\t']);
+    // Trailing spaces stay for the content, where they may make a hard break.
+    let text = trim_ascii_start(line.text);
     if !text.starts_with("[^") {
         return None;
     }
@@ -2407,7 +2419,7 @@ fn parse_footnote_definition(
     if !is_footnote_label(label) {
         return None;
     }
-    let rest = text[close + 2..].trim_matches([' ', '\t']);
+    let rest = trim_ascii_start(&text[close + 2..]);
     let mut content = DerivedText::default();
     content.push_line(&line, rest, 0);
     let mut cursor = index + 1;

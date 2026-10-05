@@ -1932,4 +1932,43 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn constructs_after_a_directive_email_or_alert_keep_their_parse() {
+        for source in [
+            "++@b.c",
+            ">[!NOTE]\u{c}",
+            ">[!NOTE]+\t*",
+            ":e\\{",
+            ":e{}1",
+            ":e[]www.+",
+            ":e{}a@b.c",
+            ":e{}[^1]",
+            "]\\-a@b.c",
+            "~\\+a@b.c",
+            "\\+@b.p://",
+            "1++1://u 1++",
+            "^://. ^",
+            "]\n: :::e",
+            "[^1]:| &#x20;\n:",
+            ":::t\n```\n:::e",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_paragraph_opening_with_an_esm_keyword_stays_a_paragraph_under_mdx() {
+        let options = SyntaxOptions::mdx();
+        for source in [" import -", " export x"] {
+            let document = options.parse(source).document;
+            let markdown = document.to_markdown().expect("document serializes");
+            let reparsed = options.parse(&markdown).document;
+            assert_eq!(
+                without_spans(&format!("{:?}", reparsed.children)),
+                without_spans(&format!("{:?}", document.children)),
+                "{source:?} -> {markdown:?}"
+            );
+        }
+    }
 }
