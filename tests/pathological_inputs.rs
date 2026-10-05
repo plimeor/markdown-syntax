@@ -362,3 +362,34 @@ fn tilde_closers_with_subscripts_parse_in_bounded_time() {
     let input = String::from("~~x ") + &"*a ".repeat(50_000) + &" ~b~~ ".repeat(50_000);
     parse_bounded("tilde closers after a strikethrough opener", input);
 }
+
+#[test]
+fn long_nested_containers_and_tables_parse_in_bounded_time() {
+    // Every line of a deep container is derived through each level's source
+    // map; lookups must not grow with the lines before them.
+    let quote_prefix = "> ".repeat(30);
+    let quoted: String = (0..3_000)
+        .map(|line| format!("{quote_prefix}line {line} *a* [b](u)\r\n"))
+        .collect();
+    parse_bounded("long nested block quote", quoted);
+
+    let mut listed = String::new();
+    for level in 0..15 {
+        listed.push_str(&"  ".repeat(level));
+        listed.push_str("- item\n");
+    }
+    let continuation = "  ".repeat(15);
+    for line in 0..5_000 {
+        listed.push_str(&format!("{continuation}\tline {line} *a*\n"));
+    }
+    parse_bounded("long nested list item", listed);
+
+    let mut table = String::from("| a | b | c |\n|---|---|---|\n");
+    for row in 0..5_000 {
+        table.push_str(&format!("| {row} \\| x | *b* | `c` |\n"));
+    }
+    parse_bounded("long table", table);
+
+    let escaped_pipes = String::from("| a |\n|---|\n| ") + &"x\\|".repeat(50_000) + " |\n";
+    parse_bounded("cell of escaped pipes", escaped_pipes);
+}

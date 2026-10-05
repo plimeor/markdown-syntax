@@ -182,20 +182,20 @@ Specs:
   - every canonical diff from the starting commit being a backtick in text
 
 ### 4. Source spans
-- [ ] 4.1 Add tests:
+- [x] 4.1 Add tests:
   - every scenario of "Spans map stripped lines back to the source", the new "Source spans" scenarios, and "Emphasis on a block quote continuation line"
   - issue plimeor/markdown-syntax#6's regression test, as `inline_spans_address_source_inside_containers` in `tests/parse_span_contract.rs`, with its 31 cases unchanged
   - a "Spans nest" check over the fixture corpus and over seeded generated inputs mixing containers, tables, CRLF, and tabs
 
   Verified by the changed-behavior tests failing on the current code, the issue's test failing 26 of 31 cases.
-- [ ] 4.2 Add the source-map type and build every container's content with its map, composed in original coordinates. The containers are block quotes and alerts, list items, footnote definitions, container directives, description details, and HTML containers. `Line` positions come from the map. Verified by:
+- [x] 4.2 Add the source-map type and build every container's content with its map, composed in original coordinates. The containers are block quotes and alerts, list items, footnote definitions, container directives, description details, and HTML containers. `Line` positions come from the map. A container whose first content line is empty keeps that line, which the old string join dropped; this realigns lazy-line flags, so `> \n> a\n- ` parses as `> a\n- ` does. Verified by:
   - the "Later block inside a block quote" and "Split tab" tests passing
   - `tests/parse_span_contract.rs` passing
   - the nest check finding no block span outside its parent
-- [ ] 4.3 Build every inline input with its map: paragraphs, ATX and setext headings, table cells, directive labels, description terms, and HTML containers. Translate spans in one walk per block-level inline parse. Verified by the inline scenarios, all 31 cases of `inline_spans_address_source_inside_containers`, and the nest check passing at every depth.
-- [ ] 4.4 Give table cells their spans, as described under Decisions; verified by the table-cell scenarios passing.
-- [ ] 4.5 Extend `inline_container_spans_cover_their_delimiters_and_content` to inputs with leading whitespace, block quotes, list items, tables, and CRLF; verified by it passing.
-- [ ] 4.6 Add a growth check for long, nested block quotes and list items and for long tables to `tests/pathological_inputs.rs`; verified by linear growth in debug and release builds.
+- [x] 4.3 Build every inline input with its map: paragraphs, ATX and setext headings, table cells, directive labels, description terms, and HTML containers. Translate spans in one walk per block-level inline parse. Verified by the inline scenarios, all 31 cases of `inline_spans_address_source_inside_containers`, and the nest check passing at every depth.
+- [x] 4.4 Give table cells their spans, as described under Decisions; verified by the table-cell scenarios passing.
+- [x] 4.5 Extend `inline_container_spans_cover_their_delimiters_and_content` to inputs with leading whitespace, block quotes, list items, tables, and CRLF; verified by it passing.
+- [x] 4.6 Add a growth check for long, nested block quotes and list items and for long tables to `tests/pathological_inputs.rs`; verified by linear growth in debug and release builds.
 
 ### 5. Integration checks
 - [ ] 5.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
