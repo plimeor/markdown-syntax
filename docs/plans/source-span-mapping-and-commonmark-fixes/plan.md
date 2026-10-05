@@ -103,12 +103,47 @@ span, an inline link, or a link reference definition.
   rule applies to the lazy line, not to the quoted line before it.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
   Windows filename that `cargo package` warns about.
+- Block structure reads only spaces and tabs as whitespace: a line holding a
+  no-break space, form feed, or other whitespace char is neither blank nor
+  indented, and such a char ends no thematic break, setext underline, fence,
+  ATX heading, HTML block start line, table row, flow MDX JSX indentation, or
+  paragraph. Label matching collapses only spaces, tabs, and line endings; a
+  footnote label holds no space, tab, line ending, or unescaped bracket; and an
+  angle-bracket autolink's URI may hold any other whitespace.
+- A hard break comes only from spaces the source holds, a `<?>` is text, a
+  list that could not interrupt a paragraph continues the one a definition
+  was read from, a directive opener inside fenced code in a container
+  directive is code, a footnote definition's first line keeps its trailing
+  spaces, and a GFM table starts below a delimiter row that is neither lazy
+  nor a setext underline, before any block its header row would otherwise
+  open.
+- A paragraph or heading whose content the plain rendering does not read
+  back, and whose runs abut, meet a `~` or `*`, or meet a literal autolink's
+  edge, takes the first other delimiter choice that reads back under the
+  default preset, else under GFM or MDX: `__` strong, `_` inner or outer runs,
+  all-`*` runs, raw edge chars, and spaces around a literal autolink written
+  raw or as references. The check gives each reference label a stand-in
+  definition.
+- The serializer also writes these so that they reparse to the same tree:
+  text before a construct whose delimiters it could pair with (a footnote's
+  `^`, a math fence, a literal autolink's or wiki link's chars, a `$` or `}`
+  in code, raw HTML, or MDX); a reference label's raw backtick, a bang
+  before a wiki link, whitespace control chars, labels, and alert titles as
+  their source; a bare text directive followed by what could go on with it;
+  email-local chars before an email; a paragraph that MDX would read as ESM
+  or flow; an empty container directive; and task item text that opens with
+  whitespace.
+- Collecting definitions reads the block structure alone, once the input
+  holds `]:`, over the lines the main pass reads; inline content is scanned
+  for literal autolinks only when it holds `://`, `www.`, or `@`; and a table
+  delimiter row is checked by its chars before its cells are split.
 
 Specs:
 - `public-api` (modified)
 - `inline-syntax` (modified)
 - `serialization` (modified)
 - `block-syntax` (modified)
+- `validation` (modified)
 
 ## Design
 
