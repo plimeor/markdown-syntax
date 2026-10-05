@@ -81,7 +81,11 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
         Block::Definition(definition) => {
-            if definition.identifier.trim().is_empty() {
+            if definition
+                .identifier
+                .trim_matches([' ', '\t', '\n', '\r'])
+                .is_empty()
+            {
                 diagnostics.push(Diagnostic::invalid(
                     definition.meta.span,
                     "definition identifier cannot be empty",

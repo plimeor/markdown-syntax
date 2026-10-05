@@ -297,13 +297,10 @@ impl DerivedText {
         self.pending_eol = None;
     }
 
-    /// Drops the CommonMark whitespace (space, tab, line tabulation, form feed)
-    /// that ends the text, with the map runs it covered.
+    /// Drops the spaces and tabs that end the text, with the map runs they
+    /// covered.
     pub(super) fn trim_final_whitespace(&mut self) {
-        let len = self
-            .text
-            .trim_end_matches([' ', '\t', '\u{b}', '\u{c}'])
-            .len();
+        let len = self.text.trim_end_matches([' ', '\t']).len();
         self.text.truncate(len);
         self.map.truncate(len);
     }

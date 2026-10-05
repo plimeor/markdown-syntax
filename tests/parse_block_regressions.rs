@@ -1348,3 +1348,67 @@ mod paragraph_interruption {
         }
     }
 }
+
+mod unicode_whitespace {
+    //! Block structure reads only spaces and tabs as whitespace: a line holding
+    //! another whitespace char, such as a no-break space or a form feed, is
+    //! neither blank nor indented, and such a char ends no marker or fence.
+
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    fn blocks(source: &str, options: &SyntaxOptions) -> Vec<Block> {
+        options.parse(source).document.children
+    }
+
+    #[test]
+    fn a_line_with_other_whitespace_is_text() {
+        let commonmark = SyntaxOptions::commonmark();
+        for source in [
+            "***\u{a0}",
+            "\u{a0}***",
+            "a\n---\u{a0}",
+            "a\n===\u{3000}",
+            "a\n\u{a0}\nb",
+            "a\n\u{c}---",
+            "<a>\u{a0}\nx",
+        ] {
+            let blocks = blocks(source, &commonmark);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        // The dashes read as list markers, as no thematic break forms.
+        let nested = blocks("- - -\u{c}", &commonmark);
+        assert!(matches!(nested.as_slice(), [Block::List(_)]), "{nested:?}");
+        let gfm = SyntaxOptions::gfm();
+        for source in ["| a |\n| - |\u{a0}", "\u{a0}| a |\n| - |"] {
+            let blocks = blocks(source, &gfm);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_form_feed_ending_a_paragraph_stays_its_text() {
+        let blocks = blocks("a\u{c}", &SyntaxOptions::commonmark());
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(paragraph.children.as_slice(), [Inline::Text(text)] if text.value == "a\u{c}"),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn labels_collapse_only_spaces_tabs_and_line_endings() {
+        let options = SyntaxOptions::default();
+        let debug = format!("{:?}", blocks("[a\u{a0}b]\n\n[a b]: /u", &options));
+        assert!(!debug.contains("LinkReference"), "{debug}");
+        let debug = format!("{:?}", blocks("[^a\u{a0}b]\n\n[^a\u{a0}b]: x", &options));
+        assert!(debug.contains("FootnoteReference"), "{debug}");
+    }
+}

@@ -119,6 +119,14 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **WHEN** the document parsed from `")||||||\t||"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Text` and `Spoiler`, since every bar but the last of a text run that could open a spoiler is written as a reference
 
+#### Scenario: Whitespace control chars in text
+- **WHEN** the documents parsed from `"\u{c}:a"`, `"[^\u{c}]"`, `"[;\u{c}]:["`, and `"://y\u{c}c"` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same inlines, since a line tabulation, form feed, or next-line char is written as itself, which reads as whitespace beside a construct as the source did, and a reference or footnote label is written as its source
+
+#### Scenario: Hard break opening a span
+- **WHEN** the document parsed from `"==&#x20; \n-=="` with `parse` is serialized and reparsed
+- **THEN** the reparsed paragraph holds the same `Mark`, since a hard break that opens a span is written `&#x20; ` before its line ending
+
 #### Scenario: Literal autolink before a shortcode
 - **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`

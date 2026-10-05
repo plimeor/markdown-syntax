@@ -49,9 +49,18 @@ spans, links, and emphasis.
 
 ### Requirement: Footnote labels
 The parser SHALL read `[^label]` as a footnote reference, and `[^label]:` as a
-footnote definition, only when the label is non-empty, holds no whitespace,
-and, as a link label, holds no unescaped `[` or `]`.
+footnote definition, only when the label is non-empty, holds no space, tab, or
+line ending, and, as a link label, holds no unescaped `[` or `]`.
 
 #### Scenario: Bracket inside a footnote label
 - **WHEN** `"^*[^[^]]"` and `"[^a[b]"` are parsed with `parse`
 - **THEN** neither paragraph holds a `FootnoteReference`, while `"[^a\\[b]"` holds one
+
+### Requirement: Reference label matching
+Two link labels SHALL match when they agree after Unicode case folding,
+trimming, and collapsing each run of spaces, tabs, and line endings to one
+space; any other whitespace char is matched as written.
+
+#### Scenario: No-break space in a label
+- **WHEN** `"[a\u{a0}b]\n\n[a b]: /u"` is parsed
+- **THEN** the paragraph holds no `LinkReference`

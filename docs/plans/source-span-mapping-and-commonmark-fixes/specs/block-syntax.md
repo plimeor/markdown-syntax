@@ -117,3 +117,25 @@ does not end a paragraph.
 #### Scenario: Malformed directive line inside a paragraph
 - **WHEN** `"a\n::1bad"` or `"a\n:::"` is parsed with `parse`
 - **THEN** the document holds one `Paragraph` holding both lines
+
+## ADDED Requirements
+
+### Requirement: Spaces and tabs are block whitespace
+The parser SHALL read only spaces and tabs as whitespace in block structure: a
+blank line holds only spaces and tabs; indentation, the space after a block
+marker, the trailing whitespace a thematic break, setext underline, closing
+fence, ATX closing sequence, HTML block start line, definition, or table row
+allows, and the final whitespace of a paragraph are spaces and tabs. Any
+other whitespace char, such as a no-break space or a form feed, is content.
+
+#### Scenario: Other whitespace after a thematic break
+- **WHEN** `"***\u{a0}"` is parsed with the CommonMark preset
+- **THEN** the document holds a `Paragraph`, not a `ThematicBreak`
+
+#### Scenario: Line holding only a no-break space
+- **WHEN** `"a\n\u{a0}\nb"` is parsed with the CommonMark preset
+- **THEN** the document holds one `Paragraph`
+
+#### Scenario: Form feed ending a paragraph
+- **WHEN** `"a\u{c}"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("a\u{c}")`

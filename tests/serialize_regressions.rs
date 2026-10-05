@@ -1837,6 +1837,7 @@ mod round_trip_edges {
             "__***/***__",
             "**#****]***_**",
             "***_\\**#*",
+            "**__\u{0}___**",
         ] {
             assert_round_trips(source);
         }
@@ -1889,6 +1890,26 @@ mod round_trip_edges {
             ")||||||\t||",
             "**(__)__$**",
             "*{_~_目*",
+            "`\\:++:++",
+            "|\\$*`$`",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn whitespace_other_than_spaces_and_tabs_round_trips() {
+        for source in [
+            "\u{c}",
+            "a\u{c}",
+            "\u{c}:a",
+            "[^\u{c}]",
+            "://y\u{c}c",
+            "1. \u{c}",
+            "==&#x20; \n-==",
+            "[;\u{c}]:[",
+            "[\u{c}]:\u{a0}",
+            "d$![[\\$]]",
         ] {
             assert_round_trips(source);
         }

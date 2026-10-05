@@ -1092,6 +1092,18 @@ impl DelimiterChars {
         bit != 0 && self.0 & bit == bit
     }
 
+    /// The `>` and `$` in raw text, which can close what a char before it
+    /// opens.
+    fn raw_closers(raw: &str) -> Self {
+        let mut set = Self(0);
+        for char in ['>', '$'] {
+            if raw.contains(char) {
+                set = set.union(Self::of_char(char));
+            }
+        }
+        set
+    }
+
     /// The delimiter chars that `inline` may write that can pair with a run
     /// before it: a link's or image's text pairs only within its brackets.
     fn written_by(inline: &Inline) -> Self {
@@ -1112,20 +1124,14 @@ impl DelimiterChars {
             Inline::Superscript(node) => within("^", &node.children),
             Inline::Spoiler(node) => within("|", &node.children),
             // Their contents pair with nothing outside them; only a `>` in
-            // them can end raw HTML that a `<` before them opens. A math
-            // span's own `$` fence can close a `$` before it.
+            // them can end raw HTML that a `<` before them opens, and a `$`
+            // close math that a `$` before them opens, as a math span's own
+            // `$` fence can.
             Inline::Math(MathInline { value, .. }) => {
-                let fence = Self::of_char('$');
-                if value.contains('>') {
-                    fence.union(Self::of_char('>'))
-                } else {
-                    fence
-                }
+                Self::of_char('$').union(Self::raw_closers(value))
             }
-            Inline::Html(HtmlInline { value: raw, .. }) | Inline::Code(CodeInline { raw, .. })
-                if raw.contains('>') =>
-            {
-                Self::of_char('>')
+            Inline::Html(HtmlInline { value: raw, .. }) | Inline::Code(CodeInline { raw, .. }) => {
+                Self::raw_closers(raw)
             }
             // A footnote's `^` can close a superscript before it; its label
             // or content pairs with nothing outside it but a `<`.
@@ -1147,6 +1153,8 @@ impl DelimiterChars {
             }
             // A URL's chars are scanned after the delimiters before it pair.
             Inline::Autolink(node) => Self::of_str(&node.destination).union(Self::of_char('>')),
+            // A wiki link's text can close what a char before it opens.
+            Inline::WikiLink(node) => Self::of_str(&node.target).union(Self::of_str(&node.label)),
             Inline::Shortcode(_) | Inline::TextDirective(_) => Self::of_char(':'),
             _ => Self(0),
         }
@@ -1595,11 +1603,21 @@ fn serialize_inlines_with_context(
                     rendered.insert(0, '\\');
                 }
                 // A `:` ending the text would open a shortcode that a `:` in
-                // the literal autolink after it closes.
-                if inlines
+                // the literal autolink after it closes, or that a span after it
+                // names with its `++` or `_` delimiters.
+                if (inlines
                     .get(index + 1)
                     .and_then(literal_autolink_original)
                     .is_some()
+                    || (matches!(
+                        inlines.get(index + 1),
+                        Some(
+                            Inline::Insert(_)
+                                | Inline::Underline(_)
+                                | Inline::Strong(_)
+                                | Inline::Emphasis(_)
+                        )
+                    ) && written_later.contains(':')))
                     && ends_with_unescaped(&rendered, ':')
                 {
                     rendered.insert(rendered.len() - 1, '\\');
@@ -1693,7 +1711,7 @@ fn serialize_inlines_with_context(
                     || (context.run_style == RunStyle::StrongUnderscore
                         && (children.starts_with('*') || children.ends_with('*')));
                 let underscore_fits = !children.starts_with('_')
-                    && !children.ends_with('_')
+                    && !ends_with_unescaped(&children, '_')
                     && !matches!(
                         inlines.get(index + 1),
                         Some(Inline::Text(next))
@@ -1924,7 +1942,8 @@ fn serialize_inlines_with_context(
             Inline::LineBreak(node) => match node.kind {
                 LineBreakKind::Backslash => output.push_str("\\\n"),
                 LineBreakKind::Spaces
-                    if breaks_line_start(&output, &mut output_line, opens_line) =>
+                    if breaks_line_start(&output, &mut output_line, opens_line)
+                        || (opens_span && output.is_empty()) =>
                 {
                     output.push_str("&#x20; \n");
                 }
@@ -2315,7 +2334,7 @@ fn escape_text_with_context(
             continue;
         }
         // A tab inside the text stays literal: the reparse keeps it as it is.
-        if char.is_control() && char != '\t' {
+        if written_as_reference(char) {
             output.push_str(&format!("&#x{:X};", char as u32));
             at_leading_edge = false;
             continue;
@@ -2717,6 +2736,13 @@ fn same_byte_run_len(input: &str, offset: usize, byte: u8) -> usize {
 /// `input` with every char that the text escaper writes as a character
 /// reference replaced by as many `&` bytes: control chars other than a tab,
 /// and the spaces and tabs it keeps at a preserved edge.
+/// Whether text writes `char` as a character reference: a control char
+/// other than the tab, line tabulation, form feed, and next line, which the
+/// reparse keeps as written and reads as whitespace, as the source did.
+fn written_as_reference(char: char) -> bool {
+    char.is_control() && !matches!(char, '\t' | '\u{b}' | '\u{c}' | '\u{85}')
+}
+
 fn referenced_chars_as_punctuation(
     input: &str,
     preserve_leading: bool,
@@ -2724,7 +2750,7 @@ fn referenced_chars_as_punctuation(
 ) -> Cow<'_, str> {
     let leading_end = usize::from(preserve_leading && input.starts_with([' ', '\t']));
     let referenced = |offset: usize, char: char| {
-        (char.is_control() && char != '\t')
+        written_as_reference(char)
             || (matches!(char, ' ' | '\t') && (offset < leading_end || offset >= trailing_start))
     };
     // A control char is ASCII below a space or DEL, or a C1 char, whose UTF-8
@@ -3014,14 +3040,13 @@ fn escape_reference_label_source(input: &str, escape_pipe: bool) -> String {
     for char in input.chars() {
         match char {
             // A reference label may span several physical lines, and the parser
-            // matches the RAW label (whitespace collapsed, no entity decode).
-            // Emitting interior newlines/tabs literally (rather than `&#xA;`)
-            // keeps a whitespace-bearing label re-parsing as the same reference
-            // — crucially, a `^`-prefixed label with literal whitespace stays a
-            // link reference instead of becoming a footnote (which requires `^`
-            // followed by non-whitespace).
-            '\t' | '\n' | '\r' => output.push(char),
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
+            // matches the RAW label (whitespace collapsed, no entity decode), so
+            // every control char, line endings and tabs among them, is written
+            // as itself rather than as a reference such as `&#xA;`. This keeps
+            // a whitespace-bearing label re-parsing as the same reference —
+            // crucially, a `^`-prefixed label with a literal space stays a link
+            // reference instead of becoming a footnote.
+            char if char.is_control() => output.push(char),
             '|' if escape_pipe => {
                 output.push('\\');
                 output.push(char);
@@ -3036,15 +3061,9 @@ fn escape_reference_label_with_pipe(input: &str, escape_pipe: bool) -> String {
     escape_label_syntax(input, escape_pipe, false)
 }
 
+/// A footnote label is matched as written, so its chars are.
 fn escape_footnote_label_source(input: &str) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            _ => output.push(char),
-        }
-    }
-    output
+    input.into()
 }
 
 fn escape_footnote_label_semantic(input: &str) -> String {
