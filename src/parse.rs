@@ -972,16 +972,33 @@ fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> b
     open_fence.is_some_and(|(_, _, has_nonblank_content)| !has_nonblank_content)
 }
 
-/// Recursively determines whether the innermost block reachable through this
-/// (already marker-stripped) block-quote content line is an OPEN paragraph —
-/// the only block kind that a following lazy continuation line may extend.
+/// What the innermost block reachable through a container content line is,
+/// as far as a following line needs to know.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContentLineKind {
+    /// Nothing after the container markers.
+    Empty,
+    /// Paragraph text, which a following lazy line may continue.
+    Paragraph,
+    /// A block that ends with its line (a thematic break or ATX heading), or
+    /// indented code, which the next line's own indentation continues or ends.
+    Closed,
+    /// A block that the following non-blank lines continue: a fence, an HTML
+    /// block, or another block start.
+    Open,
+}
+
+/// Classifies the innermost block reachable through this (already
+/// marker-stripped) container content line, read as if no paragraph were
+/// open before it.
 ///
-/// Nested quote markers are stripped one level at a time so that, e.g.,
-/// `> > a` reports that the deepest content `a` is an open paragraph (this is
+/// Nested quote and list markers are stripped one level at a time so that,
+/// e.g., `> > a` reports that the deepest content `a` is a paragraph (this is
 /// what lets a lazy line continue a paragraph buried inside several quotes).
-/// Indented code, blank lines, HTML blocks, and every other block start are
-/// reported as NOT-an-open-paragraph.
-fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) -> bool {
+fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind {
+    if content.trim().is_empty() {
+        return ContentLineKind::Empty;
+    }
     // Nested `>` and list markers are peeled one per iteration. Past
     // `MAX_BLOCK_NESTING` of them no container opens (see
     // `parse_blocks_from_lines`), so what remains is paragraph text.
@@ -990,17 +1007,23 @@ fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) ->
     for _ in 0..=MAX_BLOCK_NESTING {
         let Some(trimmed) = trim_up_to_three_spaces(&source[offset..]) else {
             // >= 4 columns of indentation: indented code, never a paragraph.
-            return false;
+            return ContentLineKind::Closed;
         };
         if trimmed.is_empty() {
-            return false;
+            return ContentLineKind::Empty;
         }
         let rest = if let Some(rest) = trimmed.strip_prefix('>') {
             Cow::Borrowed(rest.strip_prefix(' ').unwrap_or(rest))
         } else if let Some(marker) = list_marker_info(trimmed) {
             list_marker_first_content(trimmed, marker).0
+        } else if parse_thematic_break(Line::detached(trimmed)).is_some()
+            || is_atx_heading_line(trimmed)
+        {
+            return ContentLineKind::Closed;
+        } else if lazy_line_starts_block(trimmed, options) {
+            return ContentLineKind::Open;
         } else {
-            return !lazy_line_starts_block(trimmed, options);
+            return ContentLineKind::Paragraph;
         };
         match rest {
             // A borrowed rest is a suffix of `source`; continue from it in place.
@@ -1011,28 +1034,114 @@ fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) ->
             }
         }
     }
-    true
+    ContentLineKind::Paragraph
 }
 
-/// Whether a line starts a block for the purpose of LAZY-continuation
-/// suppression. Identical to [`likely_block_start`] except for two kinds of
-/// line that cannot interrupt a paragraph but do end a lazy one, since the block
-/// they open belongs to the container the line is in rather than to the
-/// paragraph's:
+/// Whether `trimmed` (indented at most three columns) is an ATX heading line.
+fn is_atx_heading_line(trimmed: &str) -> bool {
+    let depth = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&depth) && matches!(trimmed.as_bytes().get(depth), None | Some(b' ' | b'\t'))
+}
+
+/// The open paragraph of a container's content, if any, by the number of
+/// nested block quotes it sits in.
+type OpenParagraph = Option<usize>;
+
+/// `content` with up to `depth` leading block quote markers removed, and how
+/// many it removed.
+fn strip_quote_markers(content: &str, depth: usize) -> (&str, usize) {
+    let mut rest = content;
+    for stripped in 0..depth {
+        match trim_up_to_three_spaces(rest).and_then(|trimmed| trimmed.strip_prefix('>')) {
+            Some(after) => rest = after.strip_prefix(' ').unwrap_or(after),
+            None => return (rest, stripped),
+        }
+    }
+    (rest, depth)
+}
+
+/// The paragraph open after a container content line, given the one open
+/// before it. A lazy line is paragraph continuation by construction. A line
+/// that reaches the open paragraph's quote level ends it with a setext
+/// underline and continues it when it cannot interrupt a paragraph (by the
+/// rules `parse_paragraph` applies); a line that stops short of that level can
+/// only continue it as a lazy line. Any other line is read afresh.
+fn paragraph_open_after(
+    open: OpenParagraph,
+    content: &str,
+    lazy: bool,
+    options: &SyntaxOptions,
+) -> OpenParagraph {
+    if lazy {
+        return open;
+    }
+    if content.trim().is_empty() {
+        return None;
+    }
+    if let Some(depth) = open {
+        let (rest, reached) = strip_quote_markers(content, depth);
+        if reached == depth && rest.trim().is_empty() {
+            // A blank line at the paragraph's level ends it.
+            return None;
+        }
+        if reached == depth {
+            if setext_underline_depth(rest).is_some() {
+                return None;
+            }
+            if !likely_block_start(rest, options) {
+                return open;
+            }
+        } else if !rest.trim().is_empty() && !lazy_line_starts_block(rest, options) {
+            return open;
+        }
+    }
+    match content_line_kind(content, options) {
+        ContentLineKind::Paragraph => Some(quote_depth(content)),
+        _ => None,
+    }
+}
+
+/// How many block quotes the innermost content of `content` sits in.
+fn quote_depth(content: &str) -> usize {
+    let mut depth = 0;
+    let mut rest = content;
+    while let Some(after) =
+        trim_up_to_three_spaces(rest).and_then(|trimmed| trimmed.strip_prefix('>'))
+    {
+        rest = after.strip_prefix(' ').unwrap_or(after);
+        depth += 1;
+        if depth > MAX_BLOCK_NESTING {
+            break;
+        }
+    }
+    depth
+}
+
+/// Whether a block quote's lazy line starts a block instead of continuing the
+/// quote's paragraph: [`lazy_line_opens_block`], and also a line that almost
+/// opens a fenced code block — any fence-char run after up to three spaces of
+/// indent — ends the paragraph instead of continuing it (GH-19): `> x\n``\n`
+/// closes the quote rather than joining `` ` `` onto the paragraph.
+fn lazy_line_starts_block(input: &str, options: &SyntaxOptions) -> bool {
+    lazy_line_opens_block(input, options)
+        || trim_up_to_three_spaces(input).is_some_and(|t| t.starts_with('`') || t.starts_with('~'))
+}
+
+/// Whether a container's lazy line opens a block of the container the line is
+/// in, ending the paragraph instead of continuing it. Identical to
+/// [`likely_block_start`] except for two kinds of line that cannot interrupt a
+/// paragraph but do end a lazy one, since the block they open belongs to the
+/// enclosing container rather than to the paragraph's:
 /// - *every* HTML block start, including the type-7 "complete tag" form: a bare
-///   `<a>` after `> a` must close the quote, not be absorbed as paragraph text;
+///   `<a>` after `> a` or `- a` closes the container, as cmark-gfm and
+///   micromark read it;
 /// - *every* list marker, including an empty item and an ordered one not
 ///   starting at 1: `> a\n- ` and `> a\n2. b` close the quote and open a list,
 ///   as cmark, commonmark.js, markdown-it, and micromark all read them.
-fn lazy_line_starts_block(input: &str, options: &SyntaxOptions) -> bool {
+fn lazy_line_opens_block(input: &str, options: &SyntaxOptions) -> bool {
     likely_block_start(input, options)
         || list_marker_info(input).is_some()
         || (options.constructs.html_block && line_starts_html_block(input))
-        // A lazy line that almost opens a fenced code block — any fence-char
-        // run after up to three spaces of indent — ends the paragraph instead
-        // of continuing it (GH-19): `> x\n``\n` closes the quote rather than
-        // joining `` ` `` onto the paragraph.
-        || trim_up_to_three_spaces(input).is_some_and(|t| t.starts_with('`') || t.starts_with('~'))
 }
 
 fn parse_block_quote(
@@ -1053,7 +1162,7 @@ fn parse_block_quote(
     // child parser can suppress lazy-only constructs (e.g. setext underlines).
     let mut lazy_flags: Vec<bool> = Vec::new();
     let mut cursor = index;
-    let mut paragraph_open = false;
+    let mut paragraph_open: OpenParagraph = None;
     let mut in_table = false;
     let mut last_content_line: Option<String> = None;
     while cursor < lines.len() {
@@ -1061,10 +1170,9 @@ fn parse_block_quote(
         let trimmed_opt = trim_up_to_three_spaces(raw);
         let marked = trimmed_opt.is_some_and(|trimmed| trimmed.starts_with('>'));
         let quote_rest_owned: String;
-        if let Some(trimmed) = trimmed_opt {
-            if trimmed.is_empty() {
-                break;
-            }
+        // A blank line ends the quote however far it is indented.
+        if raw.trim().is_empty() {
+            break;
         }
         // The line's content and the byte of `raw` it is read from.
         let (line, from) = if marked {
@@ -1092,7 +1200,7 @@ fn parse_block_quote(
             // An open GFM table absorbs unmarked rows (lazy table body); a
             // non-row unmarked line ends the quote.
             break;
-        } else if paragraph_open && !lazy_line_starts_block(raw, options) {
+        } else if paragraph_open.is_some() && !lazy_line_starts_block(raw, options) {
             // Lazy paragraph continuation: a marker-less line that continues an
             // open paragraph (possibly nested). The RAW line is used verbatim —
             // its indentation (even >= 4 columns) is paragraph text, not code.
@@ -1131,15 +1239,15 @@ fn parse_block_quote(
             )
         });
         if marked && starts_table {
-            paragraph_open = false;
+            paragraph_open = None;
             in_table = true;
         } else if marked && in_table && block_quote_table_body_row(line, options) {
-            paragraph_open = false;
+            paragraph_open = None;
         } else {
             in_table = false;
             // Track the innermost open paragraph across nested quote markers so a
             // following lazy line can reach a paragraph buried in nested quotes.
-            paragraph_open = block_quote_content_paragraph_open(line, options);
+            paragraph_open = paragraph_open_after(paragraph_open, line, !marked, options);
         }
         last_content_line = Some(line.into());
         match inserted_escape {
@@ -1256,6 +1364,9 @@ fn parse_list(
     let mut items = Vec::new();
     let mut cursor = index;
     let mut tight = true;
+    // Whether the previous item ended at a blank line: an item that follows it
+    // is separated from it by that blank, which loosens the list.
+    let mut blank_before_item = false;
 
     while cursor < lines.len() {
         // A thematic break (`* * *`, `---`, …) outranks a list marker at the same
@@ -1271,6 +1382,10 @@ fn parse_list(
         if !same_list_marker(first_marker, marker) {
             break;
         }
+        if blank_before_item {
+            tight = false;
+        }
+        blank_before_item = false;
 
         let item_start = cursor;
         let mut item_end = cursor;
@@ -1292,7 +1407,8 @@ fn parse_list(
         let mut open_fence = None;
         let (first_content, first_from) = list_marker_first_content(lines[cursor].text, marker);
         let mut last_content_line: Option<String> = Some(first_content.as_ref().into());
-        let mut paragraph_open = list_item_paragraph_stays_open(None, &first_content, options);
+        let (mut paragraph_open, mut block_open) =
+            list_item_paragraph_stays_open(None, false, &first_content, false, options);
         // CommonMark §5.2: a list item can begin with at most one blank line.
         // When the marker has no content the item starts blank, and the first
         // following blank line ends it — later indented content cannot join
@@ -1330,15 +1446,7 @@ fn parse_list(
                     )
                     || leading_indent_columns(lines[next].text) < marker.content_indent
                 {
-                    if next < lines.len()
-                        && sibling_list_marker_at_line(
-                            lines[next].text,
-                            first_marker,
-                            marker.content_indent,
-                        )
-                    {
-                        item_tight = false;
-                    }
+                    blank_before_item = true;
                     cursor = next;
                     break;
                 }
@@ -1350,7 +1458,8 @@ fn parse_list(
                 // line's offset within the collected content so the structural
                 // check can tell a direct-child separator from a nested one.
                 item_blank_offsets.push(lines[cursor].start);
-                paragraph_open = false;
+                paragraph_open = None;
+                block_open = false;
                 let blank = &lines[cursor].text[lines[cursor].text.len()..];
                 content.push_line(&lines[cursor], blank, lines[cursor].text.len());
                 lazy_flags.push(false);
@@ -1361,7 +1470,15 @@ fn parse_list(
 
             item_started_blank = false;
 
-            if sibling_list_marker_at_line(lines[cursor].text, first_marker, marker.content_indent)
+            // A line that reached this list as a lazy continuation of an
+            // enclosing container's paragraph starts no block here either.
+            let lazy_from_outside = lines[cursor].lazy && paragraph_open.is_some();
+            if !lazy_from_outside
+                && sibling_list_marker_at_line(
+                    lines[cursor].text,
+                    first_marker,
+                    marker.content_indent,
+                )
             {
                 break;
             }
@@ -1370,15 +1487,20 @@ fn parse_list(
             // (CommonMark §5.3: changing the marker starts a new list). It is not
             // a same-list sibling, so it would otherwise be absorbed as lazy
             // paragraph text — break the item instead so a new list can start.
-            if leading_indent_columns(lines[cursor].text) < marker.content_indent
+            if !lazy_from_outside
+                && leading_indent_columns(lines[cursor].text) < marker.content_indent
                 && !same_list_marker_line(lines[cursor].text, first_marker)
                 && list_marker_info(lines[cursor].text).is_some()
             {
                 break;
             }
 
-            if leading_indent_columns(lines[cursor].text) < marker.content_indent {
-                if likely_block_start(lines[cursor].text, options) || !paragraph_open {
+            // A dedented line continues the item only as a lazy paragraph line,
+            // under the same rule a block quote applies to its lazy lines.
+            if !lazy_from_outside
+                && leading_indent_columns(lines[cursor].text) < marker.content_indent
+            {
+                if lazy_line_opens_block(lines[cursor].text, options) || paragraph_open.is_none() {
                     break;
                 }
             }
@@ -1388,8 +1510,11 @@ fn parse_list(
             // paragraph was open). Mark it lazy so the re-parse keeps it as
             // paragraph text rather than letting a stripped `- e`/`> q`/`# h`
             // begin a fresh block inside the item.
-            let lazy = paragraph_open
-                && leading_indent_columns(lines[cursor].text) < marker.content_indent;
+            // A line that reached this list as a lazy line of an enclosing
+            // container stays lazy inside it.
+            let lazy = lines[cursor].lazy
+                || (paragraph_open.is_some()
+                    && leading_indent_columns(lines[cursor].text) < marker.content_indent);
             let (stripped, from) = strip_list_continuation(
                 lines[cursor].text,
                 marker.content_indent,
@@ -1403,10 +1528,11 @@ fn parse_list(
                     options.constructs.spoiler,
                 )
             });
-            paragraph_open = if starts_table {
-                false
+            (paragraph_open, block_open) = if starts_table {
+                // The table's body rows continue it.
+                (None, true)
             } else {
-                list_item_paragraph_stays_open(Some(paragraph_open), &stripped, options)
+                list_item_paragraph_stays_open(paragraph_open, block_open, &stripped, lazy, options)
             };
             content.push_line(&lines[cursor], &stripped, from);
             lazy_flags.push(lazy);
@@ -1518,18 +1644,26 @@ fn block_span(block: &Block) -> Option<Span> {
     meta.span
 }
 
+/// Whether a paragraph is open after a list item's content line `line`, and
+/// whether a multi-line block other than a paragraph is: a block that an
+/// earlier line opened (`block_open`) keeps going until a blank line, while
+/// after a blank, a single-line block, or a paragraph the line is read afresh.
 fn list_item_paragraph_stays_open(
-    previous_open: Option<bool>,
+    paragraph_open: OpenParagraph,
+    block_open: bool,
     line: &str,
+    lazy: bool,
     options: &SyntaxOptions,
-) -> bool {
+) -> (OpenParagraph, bool) {
     if line.trim().is_empty() {
-        return false;
+        return (None, false);
     }
-    if previous_open == Some(false) {
-        return false;
+    if block_open && !lazy {
+        return (None, true);
     }
-    block_quote_content_paragraph_open(line, options)
+    let open = paragraph_open_after(paragraph_open, line, lazy, options);
+    let opens_block = open.is_none() && content_line_kind(line, options) == ContentLineKind::Open;
+    (open, opens_block)
 }
 
 fn parse_description_list(

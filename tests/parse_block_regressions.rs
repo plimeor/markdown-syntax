@@ -938,3 +938,163 @@ mod lazy_lines_and_final_whitespace {
         }
     }
 }
+
+mod container_laziness {
+    //! Lazy paragraph continuation inside lists and block quotes, as cmark,
+    //! commonmark.js, and micromark read it, and the blank lines and blank
+    //! item separators that end containers or loosen lists.
+
+    use markdown_syntax::{Block, Inline, ListItem, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::SoftBreak(_) => "/".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn only_item(block: &Block) -> &ListItem {
+        match block {
+            Block::List(list) if list.children.len() == 1 => &list.children[0],
+            other => panic!("expected a one-item list, got {other:?}"),
+        }
+    }
+
+    fn paragraph_texts(block: &Block) -> Vec<String> {
+        match block {
+            Block::Paragraph(paragraph) => texts(&paragraph.children),
+            other => panic!("expected a paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_lazy_line_continues_a_paragraph_in_an_item_that_started_blank() {
+        let blocks = blocks("- \n  a\nb");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(list).children[0]),
+            ["a", "/", "b"]
+        );
+
+        let blocks = self::blocks("* \n  1. a\na");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let inner = only_item(&only_item(list).children[0]);
+        assert_eq!(paragraph_texts(&inner.children[0]), ["a", "/", "a"]);
+    }
+
+    #[test]
+    fn a_lazy_line_continues_a_paragraph_after_a_thematic_break_in_an_item() {
+        let blocks = blocks("2. ---\n   > b c\nb c");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let item = only_item(list);
+        let [Block::ThematicBreak(_), Block::BlockQuote(quote)] = item.children.as_slice() else {
+            panic!("expected a break and a quote, got {:?}", item.children);
+        };
+        assert_eq!(paragraph_texts(&quote.children[0]), ["b c", "/", "b c"]);
+    }
+
+    #[test]
+    fn an_empty_item_marker_that_cannot_interrupt_continues_the_paragraph() {
+        let blocks = blocks("- a\n    * \nb c");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(list).children[0]),
+            ["a", "/", "*", "/", "b c"]
+        );
+    }
+
+    #[test]
+    fn a_lazy_line_of_a_block_quote_stays_lazy_inside_its_list() {
+        let blocks = blocks("> - a\n    - ");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(&quote.children[0]).children[0]),
+            ["a", "/", "-"]
+        );
+    }
+
+    #[test]
+    fn a_line_short_of_the_paragraphs_quote_level_continues_it_only_lazily() {
+        let blocks = blocks("> > a\n> 1. ");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        assert!(
+            matches!(
+                quote.children.as_slice(),
+                [Block::BlockQuote(_), Block::List(_)]
+            ),
+            "{:?}",
+            quote.children
+        );
+
+        let blocks = self::blocks("> > a\n> > 1. ");
+        let [Block::BlockQuote(outer)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::BlockQuote(inner)] = outer.children.as_slice() else {
+            panic!("expected a nested quote, got {:?}", outer.children);
+        };
+        assert_eq!(paragraph_texts(&inner.children[0]), ["a", "/", "1."]);
+    }
+
+    #[test]
+    fn a_blank_line_indented_four_columns_ends_a_block_quote() {
+        let blocks = blocks("> a\n    \n> b");
+        assert!(
+            matches!(
+                blocks.as_slice(),
+                [Block::BlockQuote(_), Block::BlockQuote(_)]
+            ),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_blank_line_between_an_empty_item_and_the_next_loosens_the_list() {
+        let blocks = blocks("* \n\n  * b c");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(list.children.len(), 2);
+        assert!(!list.tight);
+    }
+
+    #[test]
+    fn a_blank_line_before_a_thematic_break_leaves_the_list_tight() {
+        let blocks = blocks("- a\n\n- ---");
+        let [Block::List(list), Block::ThematicBreak(_)] = blocks.as_slice() else {
+            panic!("expected a list and a break, got {blocks:?}");
+        };
+        assert!(list.tight);
+    }
+
+    #[test]
+    fn a_complete_html_tag_on_a_lazy_line_ends_a_list_item() {
+        // cmark-gfm and micromark start a type-7 HTML block here; upstream cmark
+        // and commonmark.js keep the tag in the paragraph.
+        let blocks = blocks("- a\n<a>");
+        assert!(
+            matches!(blocks.as_slice(), [Block::List(_), Block::HtmlBlock(_)]),
+            "{blocks:?}"
+        );
+    }
+}

@@ -42,6 +42,13 @@ span, an inline link, or a link reference definition.
 - A paragraph and a setext heading drop the final whitespace of their content.
   A level-two setext heading whose text ends in `|` is written with that pipe
   escaped, so its `---` underline is not read as a table delimiter row.
+- Lazy lines continue a paragraph in list items and block quotes as cmark,
+  commonmark.js, and micromark read them: after an item that started blank,
+  after a single-line block, across nested containers, and at the quote level
+  the paragraph sits in. A blank line ends a block quote however far it is
+  indented, and a blank line between two items loosens the list.
+- A complete HTML tag (a type-7 HTML block start) on a lazy line ends a list
+  item, as it already ends a block quote.
 
 Specs:
 - `public-api` (modified)
@@ -152,6 +159,19 @@ Specs:
 - The serializer escapes a `|` that ends a level-two setext heading only when a
   text node supplies it — because a pipe ending a literal autolink belongs to
   its URL, and escaping it there changes the autolink.
+- A complete HTML tag on a lazy line ends the container, in list items as in
+  block quotes — because cmark-gfm (GitHub) and micromark start a type-7 HTML
+  block there, and the micromark case `html_flow` 147 pins it. Turned down:
+  upstream cmark's and commonmark.js's reading, which keeps the tag in the
+  paragraph, against the GitHub rendering.
+- Whether a paragraph is open is tracked with the number of nested block quotes
+  it sits in — because a line that reaches that level continues the paragraph
+  by the paragraph-interruption rules, while a line that stops short of it can
+  only continue it as a lazy line. Turned down: a yes/no flag, which reads
+  `> > a\n> 1. ` as continuation instead of a list in the outer quote.
+- The GH-19 rule that a fence-like lazy line ends a block quote's paragraph is
+  kept for block quotes and not extended to list items — because extending it
+  moved 22 generated inputs away from cmark, commonmark.js, and micromark.
 - After a shortcut reference, the serializer escapes the character that would
   re-read its brackets, because the AST must round-trip.
   - Turned down: writing the reference in collapsed form, which changes the
@@ -221,7 +241,11 @@ Specs:
 - [x] 5.3 Trim the final whitespace of paragraph and setext heading content before the inline parse, regenerating and reading the moved goldens; verified by the final-whitespace tests and `tests/fixtures.rs` passing.
 - [x] 5.4 Escape a text `|` that ends a level-two setext heading; verified by `a_pipe_ending_a_level_two_setext_heading_does_not_start_a_table` (failing before) and a parse-output comparison with the group-4 end in which no input newly fails to round-trip and every tree diff comes from 5.2 or 5.3.
 
-### 6. Integration checks
-- [x] 6.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
-- [x] 6.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
-- [x] 6.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
+### 6. Container laziness
+- [x] 6.1 Add tests for "Lazy line in an item that started blank", "Blank line indented four columns ends a block quote", "Blank line between an empty item and the next", and "Complete HTML tag on a lazy line ends a list item", and for lazy lines after a thematic break, through nested containers, and short of the paragraph's quote level; verified by each failing on the group-5 code, apart from the quote-level guard.
+- [x] 6.2 End a block quote at any blank line; track an item's open paragraph afresh after a blank line or a single-line block; track the open paragraph's quote level; carry a lazy flag into nested lists; loosen a list at a blank line between items; and read a list item's lazy lines with the block quote's rule, GH-19 aside; verified by a comparison with cmark/commonmark.js and micromark, where they agree, on 43,805 generated block-structure inputs without tabs or fences, with no mismatch left and no input that matched before stopping matching, and by a parse-output comparison with the group-5 end in which no input newly fails to round-trip.
+
+### 7. Integration checks
+- [x] 7.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
+- [x] 7.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
+- [x] 7.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
