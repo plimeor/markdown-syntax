@@ -1313,6 +1313,31 @@ mod paragraph_interruption {
     }
 
     #[test]
+    fn a_tab_inside_nested_containers_spans_its_source_columns() {
+        // Each tab reaches its stop from its column in the source line, not from
+        // the start of the content a container read it in.
+        let shape = |source: &str| format!("{:?}", blocks(source));
+        // `> > ` ends at column 4: the tab spans four columns, code.
+        assert!(
+            shape("> > \ta").contains("CodeBlock"),
+            "{}",
+            shape("> > \ta")
+        );
+        // `* - ` ends at column 4: one space and a four-column tab, code.
+        assert!(
+            shape("* - \tb c").contains("CodeBlock"),
+            "{}",
+            shape("* - \tb c")
+        );
+        // `>1. \t` holds code, so the next line is not its lazy continuation.
+        let lazy = blocks(">1. \ta\n    \t1. ===");
+        assert!(
+            matches!(lazy.as_slice(), [Block::BlockQuote(_), Block::CodeBlock(_)]),
+            "{lazy:?}"
+        );
+    }
+
+    #[test]
     fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
         for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
             let blocks = blocks(source);

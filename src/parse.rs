@@ -75,6 +75,9 @@ struct Line<'a> {
     /// the string the line was split from, where `text` starts at `text_offset`.
     segments: &'a [Segment],
     text_offset: usize,
+    /// The source column `text` starts at, from which its tabs reach their
+    /// tab stops (every four columns).
+    column: usize,
 }
 
 impl<'a> Line<'a> {
@@ -89,7 +92,19 @@ impl<'a> Line<'a> {
             lazy: false,
             segments: &[],
             text_offset: 0,
+            column: 0,
         }
+    }
+
+    /// The source column after `self.text[..offset]`.
+    fn column_at(&self, offset: usize) -> usize {
+        advance_columns(self.column, &self.text[..offset])
+    }
+
+    /// The columns of the whitespace that starts the line, from its column.
+    fn indent_columns(&self) -> usize {
+        let leading = self.text.len() - trim_ascii_start(self.text).len();
+        self.column_at(leading) - self.column
     }
 
     /// The input position where a node starting at byte `offset` of `text`
@@ -136,6 +151,8 @@ struct ListMarkerInfo<'a> {
     marker_len: usize,
     content_indent: usize,
     content: &'a str,
+    /// The source column the marker's line starts at.
+    column: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -253,6 +270,17 @@ fn source_char(char: char) -> char {
 const MAX_BLOCK_NESTING: usize = 32;
 
 /// Parses the blocks of a container's derived content.
+/// The column `text` reaches from column `column`, with tab stops every four.
+fn advance_columns(column: usize, text: &str) -> usize {
+    text.chars().fold(column, |column, char| {
+        if char == '\t' {
+            column + 4 - column % 4
+        } else {
+            column + 1
+        }
+    })
+}
+
 fn parse_derived_blocks(
     content: &DerivedText,
     options: &SyntaxOptions,
@@ -260,7 +288,7 @@ fn parse_derived_blocks(
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
-    let lines = collect_lines(&content.text, content.map());
+    let lines = content.lines();
     parse_blocks_from_lines(&lines, false, options, definitions, diagnostics, depth)
 }
 
@@ -552,6 +580,7 @@ impl<'a> LineSegments<'a> {
             lazy: false,
             segments: covering,
             text_offset: start,
+            column: 0,
         }
     }
 }
@@ -786,7 +815,7 @@ fn parse_math_block(
     // line, exactly like a fenced code block.
     let opener = trim_up_to_three_spaces(lines[index].text)?;
     let fence_length = math_block_fence_length(opener)?;
-    let opening_indent = leading_indent_columns(lines[index].text);
+    let opening_indent = lines[index].indent_columns();
 
     let mut value = String::new();
     let mut content_lines = 0usize;
@@ -812,7 +841,12 @@ fn parse_math_block(
             // yielding another line.
             ensure_line_separator(&mut value);
         }
-        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        let stripped = strip_leading_indent_columns_split(
+            lines[cursor].text,
+            opening_indent,
+            lines[cursor].column,
+        )
+        .0;
         value.push_str(&stripped);
         value.push_str(lines[cursor].eol);
         content_lines += 1;
@@ -868,7 +902,7 @@ fn parse_fenced_code(
     let (marker, length) = fence_start(line)?;
     // CommonMark: up to N columns of indentation (N = the opening fence's
     // indent, 0–3) are removed from each content line.
-    let opening_indent = leading_indent_columns(lines[index].text);
+    let opening_indent = lines[index].indent_columns();
     let info = line[length..].trim();
     let info = if info.is_empty() {
         None
@@ -906,7 +940,12 @@ fn parse_fenced_code(
             // yielding another line.
             ensure_line_separator(&mut value);
         }
-        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        let stripped = strip_leading_indent_columns_split(
+            lines[cursor].text,
+            opening_indent,
+            lines[cursor].column,
+        )
+        .0;
         value.push_str(&stripped);
         value.push_str(lines[cursor].eol);
         content_lines += 1;
@@ -1085,31 +1124,49 @@ impl OpenBlockEnd {
 /// Nested quote and list markers are stripped one level at a time so that,
 /// e.g., `> > a` reports that the deepest content `a` is a paragraph (this is
 /// what lets a lazy line continue a paragraph buried inside several quotes).
-fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind {
+fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> ContentLineKind {
     if content.trim().is_empty() {
         return ContentLineKind::Empty;
     }
-    // Nested `>` and list markers are peeled one per iteration. Past
+    // Nested `>` and list markers are peeled one per iteration, keeping the
+    // source column of what is left so its tabs reach their stops. Past
     // `MAX_BLOCK_NESTING` of them no container opens (see
     // `parse_blocks_from_lines`), so what remains is paragraph text.
     let mut source = Cow::Borrowed(content);
     let mut offset = 0;
+    let mut column = column;
     let mut depth = 0;
     let mut in_list = false;
     for _ in 0..=MAX_BLOCK_NESTING {
-        let Some(trimmed) = trim_up_to_three_spaces(&source[offset..]) else {
+        let here = &source[offset..];
+        let indent = here.len() - trim_ascii_start(here).len();
+        let trimmed_column = advance_columns(column, &here[..indent]);
+        if trimmed_column - column > 3 {
             // >= 4 columns of indentation: indented code, never a paragraph.
             return ContentLineKind::Closed;
-        };
+        }
+        let trimmed = &here[indent..];
         if trimmed.is_empty() {
             return ContentLineKind::Empty;
         }
-        let rest = if let Some(rest) = trimmed.strip_prefix('>') {
+        let (rest, rest_column) = if let Some(rest) = trimmed.strip_prefix('>') {
             depth += 1;
-            Cow::Borrowed(rest.strip_prefix(' ').unwrap_or(rest))
-        } else if let Some(marker) = list_marker_info(trimmed) {
+            let rest_column = trimmed_column + 1;
+            match rest.strip_prefix(' ') {
+                Some(rest) => (Cow::Borrowed(rest), rest_column + 1),
+                None => (Cow::Borrowed(rest), rest_column),
+            }
+        } else if let Some(marker) = list_marker_info_at(trimmed, trimmed_column) {
             in_list = true;
-            list_marker_first_content(trimmed, marker).0
+            let marker_end_column = trimmed_column + marker.marker_len;
+            match list_marker_first_content(trimmed, marker) {
+                (Cow::Borrowed(rest), from) => (
+                    Cow::Borrowed(rest),
+                    advance_columns(trimmed_column, &trimmed[..from]),
+                ),
+                // A tab split after the marker: its rest starts one column on.
+                (Cow::Owned(rest), _) => (Cow::Owned(rest), marker_end_column + 1),
+            }
         } else if parse_thematic_break(Line::detached(trimmed)).is_some()
             || is_atx_heading_line(trimmed)
         {
@@ -1128,6 +1185,7 @@ fn content_line_kind(content: &str, options: &SyntaxOptions) -> ContentLineKind 
         } else {
             return ContentLineKind::Paragraph;
         };
+        column = rest_column;
         match rest {
             // A borrowed rest is a suffix of `source`; continue from it in place.
             Cow::Borrowed(rest) => offset = source.len() - rest.len(),
@@ -1172,6 +1230,7 @@ fn strip_quote_markers(content: &str, depth: usize) -> (&str, usize) {
 fn paragraph_open_after(
     open: OpenParagraph,
     content: &str,
+    column: usize,
     lazy: bool,
     options: &SyntaxOptions,
 ) -> OpenParagraph {
@@ -1198,7 +1257,7 @@ fn paragraph_open_after(
             return open;
         }
     }
-    match content_line_kind(content, options) {
+    match content_line_kind(content, column, options) {
         ContentLineKind::Paragraph => Some(quote_depth(content)),
         _ => None,
     }
@@ -1286,18 +1345,16 @@ fn parse_block_quote(
             if rest.starts_with(' ') {
                 from += 1;
                 rest = &rest[1..];
-                if depth == 0 {
-                    if let Cow::Owned(expanded) =
-                        expand_leading_whitespace(rest, leading_indent_columns(raw) + 2)
-                    {
-                        if !continues_verbatim(open_block, &expanded) {
-                            quote_rest_owned = expanded;
-                            rest = &quote_rest_owned;
-                        }
+                if let Cow::Owned(expanded) =
+                    expand_leading_whitespace(rest, lines[cursor].column_at(from))
+                {
+                    if !continues_verbatim(open_block, &expanded) {
+                        quote_rest_owned = expanded;
+                        rest = &quote_rest_owned;
                     }
                 }
             } else if rest.starts_with('\t') {
-                let marker_end_column = leading_indent_columns(raw) + 1;
+                let marker_end_column = lines[cursor].column_at(from);
                 let (stripped, split) =
                     strip_leading_indent_columns_split(rest, 1, marker_end_column);
                 from += split;
@@ -1363,8 +1420,16 @@ fn parse_block_quote(
             // Track the innermost open paragraph across nested quote markers so a
             // following lazy line can reach a paragraph buried in nested quotes,
             // and the fence or HTML block that its lines continue instead.
-            (paragraph_open, open_block) =
-                content_line_state(paragraph_open, open_block, line, !marked, true, options);
+            let column = source_map::derived_column(&lines[cursor], line, from);
+            (paragraph_open, open_block) = content_line_state(
+                paragraph_open,
+                open_block,
+                line,
+                column,
+                !marked,
+                true,
+                options,
+            );
         }
         last_content_line = Some(line.into());
         match inserted_escape {
@@ -1389,7 +1454,7 @@ fn parse_block_quote(
         return Some((alert, cursor));
     }
 
-    let mut child_lines = collect_lines(&content.text, content.map());
+    let mut child_lines = content.lines();
     for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
         child.lazy = lazy;
     }
@@ -1423,7 +1488,7 @@ fn parse_alert_from_block_quote(
     }
     let first_line = content.text.split('\n').next().unwrap_or_default();
     let (kind, title) = parse_alert_marker(first_line)?;
-    let lines = collect_lines(&content.text, content.map());
+    let lines = content.lines();
     let children = match lines.get(1..) {
         Some(rest) if !rest.is_empty() => {
             parse_blocks_from_lines(rest, false, options, definitions, diagnostics, depth + 1)
@@ -1477,7 +1542,7 @@ fn parse_list(
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
-    let first_marker = list_marker_info(lines[index].text)?;
+    let first_marker = list_marker_info_at(lines[index].text, lines[index].column)?;
     let mut items = Vec::new();
     let mut cursor = index;
     let mut tight = true;
@@ -1493,7 +1558,7 @@ fn parse_list(
         if parse_thematic_break(lines[cursor]).is_some() {
             break;
         }
-        let Some(marker) = list_marker_info(lines[cursor].text) else {
+        let Some(marker) = list_marker_info_at(lines[cursor].text, lines[cursor].column) else {
             break;
         };
         if !same_list_marker(first_marker, marker) {
@@ -1523,9 +1588,17 @@ fn parse_list(
         let mut lazy_flags: Vec<bool> = Vec::new();
         let mut open_fence = None;
         let (first_content, first_from) = list_marker_first_content(lines[cursor].text, marker);
+        let first_content = align_leading_tabs(first_content, &lines[cursor], first_from);
         let mut last_content_line: Option<String> = Some(first_content.as_ref().into());
-        let (mut paragraph_open, mut open_block) =
-            content_line_state(None, None, &first_content, false, false, options);
+        let (mut paragraph_open, mut open_block) = content_line_state(
+            None,
+            None,
+            &first_content,
+            source_map::derived_column(&lines[cursor], &first_content, first_from),
+            false,
+            false,
+            options,
+        );
         // CommonMark §5.2: a list item can begin with at most one blank line.
         // When the marker has no content the item starts blank, and the first
         // following blank line ends it — later indented content cannot join
@@ -1542,7 +1615,7 @@ fn parse_list(
                 // verbatim code content, not item-ending blanks: keep them.
                 if open_fence.is_some() {
                     let (stripped, from) = strip_list_continuation(
-                        lines[cursor].text,
+                        &lines[cursor],
                         marker.content_indent,
                         first_marker.indent,
                     );
@@ -1561,7 +1634,7 @@ fn parse_list(
                         first_marker,
                         marker.content_indent,
                     )
-                    || leading_indent_columns(lines[next].text) < marker.content_indent
+                    || lines[next].indent_columns() < marker.content_indent
                 {
                     // A blank line inside a fence the item's content left open
                     // is the fence's, which loosens no list (cmark).
@@ -1608,7 +1681,7 @@ fn parse_list(
             // a same-list sibling, so it would otherwise be absorbed as lazy
             // paragraph text — break the item instead so a new list can start.
             if !lazy_from_outside
-                && leading_indent_columns(lines[cursor].text) < marker.content_indent
+                && lines[cursor].indent_columns() < marker.content_indent
                 && !same_list_marker_line(lines[cursor].text, first_marker)
                 && list_marker_info(lines[cursor].text).is_some()
             {
@@ -1617,9 +1690,7 @@ fn parse_list(
 
             // A dedented line continues the item only as a lazy paragraph line,
             // under the same rule a block quote applies to its lazy lines.
-            if !lazy_from_outside
-                && leading_indent_columns(lines[cursor].text) < marker.content_indent
-            {
+            if !lazy_from_outside && lines[cursor].indent_columns() < marker.content_indent {
                 if lazy_line_opens_block(lines[cursor].text, options) || paragraph_open.is_none() {
                     break;
                 }
@@ -1634,16 +1705,13 @@ fn parse_list(
             // container stays lazy inside it.
             let lazy = lines[cursor].lazy
                 || (paragraph_open.is_some()
-                    && leading_indent_columns(lines[cursor].text) < marker.content_indent);
-            let (stripped, from) = strip_list_continuation(
-                lines[cursor].text,
-                marker.content_indent,
-                first_marker.indent,
-            );
-            let stripped = match align_top_level_tabs(stripped, lines[cursor].text, from, depth) {
+                    && lines[cursor].indent_columns() < marker.content_indent);
+            let (stripped, from) =
+                strip_list_continuation(&lines[cursor], marker.content_indent, first_marker.indent);
+            let stripped = match align_leading_tabs(stripped, &lines[cursor], from) {
                 Cow::Owned(expanded) if continues_verbatim(open_block, &expanded) => {
                     strip_list_continuation(
-                        lines[cursor].text,
+                        &lines[cursor],
                         marker.content_indent,
                         first_marker.indent,
                     )
@@ -1668,7 +1736,15 @@ fn parse_list(
                 };
                 (None, Some(table))
             } else {
-                content_line_state(paragraph_open, open_block, &stripped, lazy, false, options)
+                content_line_state(
+                    paragraph_open,
+                    open_block,
+                    &stripped,
+                    source_map::derived_column(&lines[cursor], &stripped, from),
+                    lazy,
+                    false,
+                    options,
+                )
             };
             content.push_line(&lines[cursor], &stripped, from);
             lazy_flags.push(lazy);
@@ -1684,7 +1760,7 @@ fn parse_list(
         if container_closed_after_unclosed_fence(lines, cursor, item_end, &content.text, options) {
             content.push_synthetic("\n");
         }
-        let mut child_lines = collect_lines(&content.text, content.map());
+        let mut child_lines = content.lines();
         for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
             child.lazy = lazy;
         }
@@ -1791,6 +1867,7 @@ fn content_line_state(
     paragraph_open: OpenParagraph,
     open_block: Option<OpenBlock>,
     line: &str,
+    column: usize,
     lazy: bool,
     in_quote: bool,
     options: &SyntaxOptions,
@@ -1812,11 +1889,11 @@ fn content_line_state(
             return (None, (!block.end.ends_with(rest)).then_some(block));
         }
     }
-    let open = paragraph_open_after(paragraph_open, line, false, options);
+    let open = paragraph_open_after(paragraph_open, line, column, false, options);
     if open.is_some() {
         return (open, None);
     }
-    let block = match content_line_kind(line, options) {
+    let block = match content_line_kind(line, column, options) {
         ContentLineKind::Open(block)
             if in_quote && (block.in_list || block.end == OpenBlockEnd::Blank) =>
         {
@@ -7888,6 +7965,11 @@ fn trim_closing_hashes(input: &str) -> &str {
 }
 
 fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
+    list_marker_info_at(input, 0)
+}
+
+/// `list_marker_info` for a line that starts at source column `column`.
+fn list_marker_info_at(input: &str, column: usize) -> Option<ListMarkerInfo<'_>> {
     let trimmed = trim_up_to_three_spaces(input)?;
     let indent = input.len() - trimmed.len();
     let bytes = trimmed.as_bytes();
@@ -7898,7 +7980,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 b'*' => ListDelimiter::Asterisk,
                 _ => ListDelimiter::Plus,
             };
-            let (content_offset, content_indent) = list_content_offset(trimmed, 1, indent);
+            let (content_offset, content_indent) = list_content_offset(trimmed, 1, indent, column);
             Some(ListMarkerInfo {
                 ordered: false,
                 start: None,
@@ -7907,6 +7989,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 marker_len: 1,
                 content_indent,
                 content: &trimmed[content_offset..],
+                column,
             })
         }
         byte if byte.is_ascii_digit() => {
@@ -7927,7 +8010,8 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
             }
             let start = trimmed[..end].parse().ok()?;
             let marker_len = end + 1;
-            let (content_offset, content_indent) = list_content_offset(trimmed, marker_len, indent);
+            let (content_offset, content_indent) =
+                list_content_offset(trimmed, marker_len, indent, column);
             Some(ListMarkerInfo {
                 ordered: true,
                 start: Some(start),
@@ -7936,13 +8020,22 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 marker_len,
                 content_indent,
                 content: &trimmed[content_offset..],
+                column,
             })
         }
         _ => None,
     }
 }
 
-fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize, usize) {
+/// The byte the content after a list marker starts at, and the item's content
+/// indent in columns from the line's start; tabs reach their stops from the
+/// line's source column `base`.
+fn list_content_offset(
+    input: &str,
+    marker_len: usize,
+    indent: usize,
+    base: usize,
+) -> (usize, usize) {
     let bytes = input.as_bytes();
     if bytes.get(marker_len).is_none() {
         return (marker_len, indent + marker_len + 1);
@@ -7953,7 +8046,7 @@ fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize,
     while let Some(byte) = bytes.get(cursor) {
         match *byte {
             b' ' => column += 1,
-            b'\t' => column += 4 - (column % 4),
+            b'\t' => column += 4 - ((base + column) % 4),
             _ => break,
         }
         cursor += 1;
@@ -7988,8 +8081,11 @@ fn list_marker_first_content<'a>(
     };
     let after_marker = &trimmed[marker.marker_len..];
     if after_marker.starts_with('\t') {
-        let (content, split) =
-            strip_leading_indent_columns_split(after_marker, 1, marker.indent + marker.marker_len);
+        let (content, split) = strip_leading_indent_columns_split(
+            after_marker,
+            1,
+            marker.column + marker.indent + marker.marker_len,
+        );
         (content, input.len() - after_marker.len() + split)
     } else {
         borrowed()
@@ -8062,27 +8158,6 @@ fn leading_indent_columns(input: &str) -> usize {
     leading_indent(input).0
 }
 
-/// Removes up to `max_columns` columns of leading whitespace, stopping at the
-/// first non-space/tab byte (tabs advance to the next 4-column tab stop). A tab
-/// that straddles the column budget is PARTIALLY consumed: the columns beyond the
-/// budget are re-emitted as spaces (CommonMark tab-expansion of indentation), so
-/// the result may be an owned `String`. Whitespace already at/over the budget
-/// (and any literal tab whose start sits at the budget) is returned verbatim.
-fn strip_leading_indent_columns(input: &str, max_columns: usize) -> Cow<'_, str> {
-    strip_leading_indent_columns_from(input, max_columns, 0)
-}
-
-fn strip_leading_indent_columns_from(
-    input: &str,
-    max_columns: usize,
-    start_column: usize,
-) -> Cow<'_, str> {
-    strip_leading_indent_columns_split(input, max_columns, start_column).0
-}
-
-/// `strip_leading_indent_columns_from`, also returning the byte of `input` the
-/// result starts from: a borrowed result is `input` from there on, and an owned
-/// one expands the whitespace at the start of it (beginning with a split tab).
 /// `input`, which starts at `start_column`, with each tab of its leading
 /// whitespace that starts within its first four columns written as the spaces
 /// it spans there. Those columns decide indentation; a tab past them is
@@ -8108,19 +8183,13 @@ fn expand_leading_whitespace(input: &str, start_column: usize) -> Cow<'_, str> {
     Cow::Owned(expanded)
 }
 
-/// A container's content line read from byte `from` of `raw`, with the tabs
-/// of its leading whitespace written as the spaces they span at their column
-/// in `raw`. Only a top-level container (`depth` 0) reads lines whose first
-/// column is the source line's; a nested one reads its lines as they are.
-fn align_top_level_tabs<'a>(
-    derived: Cow<'a, str>,
-    raw: &str,
-    from: usize,
-    depth: usize,
-) -> Cow<'a, str> {
+/// A container's content line read from byte `from` of `line`, with the tabs
+/// of its leading whitespace written as the spaces they span at their source
+/// column (see `expand_leading_whitespace`).
+fn align_leading_tabs<'a>(derived: Cow<'a, str>, line: &Line<'_>, from: usize) -> Cow<'a, str> {
     match derived {
-        Cow::Borrowed(text) if depth == 0 && text.starts_with([' ', '\t']) => {
-            expand_leading_whitespace(text, columns_of(&raw[..from]))
+        Cow::Borrowed(text) if text.starts_with([' ', '\t']) => {
+            expand_leading_whitespace(text, line.column_at(from))
         }
         derived => derived,
     }
@@ -8132,17 +8201,12 @@ fn continues_verbatim(open_block: Option<OpenBlock>, line: &str) -> bool {
     open_block.is_some_and(|block| block.depth == 0 && !block.end.ends_with(line))
 }
 
-/// The columns `input` spans from column 0, with tab stops every four.
-fn columns_of(input: &str) -> usize {
-    input.chars().fold(0, |column, char| {
-        if char == '\t' {
-            column + 4 - column % 4
-        } else {
-            column + 1
-        }
-    })
-}
-
+/// Removes up to `max_columns` columns of the leading whitespace of `input`,
+/// which starts at source column `start_column` (tabs advance to the next
+/// four-column stop). A tab that straddles the budget is partly consumed: its
+/// columns past the budget, and the whitespace after it, are written as spaces.
+/// Also returns the byte of `input` the result starts from: a borrowed result
+/// is `input` from there on, and an owned one expands the whitespace there.
 fn strip_leading_indent_columns_split(
     input: &str,
     max_columns: usize,
@@ -8197,18 +8261,22 @@ fn strip_leading_indent_columns_split(
 
 /// A list item's continuation line with its indentation removed, and the byte
 /// of `input` it is read from (see `strip_leading_indent_columns_split`).
-fn strip_list_continuation(
-    input: &str,
+fn strip_list_continuation<'a>(
+    line: &Line<'a>,
     content_indent: usize,
     list_indent: usize,
-) -> (Cow<'_, str>, usize) {
-    let (indent_columns, indent_bytes) = leading_indent(input);
+) -> (Cow<'a, str>, usize) {
+    let input = line.text;
+    let indent_bytes = input.len() - trim_ascii_start(input).len();
+    let indent_columns = line.indent_columns();
     if indent_columns >= content_indent {
         // Remove exactly `content_indent` columns. A tab straddling that budget
         // is split: the columns past the budget survive as spaces (CommonMark
         // tab expansion of list-item indentation), so a `\t`-only line inside a
         // 2-column item keeps the residual two spaces instead of vanishing.
-        strip_leading_indent_columns_split(input, content_indent, 0)
+        let (stripped, from) =
+            strip_leading_indent_columns_split(input, content_indent, line.column);
+        (stripped, from)
     } else if indent_columns > list_indent {
         (Cow::Borrowed(&input[indent_bytes..]), indent_bytes)
     } else {

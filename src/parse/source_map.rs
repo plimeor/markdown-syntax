@@ -198,6 +198,8 @@ pub(super) struct DerivedText {
     map: SourceMap,
     /// The source range of the line ending the next joiner stands for.
     pending_eol: Option<(usize, usize)>,
+    /// The source column each pushed line starts at.
+    columns: Vec<usize>,
 }
 
 impl DerivedText {
@@ -226,8 +228,19 @@ impl DerivedText {
     /// previous line.
     pub(super) fn push_line(&mut self, line: &Line<'_>, derived: &str, from: usize) {
         self.join();
+        self.columns.push(derived_column(line, derived, from));
         self.append(line, derived, from);
         self.pending_eol = Some(line.eol_source());
+    }
+
+    /// The lines of the text, each starting at the source column it was read
+    /// from.
+    pub(super) fn lines(&self) -> Vec<Line<'_>> {
+        let mut lines = super::collect_lines(&self.text, &self.map);
+        for (line, column) in lines.iter_mut().zip(&self.columns) {
+            line.column = *column;
+        }
+        lines
     }
 
     /// Appends `derived` to the current line without a joiner.
@@ -260,6 +273,7 @@ impl DerivedText {
         inserted: &str,
     ) {
         self.join();
+        self.columns.push(line.column);
         let at = self.text.len();
         line.copy_into(&mut self.map, at, 0, offset);
         let source = line.source_start(offset);
@@ -300,6 +314,21 @@ impl DerivedText {
         self.map.push(self.text.len(), text.len(), at, at);
         self.text.push_str(text);
     }
+}
+
+/// The source column `derived` starts at, which `line` read from byte `from`
+/// of its text (see [`DerivedText::push_line`]): the column of its offset
+/// when it is a slice of the text, or else the column its verbatim tail starts
+/// at less the spaces its expanded head writes.
+pub(super) fn derived_column(line: &Line<'_>, derived: &str, from: usize) -> usize {
+    if let Some(offset) = slice_offset(line.text, derived) {
+        return line.column_at(offset);
+    }
+    let raw = &line.text[from..];
+    let suffix = common_suffix_len(raw, derived);
+    let head = derived.len() - suffix;
+    line.column_at(from + raw.len() - suffix)
+        .saturating_sub(head)
 }
 
 /// The offset of `slice` inside `text` when it is a borrowed sub-slice of it.

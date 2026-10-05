@@ -92,10 +92,12 @@ span, an inline link, or a link reference definition.
   paragraph or setext heading after a definition; a line that would open
   description details; frontmatter ending in an empty line; and a literal `~`
   beside an emphasis run, which stays literal unless it could pair.
-- A tab in the indentation after a top-level block quote's marker and space,
-  or after a top-level list item's content indent, spans the columns it
-  spans in the source line, up to the four columns that decide indentation;
-  a line inside a fence or HTML block keeps its tabs.
+- Every line carries the source column it starts at, so a tab spans the
+  columns it spans in the source line at any container depth: in the
+  indentation after a block quote's marker or a list item's content indent
+  (up to the four columns that decide indentation), after a list marker, and
+  in a fence's indentation. A line inside a fence or HTML block keeps its
+  tabs.
 - A blank line inside a fence that a nested item left open loosens no list.
 - A quoted paragraph that opens with backticks takes lazy lines; the GH-19
   rule applies to the lazy line, not to the quoted line before it.
@@ -233,11 +235,6 @@ Specs:
   (`a*~ **&*`); and backticks or brackets inside a wiki link or footnote
   label (`[^`]``). Each needs the dialect or a reparse check in the
   serializer, which this plan does not add.
-- [Tabs inside nested containers] → A nested container reads its lines from
-  column 0 of the derived text, so a tab after a nested marker still spans
-  the columns of that position rather than the source's (282 of the 289
-  mismatches left in the block comparison). Fixing it needs each line to
-  carry its source column through every indentation check.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -334,3 +331,4 @@ Specs:
 - [x] 12.1 Add a test for "Quoted paragraph opening with backticks"; verified by it failing on the group-11 code.
 - [x] 12.2 Read a quoted content line's block without the lazy-line GH-19 rule; verified by a comparison with commonmark.js and micromark, with raw HTML allowed, on 30,000 generated inline inputs (links, references, images, code spans, entities, escapes, autolinks, emphasis, raw HTML) where they agree on 29,971: 5 mismatches before and 3 after, one the GH-19 rule the conformance oracle (markdown-rs) keeps and two the link-text autolink demotion the 0.3.0 delimiter stack chose; and by the block comparison staying with no input newly mismatching.
 - [x] 12.3 Leave a list tight across a blank line that a fence opened in a nested item holds; verified by `a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight` (failing before) and by the block comparison's last non-tab, non-GH-19 mismatch matching, with none newly mismatching (286 left: 280 tab cases in nested containers and 6 under the GH-19 rule).
+- [x] 11.3 Give each line the source column it starts at, recorded by `DerivedText` for derived lines, and read tabs from it in list markers, list continuations, block quote markers, fence indentation, and the container line classification; verified by `a_tab_inside_nested_containers_spans_its_source_columns` (failing before), by the block comparison going from 286 mismatches to 8 (all under the GH-19 rule) with none newly mismatching, by the hand-written tab layouts all matching, and by conformance staying at 2233 of 2236.

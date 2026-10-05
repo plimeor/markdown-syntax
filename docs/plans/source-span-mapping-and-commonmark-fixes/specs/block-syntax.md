@@ -84,6 +84,10 @@ specification defines them.
 - **WHEN** ``"2. a\n   1. ```\n\n2. b"`` is parsed with the CommonMark preset
 - **THEN** the document holds one tight `List`
 
+#### Scenario: Tab inside nested containers
+- **WHEN** `"* - \tb c"` is parsed with the CommonMark preset
+- **THEN** the inner list item holds an indented `CodeBlock`, since the tab spans columns 4 to 8
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
