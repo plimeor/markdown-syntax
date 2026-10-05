@@ -18,7 +18,7 @@ use crate::{
     validate::is_directive_name,
 };
 
-mod nul;
+mod nul_replacement;
 #[cfg(test)]
 mod scan_tests;
 
@@ -167,7 +167,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         children,
     };
     if source.contains('\0') {
-        nul::replace_in_document(&mut document);
+        nul_replacement::replace_in_document(&mut document);
     }
 
     Ok(ParseOutput {
@@ -178,7 +178,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
 
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
 /// between the two call this; node values are rewritten after parsing by
-/// `nul::replace_in_document`, so spans stay in source coordinates.
+/// `nul_replacement::replace_in_document`, so spans stay in source coordinates.
 fn source_char(char: char) -> char {
     if char == '\0' {
         '\u{FFFD}'
