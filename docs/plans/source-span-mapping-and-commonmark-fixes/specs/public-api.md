@@ -26,6 +26,38 @@ tab SHALL map to that tab.
 - **WHEN** `parse("> a\n>\n> b")` runs
 - **THEN** the block quote's second paragraph spans bytes 8..9
 
+#### Scenario: Nested list item after multi-byte text
+- **WHEN** `parse("- 项目\n  - 嵌套 [[library/工作/买菜]]\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 20..45
+
+#### Scenario: Nested block quote
+- **WHEN** `parse("> 外层\n> > 内层 [[A]]\n")` runs
+- **THEN** the inner block quote's `WikiLink` spans bytes 20..25
+
+#### Scenario: Alert body
+- **WHEN** `parse("> [!NOTE]\n> 见 [[A]]\n")` runs
+- **THEN** the alert's `WikiLink` spans bytes 16..21
+
+#### Scenario: Footnote definition continuation line
+- **WHEN** `parse("正文[^1]\n\n[^1]: 见 [[A]]\n    续 [[B]]\n")` runs
+- **THEN** the footnote definition's second `WikiLink` spans bytes 36..41
+
+#### Scenario: Inside an HTML container
+- **WHEN** `parse("<details>\n<summary>更多</summary>\n\n- 项目\n  - [[A]]\n\n</details>\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 50..55
+
+#### Scenario: Inside a container directive
+- **WHEN** `parse(":::note\n- 项目\n  - [[A]]\n:::\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 21..26
+
+#### Scenario: Tab-indented nested list
+- **WHEN** `parse("- 项目\n\t- 嵌套 [[A]]\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 19..24
+
+#### Scenario: CRLF nested list
+- **WHEN** `parse("- 项目\r\n  - 嵌套 [[A]]\r\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 21..26
+
 #### Scenario: CRLF soft break
 - **WHEN** `parse("a\r\nb")` runs
 - **THEN** the paragraph holds a `SoftBreak` spanning bytes 1..3 and `Text("b")` spanning bytes 3..4
@@ -41,6 +73,10 @@ tab SHALL map to that tab.
 #### Scenario: Split tab
 - **WHEN** `parse(">\t\tfoo")` runs
 - **THEN** the block quote holds an indented code block with value `  foo` spanning bytes 1..6
+
+#### Scenario: Container span regression cases
+- **WHEN** `inline_spans_address_source_inside_containers` in `tests/parse_span_contract.rs` parses each of its 31 cases (lists, task lists, block quotes, alerts, tables, footnote definitions, HTML containers, container directives, frontmatter, CRLF, and tabs)
+- **THEN** every `WikiLink`, `Link`, `Image`, and `#`-holding `Text` it collects spans exactly the literal it occupies in the input
 
 ### Requirement: Spans nest
 Every parsed node's span SHALL lie on UTF-8 character boundaries within the

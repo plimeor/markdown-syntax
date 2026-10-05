@@ -7,7 +7,11 @@ quotes, list items, and the other containers) is joined into one string and
 re-read from a single base offset, and paragraph, heading, and table-cell inline
 input is joined the same way. So every line after a stripped prefix, a CRLF, or
 a cell pipe is shifted: block and inline spans slice the wrong text, and code
-blocks inside containers get spans past the end of the input. Separately, three
+blocks inside containers get spans past the end of the input. Issue
+plimeor/markdown-syntax#6 measures this on 31 container cases, 26 of which fail
+on 0.3.0. Editors that rewrite source in place by span then panic when a span
+lands inside a multi-byte character, or silently replace the wrong bytes.
+Separately, three
 CommonMark and round-trip defects predate the delimiter-stack change: the rule
 of three uses the remaining run length, an image with an invalid `(…)` does not
 fall back to a reference, and the serializer writes text that reparses as a code
@@ -17,7 +21,8 @@ span, an inline link, or a link reference definition.
 
 - Every parsed node's span maps to the source bytes it was read from, on every
   line of every container, across CRLF line endings, inside table cells, and
-  across split tabs.
+  across split tabs. This resolves issue plimeor/markdown-syntax#6, whose
+  31-case regression test joins the suite.
 - Table cells carry spans; today they carry none.
 - Every span lies within its parent's span, in source order among its siblings,
   and this holds for the whole tree.
@@ -170,14 +175,15 @@ Specs:
 ### 4. Source spans
 - [ ] 4.1 Add tests:
   - every scenario of "Spans map stripped lines back to the source", the new "Source spans" scenarios, and "Emphasis on a block quote continuation line"
+  - issue plimeor/markdown-syntax#6's regression test, as `inline_spans_address_source_inside_containers` in `tests/parse_span_contract.rs`, with its 31 cases unchanged
   - a "Spans nest" check over the fixture corpus and over seeded generated inputs mixing containers, tables, CRLF, and tabs
 
-  Verified by the changed-behavior tests failing on the current code.
+  Verified by the changed-behavior tests failing on the current code, the issue's test failing 26 of 31 cases.
 - [ ] 4.2 Add the source-map type and build every container's content with its map, composed in original coordinates. The containers are block quotes and alerts, list items, footnote definitions, container directives, description details, and HTML containers. `Line` positions come from the map. Verified by:
   - the "Later block inside a block quote" and "Split tab" tests passing
   - `tests/parse_span_contract.rs` passing
   - the nest check finding no block span outside its parent
-- [ ] 4.3 Build every inline input with its map: paragraphs, ATX and setext headings, table cells, directive labels, description terms, and HTML containers. Translate spans in one walk per block-level inline parse. Verified by the inline scenarios and the nest check passing at every depth.
+- [ ] 4.3 Build every inline input with its map: paragraphs, ATX and setext headings, table cells, directive labels, description terms, and HTML containers. Translate spans in one walk per block-level inline parse. Verified by the inline scenarios, all 31 cases of `inline_spans_address_source_inside_containers`, and the nest check passing at every depth.
 - [ ] 4.4 Give table cells their spans, as described under Decisions; verified by the table-cell scenarios passing.
 - [ ] 4.5 Extend `inline_container_spans_cover_their_delimiters_and_content` to inputs with leading whitespace, block quotes, list items, tables, and CRLF; verified by it passing.
 - [ ] 4.6 Add a growth check for long, nested block quotes and list items and for long tables to `tests/pathological_inputs.rs`; verified by linear growth in debug and release builds.
