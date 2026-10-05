@@ -505,7 +505,7 @@ mod reference {
             // character; Unicode whitespace (e.g. U+00A0) is ordinary. A backslash
             // before a space is NOT an escape (only ASCII punctuation is escapable),
             // so `\ ` still terminates the destination → `[a](\ b)` is not a link.
-            if (char == ' ' || char.is_ascii_control()) && depth == 0 {
+            if char == ' ' || char.is_ascii_control() {
                 break;
             }
             if char == '(' && !is_escaped_at(input, cursor) {

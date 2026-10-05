@@ -139,7 +139,7 @@ fn for_each_scan(seed: u64, mut check: impl FnMut(&str, &mut TextScan, usize)) {
     for input in generated_inputs(700, 40, seed) {
         let positions = boundaries(&input);
         for order in query_orders(&positions, &mut rng) {
-            let mut scan = TextScan::new(&input);
+            let mut scan = TextScan::new(&input, DelimiterChars::default());
             for offset in order {
                 if offset < input.len() {
                     check(&input, &mut scan, offset);

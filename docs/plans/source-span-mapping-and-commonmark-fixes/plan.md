@@ -63,6 +63,20 @@ span, an inline link, or a link reference definition.
   block value, a text line that would open an HTML block or a leaf directive,
   and an indented code block ending in `\r` or `\r\n`. The CRLF line-ending
   option leaves a value's `\r\n` as it is.
+- A `_` run preceded or followed by Unicode punctuation opens and closes as
+  one beside ASCII punctuation does; an escaped backslash before a line ending
+  is text, not a hard break; a bare link destination ends at a space inside
+  parentheses; a line with a malformed directive opener does not end a
+  paragraph; and a container's last content line ends in `\n` like the others.
+- The serializer escapes a run of `*`, `_`, or `$` in text whole or not at
+  all, reads the text's neighbours as the reparse sees them (delimiters the
+  later inlines write, tabs, and chars written as references), writes `_`
+  emphasis only where `_` can open and close, indents a continuation line
+  inside an inline that would start a block, writes a break that opens a line
+  or a delimited span after a `&#x20;`, writes a space in a bare destination
+  as a reference, starts a list item whose first block opens with whitespace
+  on the line after its marker, and lengthens a code fence only past lines
+  that would close it.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
   Windows filename that `cargo package` warns about.
 
@@ -264,3 +278,8 @@ Specs:
 - [x] 8.1 Add tests for "ATX-like line that is no heading", "Backtick run with a backtick in its info", "Unclosed fence in a block quote", and "Last line ending of indented code", and for each serializer case under "Escaping keeps text literal" that this group adds, with guards that a closed fence and a fence inside a quoted list item leave lazy lines as they were; verified by each failing on the group-6 code, apart from the two guards.
 - [x] 8.2 Read `#` and fence lines in `likely_block_start` with the ATX and fence opener rules; track a block quote's open fence, math block, and HTML block in `content_line_state`, which list items share; end a code or math block's last line with the value's first line ending; regenerate and read the `commonmark_code_spans`, `commonmark_blockquotes`, and `commonmark_tabs` goldens; verified by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree (792 mismatches before, 751 after, none newly mismatching; of the rest, 744 involve tabs, 6 the GH-19 rule, and 1 a blank line inside an unclosed fence of a nested item) and by conformance staying at 2233 of 2236.
 - [x] 8.3 Write the serializer cases above; verified by the round-trip fuzz over 30,000 generated inputs dropping from 812 failures at the group-6 end to 372, and by `tests/fixtures.rs` passing.
+
+### 9. Inline flanking, delimiter runs, and further round-trips
+- [x] 9.1 Add tests for "Underscore after Unicode punctuation", "Escaped backslash before a line ending", "Space inside a bare destination's parentheses", "Container content ending in a carriage return", "Malformed directive line inside a paragraph", and each serializer scenario this group adds; verified by each failing on the group-8 code.
+- [x] 9.2 Read the `_` rules' punctuation as Unicode punctuation; take a hard break only after an unescaped backslash; end a bare destination at any space; require a valid opener for a directive line to interrupt a paragraph; end a container's last line with `\n`; verified by the tests, by conformance staying at 2233 of 2236, and by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree with no input newly mismatching.
+- [x] 9.3 Write the serializer cases above, regenerating the `commonmark_attention` canonical output, whose `\__foo\__bar` becomes `\_\_foo\_\_bar`; verified by the round-trip fuzz over 30,000 generated inputs dropping from 372 failures at the group-8 end to none.

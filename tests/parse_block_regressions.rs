@@ -1190,6 +1190,30 @@ mod paragraph_interruption {
     }
 
     #[test]
+    fn a_malformed_directive_line_continues_the_paragraph() {
+        for source in ["a\n::", "a\n::1bad", "a\n:::", "a\n::: x"] {
+            let blocks = SyntaxOptions::default().parse(source).document.children;
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_container_ends_its_last_line_with_a_line_feed() {
+        let blocks = blocks("- ```\n  ~\r");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let [Block::CodeBlock(CodeBlock { value, .. })] = list.children[0].children.as_slice()
+        else {
+            panic!("expected one code block, got {list:?}");
+        };
+        assert_eq!(value, "~\n");
+    }
+
+    #[test]
     fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
         for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
             let blocks = blocks(source);

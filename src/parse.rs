@@ -1339,7 +1339,7 @@ fn parse_block_quote(
 
     let span = Span::new(lines[index].start, lines[cursor - 1].end_with_eol);
     if !lines[cursor - 1].eol.is_empty() && !ends_with_line_ending(&content.text) {
-        content.push_pending_eol(lines[cursor - 1].eol);
+        content.push_pending_eol();
     }
     if container_closed_after_unclosed_fence(lines, cursor, cursor - 1, &content.text, options) {
         content.push_synthetic("\n");
@@ -1626,7 +1626,7 @@ fn parse_list(
         }
 
         if !lines[item_end].eol.is_empty() && !ends_with_line_ending(&content.text) {
-            content.push_pending_eol(lines[item_end].eol);
+            content.push_pending_eol();
         }
         if container_closed_after_unclosed_fence(lines, cursor, item_end, &content.text, options) {
             content.push_synthetic("\n");
@@ -4423,9 +4423,9 @@ fn emphasis_roles(
     let (mut can_open, mut can_close) = if marker == b'_' {
         (
             flanking.left
-                && (!flanking.right || flanking.previous.is_some_and(|c| c.is_ascii_punctuation())),
+                && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation)),
             flanking.right
-                && (!flanking.left || flanking.next.is_some_and(|c| c.is_ascii_punctuation())),
+                && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation)),
         )
     } else {
         (flanking.left, flanking.right)
@@ -5779,7 +5779,13 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'\n' {
-            if text.ends_with('\\') {
+            // Only a literal backslash, not one an escape or a reference wrote,
+            // makes the line ending a hard break.
+            if index > 0
+                && bytes[index - 1] == b'\\'
+                && !is_escaped_at(input, index - 1)
+                && text.ends_with('\\')
+            {
                 text.pop();
                 flush_text(
                     &mut nodes,
@@ -7084,13 +7090,12 @@ fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
 
 fn can_open_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.left
-        && (!flanking.right || flanking.previous.is_some_and(|c| c.is_ascii_punctuation()))
+    flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
 }
 
 fn can_close_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.right && (!flanking.left || flanking.next.is_some_and(|c| c.is_ascii_punctuation()))
+    flanking.right && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation))
 }
 
 #[derive(Clone, Copy)]
@@ -7407,7 +7412,7 @@ fn parse_link_destination(
         // character; Unicode whitespace (e.g. U+00A0) is ordinary. A backslash
         // before a space is NOT an escape (only ASCII punctuation is escapable),
         // so `\ ` still terminates the destination → `[a](\ b)` is not a link.
-        if (char == ' ' || source_char(char).is_ascii_control()) && depth == 0 {
+        if char == ' ' || source_char(char).is_ascii_control() {
             break;
         }
         if char == '(' && !is_escaped_at(input, cursor) {
@@ -7729,7 +7734,7 @@ fn next_char(input: &str, index: usize) -> Option<(usize, char)> {
 /// ASCII punctuation plus the non-ASCII Unicode `P*`/`S*` categories. Only the
 /// flanking classification needs the Unicode set; escape/label logic stays
 /// ASCII-only via `char::is_ascii_punctuation`.
-fn is_flanking_punctuation(value: char) -> bool {
+pub(crate) fn is_flanking_punctuation(value: char) -> bool {
     value.is_ascii_punctuation() || crate::unicode_punctuation::is_unicode_punctuation(value)
 }
 
@@ -8657,6 +8662,15 @@ fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) ->
     )
 }
 
+/// Whether `line`, read as a paragraph's continuation line after `previous`,
+/// would end the paragraph or make it a setext heading or a table header
+/// under the maximal default dialect.
+pub(crate) fn continuation_line_breaks_paragraph(previous: &str, line: &str) -> bool {
+    likely_block_start(line, &SyntaxOptions::default())
+        || setext_underline_depth(line).is_some()
+        || gfm_table_can_start_source(previous, line)
+}
+
 pub(crate) fn gfm_table_can_start_source(header: &str, delimiter: &str) -> bool {
     table_can_start_source(header, delimiter, true, false)
 }
@@ -8723,9 +8737,26 @@ fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
         || (options.constructs.html_container && line_starts_html_container(input))
         || (options.constructs.html_block && line_starts_interrupting_html_block(input))
         || (options.constructs.math_block && math_block_fence_length(trimmed).is_some())
-        || (options.constructs.directive_container && trimmed.starts_with(":::"))
-        || (options.constructs.directive_leaf && trimmed.starts_with("::"))
+        || (options.constructs.directive_container && container_directive_opens(trimmed))
+        || (options.constructs.directive_leaf && leaf_directive_opens(trimmed))
         || (options.constructs.footnote_definition && line_starts_footnote_definition(trimmed))
+}
+
+/// Whether `trimmed` opens a container directive: three or more `:` and a
+/// valid opener. A container finds its closing fence among its own lines, so
+/// a bare fence ends no paragraph.
+fn container_directive_opens(trimmed: &str) -> bool {
+    directive_container_opener_prefix(trimmed)
+        .is_some_and(|(_, rest)| parse_directive_opener(rest).is_some())
+}
+
+/// Whether `trimmed` opens a leaf directive: `::` and a valid opener. A line
+/// with a malformed one is reported where a block starts, but does not end a
+/// paragraph it would only become text of.
+fn leaf_directive_opens(trimmed: &str) -> bool {
+    trimmed.starts_with("::")
+        && !trimmed.starts_with(":::")
+        && parse_directive_opener(&trimmed[2..]).is_some()
 }
 
 // A GFM footnote definition `[^label]:` is a block boundary: it interrupts a

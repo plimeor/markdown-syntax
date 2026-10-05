@@ -29,6 +29,18 @@ spans, links, and emphasis.
 - **WHEN** `"![foo](a b)\n\n[foo]: /u"` is parsed with the CommonMark preset
 - **THEN** the paragraph holds a shortcut `ImageReference` to `foo` followed by `Text("(a b)")`
 
+#### Scenario: Underscore after Unicode punctuation
+- **WHEN** `"«_**]**_"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("«")` and an `Emphasis` containing a `Strong` containing `]`
+
+#### Scenario: Escaped backslash before a line ending
+- **WHEN** `"a\\\\\nb"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("a\\")`, a `SoftBreak`, and `Text("b")`
+
+#### Scenario: Space inside a bare destination's parentheses
+- **WHEN** `"[a](( ))"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("[a](( ))")` and no `Link`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the inline cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML

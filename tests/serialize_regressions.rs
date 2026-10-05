@@ -1635,3 +1635,108 @@ mod literal_text {
         assert_eq!(markdown, "```\r\na\r\n```\r\n\r\nb\r\n");
     }
 }
+
+mod round_trip_edges {
+    //! Parsed documents whose serialized output must reparse to the same
+    //! tree under the dialect that parsed them.
+
+    use markdown_syntax::prelude::*;
+
+    /// `debug` with every `Some(Span { .. })` written as `None`.
+    fn without_spans(debug: &str) -> String {
+        let mut out = String::new();
+        let mut rest = debug;
+        while let Some(start) = rest.find("Some(Span { ") {
+            out.push_str(&rest[..start]);
+            out.push_str("None");
+            let end = rest[start..].find("})").expect("span ends") + start + 2;
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Checks the round trip of `source` under the CommonMark preset and the
+    /// default dialect, and returns the default dialect's output.
+    fn assert_round_trips(source: &str) -> String {
+        let mut markdown = String::new();
+        for options in [SyntaxOptions::commonmark(), SyntaxOptions::default()] {
+            let document = options.parse(source).document;
+            markdown = document.to_markdown().expect("document serializes");
+            let reparsed = options.parse(&markdown).document;
+            assert_eq!(
+                without_spans(&format!("{:?}", reparsed.children)),
+                without_spans(&format!("{:?}", document.children)),
+                "{source:?} -> {markdown:?}"
+            );
+        }
+        markdown
+    }
+
+    #[test]
+    fn a_break_that_opens_a_line_or_a_span_is_written_after_a_reference() {
+        assert_eq!(assert_round_trips("&#x20; \na"), "&#x20; \na\n");
+        assert_eq!(assert_round_trips("a\n&#x20;\nb"), "a\n&#x20;\nb\n");
+        assert_round_trips("++&#x20;\nd++");
+        assert_round_trips("_&#x20;\n=_");
+        assert_eq!(assert_round_trips("[\nfoo](u)"), "[\nfoo](u)\n");
+    }
+
+    #[test]
+    fn a_continuation_line_inside_an_inline_that_would_start_a_block_is_indented() {
+        assert_eq!(assert_round_trips("=```\n    ```"), "\\=```\n    ```\n");
+        assert_round_trips("-$$\n    $$");
+        assert_eq!(assert_round_trips("(\n    <div>"), "(\n    <div>\n");
+        assert_eq!(assert_round_trips("``\nfoo\nbar\n``"), "``\nfoo\nbar\n``\n");
+    }
+
+    #[test]
+    fn delimiter_runs_in_text_are_escaped_whole() {
+        for source in [
+            "**\t*$",
+            "+*(**\0",
+            "__***-*",
+            "(*~\n**)",
+            "**:\n**:",
+            "($$]$=",
+            "[\\||>||)||",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn emphasis_delimiters_suit_their_neighbours() {
+        assert_eq!(assert_round_trips("***y*b"), "\\*\\**y*b\n");
+        assert_eq!(assert_round_trips("y***b***"), "y***b***\n");
+    }
+
+    #[test]
+    fn a_literal_autolink_does_not_run_on_into_what_follows() {
+        for source in ["&#x20;://y", "://\\:://y", "://\\::p:", "://\t["] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_bare_destination_writes_a_space_as_a_reference() {
+        assert_eq!(assert_round_trips("[o]:&#x20;"), "[o]: &#x20;\n");
+    }
+
+    #[test]
+    fn whitespace_that_opens_a_list_items_first_block_starts_on_the_next_line() {
+        assert_eq!(assert_round_trips("-\n   <v>"), "-\n   <v>\n");
+        assert_round_trips("*\t<a>");
+    }
+
+    #[test]
+    fn raw_html_alone_on_a_paragraphs_first_line_keeps_a_trailing_reference() {
+        assert_eq!(assert_round_trips("<a>&#x20;\n;"), "<a>&#x20;\n;\n");
+    }
+
+    #[test]
+    fn a_fence_grows_only_past_lines_that_would_close_it() {
+        assert_eq!(assert_round_trips("```\n```*"), "```\n```*\n```\n");
+        assert_eq!(assert_round_trips("````\n```\n````"), "````\n```\n````\n");
+    }
+}

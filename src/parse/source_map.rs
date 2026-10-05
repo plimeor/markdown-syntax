@@ -276,14 +276,11 @@ impl DerivedText {
         self.pending_eol = Some(line.eol_source());
     }
 
-    /// Appends the line ending the last pushed line was read with.
-    pub(super) fn push_pending_eol(&mut self, eol: &str) {
-        let (start, end) = self.pending_eol.take().unwrap_or_else(|| {
-            let at = end_of(self.map.segments(), self.text.len());
-            (at, at)
-        });
-        self.map.push(self.text.len(), eol.len(), start, end);
-        self.text.push_str(eol);
+    /// Ends the last pushed line with `\n`, mapped to the line ending it was
+    /// read with, as the lines before it are joined.
+    pub(super) fn push_pending_eol(&mut self) {
+        self.join();
+        self.pending_eol = None;
     }
 
     /// Drops the CommonMark whitespace (space, tab, line tabulation, form feed)

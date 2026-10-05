@@ -5,8 +5,10 @@
 //! with a [`SerializeError`].
 
 use alloc::{
+    borrow::Cow,
     format,
     string::{String, ToString},
+    vec,
     vec::Vec,
 };
 
@@ -15,8 +17,8 @@ use crate::{
     diagnostic::Diagnostic,
     memo::{pattern_starts, PathMemo, Positions, Step},
     parse::{
-        gfm_table_can_start_source, line_starts_html_block, line_starts_interrupting_html_block,
-        literal_autolink_extents,
+        continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
+        line_starts_html_block, line_starts_interrupting_html_block, literal_autolink_extents,
     },
     validate::validate_document,
 };
@@ -203,6 +205,7 @@ fn serialize_block(
                     } else {
                         content
                     };
+                    let content = indent_block_starting_continuations(content);
                     format!("{content}\n{underline}")
                 }
                 _ if content.is_empty() => "#".repeat(node.depth as usize),
@@ -389,17 +392,46 @@ fn serialize_paragraph(
 ) -> Result<String, SerializeError> {
     let mut output = serialize_inlines(&node.children, options)?;
     if let Some(offset) = paragraph_html_block_escape_offset(&output) {
-        output.insert(offset, '\\');
+        if matches!(node.children.first(), Some(Inline::Html(_))) {
+            // Raw HTML takes no escape; only a complete tag alone on its line
+            // (type 7) reaches here, as `<a>&#x20;\n…` parses, and a trailing
+            // space written as a reference keeps the line a paragraph's.
+            let line_end = output.find('\n').unwrap_or(output.len());
+            output.insert_str(line_end, "&#x20;");
+        } else {
+            output.insert(offset, '\\');
+        }
     }
     if let Some(offset) = paragraph_table_escape_offset(&output) {
         output.insert(offset, '\\');
     }
-    if matches!(node.children.first(), Some(Inline::SoftBreak(_))) {
-        // A paragraph that opens with a soft break, as `&#x20;\n…` parses (the
-        // space before a line ending is dropped), is written the same way.
-        output.insert_str(0, "&#x20;");
+    Ok(indent_block_starting_continuations(output))
+}
+
+/// Indents each continuation line of inline content that would start a block
+/// (a line inside a code span, raw HTML, or a link title, which text escaping
+/// does not reach) past a block start; the paragraph drops that indentation.
+fn indent_block_starting_continuations(output: String) -> String {
+    let mut lines = output.split('\n');
+    let Some(first) = lines.next() else {
+        return output;
+    };
+    let mut previous = first;
+    let mut indented = None::<String>;
+    let mut written = first.len();
+    for line in lines {
+        if continuation_line_breaks_paragraph(previous, line) {
+            let result = indented.get_or_insert_with(|| String::from(&output[..written]));
+            result.push_str("\n    ");
+            result.push_str(line);
+        } else if let Some(result) = indented.as_mut() {
+            result.push('\n');
+            result.push_str(line);
+        }
+        written += 1 + line.len();
+        previous = line;
     }
-    Ok(output)
+    indented.unwrap_or(output)
 }
 
 fn paragraph_html_block_escape_offset(input: &str) -> Option<usize> {
@@ -537,6 +569,15 @@ fn serialize_list_with_marker_spacing(
             output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
             continue;
         }
+        if inner.starts_with([' ', '\t']) {
+            // Content after the marker's padding would move the item's content
+            // column, so whitespace that opens the item's first block (an HTML
+            // block's indentation) starts on the line after the marker.
+            output.push_str(marker.trim_end());
+            output.push('\n');
+            output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
+            continue;
+        }
         output.push_str(&marker);
         output.push_str(&indent_after_first_line(&inner, marker.len()));
     }
@@ -639,7 +680,7 @@ fn serialize_code_block(
         }
         CodeBlockKind::Fenced { marker, length } => {
             let marker = code_block_fence_marker(node, marker, options);
-            let fence = fence_for(&node.value, marker, length.max(3));
+            let fence = code_block_fence(&node.value, marker, length.max(3));
             let mut opener = fence.clone();
             if let Some(info) = &node.info {
                 opener.push(' ');
@@ -760,6 +801,68 @@ struct InlineSerializeContext {
     /// Inside an `_`-delimited emphasis, where a `_` in text that can close
     /// would close it on reparse.
     in_underscore_emphasis: bool,
+    /// The inlines open a line of the block, rather than following a
+    /// delimiter such as a link's `[` on it.
+    opens_line: bool,
+    /// For a text, the delimiter chars that the inlines after it may write.
+    written_later: DelimiterChars,
+    /// The inlines open a span delimited by a run such as `*` or `++`, which
+    /// a line ending right after it could not open.
+    opens_span: bool,
+}
+
+/// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, and `|`, which delimit
+/// inline spans that pair runs across sibling inlines.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct DelimiterChars(u8);
+
+impl DelimiterChars {
+    const CHARS: [char; 7] = ['*', '_', '~', '+', '=', '^', '|'];
+
+    fn of_char(char: char) -> Self {
+        Self::CHARS
+            .iter()
+            .position(|known| *known == char)
+            .map_or(Self(0), |bit| Self(1 << bit))
+    }
+
+    fn of_str(input: &str) -> Self {
+        input
+            .chars()
+            .fold(Self(0), |set, char| set.union(Self::of_char(char)))
+    }
+
+    const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    fn contains(self, char: char) -> bool {
+        let bit = Self::of_char(char).0;
+        bit != 0 && self.0 & bit == bit
+    }
+
+    /// The delimiter chars that `inline` may write that can pair with a run
+    /// before it: a link's or image's text pairs only within its brackets.
+    fn written_by(inline: &Inline) -> Self {
+        let within = |own: &str, children: &[Inline]| {
+            children.iter().fold(Self::of_str(own), |set, child| {
+                set.union(Self::written_by(child))
+            })
+        };
+        match inline {
+            Inline::Text(node) => Self::of_str(&node.value),
+            Inline::Emphasis(node) => within("*_", &node.children),
+            Inline::Strong(node) => within("*_", &node.children),
+            Inline::Underline(node) => within("_", &node.children),
+            Inline::Delete(node) => within("~", &node.children),
+            Inline::Insert(node) => within("+", &node.children),
+            Inline::Mark(node) => within("=", &node.children),
+            Inline::Subscript(node) => within("~", &node.children),
+            Inline::Superscript(node) => within("^", &node.children),
+            Inline::Spoiler(node) => within("|", &node.children),
+            _ => Self(0),
+        }
+    }
 }
 
 impl InlineSerializeContext {
@@ -768,6 +871,27 @@ impl InlineSerializeContext {
             table_cell: true,
             avoid_star_edges: false,
             in_underscore_emphasis: false,
+            opens_line: false,
+            written_later: DelimiterChars(0),
+            opens_span: false,
+        }
+    }
+
+    const fn opening_span(self) -> Self {
+        Self {
+            opens_span: true,
+            ..self
+        }
+    }
+
+    const fn block_content() -> Self {
+        Self {
+            table_cell: false,
+            avoid_star_edges: false,
+            in_underscore_emphasis: false,
+            opens_line: true,
+            written_later: DelimiterChars(0),
+            opens_span: false,
         }
     }
 
@@ -790,7 +914,7 @@ fn serialize_inlines(
     inlines: &[Inline],
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    serialize_inlines_with_context(inlines, options, InlineSerializeContext::default())
+    serialize_inlines_with_context(inlines, options, InlineSerializeContext::block_content())
 }
 
 /// Escape a trailing unescaped `!` already in `output` before emitting a
@@ -893,14 +1017,26 @@ fn literal_autolink_original(inline: &Inline) -> Option<&str> {
     }
 }
 
+/// How `inline` is written when that takes no escaping: a literal autolink or
+/// a shortcode, which a literal autolink's URL scan may run on into; empty
+/// for any other inline.
+fn plain_spelling(inline: &Inline) -> String {
+    match inline {
+        Inline::Shortcode(node) => alloc::format!(":{}:", node.name),
+        _ => literal_autolink_original(inline).map_or(String::new(), String::from),
+    }
+}
+
 /// Whether `rendered` text written right after the literal autolink
-/// `original` leaves the autolink as it is under at least one autolink dialect
-/// (GFM, or GFM plus relaxed): the parser's own scan reads exactly `original`.
-/// The dialect the document came from is not known here; the source spelling
-/// keeps it under that one.
-fn text_keeps_literal_autolink(original: &str, rendered: &str) -> bool {
+/// `original`, and before `following` (the [`plain_spelling`] of the next
+/// inline), leaves the autolink as it is under at least one
+/// autolink dialect (GFM, or GFM plus relaxed): the parser's own scan reads
+/// exactly `original`. The dialect the document came from is not known here;
+/// the source spelling keeps it under that one.
+fn text_keeps_literal_autolink(original: &str, rendered: &str, following: &str) -> bool {
     let mut joined = String::from(original);
     joined.push_str(rendered);
+    joined.push_str(following);
     literal_autolink_extents(&joined).contains(&Some(original.len()))
 }
 
@@ -925,8 +1061,20 @@ fn serialize_inlines_with_context(
     options: &SerializeOptions,
     context: InlineSerializeContext,
 ) -> Result<String, SerializeError> {
+    let opens_line = context.opens_line;
+    let opens_span = context.opens_span;
+    // Nested inlines follow their parent's opening delimiter.
+    let context = InlineSerializeContext {
+        opens_line: false,
+        written_later: DelimiterChars(0),
+        opens_span: false,
+        ..context
+    };
     let mut output = String::new();
     let mut output_line = OutputLine::default();
+    // The delimiter chars the inlines from each index on may write, read once
+    // a text needs them.
+    let mut written_from: Option<Vec<DelimiterChars>> = None;
     for (index, inline) in inlines.iter().enumerate() {
         match inline {
             Inline::Text(node) => {
@@ -936,7 +1084,23 @@ fn serialize_inlines_with_context(
                 let before_literal_autolink =
                     inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
                 let at_line_start = output_line.len(&output) == 0;
+                let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
                 let at_line_end = text_is_at_line_end(inlines, index);
+                let written_later = if node.value.contains(DelimiterChars::CHARS) {
+                    written_from.get_or_insert_with(|| {
+                        let mut sets = vec![DelimiterChars(0); inlines.len() + 1];
+                        for (at, inline) in inlines.iter().enumerate().rev() {
+                            sets[at] = sets[at + 1].union(DelimiterChars::written_by(inline));
+                        }
+                        sets
+                    })[index + 1]
+                } else {
+                    DelimiterChars(0)
+                };
+                let text_context = InlineSerializeContext {
+                    written_later,
+                    ..context
+                };
 
                 // Trailing guard: when this text is immediately followed by a
                 // www/http/email literal, its trailing whitespace must survive
@@ -945,8 +1109,12 @@ fn serialize_inlines_with_context(
                 // control char, which would break the literal's left boundary on
                 // reparse — emit the trailing space/tab run literally instead.
                 let render = |lead: &str, body: &str| {
-                    let (escape_body, trailing_ws) = if before_literal_autolink {
-                        let head = body.trim_end_matches([' ', '\t']);
+                    let head = body.trim_end_matches([' ', '\t']);
+                    // Whitespace that opens a line stays encoded: written
+                    // literally, the line would drop it.
+                    let whole_line_start = opens_block_line && lead.is_empty() && head.is_empty();
+                    let (escape_body, trailing_ws) = if before_literal_autolink && !whole_line_start
+                    {
                         (head, &body[head.len()..])
                     } else {
                         (body, "")
@@ -956,7 +1124,7 @@ fn serialize_inlines_with_context(
                         escape_body,
                         lead.is_empty() && trailing_ws.len() != body.len() && at_line_start,
                         trailing_ws.is_empty() && at_line_end,
-                        context,
+                        text_context,
                     ));
                     rendered.push_str(trailing_ws);
                     rendered
@@ -975,10 +1143,11 @@ fn serialize_inlines_with_context(
                 // extend its URL on reparse. When it would, its first char is
                 // written in the first form the URL scan stops at.
                 if let Some(original) = autolink_before {
-                    if !text_keeps_literal_autolink(original, &rendered) {
+                    let following = inlines.get(index + 1).map_or(String::new(), plain_spelling);
+                    if !text_keeps_literal_autolink(original, &rendered, &following) {
                         for (lead, rest) in leading_char_encodings(&node.value) {
                             let candidate = render(&lead, rest);
-                            if text_keeps_literal_autolink(original, &candidate) {
+                            if text_keeps_literal_autolink(original, &candidate, &following) {
                                 rendered = candidate;
                                 break;
                             }
@@ -1000,7 +1169,7 @@ fn serialize_inlines_with_context(
                 let children = serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.inside_underscore_emphasis(),
+                    context.inside_underscore_emphasis().opening_span(),
                 )?;
                 let touches_underscore = children.starts_with('_')
                     || children.ends_with('_')
@@ -1010,17 +1179,27 @@ fn serialize_inlines_with_context(
                 // preceding `*`-emphasis) would otherwise merge into one run, so
                 // switch this run to `_` when that does not introduce a new
                 // `_`-collision with the children.
-                let abuts_star = output.ends_with('*') && !touches_underscore;
-                let prefer_underscore = (context.avoid_star_edges && !touches_underscore)
-                    || abuts_star
-                    || children.starts_with('*')
-                    || children.ends_with('*');
+                let abuts_star = ends_with_unescaped(&output, '*') && !touches_underscore;
+                // `_` neither opens after nor closes before an alphanumeric.
+                let underscore_flanks = !output
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric)
+                    && !matches!(
+                        inlines.get(index + 1),
+                        Some(Inline::Text(next)) if next.value.chars().next().is_some_and(char::is_alphanumeric)
+                    );
+                let prefer_underscore = underscore_flanks
+                    && ((context.avoid_star_edges && !touches_underscore)
+                        || abuts_star
+                        || children.starts_with('*')
+                        || children.ends_with('*'));
                 let delimiter = if prefer_underscore { '_' } else { '*' };
                 let children = if delimiter == '*' {
                     serialize_inlines_with_context(
                         &node.children,
                         options,
-                        context.avoiding_star_edges(),
+                        context.avoiding_star_edges().opening_span(),
                     )?
                 } else {
                     children
@@ -1033,7 +1212,7 @@ fn serialize_inlines_with_context(
                 let children = serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.avoiding_star_edges(),
+                    context.avoiding_star_edges().opening_span(),
                 )?;
                 // NOTE: two abutting `Strong` nodes (`**a****b**`) reparse as a
                 // single run. The only zero-insertion separator is flipping one
@@ -1049,12 +1228,16 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push_str("__");
             }
             Inline::Delete(node) => {
-                let children = serialize_inlines_with_context(&node.children, options, context)?;
+                let children = serialize_inlines_with_context(
+                    &node.children,
+                    options,
+                    context.opening_span(),
+                )?;
                 let marker = match node.marker {
                     DeleteMarker::SingleTilde => "~",
                     DeleteMarker::DoubleTilde => "~~",
@@ -1068,7 +1251,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push_str("++");
             }
@@ -1077,7 +1260,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push_str("==");
             }
@@ -1086,7 +1269,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push('~');
             }
@@ -1095,7 +1278,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push('^');
             }
@@ -1104,7 +1287,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context,
+                    context.opening_span(),
                 )?);
                 output.push_str("||");
             }
@@ -1234,9 +1417,26 @@ fn serialize_inlines_with_context(
                 }
             },
             Inline::Html(node) => output.push_str(&node.value),
-            Inline::SoftBreak(_) => output.push('\n'),
+            // A break that opens a line, as `&#x20;\n` and `&#x20; \n` parse
+            // (the whitespace before a line ending is dropped), is written the
+            // same way: a bare line ending or spaces there would end the block.
+            // So is one that opens a delimited span, whose opener a line ending
+            // right after it would keep from opening.
+            Inline::SoftBreak(_) => {
+                if breaks_line_start(&output, &mut output_line, opens_line)
+                    || (opens_span && output.is_empty())
+                {
+                    output.push_str("&#x20;");
+                }
+                output.push('\n');
+            }
             Inline::LineBreak(node) => match node.kind {
                 LineBreakKind::Backslash => output.push_str("\\\n"),
+                LineBreakKind::Spaces
+                    if breaks_line_start(&output, &mut output_line, opens_line) =>
+                {
+                    output.push_str("&#x20; \n");
+                }
                 LineBreakKind::Spaces => output.push_str("  \n"),
             },
             Inline::Math(node) => {
@@ -1404,10 +1604,12 @@ struct TextScan<'a> {
     dollar_runs: Option<SameCharRuns>,
     /// The byte, start, and end of the last run `run_len_from` measured.
     current_run: Option<(u8, usize, usize)>,
+    /// The [`DelimiterChars`] that the inlines after the text may write.
+    written_later: DelimiterChars,
 }
 
 impl<'a> TextScan<'a> {
-    fn new(input: &'a str) -> Self {
+    fn new(input: &'a str, written_later: DelimiterChars) -> Self {
         Self {
             input,
             marker_starts: Default::default(),
@@ -1415,7 +1617,17 @@ impl<'a> TextScan<'a> {
             last_occurrences: Vec::new(),
             dollar_runs: None,
             current_run: None,
+            written_later,
         }
+    }
+
+    /// Whether an inline after the text may write `marker`'s char, which a
+    /// delimiter opening in the text could pair with.
+    fn written_later(&self, marker: &str) -> bool {
+        marker
+            .chars()
+            .next()
+            .is_some_and(|char| self.written_later.contains(char))
     }
 
     /// `same_char_run_len` for an ASCII `needle`, measuring each run once
@@ -1542,7 +1754,6 @@ fn escape_text_with_context(
     let in_underscore_emphasis = context.in_underscore_emphasis;
     let mut output = String::new();
     let mut output_line = OutputLine::default();
-    let mut scan = TextScan::new(input);
     let mut line_digit_prefix = 0usize;
     let trailing_start = if preserve_trailing {
         input
@@ -1551,6 +1762,15 @@ fn escape_text_with_context(
     } else {
         input.len()
     };
+    // Delimiter decisions read the text as the reparse sees it, where each
+    // char written as a character reference is punctuation.
+    let view = referenced_chars_as_punctuation(input, preserve_leading, trailing_start);
+    let view = view.as_ref();
+    let mut scan = TextScan::new(view, context.written_later);
+    // The end of the current `$`, `*`, and `_` run, and whether it is escaped.
+    let mut dollar_run = (0usize, false);
+    let mut star_run = (0usize, false);
+    let mut underscore_run = (0usize, false);
     let mut chars = input.char_indices().peekable();
     let mut at_leading_edge = preserve_leading;
     while let Some((offset, char)) = chars.next() {
@@ -1572,7 +1792,8 @@ fn escape_text_with_context(
             output.push_str("&#x9;");
             continue;
         }
-        if char.is_control() {
+        // A tab inside the text stays literal: the reparse keeps it as it is.
+        if char.is_control() && char != '\t' {
             output.push_str(&format!("&#x{:X};", char as u32));
             at_leading_edge = false;
             continue;
@@ -1655,15 +1876,27 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '*' if text_attention_delimiter_can_start(input, offset, "*", false, &mut scan) => {
+            // Escaping only part of a run would leave a shorter run, which
+            // flanks and pairs differently, so a run is escaped whole or not.
+            '*' if run_escaped(view, offset, b'*', &mut scan, &mut star_run, |scan, at| {
+                text_attention_delimiter_can_start(view, at, "*", false, scan)
+            }) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
-            '_' if in_underscore_emphasis && text_delimiter_can_close(input, offset, 1, true) => {
-                output.push('\\');
-                output.push(char);
-            }
-            '_' if text_attention_delimiter_can_start(input, offset, "_", true, &mut scan) => {
+            '_' if run_escaped(
+                view,
+                offset,
+                b'_',
+                &mut scan,
+                &mut underscore_run,
+                |scan, at| {
+                    (in_underscore_emphasis && text_delimiter_can_close(view, at, 1, true))
+                        || text_attention_delimiter_can_start(view, at, "_", true, scan)
+                },
+            ) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -1671,7 +1904,7 @@ fn escape_text_with_context(
             // line, where an HTML block start (types 1–6) or a directive
             // opener would interrupt the paragraph.
             '<' if output_line.len(&output) == 0
-                && line_starts_interrupting_html_block(&input[offset..]) =>
+                && line_starts_interrupting_html_block(&view[offset..]) =>
             {
                 output.push('\\');
                 output.push(char);
@@ -1680,7 +1913,7 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '<' if text_less_than_can_start_inline(input, offset, &mut scan) => {
+            '<' if text_less_than_can_start_inline(view, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -1692,12 +1925,22 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '#' if text_atx_heading_can_start(input, offset, output_line.len(&output)) => {
+            '#' if text_atx_heading_can_start(view, offset, output_line.len(&output)) => {
                 output.push('\\');
                 output.push(char);
             }
-            '|' if text_spoiler_can_start(input, offset, &mut scan) => output.push_str("&#x7C;"),
-            '$' if text_math_can_start(input, offset, &mut scan) => {
+            '|' if text_spoiler_can_start(view, offset, &mut scan) => output.push_str("&#x7C;"),
+            // Escaping only part of a `$` run would leave a shorter run that can
+            // open math, so a run is escaped whole or not at all.
+            '$' if run_escaped(
+                view,
+                offset,
+                b'$',
+                &mut scan,
+                &mut dollar_run,
+                |scan, at| text_math_can_start(view, at, scan),
+            ) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -1705,23 +1948,23 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '~' if text_tilde_can_start(input, offset, &mut scan) => {
+            '~' if text_tilde_can_start(view, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '^' if text_caret_can_start(input, offset, &mut scan) => {
+            '^' if text_caret_can_start(view, offset, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '+' if text_attention_delimiter_can_start(input, offset, "++", false, &mut scan) => {
+            '+' if text_attention_delimiter_can_start(view, offset, "++", false, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '=' if text_attention_delimiter_can_start(input, offset, "==", false, &mut scan) => {
+            '=' if text_attention_delimiter_can_start(view, offset, "==", false, &mut scan) => {
                 output.push('\\');
                 output.push(char);
             }
-            '&' if text_character_reference_can_start(input, offset) => {
+            '&' if text_character_reference_can_start(view, offset) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -1754,7 +1997,8 @@ fn text_attention_delimiter_can_start(
         return false;
     }
 
-    scan.attention_closer_follows(marker, offset + marker.len(), underscore)
+    scan.written_later(marker)
+        || scan.attention_closer_follows(marker, offset + marker.len(), underscore)
 }
 
 fn text_delimiter_can_open(
@@ -1765,11 +2009,7 @@ fn text_delimiter_can_open(
 ) -> bool {
     let flanking = text_delimiter_flanking(input, offset, marker_len);
     if underscore {
-        flanking.left
-            && (!flanking.right
-                || flanking
-                    .previous
-                    .is_some_and(|char| char.is_ascii_punctuation()))
+        flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
     } else {
         flanking.left
     }
@@ -1783,11 +2023,7 @@ fn text_delimiter_can_close(
 ) -> bool {
     let flanking = text_delimiter_flanking(input, offset, marker_len);
     if underscore {
-        flanking.right
-            && (!flanking.left
-                || flanking
-                    .next
-                    .is_some_and(|char| char.is_ascii_punctuation()))
+        flanking.right && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation))
     } else {
         flanking.right
     }
@@ -1807,8 +2043,8 @@ fn text_delimiter_flanking(input: &str, offset: usize, marker_len: usize) -> Tex
 
     let previous_whitespace = previous.is_none_or(char::is_whitespace);
     let next_whitespace = next.is_none_or(char::is_whitespace);
-    let previous_punctuation = previous.is_some_and(|char| char.is_ascii_punctuation());
-    let next_punctuation = next.is_some_and(|char| char.is_ascii_punctuation());
+    let previous_punctuation = previous.is_some_and(is_flanking_punctuation);
+    let next_punctuation = next.is_some_and(is_flanking_punctuation);
 
     let left = next.is_some()
         && !next_whitespace
@@ -1854,7 +2090,67 @@ fn text_atx_heading_can_start(input: &str, offset: usize, output_line_len: usize
 fn text_spoiler_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     input[offset..].starts_with("||")
         && !input[offset + "||".len()..].starts_with('|')
-        && scan.occurs_from("||", offset + "||".len())
+        && (scan.written_later("|") || scan.occurs_from("||", offset + "||".len()))
+}
+
+/// Whether the `byte` at `offset` is escaped: its whole run is when
+/// `escapes` holds at any position in it. `run` holds the end of the run read
+/// last and its answer, which the run's later bytes reuse.
+fn run_escaped(
+    input: &str,
+    offset: usize,
+    byte: u8,
+    scan: &mut TextScan,
+    run: &mut (usize, bool),
+    mut escapes: impl FnMut(&mut TextScan, usize) -> bool,
+) -> bool {
+    if offset >= run.0 {
+        let end = offset + same_byte_run_len(input, offset, byte);
+        let escaped = (offset..end).any(|position| escapes(scan, position));
+        *run = (end, escaped);
+    }
+    run.1
+}
+
+fn same_byte_run_len(input: &str, offset: usize, byte: u8) -> usize {
+    input.as_bytes()[offset..]
+        .iter()
+        .take_while(|item| **item == byte)
+        .count()
+}
+
+/// `input` with every char that the text escaper writes as a character
+/// reference replaced by as many `&` bytes: control chars other than a tab,
+/// and the spaces and tabs it keeps at a preserved edge.
+fn referenced_chars_as_punctuation(
+    input: &str,
+    preserve_leading: bool,
+    trailing_start: usize,
+) -> Cow<'_, str> {
+    let leading_end = if preserve_leading {
+        input.len() - input.trim_start_matches([' ', '\t']).len()
+    } else {
+        0
+    };
+    let referenced = |offset: usize, char: char| {
+        (char.is_control() && char != '\t')
+            || (matches!(char, ' ' | '\t') && (offset < leading_end || offset >= trailing_start))
+    };
+    if !input
+        .char_indices()
+        .any(|(offset, char)| referenced(offset, char))
+    {
+        return Cow::Borrowed(input);
+    }
+    let mut view = String::with_capacity(input.len());
+    for (offset, char) in input.char_indices() {
+        if referenced(offset, char) {
+            view.extend(core::iter::repeat_n('&', char.len_utf8()));
+        } else {
+            view.push(char);
+        }
+    }
+    Cow::Owned(view)
 }
 
 fn text_math_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
@@ -1894,7 +2190,7 @@ fn text_simple_delimiter_can_start(
     {
         return true;
     }
-    scan.occurs_from(marker, offset + marker.len())
+    scan.written_later(marker) || scan.occurs_from(marker, offset + marker.len())
 }
 
 fn text_character_reference_can_start(input: &str, offset: usize) -> bool {
@@ -1969,6 +2265,20 @@ fn at_sign_can_start_email_autolink(input: &str, offset: usize) -> bool {
     saw_domain_char_after_dot
 }
 
+/// Whether `output` ends with `char` that no backslash escapes.
+fn ends_with_unescaped(output: &str, char: char) -> bool {
+    output.strip_suffix(char).is_some_and(|before| {
+        let backslashes = before.len() - before.trim_end_matches('\\').len();
+        backslashes % 2 == 0
+    })
+}
+
+/// Whether the next inline opens a line of the block: at the start of
+/// inlines that open one, or after a line ending.
+fn breaks_line_start(output: &str, output_line: &mut OutputLine, opens_line: bool) -> bool {
+    output_line.len(output) == 0 && (opens_line || !output.is_empty())
+}
+
 /// The length of the last line of an append-only output, found by scanning only
 /// the bytes appended since the previous call, so asking once per appended
 /// char stays linear on a long line.
@@ -1995,14 +2305,14 @@ fn escape_destination_with_pipe(input: &str, escape_pipe: bool) -> String {
     let mut output = String::new();
     for char in input.chars() {
         match char {
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
+            // A space would end the destination, and `\ ` is no escape.
+            char if char.is_control() || char == ' ' => {
+                output.push_str(&format!("&#x{:X};", char as u32));
+            }
             '|' if escape_pipe => {
                 output.push('\\');
                 output.push(char);
             }
-            // NB: a literal space is NOT escaped here — `\ ` is not a valid
-            // escape, so a space-containing destination is routed to the
-            // angle-bracket form by `serialize_destination_kind`.
             '(' | ')' | '\\' | '<' | '>' | '&' => {
                 output.push('\\');
                 output.push(char);
@@ -2189,14 +2499,6 @@ fn serialize_destination_kind(
         LinkDestinationKind::Bare | LinkDestinationKind::Omitted => {
             if input.is_empty() {
                 "<>".into()
-            } else if input.contains(' ') {
-                // A bare destination cannot contain a space (it would terminate
-                // the destination, and `\ ` is not an escape), so emit the
-                // angle-bracket form instead.
-                let mut output = String::from("<");
-                output.push_str(&escape_angle_destination_with_context(input, context));
-                output.push('>');
-                output
             } else {
                 escape_destination_with_pipe(input, context.table_cell)
             }
@@ -2386,6 +2688,26 @@ fn fence_for(input: &str, marker: FenceMarker, min_len: usize) -> String {
     };
     let longest = longest_char_streak(input, char);
     char.to_string().repeat(min_len.max(longest + 1))
+}
+
+/// The shortest fence of at least `min_len` marker chars that no line of
+/// `value` closes: a closing fence is up to three spaces, at least as many
+/// marker chars, and nothing else but spaces and tabs.
+fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> String {
+    let char = match marker {
+        FenceMarker::Backtick => '`',
+        FenceMarker::Tilde => '~',
+    };
+    let mut length = min_len;
+    for line in value.split(['\n', '\r']) {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let rest = &line[indent..];
+        let run = rest.len() - rest.trim_start_matches(char).len();
+        if indent <= 3 && run >= length && rest[run..].trim_matches([' ', '\t']).is_empty() {
+            length = run + 1;
+        }
+    }
+    char.to_string().repeat(length)
 }
 
 fn inline_code_fence(input: &str) -> String {

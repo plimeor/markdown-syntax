@@ -388,3 +388,36 @@ fn an_image_whose_resource_is_invalid_falls_back_to_a_shortcut_reference() {
         paragraph.children
     );
 }
+
+#[test]
+fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
+    let commonmark = SyntaxOptions::commonmark();
+    for source in ["\u{ab}_**]**_", "\u{20ac}_**]**_", "\0_**]**_"] {
+        let shape = parsed(&commonmark, source);
+        assert!(
+            shape.ends_with(r#"Emphasis[Strong["]"]]"#),
+            "{source:?}: {shape}"
+        );
+    }
+}
+
+#[test]
+fn an_escaped_backslash_before_a_line_ending_is_no_hard_break() {
+    assert_eq!(
+        parsed(&SyntaxOptions::commonmark(), "a\\\\\nb"),
+        r#""a\\"/"b""#
+    );
+}
+
+#[test]
+fn a_bare_destination_ends_at_a_space_inside_parentheses() {
+    let commonmark = SyntaxOptions::commonmark();
+    assert_eq!(parsed(&commonmark, "[a](( ))"), r#""[a](( ))""#);
+    let blocks = commonmark.parse("[o]:(a b)\n\n[o]").document.children;
+    assert!(
+        !blocks
+            .iter()
+            .any(|block| matches!(block, Block::Definition(_))),
+        "{blocks:?}"
+    );
+}

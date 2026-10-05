@@ -74,3 +74,35 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 #### Scenario: CRLF output keeps a value's CRLF
 - **WHEN** the document parsed from ``"```\r\na\r\n```\r\nb"`` is serialized with `LineEnding::CrLf`
 - **THEN** the output is ``"```\r\na\r\n```\r\n\r\nb\r\n"``
+
+#### Scenario: Break that opens a line or a delimited span
+- **WHEN** the documents parsed from `"&#x20; \na"`, `"a\n&#x20;\nb"`, and `"_&#x20;\n=_"` are serialized and reparsed
+- **THEN** each reparsed paragraph equals the parsed one, and the first two outputs are `"&#x20; \na\n"` and `"a\n&#x20;\nb\n"`
+
+#### Scenario: Continuation line inside a code span that would start a block
+- **WHEN** the document parsed from ``"=```\n    ```"`` is serialized
+- **THEN** `to_markdown()` returns ``"\\=```\n    ```\n"`` and reparsing it yields the same code span
+
+#### Scenario: Delimiter run partly escapable
+- **WHEN** the documents parsed from `"**\t*$"`, `"(*~\n**)"`, and `"($$]$="` are serialized and reparsed
+- **THEN** each reparsed paragraph holds the same single text, since a run of `*`, `_`, or `$` is escaped whole
+
+#### Scenario: Underscore emphasis beside an alphanumeric
+- **WHEN** the document parsed from `"y***b***"` is serialized
+- **THEN** `to_markdown()` returns `"y***b***\n"`
+
+#### Scenario: Literal autolink before a shortcode
+- **WHEN** the document parsed from `"://\\::p:"` with `parse` is serialized and reparsed
+- **THEN** the reparsed paragraph holds the same `Autolink`, `Text(":")`, and `Shortcode`
+
+#### Scenario: Space in a bare destination
+- **WHEN** the document parsed from `"[o]:&#x20;"` is serialized
+- **THEN** `to_markdown()` returns `"[o]: &#x20;\n"` and the reparsed definition keeps a `Bare` destination `" "`
+
+#### Scenario: Whitespace that opens a list item's first block
+- **WHEN** the document parsed from `"-\n   <v>"` is serialized
+- **THEN** `to_markdown()` returns `"-\n   <v>\n"` and the reparsed `HtmlBlock` value is `" <v>"`
+
+#### Scenario: Fence length
+- **WHEN** the document parsed from ``"```\n```*"`` is serialized
+- **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
