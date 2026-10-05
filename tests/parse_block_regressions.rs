@@ -1502,19 +1502,19 @@ mod gfm_tables {
 
     #[test]
     fn a_table_that_ends_a_paragraph_starts_on_its_header_row() {
-        let blocks = blocks("a\n+\n|-");
+        let table = blocks("a\n+\n|-");
         assert!(
-            matches!(blocks.as_slice(), [Block::Paragraph(_), Block::Table(_)]),
-            "{blocks:?}"
+            matches!(table.as_slice(), [Block::Paragraph(_), Block::Table(_)]),
+            "{table:?}"
         );
         // Below a lazy line no table forms, so the paragraph goes on.
-        let blocks = blocks("- $\n  +\n|-");
-        let [Block::List(list)] = blocks.as_slice() else {
-            panic!("{blocks:?}");
+        let lazy = blocks("- $\n  +\n|-");
+        let [Block::List(list)] = lazy.as_slice() else {
+            panic!("{lazy:?}");
         };
         assert!(
             matches!(list.children[0].children.as_slice(), [Block::Paragraph(_)]),
-            "{blocks:?}"
+            "{lazy:?}"
         );
     }
 
