@@ -842,13 +842,6 @@ fn clear_spans(inlines: &mut [Inline]) {
     }
 }
 
-/// Keeps the first line of inline content that would start an HTML block
-/// from starting one. Text gets an escape. Raw HTML takes none; only a
-/// complete tag alone on its line (type 7) reaches here outside a definition's
-/// paragraph. Before a line ending, as `<a>&#x20;\n…` parses, a trailing space
-/// written as a reference keeps the line the paragraph's; content that is
-/// that line alone, or a tag that interrupts, follows a definition, which
-/// `serialize_blocks_at_start` writes it after.
 /// Keeps inline content opening with `import ` or `export `, which MDX reads
 /// as ESM, a paragraph, by writing its first char as a reference.
 fn keep_first_line_off_esm(output: &mut String) {
@@ -873,33 +866,27 @@ fn keep_first_line_off_mdx_flow(children: &[Inline], output: &mut String) {
     if !output.starts_with(&value) {
         return;
     }
-    let rest = &output[value.len()..];
-    if rest.starts_with('\n') {
+    if output[value.len()..].starts_with('\n') {
         output.insert_str(value.len(), "&#x20;");
-    } else if rest.starts_with("  \n") {
-        // A hard break's spaces keep the line flow; a referenced space
-        // before one keeps the break.
-        output.replace_range(value.len()..value.len() + 2, "&#x20; ");
     }
 }
 
+/// Keeps the first line of inline content that would start an HTML block
+/// from starting one. Text gets an escape. Raw HTML takes none: raw HTML
+/// opening such a line opens a paragraph only as the continuation of the one
+/// a definition was read from, which `serialize_blocks_at_start` writes it
+/// right after.
 fn keep_first_line_off_html_block(children: &[Inline], output: &mut String) {
     // An angle-bracket autolink that looks like an HTML block start comes
-    // from a dialect without raw HTML, which reads it back as written.
-    if matches!(children.first(), Some(Inline::Autolink(_))) {
+    // from a dialect without raw HTML, which reads it back as written; raw
+    // HTML is written as it is, as above.
+    if matches!(
+        children.first(),
+        Some(Inline::Autolink(_) | Inline::Html(_))
+    ) {
         return;
     }
-    let Some(offset) = paragraph_html_block_escape_offset(output) else {
-        return;
-    };
-    if matches!(children.first(), Some(Inline::Html(_))) {
-        let first_line = output.split('\n').next().unwrap_or("");
-        if !line_starts_interrupting_html_block(first_line) {
-            if let Some(line_end) = output.find('\n') {
-                output.insert_str(line_end, "&#x20;");
-            }
-        }
-    } else {
+    if let Some(offset) = paragraph_html_block_escape_offset(output) {
         output.insert(offset, '\\');
     }
 }

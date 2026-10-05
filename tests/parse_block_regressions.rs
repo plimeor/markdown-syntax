@@ -1206,6 +1206,25 @@ mod paragraph_interruption {
     }
 
     #[test]
+    fn a_list_that_cannot_interrupt_a_paragraph_continues_a_definitions_paragraph() {
+        for source in ["[foo]: /url\n2) a", "[foo]: /url\n-"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(
+                    blocks.as_slice(),
+                    [Block::Definition(_), Block::Paragraph(_)]
+                ),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        let blocks = blocks("[foo]: /url\n- a");
+        assert!(
+            matches!(blocks.as_slice(), [Block::Definition(_), Block::List(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
     fn a_backtick_run_with_a_backtick_in_its_info_continues_the_paragraph() {
         let blocks = blocks("a\n``` `` ```\n```b`");
         assert!(

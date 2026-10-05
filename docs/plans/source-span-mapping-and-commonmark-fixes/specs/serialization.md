@@ -77,7 +77,7 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 
 #### Scenario: Break that opens a line or a delimited span
 - **WHEN** the documents parsed from `"&#x20; \na"`, `"a\n&#x20;\nb"`, and `"_&#x20;\n=_"` are serialized and reparsed
-- **THEN** each reparsed paragraph equals the parsed one, and the first two outputs are `"&#x20; \na\n"` and `"a\n&#x20;\nb\n"`
+- **THEN** each reparsed paragraph equals the parsed one, and the first two outputs are `"&#x20;\na\n"` and `"a\n&#x20;\nb\n"`
 
 #### Scenario: Continuation line inside a code span that would start a block
 - **WHEN** the document parsed from ``"=```\n    ```"`` is serialized

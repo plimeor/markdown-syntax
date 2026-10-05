@@ -374,9 +374,12 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = nest_containers
-            .then(|| parse_list(lines, index, options, definitions, diagnostics, depth))
-            .flatten()
+        // A list right after a definition starts only where it could
+        // interrupt the paragraph the definition was read from.
+        if let Some((block, next)) = (nest_containers
+            && (!after_definition_unbroken || list_marker_can_interrupt_paragraph(line.text)))
+        .then(|| parse_list(lines, index, options, definitions, diagnostics, depth))
+        .flatten()
         {
             blocks.push(block);
             index = next;
@@ -5942,7 +5945,10 @@ fn parse_inline_content(
                 text_start = index;
                 continue;
             }
-            let trailing_spaces = trailing_space_count(&text);
+            // Only spaces and tabs the source holds, not ones a character
+            // reference wrote, end the line: a hard break or stripped.
+            let trailing_spaces =
+                trailing_space_count(&text).min(trailing_space_count(&input[..index]));
             if is_hard_break_suffix(&text, trailing_spaces) {
                 text.truncate(text.len() - trailing_spaces);
                 flush_text(
@@ -9043,8 +9049,9 @@ fn html_inline_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Opt
     if rest.starts_with("<!--") {
         return Some(lookups.find("-->", index)? + 3);
     }
+    // The `?>` closing a processing instruction follows its `<?`.
     if rest.starts_with("<?") {
-        return Some(lookups.find("?>", index)? + 2);
+        return Some(lookups.find("?>", index + 2)? + 2);
     }
     if rest.starts_with("<![CDATA[") {
         return Some(lookups.find("]]>", index)? + 3);

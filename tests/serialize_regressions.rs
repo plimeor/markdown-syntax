@@ -1682,7 +1682,7 @@ mod round_trip_edges {
 
     #[test]
     fn a_break_that_opens_a_line_or_a_span_is_written_after_a_reference() {
-        assert_eq!(assert_round_trips("&#x20; \na"), "&#x20; \na\n");
+        assert_eq!(assert_round_trips("&#x20; \na"), "&#x20;\na\n");
         assert_eq!(assert_round_trips("a\n&#x20;\nb"), "a\n&#x20;\nb\n");
         assert_round_trips("++&#x20;\nd++");
         assert_round_trips("_&#x20;\n=_");

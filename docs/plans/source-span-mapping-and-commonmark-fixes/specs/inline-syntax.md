@@ -73,3 +73,20 @@ whitespace char is part of the URI.
 #### Scenario: No-break space in an angle-bracket autolink
 - **WHEN** `"<http://a\u{a0}b>"` is parsed with the CommonMark preset
 - **THEN** the paragraph holds an `Autolink` to `http://a\u{a0}b`
+
+### Requirement: Hard line breaks from spaces
+A line ending SHALL be a hard break when two or more spaces the source holds,
+and no tab, end the line; spaces or tabs a character reference writes are
+text, and only the source's spaces and tabs before a soft break are removed.
+
+#### Scenario: Referenced space before a line ending
+- **WHEN** `"a&#x20; \nb"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("a ")`, a `SoftBreak`, and `Text("b")`
+
+### Requirement: Processing instructions
+Raw inline HTML SHALL read `<?` as a processing instruction only when a `?>`
+after the `<?` closes it.
+
+#### Scenario: `<?>` is text
+- **WHEN** `"a<?> b"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds no `Html` inline

@@ -162,3 +162,13 @@ make a hard break.
 #### Scenario: Hard break on a footnote definition's first line
 - **WHEN** `"[^1]: a  \nb"` is parsed
 - **THEN** the definition's paragraph holds `Text("a")`, a `LineBreak`, and `Text("b")`
+
+### Requirement: List after a definition
+A list SHALL start on the line right after a definition only when its first
+item could interrupt a paragraph: a bullet or an ordered item starting at 1,
+with content. Otherwise the line continues the paragraph the definition was
+read from.
+
+#### Scenario: Ordered item not starting at 1 after a definition
+- **WHEN** `"[foo]: /url\n2) a"` is parsed with the CommonMark preset
+- **THEN** the document holds the `Definition` and a `Paragraph`

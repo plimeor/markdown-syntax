@@ -447,3 +447,31 @@ fn an_angle_autolink_holds_whitespace_other_than_a_space() {
     assert!(document.validate().is_empty());
     assert_eq!(document.to_markdown().unwrap(), "<http://a\u{a0}b>\n");
 }
+
+#[test]
+fn a_referenced_space_makes_no_hard_break() {
+    let blocks = SyntaxOptions::commonmark()
+        .parse("a&#x20; \nb")
+        .document
+        .children;
+    let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+        panic!("{blocks:?}");
+    };
+    assert!(
+        matches!(
+            paragraph.children.as_slice(),
+            [Inline::Text(text), Inline::SoftBreak(_), Inline::Text(_)] if text.value == "a "
+        ),
+        "{blocks:?}"
+    );
+}
+
+#[test]
+fn a_processing_instruction_closes_after_its_opener() {
+    let blocks = SyntaxOptions::commonmark()
+        .parse("a<?> b")
+        .document
+        .children;
+    let debug = format!("{blocks:?}");
+    assert!(!debug.contains("Html"), "{debug}");
+}
