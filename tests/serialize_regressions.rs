@@ -1572,4 +1572,11 @@ mod literal_text {
             .expect("document serializes");
         assert_eq!(markdown, "Test \\`hello world\\` here.\n");
     }
+
+    #[test]
+    fn a_pipe_ending_a_level_two_setext_heading_does_not_start_a_table() {
+        // A one-dash underline is no table delimiter row, so this is a heading.
+        let markdown = assert_parsed_round_trips("a |\n-", &SyntaxOptions::default());
+        assert_eq!(markdown, "a \\|\n---\n");
+    }
 }

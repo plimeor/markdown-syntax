@@ -837,3 +837,104 @@ mod parser {
         );
     }
 }
+
+mod lazy_lines_and_final_whitespace {
+    //! A lazy line that opens a list ends the container it would otherwise
+    //! continue, and a paragraph or setext heading drops the final whitespace
+    //! of its content, as CommonMark specifies.
+
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::LineBreak(_) => "<br>".into(),
+                Inline::SoftBreak(_) => "/".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_empty_list_item_on_a_lazy_line_ends_the_block_quote() {
+        for source in ["> a\n- ", "> a\n-", "> a\n1. "] {
+            let blocks = blocks(source);
+            let [Block::BlockQuote(quote), Block::List(list)] = blocks.as_slice() else {
+                panic!("{source:?}: expected a block quote and a list, got {blocks:?}");
+            };
+            let [Block::Paragraph(paragraph)] = quote.children.as_slice() else {
+                panic!("{source:?}: expected one paragraph in the quote");
+            };
+            assert_eq!(texts(&paragraph.children), ["a"], "{source:?}");
+            assert!(
+                matches!(list.children.as_slice(), [item] if item.children.is_empty()),
+                "{source:?}: {list:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordered_item_not_starting_at_one_on_a_lazy_line_ends_the_block_quote() {
+        let blocks = blocks("> > a\n2. b");
+        let [Block::BlockQuote(_), Block::List(list)] = blocks.as_slice() else {
+            panic!("expected a block quote and a list, got {blocks:?}");
+        };
+        assert!(list.ordered);
+        assert_eq!(list.start, Some(2));
+    }
+
+    #[test]
+    fn a_lazy_list_marker_does_not_join_a_list_inside_the_quote() {
+        let blocks = blocks("> - a\n- ");
+        let [Block::BlockQuote(quote), Block::List(outer)] = blocks.as_slice() else {
+            panic!("expected a block quote and a list, got {blocks:?}");
+        };
+        assert!(
+            matches!(quote.children.as_slice(), [Block::List(inner)] if inner.children.len() == 1)
+        );
+        assert_eq!(outer.children.len(), 1);
+    }
+
+    #[test]
+    fn a_paragraph_drops_the_final_whitespace_of_its_content() {
+        for (source, expected) in [
+            ("foo  ", vec!["foo"]),
+            ("foo \t\n", vec!["foo"]),
+            ("aaa     \nbbb     ", vec!["aaa", "<br>", "bbb"]),
+            ("> a  ", vec!["a"]),
+        ] {
+            let blocks = blocks(source);
+            let paragraph = match blocks.as_slice() {
+                [Block::Paragraph(paragraph)] => paragraph,
+                [Block::BlockQuote(quote)] => match quote.children.as_slice() {
+                    [Block::Paragraph(paragraph)] => paragraph,
+                    other => panic!("{source:?}: {other:?}"),
+                },
+                other => panic!("{source:?}: {other:?}"),
+            };
+            assert_eq!(texts(&paragraph.children), expected, "{source:?}");
+        }
+        let blocks = blocks("foo  ");
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(paragraph.children[0].span().map(|span| span.end), Some(3));
+    }
+
+    #[test]
+    fn a_setext_heading_drops_the_final_whitespace_of_its_content() {
+        for source in ["Foo  \n-----", "Foo\t\n==="] {
+            let blocks = blocks(source);
+            let [Block::Heading(heading)] = blocks.as_slice() else {
+                panic!("{source:?}: expected a heading, got {blocks:?}");
+            };
+            assert_eq!(texts(&heading.children), ["Foo"], "{source:?}");
+        }
+    }
+}

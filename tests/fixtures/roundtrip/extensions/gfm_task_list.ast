@@ -48,7 +48,7 @@ Document
         Text "[ ]"
     ListItem checked=none
       Paragraph
-        Text "[ ] "
+        Text "[ ]"
   List ordered=false tight=true
     ListItem checked=false
       Paragraph

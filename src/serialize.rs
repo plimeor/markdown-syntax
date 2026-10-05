@@ -158,11 +158,17 @@ fn serialize_block(
             Ok(match node.kind {
                 HeadingKind::Setext if setext_representable => {
                     let marker = if node.depth == 1 { '=' } else { '-' };
-                    format!(
-                        "{}\n{}",
-                        content,
-                        marker.to_string().repeat(content.len().max(3))
-                    )
+                    let underline = marker.to_string().repeat(content.len().max(3));
+                    let ends_with_text_pipe = matches!(
+                        node.children.last(),
+                        Some(Inline::Text(text)) if text.value.trim_end().ends_with('|')
+                    );
+                    let content = if node.depth == 2 && ends_with_text_pipe {
+                        escape_pipe_ending_table_header(content)
+                    } else {
+                        content
+                    };
+                    format!("{content}\n{underline}")
                 }
                 _ if content.is_empty() => "#".repeat(node.depth as usize),
                 _ => format!(
@@ -301,6 +307,29 @@ fn serialize_html_container(
 /// closing hash sequence. CommonMark treats a final run of `#` preceded by
 /// whitespace (after trailing whitespace is trimmed) as the optional closing
 /// sequence; escaping the first `#` of that run keeps it as literal text.
+/// `content`, ending in text, with an unescaped `|` that ends its last line
+/// escaped: above a `---` underline, a line ending in a bare pipe is a one-cell
+/// table header and the underline its delimiter row.
+fn escape_pipe_ending_table_header(content: String) -> String {
+    let last_line = content.rsplit('\n').next().unwrap_or_default();
+    let trimmed = last_line.trim_end();
+    let Some(before_pipe) = trimmed.strip_suffix('|') else {
+        return content;
+    };
+    let backslashes = before_pipe
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'\\')
+        .count();
+    if backslashes % 2 == 1 {
+        return content;
+    }
+    let pipe = content.len() - (last_line.len() - trimmed.len()) - 1;
+    let mut escaped = content;
+    escaped.insert(pipe, '\\');
+    escaped
+}
+
 fn escape_atx_heading_content(content: &str) -> String {
     let trimmed_len = content.trim_end_matches([' ', '\t']).len();
     let trimmed = &content[..trimmed_len];

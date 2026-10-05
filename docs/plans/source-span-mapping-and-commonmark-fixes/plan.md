@@ -37,17 +37,20 @@ span, an inline link, or a link reference definition.
 - The serializer escapes text after a shortcut link or image reference so that
   reparsing keeps the reference: a `(` directly after it, and a `:` directly
   after one that starts a paragraph.
+- A lazy line that opens a list ends the block quote it would otherwise
+  continue, including an empty item and an ordered item not starting at 1.
+- A paragraph and a setext heading drop the final whitespace of their content.
+  A level-two setext heading whose text ends in `|` is written with that pipe
+  escaped, so its `---` underline is not read as a table delimiter row.
 
 Specs:
 - `public-api` (modified)
 - `inline-syntax` (modified)
 - `serialization` (modified)
+- `block-syntax` (modified)
 
 ## Out of scope
 
-- The final line of a paragraph keeps its trailing whitespace (`a  \n` gives
-  `Text("a  ")`), which CommonMark strips. This is block-level whitespace
-  handling that touches hard breaks and spans, so it goes to its own task.
 - Renaming `src/parse/nul.rs`, a reserved Windows filename that `cargo package`
   warns about. It is a packaging fix with no behavior change and lands on its own
   before the crate is published.
@@ -134,6 +137,21 @@ Specs:
   every `*` / `_` that can close, or every character of an escaped run, which
   moved canonical output for about 1,000 corpus inputs while the defect needs a
   delimiter outside the text node.
+- A list marker on a lazy line ends the block quote whatever its content or
+  start number — because cmark, commonmark.js, markdown-it, and micromark all
+  read `> a\n- ` and `> a\n2. b` as a quote followed by a list: the empty-item
+  and start-number restrictions apply only when the paragraph is in the
+  container the list would open in. Turned down: applying those restrictions to
+  lazy lines too, which the spec's "would otherwise count as paragraph
+  continuation text" could be read to ask but no reference implementation does.
+- Final whitespace is dropped from the derived inline input, with its map, after
+  the last line is read — because the inline parser then never sees it, and
+  hard line breaks on earlier lines keep their trailing spaces. Turned down:
+  trimming the last `Text` node after the inline parse, which leaves the spaces
+  to interact with the inline scan first.
+- The serializer escapes a `|` that ends a level-two setext heading only when a
+  text node supplies it — because a pipe ending a literal autolink belongs to
+  its URL, and escaping it there changes the autolink.
 - After a shortcut reference, the serializer escapes the character that would
   re-read its brackets, because the AST must round-trip.
   - Turned down: writing the reference in collapsed form, which changes the
@@ -197,7 +215,13 @@ Specs:
 - [x] 4.5 Extend `inline_container_spans_cover_their_delimiters_and_content` to inputs with leading whitespace, block quotes, list items, tables, and CRLF; verified by it passing.
 - [x] 4.6 Add a growth check for long, nested block quotes and list items and for long tables to `tests/pathological_inputs.rs`; verified by linear growth in debug and release builds.
 
-### 5. Integration checks
-- [x] 5.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
-- [x] 5.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
-- [x] 5.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.
+### 5. Lazy list markers and final whitespace
+- [x] 5.1 Add tests for "Lazy list marker ends a block quote", "Lazy ordered item not starting at 1", "Final whitespace of a paragraph", and "Final whitespace of a setext heading", and for `> - a\n- `; verified by each failing on the group-4 code.
+- [x] 5.2 Let any list marker end a lazy line in `lazy_line_starts_block`; verified by the lazy-list tests and by a comparison with commonmark.js on 30,000 generated block-structure inputs in which no input that matched before stops matching.
+- [x] 5.3 Trim the final whitespace of paragraph and setext heading content before the inline parse, regenerating and reading the moved goldens; verified by the final-whitespace tests and `tests/fixtures.rs` passing.
+- [x] 5.4 Escape a text `|` that ends a level-two setext heading; verified by `a_pipe_ending_a_level_two_setext_heading_does_not_start_a_table` (failing before) and a parse-output comparison with the group-4 end in which no input newly fails to round-trip and every tree diff comes from 5.2 or 5.3.
+
+### 6. Integration checks
+- [x] 6.1 `cargo fmt --check`, `cargo test` with and without `html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and `cargo +1.82 build` all pass.
+- [x] 6.2 `tests/pathological_inputs.rs`, the growth sweep, and the 2 MiB stack check pass in debug and release builds.
+- [x] 6.3 The conformance bench result is measured and reported with the change, along with a benign-document benchmark against the starting commit.

@@ -139,6 +139,25 @@ impl SourceMap {
         self.segments.push(segment);
     }
 
+    /// Forgets what the map holds for text from `len` on.
+    fn truncate(&mut self, len: usize) {
+        while self
+            .segments
+            .last()
+            .is_some_and(|last| last.text_start >= len)
+        {
+            self.segments.pop();
+        }
+        if let Some(last) = self.segments.last_mut() {
+            if last.text_end > len {
+                if last.verbatim() {
+                    last.source_end -= last.text_end - len;
+                }
+                last.text_end = len;
+            }
+        }
+    }
+
     /// Records that text from `text_start` on repeats what `segments` map for
     /// their text `from..to`.
     pub(super) fn copy(&mut self, text_start: usize, segments: &[Segment], from: usize, to: usize) {
@@ -265,6 +284,17 @@ impl DerivedText {
         });
         self.map.push(self.text.len(), eol.len(), start, end);
         self.text.push_str(eol);
+    }
+
+    /// Drops the CommonMark whitespace (space, tab, line tabulation, form feed)
+    /// that ends the text, with the map runs it covered.
+    pub(super) fn trim_final_whitespace(&mut self) {
+        let len = self
+            .text
+            .trim_end_matches([' ', '\t', '\u{b}', '\u{c}'])
+            .len();
+        self.text.truncate(len);
+        self.map.truncate(len);
     }
 
     /// Appends text the parser adds that the source does not hold.

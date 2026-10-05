@@ -1015,12 +1015,18 @@ fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) ->
 }
 
 /// Whether a line starts a block for the purpose of LAZY-continuation
-/// suppression. Identical to [`likely_block_start`] except that *every* HTML
-/// block start — including the type-7 "complete tag" form that cannot interrupt
-/// a paragraph with a marker present — blocks lazy continuation. A bare `<a>`
-/// after `> a` must close the quote, not be absorbed as paragraph text.
+/// suppression. Identical to [`likely_block_start`] except for two kinds of
+/// line that cannot interrupt a paragraph but do end a lazy one, since the block
+/// they open belongs to the container the line is in rather than to the
+/// paragraph's:
+/// - *every* HTML block start, including the type-7 "complete tag" form: a bare
+///   `<a>` after `> a` must close the quote, not be absorbed as paragraph text;
+/// - *every* list marker, including an empty item and an ordered one not
+///   starting at 1: `> a\n- ` and `> a\n2. b` close the quote and open a list,
+///   as cmark, commonmark.js, markdown-it, and micromark all read them.
 fn lazy_line_starts_block(input: &str, options: &SyntaxOptions) -> bool {
     likely_block_start(input, options)
+        || list_marker_info(input).is_some()
         || (options.constructs.html_block && line_starts_html_block(input))
         // A lazy line that almost opens a fenced code block — any fence-char
         // run after up to three spaces of indent — ends the paragraph instead
@@ -3625,6 +3631,8 @@ fn parse_setext_heading(
                 // would discard the trailing spaces that form a hard line break.
                 value.push_line(line, trim_ascii_start(line.text), 0);
             }
+            // CommonMark strips the final whitespace of a heading's content.
+            value.trim_final_whitespace();
             return Some((
                 Block::Heading(Heading {
                     meta: NodeMeta::new(Some(Span::new(
@@ -3698,6 +3706,8 @@ fn parse_paragraph(
         value.push_line(&lines[cursor], trim_ascii_start(lines[cursor].text), 0);
         cursor += 1;
     }
+    // CommonMark strips the final whitespace of a paragraph's content.
+    value.trim_final_whitespace();
 
     let end = lines[cursor - 1].end;
     (

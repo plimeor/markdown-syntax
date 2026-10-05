@@ -38,3 +38,7 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 #### Scenario: Colon after a shortcut reference that starts a paragraph
 - **WHEN** the document parsed from `"[foo]\\: /x\n\n[foo]: /u"` is serialized and reparsed
 - **THEN** the reparsed document still holds the paragraph, with a shortcut `LinkReference` to `foo` followed by `Text(": /x")`
+
+#### Scenario: Pipe ending a level-two setext heading
+- **WHEN** the document parsed from `"a |\n-"` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"a \\|\n---\n"` and the reparsed document holds the same setext `Heading` and no `Table`
