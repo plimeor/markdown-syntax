@@ -1563,7 +1563,10 @@ fn parse_list(
                     )
                     || leading_indent_columns(lines[next].text) < marker.content_indent
                 {
-                    blank_before_item = true;
+                    // A blank line inside a fence the item's content left open
+                    // is the fence's, which loosens no list (cmark).
+                    blank_before_item = !open_block
+                        .is_some_and(|block| matches!(block.end, OpenBlockEnd::Fence(..)));
                     cursor = next;
                     break;
                 }

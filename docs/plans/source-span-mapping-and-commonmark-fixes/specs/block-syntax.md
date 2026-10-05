@@ -80,6 +80,10 @@ specification defines them.
 - **WHEN** `"> ``a\nb"` is parsed with the CommonMark preset
 - **THEN** the document holds one `BlockQuote` whose paragraph ends with `Text("b")`
 
+#### Scenario: Blank line inside a nested item's open fence
+- **WHEN** ``"2. a\n   1. ```\n\n2. b"`` is parsed with the CommonMark preset
+- **THEN** the document holds one tight `List`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML

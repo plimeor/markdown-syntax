@@ -96,6 +96,7 @@ span, an inline link, or a link reference definition.
   or after a top-level list item's content indent, spans the columns it
   spans in the source line, up to the four columns that decide indentation;
   a line inside a fence or HTML block keeps its tabs.
+- A blank line inside a fence that a nested item left open loosens no list.
 - A quoted paragraph that opens with backticks takes lazy lines; the GH-19
   rule applies to the lazy line, not to the quoted line before it.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
@@ -332,3 +333,4 @@ Specs:
 ### 12. Inline comparison
 - [x] 12.1 Add a test for "Quoted paragraph opening with backticks"; verified by it failing on the group-11 code.
 - [x] 12.2 Read a quoted content line's block without the lazy-line GH-19 rule; verified by a comparison with commonmark.js and micromark, with raw HTML allowed, on 30,000 generated inline inputs (links, references, images, code spans, entities, escapes, autolinks, emphasis, raw HTML) where they agree on 29,971: 5 mismatches before and 3 after, one the GH-19 rule the conformance oracle (markdown-rs) keeps and two the link-text autolink demotion the 0.3.0 delimiter stack chose; and by the block comparison staying with no input newly mismatching.
+- [x] 12.3 Leave a list tight across a blank line that a fence opened in a nested item holds; verified by `a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight` (failing before) and by the block comparison's last non-tab, non-GH-19 mismatch matching, with none newly mismatching (286 left: 280 tab cases in nested containers and 6 under the GH-19 rule).

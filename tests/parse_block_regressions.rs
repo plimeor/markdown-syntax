@@ -1152,6 +1152,15 @@ mod container_laziness {
     }
 
     #[test]
+    fn a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight() {
+        let blocks = blocks("2. a\n   1. ```\n\n2. b");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert!(list.tight, "{list:?}");
+    }
+
+    #[test]
     fn a_closed_fence_leaves_the_next_paragraph_open_to_lazy_lines() {
         let blocks = blocks("> ```\n> x\n> ```\n> y\na");
         let [quote] = blocks.as_slice() else {
