@@ -74,12 +74,13 @@ mod reference {
         find_same_char_run(input, after_open, '$', marker_len).is_some()
     }
 
-    pub(super) fn text_tilde_can_start(input: &str, offset: usize) -> bool {
-        if input[offset..].starts_with("~~") {
-            return text_attention_delimiter_can_start(input, offset, "~~", false)
-                || text_simple_delimiter_can_start(input, offset, '~');
-        }
-        text_simple_delimiter_can_start(input, offset, '~')
+    pub(super) fn tilde_run_can_pair(input: &str, offset: usize) -> bool {
+        let end = offset
+            + input[offset..]
+                .bytes()
+                .take_while(|byte| *byte == b'~')
+                .count();
+        input[end..].contains('~')
     }
 
     pub(super) fn text_caret_can_start(input: &str, offset: usize) -> bool {
@@ -189,8 +190,8 @@ fn run_and_lookahead_checks_match_the_reference_scan() {
                 "{input:?} at {offset}"
             ),
             '~' => assert_eq!(
-                text_tilde_can_start(input, offset, scan),
-                reference::text_tilde_can_start(input, offset),
+                tilde_run_can_pair(input, offset, scan),
+                reference::tilde_run_can_pair(input, offset),
                 "{input:?} at {offset}"
             ),
             '^' => assert_eq!(

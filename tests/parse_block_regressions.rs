@@ -1214,6 +1214,39 @@ mod paragraph_interruption {
     }
 
     #[test]
+    fn a_complete_tag_after_a_definition_continues_its_paragraph() {
+        let tag = blocks("[o]: u\n<a>");
+        assert!(
+            matches!(tag.as_slice(), [Block::Definition(_), Block::Paragraph(_)]),
+            "{tag:?}"
+        );
+        let div = blocks("[o]: u\n<div>");
+        assert!(
+            matches!(div.as_slice(), [Block::Definition(_), Block::HtmlBlock(_)]),
+            "{div:?}"
+        );
+    }
+
+    #[test]
+    fn a_header_row_indented_four_columns_starts_no_table() {
+        let blocks = SyntaxOptions::default()
+            .parse("a\n    |b\n----")
+            .document
+            .children;
+        assert!(
+            matches!(blocks.as_slice(), [Block::Heading(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_directive_attribute_without_a_valid_name_is_dropped() {
+        let document = SyntaxOptions::default().parse(":b{<} :c{a <=1 d}").document;
+        let markdown = document.to_markdown().expect("document serializes");
+        assert_eq!(markdown, ":b :c{a d}\n");
+    }
+
+    #[test]
     fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
         for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
             let blocks = blocks(source);

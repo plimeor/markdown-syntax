@@ -20,7 +20,7 @@ use crate::{
         continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
         line_starts_html_block, line_starts_interrupting_html_block, literal_autolink_extents,
     },
-    validate::validate_document,
+    validate::{is_directive_name, validate_document},
 };
 
 /// The newline style emitted by the serializer.
@@ -154,26 +154,53 @@ fn serialize_blocks_at_start(
     options: &SerializeOptions,
     document_start: bool,
 ) -> Result<String, SerializeError> {
-    let mut output = String::new();
-    for (index, block) in blocks.iter().enumerate() {
-        if index > 0 {
-            push_block_gap(&mut output);
-        }
+    // Written last to first: a list reads the indentation of the block after
+    // it, which would join its last item unless the items' content starts
+    // further in.
+    let mut outputs: Vec<String> = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.iter().enumerate().rev() {
         let at_document_start = document_start && index == 0;
-        if let (
-            Block::List(list),
-            Some(Block::CodeBlock(CodeBlock {
-                kind: CodeBlockKind::Indented,
-                ..
-            })),
-        ) = (block, blocks.get(index + 1))
-        {
-            output.push_str(&serialize_list_with_marker_spacing(
-                list, options, " ", "    ",
-            )?);
-        } else {
-            output.push_str(&serialize_block(block, options, at_document_start)?);
+        let next_indent = outputs
+            .last()
+            .map(|next: &String| next.len() - next.trim_start_matches(' ').len());
+        let written = match (block, next_indent) {
+            (Block::List(list), Some(indent @ 1..=3)) => {
+                serialize_list_with_marker_spacing(list, options, &" ".repeat(indent), " ")?
+            }
+            (Block::List(list), Some(4..)) => {
+                serialize_list_with_marker_spacing(list, options, " ", "    ")?
+            }
+            _ => serialize_block(block, options, at_document_start)?,
+        };
+        outputs.push(written);
+    }
+    let mut output = String::new();
+    for (index, written) in outputs.iter().rev().enumerate() {
+        if index > 0 {
+            let first_line = written.split('\n').next().unwrap_or("");
+            let opens_with_html = match &blocks[index] {
+                Block::Paragraph(paragraph) => paragraph.children.first(),
+                Block::Heading(heading) if heading.kind == HeadingKind::Setext => {
+                    heading.children.first()
+                }
+                _ => None,
+            };
+            let continues_definition = matches!(blocks[index - 1], Block::Definition(_))
+                && matches!(opens_with_html, Some(Inline::Html(_)))
+                && line_starts_html_block(first_line);
+            if continues_definition {
+                // Raw HTML that would start an HTML block opens such content
+                // only as the continuation of the paragraph a definition was
+                // read from; a tag that interrupts it is indented as well.
+                output.push('\n');
+                if line_starts_interrupting_html_block(first_line) {
+                    output.push_str("    ");
+                }
+            } else {
+                push_block_gap(&mut output);
+            }
         }
+        output.push_str(written);
     }
     Ok(output)
 }
@@ -205,7 +232,16 @@ fn serialize_block(
                     } else {
                         content
                     };
-                    let content = indent_block_starting_continuations(content);
+                    let mut content = content;
+                    keep_first_line_off_html_block(&node.children, &mut content);
+                    let mut content = indent_block_starting_continuations(content);
+                    if let Some(last_line_start) = content.rfind('\n').map(|end| end + 1) {
+                        // A continuation line would read as a table header
+                        // over the underline; indented, it reads as before.
+                        if gfm_table_can_start_source(&content[last_line_start..], &underline) {
+                            content.insert_str(last_line_start, "    ");
+                        }
+                    }
                     format!("{content}\n{underline}")
                 }
                 _ if content.is_empty() => "#".repeat(node.depth as usize),
@@ -288,10 +324,9 @@ fn serialize_block(
                 FrontmatterKind::Yaml => "---",
                 FrontmatterKind::Toml => "+++",
             };
-            Ok(format!(
-                "{fence}\n{}\n{fence}",
-                trim_trailing_newline(&node.value)
-            ))
+            // The value holds the lines between the fences joined with `\n`,
+            // so a final `\n` is an empty last line.
+            Ok(format!("{fence}\n{}\n{fence}", node.value))
         }
         Block::MdxEsm(node) => Ok(node.value.clone()),
         Block::MdxExpression(node) => Ok(format!("{{{}}}", node.value)),
@@ -391,21 +426,31 @@ fn serialize_paragraph(
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
     let mut output = serialize_inlines(&node.children, options)?;
-    if let Some(offset) = paragraph_html_block_escape_offset(&output) {
-        if matches!(node.children.first(), Some(Inline::Html(_))) {
-            // Raw HTML takes no escape; only a complete tag alone on its line
-            // (type 7) reaches here, as `<a>&#x20;\n…` parses, and a trailing
-            // space written as a reference keeps the line a paragraph's.
-            let line_end = output.find('\n').unwrap_or(output.len());
-            output.insert_str(line_end, "&#x20;");
-        } else {
-            output.insert(offset, '\\');
+    keep_first_line_off_html_block(&node.children, &mut output);
+    Ok(indent_block_starting_continuations(output))
+}
+
+/// Keeps the first line of inline content that would start an HTML block
+/// from starting one. Text gets an escape. Raw HTML takes none; only a
+/// complete tag alone on its line (type 7) reaches here outside a definition's
+/// paragraph. Before a line ending, as `<a>&#x20;\n…` parses, a trailing space
+/// written as a reference keeps the line the paragraph's; content that is
+/// that line alone, or a tag that interrupts, follows a definition, which
+/// `serialize_blocks_at_start` writes it after.
+fn keep_first_line_off_html_block(children: &[Inline], output: &mut String) {
+    let Some(offset) = paragraph_html_block_escape_offset(output) else {
+        return;
+    };
+    if matches!(children.first(), Some(Inline::Html(_))) {
+        let first_line = output.split('\n').next().unwrap_or("");
+        if !line_starts_interrupting_html_block(first_line) {
+            if let Some(line_end) = output.find('\n') {
+                output.insert_str(line_end, "&#x20;");
+            }
         }
-    }
-    if let Some(offset) = paragraph_table_escape_offset(&output) {
+    } else {
         output.insert(offset, '\\');
     }
-    Ok(indent_block_starting_continuations(output))
 }
 
 /// Indents each continuation line of inline content that would start a block
@@ -447,25 +492,6 @@ fn paragraph_html_block_escape_offset(input: &str) -> Option<usize> {
             .take_while(|byte| **byte == b' ')
             .count(),
     )
-}
-
-fn paragraph_table_escape_offset(input: &str) -> Option<usize> {
-    let first_line_end = input.find('\n')?;
-    let first_line = &input[..first_line_end];
-    let second_line_start = first_line_end + 1;
-    let second_line_end = input[second_line_start..]
-        .find('\n')
-        .map(|offset| second_line_start + offset)
-        .unwrap_or(input.len());
-    let second_line = &input[second_line_start..second_line_end];
-
-    if !gfm_table_can_start_source(first_line, second_line) {
-        return None;
-    }
-
-    second_line
-        .find('-')
-        .map(|offset| second_line_start + offset)
 }
 
 fn serialize_alert(node: &Alert, options: &SerializeOptions) -> Result<String, SerializeError> {
@@ -549,9 +575,6 @@ fn serialize_list_with_marker_spacing(
             )
         };
         let mut inner = serialize_item_blocks(&item.children, options, node.tight)?;
-        if !node.ordered && unordered_list_marker(list_delimiter) == '*' {
-            inner = disambiguate_asterisk_list_item(inner);
-        }
         if let Some(checked) = item.checked {
             if let Some(rest) = inner.strip_prefix("- ") {
                 inner = rest.into();
@@ -569,13 +592,20 @@ fn serialize_list_with_marker_spacing(
             output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
             continue;
         }
-        if inner.starts_with([' ', '\t']) {
+        let first_line = inner.split('\n').next().unwrap_or("");
+        if inner.starts_with([' ', '\t'])
+            || is_thematic_break_line(&format!("{marker}{first_line}"))
+        {
             // Content after the marker's padding would move the item's content
             // column, so whitespace that opens the item's first block (an HTML
-            // block's indentation) starts on the line after the marker.
+            // block's indentation) starts on the line after the marker; so does
+            // a first line that would make the marker's line a thematic break.
+            // An item that starts blank has its content one column past the
+            // marker, whatever padding the other items use.
+            let content_indent = marker.trim_end().len() + 1;
             output.push_str(marker.trim_end());
             output.push('\n');
-            output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
+            output.push_str(&prefix_lines(&inner, &" ".repeat(content_indent)));
             continue;
         }
         output.push_str(&marker);
@@ -584,25 +614,24 @@ fn serialize_list_with_marker_spacing(
     Ok(output)
 }
 
-fn disambiguate_asterisk_list_item(inner: String) -> String {
-    let first_line_end = inner.find('\n').unwrap_or(inner.len());
-    let first_line = &inner[..first_line_end];
-    if !asterisk_bullet_first_line_is_thematic_break(first_line) {
-        return inner;
+/// Whether `line` is a thematic break: up to three spaces, then three or more
+/// of one of `-`, `*`, `_`, with only spaces and tabs between and after them.
+fn is_thematic_break_line(line: &str) -> bool {
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return false;
     }
-    let mut output = String::from("---");
-    output.push_str(&inner[first_line_end..]);
-    output
-}
-
-/// Whether a `*`-bullet item's first content line, once prefixed by the `* `
-/// marker, would escape the list as an asterisk thematic break. This is the
-/// rendering of a `ThematicBreak` child: a contiguous run of asterisks (`***`,
-/// rendered with no internal whitespace). A line with interior spaces such as
-/// `* *` is a genuine nested bullet and must be left alone, since `* * *`
-/// re-parses back into the nested list it came from.
-fn asterisk_bullet_first_line_is_thematic_break(first_line: &str) -> bool {
-    first_line.len() >= 2 && first_line.bytes().all(|byte| byte == b'*')
+    let Some(marker) = trimmed
+        .chars()
+        .next()
+        .filter(|char| matches!(char, '-' | '*' | '_'))
+    else {
+        return false;
+    };
+    trimmed
+        .chars()
+        .all(|char| matches!(char, ' ' | '\t') || char == marker)
+        && trimmed.chars().filter(|char| *char == marker).count() >= 3
 }
 
 fn serialize_item_blocks(
@@ -620,6 +649,14 @@ fn serialize_item_blocks(
             }
         }
         output.push_str(&serialize_block(block, options, false)?);
+        if tight
+            && matches!(block, Block::BlockQuote(_))
+            && matches!(blocks.get(index + 1), Some(Block::Paragraph(_)))
+        {
+            // The paragraph's first line would continue the quote's paragraph
+            // lazily; an empty quote line ends that paragraph first.
+            output.push_str("\n>");
+        }
     }
     Ok(output)
 }
@@ -652,7 +689,11 @@ fn serialize_description_list(
                 output.push('\n');
             }
             output.push_str("\n:");
-            let inner = serialize_blocks_at_start(&detail.children, options, false)?;
+            let inner = if node.tight {
+                serialize_item_blocks(&detail.children, options, true)?
+            } else {
+                serialize_blocks_at_start(&detail.children, options, false)?
+            };
             if !inner.is_empty() {
                 output.push('\n');
                 output.push_str(&indent_lines(&inner, 4));
@@ -680,13 +721,18 @@ fn serialize_code_block(
         }
         CodeBlockKind::Fenced { marker, length } => {
             let marker = code_block_fence_marker(node, marker, options);
-            let fence = code_block_fence(&node.value, marker, length.max(3));
+            let (fence, indent) = code_block_fence(&node.value, marker, length.max(3));
             let mut opener = fence.clone();
             if let Some(info) = &node.info {
                 opener.push(' ');
                 opener.push_str(&escape_code_info(info));
             }
-            Ok(fenced_body(&opener, &node.value, &fence))
+            let body = fenced_body(&opener, &node.value, &fence);
+            Ok(if indent == 0 {
+                body
+            } else {
+                prefix_lines(&body, &" ".repeat(indent))
+            })
         }
     }
 }
@@ -784,12 +830,7 @@ fn serialize_table_row(
             options,
             InlineSerializeContext::table_cell(),
         )?;
-        if table_cell_has_unescaped_pipe(&cell) {
-            return Err(SerializeError::UnsupportedNode(
-                "table cell inline contains a pipe that cannot be escaped without changing source",
-            ));
-        }
-        cells.push(cell);
+        cells.push(escape_cell_delimiter_pipes(cell));
     }
     Ok(format!("| {} |", cells.join(" | ")))
 }
@@ -804,20 +845,26 @@ struct InlineSerializeContext {
     /// The inlines open a line of the block, rather than following a
     /// delimiter such as a link's `[` on it.
     opens_line: bool,
-    /// For a text, the delimiter chars that the inlines after it may write.
+    /// For a text, the delimiter chars that the inlines after it may write;
+    /// for nested inlines, those after their parent, at every level.
     written_later: DelimiterChars,
+    /// The same for the inlines before.
+    written_before: DelimiterChars,
+    /// For a text, whether it opens a line of the block.
+    text_opens_line: bool,
     /// The inlines open a span delimited by a run such as `*` or `++`, which
     /// a line ending right after it could not open.
     opens_span: bool,
 }
 
-/// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, and `|`, which delimit
-/// inline spans that pair runs across sibling inlines.
+/// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
+/// delimit inline spans or shortcodes that pair across sibling inlines, and
+/// `>`, which ends raw HTML or an autolink that a `<` before it may open.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct DelimiterChars(u8);
+struct DelimiterChars(u16);
 
 impl DelimiterChars {
-    const CHARS: [char; 7] = ['*', '_', '~', '+', '=', '^', '|'];
+    const CHARS: [char; 10] = ['*', '_', '~', '+', '=', '^', '|', '$', ':', '>'];
 
     fn of_char(char: char) -> Self {
         Self::CHARS
@@ -860,6 +907,17 @@ impl DelimiterChars {
             Inline::Subscript(node) => within("~", &node.children),
             Inline::Superscript(node) => within("^", &node.children),
             Inline::Spoiler(node) => within("|", &node.children),
+            // Their contents pair with nothing outside them; only a `>` in
+            // them can end raw HTML that a `<` before them opens.
+            Inline::Html(HtmlInline { value: raw, .. })
+            | Inline::Code(CodeInline { raw, .. })
+            | Inline::Math(MathInline { value: raw, .. })
+                if raw.contains('>') =>
+            {
+                Self::of_char('>')
+            }
+            Inline::Autolink(_) => Self::of_char('>'),
+            Inline::Shortcode(_) | Inline::TextDirective(_) => Self::of_char(':'),
             _ => Self(0),
         }
     }
@@ -873,7 +931,20 @@ impl InlineSerializeContext {
             in_underscore_emphasis: false,
             opens_line: false,
             written_later: DelimiterChars(0),
+            written_before: DelimiterChars(0),
+            text_opens_line: false,
             opens_span: false,
+        }
+    }
+
+    /// The context of a span's content, delimited by `delimiter` on both
+    /// sides.
+    fn delimited_by(self, delimiter: char) -> Self {
+        let delimiter = DelimiterChars::of_char(delimiter);
+        Self {
+            written_later: self.written_later.union(delimiter),
+            written_before: self.written_before.union(delimiter),
+            ..self
         }
     }
 
@@ -891,6 +962,8 @@ impl InlineSerializeContext {
             in_underscore_emphasis: false,
             opens_line: true,
             written_later: DelimiterChars(0),
+            written_before: DelimiterChars(0),
+            text_opens_line: false,
             opens_span: false,
         }
     }
@@ -970,9 +1043,9 @@ fn is_gfm_literal_autolink(inline: &Inline) -> bool {
     )
 }
 
-// True when `inline` is a shortcut link or image reference, whose `[label]`
-// a following `(` would turn into an inline link, and a following `:` at the
-// start of a line into a link reference definition.
+// True when `inline` is a shortcut link or image reference or a footnote
+// reference, whose `[label]` a following `(` would turn into an inline link,
+// and a following `:` at the start of a line into a definition.
 fn is_shortcut_reference(inline: &Inline) -> bool {
     matches!(
         inline,
@@ -982,7 +1055,7 @@ fn is_shortcut_reference(inline: &Inline) -> bool {
         }) | Inline::ImageReference(ImageReference {
             kind: ReferenceKind::Shortcut,
             ..
-        })
+        }) | Inline::FootnoteReference(_)
     )
 }
 
@@ -1064,18 +1137,33 @@ fn serialize_inlines_with_context(
     let opens_line = context.opens_line;
     let opens_span = context.opens_span;
     // Nested inlines follow their parent's opening delimiter.
-    let context = InlineSerializeContext {
+    let base_context = InlineSerializeContext {
         opens_line: false,
-        written_later: DelimiterChars(0),
+        text_opens_line: false,
         opens_span: false,
         ..context
     };
     let mut output = String::new();
     let mut output_line = OutputLine::default();
-    // The delimiter chars the inlines from each index on may write, read once
-    // a text needs them.
-    let mut written_from: Option<Vec<DelimiterChars>> = None;
+    // The delimiter chars the inlines from each index on may write, and those
+    // before each index, within this run and around it.
+    let written = inlines
+        .iter()
+        .map(DelimiterChars::written_by)
+        .collect::<Vec<_>>();
+    let mut written_from = vec![context.written_later; inlines.len() + 1];
+    for index in (0..inlines.len()).rev() {
+        written_from[index] = written_from[index + 1].union(written[index]);
+    }
+    let mut written_until = context.written_before;
     for (index, inline) in inlines.iter().enumerate() {
+        let written_before = written_until;
+        written_until = written_until.union(written[index]);
+        let context = InlineSerializeContext {
+            written_later: written_from[index + 1],
+            written_before,
+            ..base_context
+        };
         match inline {
             Inline::Text(node) => {
                 let autolink_before = index
@@ -1086,19 +1174,8 @@ fn serialize_inlines_with_context(
                 let at_line_start = output_line.len(&output) == 0;
                 let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
                 let at_line_end = text_is_at_line_end(inlines, index);
-                let written_later = if node.value.contains(DelimiterChars::CHARS) {
-                    written_from.get_or_insert_with(|| {
-                        let mut sets = vec![DelimiterChars(0); inlines.len() + 1];
-                        for (at, inline) in inlines.iter().enumerate().rev() {
-                            sets[at] = sets[at + 1].union(DelimiterChars::written_by(inline));
-                        }
-                        sets
-                    })[index + 1]
-                } else {
-                    DelimiterChars(0)
-                };
                 let text_context = InlineSerializeContext {
-                    written_later,
+                    text_opens_line: opens_block_line,
                     ..context
                 };
 
@@ -1153,6 +1230,25 @@ fn serialize_inlines_with_context(
                             }
                         }
                     }
+                }
+                // A `:` opening the text would close a shortcode that a bare
+                // text directive before it opens.
+                if index.checked_sub(1).is_some_and(|prev| {
+                    matches!(&inlines[prev], Inline::TextDirective(directive)
+                        if directive.label.is_empty() && directive.attributes.is_empty())
+                }) && rendered.starts_with(':')
+                {
+                    rendered.insert(0, '\\');
+                }
+                // A `:` ending the text would open a shortcode that a `:` in
+                // the literal autolink after it closes.
+                if inlines
+                    .get(index + 1)
+                    .and_then(literal_autolink_original)
+                    .is_some()
+                    && ends_with_unescaped(&rendered, ':')
+                {
+                    rendered.insert(rendered.len() - 1, '\\');
                 }
                 output.push_str(&rendered);
             }
@@ -1214,14 +1310,28 @@ fn serialize_inlines_with_context(
                     options,
                     context.avoiding_star_edges().opening_span(),
                 )?;
-                // NOTE: two abutting `Strong` nodes (`**a****b**`) reparse as a
-                // single run. The only zero-insertion separator is flipping one
-                // run to `__`, but `__` reparses as `Underline` when that
-                // construct is enabled and the serializer has no signal for it,
-                // so this hand-built-AST sub-case is left as a known limitation.
-                output.push_str("**");
+                // A `**` right after a `*` that closes a span would join its
+                // run, so the strong is written with `__` there when `_` can
+                // flank and its content does not touch `_`. Abutting nested
+                // or following runs stay `**`: they split as written, and
+                // `__` reparses as `Underline` when that construct is enabled,
+                // which the serializer has no signal for.
+                let after_star = ends_with_unescaped(&output, '*');
+                let underscore_fits = !children.starts_with('_')
+                    && !children.ends_with('_')
+                    && !matches!(
+                        inlines.get(index + 1),
+                        Some(Inline::Text(next))
+                            if next.value.chars().next().is_some_and(|char| char.is_alphanumeric() || char == '_')
+                    );
+                let delimiter = if after_star && underscore_fits {
+                    "__"
+                } else {
+                    "**"
+                };
+                output.push_str(delimiter);
                 output.push_str(&children);
-                output.push_str("**");
+                output.push_str(delimiter);
             }
             Inline::Underline(node) => {
                 output.push_str("__");
@@ -1236,7 +1346,7 @@ fn serialize_inlines_with_context(
                 let children = serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('~'),
                 )?;
                 let marker = match node.marker {
                     DeleteMarker::SingleTilde => "~",
@@ -1251,7 +1361,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('+'),
                 )?);
                 output.push_str("++");
             }
@@ -1260,7 +1370,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('='),
                 )?);
                 output.push_str("==");
             }
@@ -1269,7 +1379,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('~'),
                 )?);
                 output.push('~');
             }
@@ -1278,7 +1388,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('^'),
                 )?);
                 output.push('^');
             }
@@ -1287,7 +1397,7 @@ fn serialize_inlines_with_context(
                 output.push_str(&serialize_inlines_with_context(
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().delimited_by('|'),
                 )?);
                 output.push_str("||");
             }
@@ -1579,10 +1689,17 @@ fn is_directive_shorthand_value(input: &str) -> bool {
             .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'))
 }
 
+/// Whether whitespace ending the text at `index` would be dropped: before a
+/// line ending, two-space hard break, or the end of the run. A backslash hard
+/// break keeps the whitespace before it.
 fn text_is_at_line_end(inlines: &[Inline], index: usize) -> bool {
     matches!(
         inlines.get(index + 1),
-        None | Some(Inline::SoftBreak(_)) | Some(Inline::LineBreak(_))
+        None | Some(Inline::SoftBreak(_))
+            | Some(Inline::LineBreak(LineBreak {
+                kind: LineBreakKind::Spaces,
+                ..
+            }))
     )
 }
 
@@ -1606,10 +1723,21 @@ struct TextScan<'a> {
     current_run: Option<(u8, usize, usize)>,
     /// The [`DelimiterChars`] that the inlines after the text may write.
     written_later: DelimiterChars,
+    /// Those that the inlines before it may write.
+    written_before: DelimiterChars,
 }
 
 impl<'a> TextScan<'a> {
+    #[cfg(test)]
     fn new(input: &'a str, written_later: DelimiterChars) -> Self {
+        Self::around(input, written_later, DelimiterChars(0))
+    }
+
+    fn around(
+        input: &'a str,
+        written_later: DelimiterChars,
+        written_before: DelimiterChars,
+    ) -> Self {
         Self {
             input,
             marker_starts: Default::default(),
@@ -1618,6 +1746,7 @@ impl<'a> TextScan<'a> {
             dollar_runs: None,
             current_run: None,
             written_later,
+            written_before,
         }
     }
 
@@ -1755,10 +1884,10 @@ fn escape_text_with_context(
     let mut output = String::new();
     let mut output_line = OutputLine::default();
     let mut line_digit_prefix = 0usize;
-    let trailing_start = if preserve_trailing {
-        input
-            .trim_end_matches(|char| matches!(char, ' ' | '\t'))
-            .len()
+    // Only the space or tab at a preserved edge is written as a reference:
+    // the ones beside it are no longer at the edge of the line or span.
+    let trailing_start = if preserve_trailing && input.ends_with([' ', '\t']) {
+        input.len() - 1
     } else {
         input.len()
     };
@@ -1766,11 +1895,12 @@ fn escape_text_with_context(
     // char written as a character reference is punctuation.
     let view = referenced_chars_as_punctuation(input, preserve_leading, trailing_start);
     let view = view.as_ref();
-    let mut scan = TextScan::new(view, context.written_later);
+    let mut scan = TextScan::around(view, context.written_later, context.written_before);
     // The end of the current `$`, `*`, and `_` run, and whether it is escaped.
     let mut dollar_run = (0usize, false);
     let mut star_run = (0usize, false);
     let mut underscore_run = (0usize, false);
+    let mut tilde_run = (0usize, false);
     let mut chars = input.char_indices().peekable();
     let mut at_leading_edge = preserve_leading;
     while let Some((offset, char)) = chars.next() {
@@ -1786,10 +1916,12 @@ fn escape_text_with_context(
         }
         if (at_leading_edge || offset >= trailing_start) && char == ' ' {
             output.push_str("&#x20;");
+            at_leading_edge = false;
             continue;
         }
         if (at_leading_edge || offset >= trailing_start) && char == '\t' {
             output.push_str("&#x9;");
+            at_leading_edge = false;
             continue;
         }
         // A tab inside the text stays literal: the reparse keeps it as it is.
@@ -1804,10 +1936,9 @@ fn escape_text_with_context(
             line_digit_prefix += 1;
             continue;
         }
-        if char == ':'
-            && (input[..offset].ends_with("http") || input[..offset].ends_with("https"))
-            && input[offset + char.len_utf8()..].starts_with("//")
-        {
+        // `://` can open a literal autolink: with any scheme, or none under
+        // the relaxed autolink dialect.
+        if char == ':' && input[offset + char.len_utf8()..].starts_with("//") {
             output.push('\\');
             output.push(char);
             line_digit_prefix = usize::MAX;
@@ -1909,7 +2040,23 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            ':' if output_line.len(&output) == 0 && input[offset..].starts_with("::") => {
+            // A `:` or `~` and whitespace opening a line would open the
+            // details of a description list whose term is the line before.
+            ':' | '~'
+                if offset == 0
+                    && context.text_opens_line
+                    && input[offset + 1..]
+                        .chars()
+                        .next()
+                        .is_none_or(|next| matches!(next, ' ' | '\t')) =>
+            {
+                output.push('\\');
+                output.push(char);
+            }
+            ':' if (output_line.len(&output) == 0 && input[offset..].starts_with("::"))
+                || text_directive_can_start(view, offset)
+                || shortcode_can_form(view, offset, &mut scan) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -1948,7 +2095,12 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '~' if text_tilde_can_start(view, offset, &mut scan) => {
+            // A run of three opening a line would open a code fence.
+            '~' if run_escaped(view, offset, b'~', &mut scan, &mut tilde_run, |scan, at| {
+                (at == 0 && context.text_opens_line && same_byte_run_len(view, at, b'~') >= 3)
+                    || tilde_run_can_pair(view, at, scan)
+            }) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -2064,7 +2216,7 @@ fn text_delimiter_flanking(input: &str, offset: usize, marker_len: usize) -> Tex
 fn text_less_than_can_start_inline(input: &str, offset: usize, scan: &mut TextScan) -> bool {
     let after_offset = offset + '<'.len_utf8();
     let after = &input[after_offset..];
-    if scan.occurs_from(">", after_offset) {
+    if scan.written_later(">") || scan.occurs_from(">", after_offset) {
         let next = after.chars().next();
         return next.is_some_and(|char| {
             char.is_ascii_alphabetic() || matches!(char, '/' | '!' | '?' | '_')
@@ -2073,6 +2225,39 @@ fn text_less_than_can_start_inline(input: &str, offset: usize, scan: &mut TextSc
             || scan.occurs_from("@", after_offset);
     }
     false
+}
+
+/// Whether the `:` at `offset` can open a shortcode, closed by a `:` after a
+/// name in the text or written by the inlines after it.
+fn shortcode_can_form(input: &str, offset: usize, scan: &mut TextScan) -> bool {
+    let name_end = offset
+        + 1
+        + input[offset + 1..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'+'))
+            .count();
+    let opens = name_end > offset + 1
+        && match input.as_bytes().get(name_end) {
+            Some(b':') => true,
+            Some(_) => false,
+            None => scan.written_later(":"),
+        };
+    opens
+}
+
+/// Whether the `:` at `offset` can open a text directive: after whitespace,
+/// `(`, `[`, `{`, or at the text's start, and before a directive name.
+fn text_directive_can_start(input: &str, offset: usize) -> bool {
+    let rest = &input[offset + ':'.len_utf8()..];
+    let opens_after = input[..offset]
+        .chars()
+        .next_back()
+        .is_none_or(|char| char.is_whitespace() || matches!(char, '(' | '[' | '{'));
+    let name_len = rest
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        .count();
+    opens_after && is_directive_name(&rest[..name_len])
 }
 
 fn text_atx_heading_can_start(input: &str, offset: usize, output_line_len: usize) -> bool {
@@ -2127,11 +2312,7 @@ fn referenced_chars_as_punctuation(
     preserve_leading: bool,
     trailing_start: usize,
 ) -> Cow<'_, str> {
-    let leading_end = if preserve_leading {
-        input.len() - input.trim_start_matches([' ', '\t']).len()
-    } else {
-        0
-    };
+    let leading_end = usize::from(preserve_leading && input.starts_with([' ', '\t']));
     let referenced = |offset: usize, char: char| {
         (char.is_control() && char != '\t')
             || (matches!(char, ' ' | '\t') && (offset < leading_end || offset >= trailing_start))
@@ -2162,15 +2343,20 @@ fn text_math_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool 
     if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
         return true;
     }
-    scan.exact_dollar_run_follows(offset + marker_len, marker_len)
+    scan.written_later("$") || scan.exact_dollar_run_follows(offset + marker_len, marker_len)
 }
 
-fn text_tilde_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
-    if input[offset..].starts_with("~~") {
-        return text_attention_delimiter_can_start(input, offset, "~~", false, scan)
-            || text_simple_delimiter_can_start(input, offset, "~", scan);
-    }
-    text_simple_delimiter_can_start(input, offset, "~", scan)
+/// Whether the `~` run from `offset` to its end could pair, or join a run,
+/// once written literally: with a `~` later in the text or one the inlines
+/// after it (or the span around it) write, or with one written right before
+/// the text's start. (A run before it in the text is escaped when it could
+/// pair with this one.) Escaping only when it could keeps a `*` or `_` run
+/// beside a literal `~` opening or closing as it did.
+fn tilde_run_can_pair(input: &str, offset: usize, scan: &mut TextScan) -> bool {
+    let end = offset + same_byte_run_len(input, offset, b'~');
+    scan.occurs_from("~", end)
+        || scan.written_later("~")
+        || (offset == 0 && scan.written_before.contains('~'))
 }
 
 fn text_caret_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool {
@@ -2470,9 +2656,13 @@ fn escape_label_syntax(input: &str, escape_pipe: bool, escape_whitespace: bool) 
 
 fn escape_wikilink_part(input: &str) -> String {
     let mut output = String::new();
-    for char in input.chars() {
+    for (offset, char) in input.char_indices() {
         match char {
             char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
+            '&' if text_character_reference_can_start(input, offset) => {
+                output.push('\\');
+                output.push(char);
+            }
             '\\' | '[' | ']' | '|' => {
                 output.push('\\');
                 output.push(char);
@@ -2690,24 +2880,42 @@ fn fence_for(input: &str, marker: FenceMarker, min_len: usize) -> String {
     char.to_string().repeat(min_len.max(longest + 1))
 }
 
-/// The shortest fence of at least `min_len` marker chars that no line of
-/// `value` closes: a closing fence is up to three spaces, at least as many
-/// marker chars, and nothing else but spaces and tabs.
-fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> String {
+/// The fence for a code block's `value` and the columns the block is indented
+/// by, so that no line of `value` closes it. A closing fence is up to three
+/// spaces, at least as many marker chars, and nothing else but spaces and
+/// tabs. The fence keeps `min_len` chars when indenting the block (which the
+/// value's lines lose again) moves every closing-like line past three spaces;
+/// otherwise it grows past the longest of them.
+fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> (String, usize) {
     let char = match marker {
         FenceMarker::Backtick => '`',
         FenceMarker::Tilde => '~',
     };
-    let mut length = min_len;
-    for line in value.split(['\n', '\r']) {
+    let closing_like = |line: &str, length: usize| {
         let indent = line.len() - line.trim_start_matches(' ').len();
         let rest = &line[indent..];
         let run = rest.len() - rest.trim_start_matches(char).len();
-        if indent <= 3 && run >= length && rest[run..].trim_matches([' ', '\t']).is_empty() {
-            length = run + 1;
+        (indent <= 3 && run >= length && rest[run..].trim_matches([' ', '\t']).is_empty())
+            .then_some((indent, run))
+    };
+    let lines = || value.split(['\n', '\r']);
+    let least_indent = lines()
+        .filter_map(|line| closing_like(line, min_len))
+        .map(|(indent, _)| indent)
+        .min();
+    match least_indent {
+        None => (char.to_string().repeat(min_len), 0),
+        Some(indent) if indent > 0 => (char.to_string().repeat(min_len), 4 - indent),
+        Some(_) => {
+            let mut length = min_len;
+            for line in lines() {
+                if let Some((_, run)) = closing_like(line, length) {
+                    length = run + 1;
+                }
+            }
+            (char.to_string().repeat(length), 0)
         }
     }
-    char.to_string().repeat(length)
 }
 
 fn inline_code_fence(input: &str) -> String {
@@ -2746,22 +2954,10 @@ fn serialize_inline_math_with_context(
     node: &MathInline,
     context: InlineSerializeContext,
 ) -> Result<String, SerializeError> {
+    // A pipe in a table cell is escaped with the cell (see
+    // `escape_cell_delimiter_pipes`), which the table drops again.
+    let _ = context;
     let input = node.value.as_str();
-
-    // A table-cell pipe cannot live inside a dollar fence (it would split the
-    // cell), so it is forced into the `$`…`$` code-math form regardless of the
-    // node's recorded kind. That form cannot represent a value that itself
-    // contains a `` `$ `` close.
-    if context.table_cell && input.contains('|') {
-        if input.contains("`$") {
-            return Err(SerializeError::UnsupportedNode(
-                "inline math containing a table pipe and a code-math close",
-            ));
-        }
-        let input = table_cell_escape_code_pipes(input);
-        return Ok(format!("$`{input}`$"));
-    }
-
     match node.kind {
         MathInlineKind::Code => {
             if input.contains("`$") {
@@ -2786,8 +2982,26 @@ fn serialize_inline_math_with_context(
 /// Whether a serialized cell would split into more cells when parsed back,
 /// judged with spoilers enabled so a spoiler's bars are never taken for
 /// delimiters.
-fn table_cell_has_unescaped_pipe(input: &str) -> bool {
-    input.contains('|') && !crate::parse::table_row_delimiters(input, true).is_empty()
+/// `cell` with a backslash before each pipe that would delimit a cell: a pipe
+/// that raw HTML, an autolink, or another verbatim inline writes. The table
+/// drops that backslash before the cell's inline parse.
+fn escape_cell_delimiter_pipes(cell: String) -> String {
+    if !cell.contains('|') {
+        return cell;
+    }
+    let delimiters = crate::parse::table_row_delimiters(&cell, true);
+    if delimiters.is_empty() {
+        return cell;
+    }
+    let mut output = String::with_capacity(cell.len() + delimiters.len());
+    let mut copied = 0;
+    for pipe in delimiters {
+        output.push_str(&cell[copied..pipe]);
+        output.push('\\');
+        copied = pipe;
+    }
+    output.push_str(&cell[copied..]);
+    output
 }
 
 fn longest_char_streak(input: &str, needle: char) -> usize {

@@ -418,7 +418,14 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_html_block(lines, index, options) {
+        // A line right after a definition continues the paragraph the
+        // definition was read from, so only an HTML block that can interrupt
+        // a paragraph starts there.
+        if let Some((block, next)) = (!after_definition_unbroken
+            || line_starts_interrupting_html_block(line.text))
+        .then(|| parse_html_block(lines, index, options))
+        .flatten()
+        {
             blocks.push(block);
             index = next;
             continue;
@@ -944,7 +951,27 @@ fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> b
     let map = SourceMap::verbatim(content.len(), 0);
     let lines = collect_lines(content, &map);
     let mut open_fence = None;
+    // An HTML block that only its end condition closes holds fence-like lines
+    // as its own text.
+    let mut open_html: Option<OpenBlockEnd> = None;
     for line in lines {
+        if let Some(end) = open_html {
+            if end.ends_with(line.text) {
+                open_html = None;
+            }
+            continue;
+        }
+        if open_fence.is_none() && options.constructs.html_block {
+            let end = match trim_up_to_three_spaces(line.text).and_then(html_block_start) {
+                Some(HtmlBlockKind::RawTag) => Some(OpenBlockEnd::RawHtml),
+                Some(HtmlBlockKind::Until(end)) => Some(OpenBlockEnd::HtmlUntil(end)),
+                _ => None,
+            };
+            if let Some(end) = end {
+                open_html = (!end.ends_with(line.text)).then_some(end);
+                continue;
+            }
+        }
         let Some(trimmed) = fence_line(line.text, options) else {
             continue;
         };
@@ -6865,24 +6892,23 @@ fn parse_attributes(input: &str) -> Vec<DirectiveAttribute> {
             break;
         }
         cursor = skip_spaces(input, next);
-        if input.as_bytes().get(cursor) == Some(&b'=') {
+        let value = if input.as_bytes().get(cursor) == Some(&b'=') {
             cursor = skip_spaces(input, cursor + 1);
             if let Some((value, next)) = parse_attribute_value(input, cursor) {
-                attributes.push(DirectiveAttribute {
-                    name: name.into(),
-                    value: Some(value),
-                });
                 cursor = next;
+                Some(value)
             } else {
-                attributes.push(DirectiveAttribute {
-                    name: name.into(),
-                    value: Some(String::new()),
-                });
+                Some(String::new())
             }
         } else {
+            None
+        };
+        // A token that is no attribute name is skipped, as a malformed value
+        // is read leniently: the document keeps only attributes it can write.
+        if crate::validate::is_attribute_name(name) {
             attributes.push(DirectiveAttribute {
                 name: name.into(),
-                value: None,
+                value,
             });
         }
     }
@@ -8663,12 +8689,13 @@ fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) ->
 }
 
 /// Whether `line`, read as a paragraph's continuation line after `previous`,
-/// would end the paragraph or make it a setext heading or a table header
-/// under the maximal default dialect.
+/// would end the paragraph or make it a setext heading, a table header, or a
+/// description term under the maximal default dialect.
 pub(crate) fn continuation_line_breaks_paragraph(previous: &str, line: &str) -> bool {
     likely_block_start(line, &SyntaxOptions::default())
         || setext_underline_depth(line).is_some()
         || gfm_table_can_start_source(previous, line)
+        || description_marker(line).is_some()
 }
 
 pub(crate) fn gfm_table_can_start_source(header: &str, delimiter: &str) -> bool {
@@ -8681,6 +8708,11 @@ fn table_can_start_source(
     indented_code: bool,
     spoiler: bool,
 ) -> bool {
+    // A header row indented four columns or more is a paragraph's
+    // continuation text, as markdown-it and micromark read it.
+    if table_indent_line(header, indented_code).is_none() {
+        return false;
+    }
     let Some(delimiter) = table_indent_line(delimiter, indented_code) else {
         return false;
     };

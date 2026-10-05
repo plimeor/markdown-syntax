@@ -77,6 +77,21 @@ span, an inline link, or a link reference definition.
   as a reference, starts a list item whose first block opens with whitespace
   on the line after its marker, and lengthens a code fence only past lines
   that would close it.
+- A complete-tag line right after a definition continues the paragraph the
+  definition was read from, a table header row indented four columns or more
+  starts no table, and a directive attribute without a valid name is
+  dropped, so every parsed document serializes.
+- The serializer also writes these so that they reparse to the same tree:
+  text that would open a text directive, shortcode, raw HTML, or math with
+  an inline after it; a pipe that raw HTML, an autolink, or math writes in a
+  table cell, escaped with the cell; a list before a block indented one to
+  three columns, whose markers are indented past it; a paragraph after a
+  block quote in a tight item; a list item whose first line would make the
+  marker's line a thematic break; a code fence that a content line would
+  close, indented when that keeps the fence's length; raw HTML that opens a
+  paragraph or setext heading after a definition; a line that would open
+  description details; frontmatter ending in an empty line; and a literal `~`
+  beside an emphasis run, which stays literal unless it could pair.
 - `src/parse/nul.rs` is named `nul_replacement.rs`, since `nul` is a reserved
   Windows filename that `cargo package` warns about.
 
@@ -202,6 +217,15 @@ Specs:
     reparsed `ReferenceKind`.
 
 ### Risks
+- [Round-trip classes the serializer cannot reach without the parse's
+  context] → Generated inputs still fail to round-trip in four classes: a
+  `Strong` or `Emphasis` nested against a run of the same char (`__**)**&__`),
+  which needs `__` that the `Underline` dialect would read otherwise; a
+  relaxed literal autolink that ends at a span's closing delimiter
+  (`*://*&mp;`); a literal `~` whose emphasis run also touches other marks
+  (`a*~ **&*`); and backticks or brackets inside a wiki link or footnote
+  label (`[^`]``). Each needs the dialect or a reparse check in the
+  serializer, which this plan does not add.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -283,3 +307,8 @@ Specs:
 - [x] 9.1 Add tests for "Underscore after Unicode punctuation", "Escaped backslash before a line ending", "Space inside a bare destination's parentheses", "Container content ending in a carriage return", "Malformed directive line inside a paragraph", and each serializer scenario this group adds; verified by each failing on the group-8 code.
 - [x] 9.2 Read the `_` rules' punctuation as Unicode punctuation; take a hard break only after an unescaped backslash; end a bare destination at any space; require a valid opener for a directive line to interrupt a paragraph; end a container's last line with `\n`; verified by the tests, by conformance staying at 2233 of 2236, and by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree with no input newly mismatching.
 - [x] 9.3 Write the serializer cases above, regenerating the `commonmark_attention` canonical output, whose `\__foo\__bar` becomes `\_\_foo\_\_bar`; verified by the round-trip fuzz over 30,000 generated inputs dropping from 372 failures at the group-8 end to none.
+
+### 10. Extension constructs, cells, list edges, and definitions
+- [x] 10.1 Add tests for "Complete tag after a definition", "Indented table header row", and "Directive attribute without a valid name", and for each serializer scenario this group adds; verified by each failing on the group-9 code.
+- [x] 10.2 Skip type-7 HTML blocks right after a definition; reject table header rows indented four columns or more; drop directive attributes whose names do not validate; and skip HTML blocks of types 1–5 when looking for an unclosed fence in a closed container; verified by the tests, by conformance staying at 2233 of 2236, and by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree with no input newly mismatching.
+- [x] 10.3 Write the serializer cases above, regenerating the `commonmark_character_escapes` and `math_edges` canonical outputs (a final `~` stays literal; a `$` that a later line's `$` could close is escaped) and updating two serializer regression tests whose expected output changed for the better (a thematic-break item keeps its marker; dollar math in a table cell keeps its kind); verified by the round-trip fuzz over 200,000 generated inputs on four seeds dropping from 125–168 failures to 20–27, all in the classes listed under Risks.

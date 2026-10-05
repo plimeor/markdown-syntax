@@ -980,7 +980,7 @@ mod serializer_escape {
         let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("a&#x7C;b"));
         assert!(markdown.contains(r"`c\|d`"));
-        assert!(markdown.contains(r"$`x\|y`$"));
+        assert!(markdown.contains(r"$x\|y$"));
         assert!(markdown.contains("[link&#x7C;label](/link)"));
         assert!(markdown.contains("![img&#x7C;alt](/img)"));
         assert!(markdown.contains("[ref&#x7C;text][pipe\\|id]"));
@@ -1000,7 +1000,8 @@ mod serializer_escape {
                 ));
                 assert!(matches!(
                     &table.rows[1].cells[2].children[..],
-                    [Inline::Math(MathInline { value, .. })] if value == "x|y"
+                    [Inline::Math(MathInline { value, kind: MathInlineKind::Dollar { dollars: 1 }, .. })]
+                        if value == "x|y"
                 ));
                 assert!(matches!(
                     &table.rows[1].cells[3].children[..],
@@ -1423,8 +1424,8 @@ mod review_serialize {
 
         let markdown = document.to_markdown().expect("document serializes");
         // `* ***` would escape the list as a top-level thematic break, so the item
-        // body is rewritten to a dash break that stays inside the list.
-        assert_eq!(markdown, "* ---\n");
+        // starts on the line after its marker, keeping the break's marker.
+        assert_eq!(markdown, "*\n  ***\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
         assert!(matches!(
@@ -1433,7 +1434,13 @@ mod review_serialize {
                 if matches!(
                     children.as_slice(),
                     [ListItem { children, .. }]
-                        if matches!(children.as_slice(), [Block::ThematicBreak(_)])
+                        if matches!(
+                            children.as_slice(),
+                            [Block::ThematicBreak(ThematicBreak {
+                                marker: ThematicBreakMarker::Asterisk,
+                                ..
+                            })]
+                        )
                 )
         ));
     }
@@ -1738,5 +1745,85 @@ mod round_trip_edges {
     fn a_fence_grows_only_past_lines_that_would_close_it() {
         assert_eq!(assert_round_trips("```\n```*"), "```\n```*\n```\n");
         assert_eq!(assert_round_trips("````\n```\n````"), "````\n```\n````\n");
+    }
+
+    #[test]
+    fn text_that_would_open_an_extension_construct_stays_text() {
+        for source in [
+            ":b[",
+            "\\:p",
+            "( \\:a",
+            "$\\<!--\n-->",
+            "`\\$[<a>[$>",
+            "\\:p://",
+            ":b\\:",
+            ":\\+:",
+            "[[\\&mp;]]",
+            "[^:](\\)",
+            "a\\://",
+            "^:// ^",
+            "||://\t||",
+            "&#x20; :b",
+            "==)\\==^==",
+            "||*\\||:||",
+            "://y \\\n|",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_literal_tilde_beside_an_emphasis_run_stays_literal() {
+        assert_eq!(assert_round_trips("a**~**"), "a**~**\n");
+        assert_eq!(assert_round_trips("b*~*"), "b*~*\n");
+        assert_eq!(assert_round_trips("d_~_"), "d*~*\n");
+        assert_round_trips("b*~~~***");
+        assert_round_trips("~~a~~~");
+        assert_round_trips("~~~a");
+    }
+
+    #[test]
+    fn a_pipe_that_raw_html_an_autolink_or_math_writes_in_a_cell_is_escaped() {
+        for source in ["://\\||[\n-|-", "|<!--\\|-->\n--", "$\\|$||\n-|-"] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn container_and_list_edges_round_trip() {
+        for source in [
+            "-\t(\n  <v>",
+            "*\t<a>\n  <v>",
+            "- >**\n`",
+            "1. >)\n~",
+            "-\n  ---",
+            "><!--\n>```",
+            "`\n|`\n-",
+            " ~~~\n    ~~~",
+            "---\n \n\n---",
+            "*c*__&__",
+        ] {
+            assert_round_trips(source);
+        }
+        assert_eq!(assert_round_trips(" ~~~\n    ~~~"), " ~~~\n    ~~~\n ~~~\n");
+    }
+
+    #[test]
+    fn raw_html_after_a_definition_continues_its_paragraph() {
+        for source in [
+            "[o]:u\n\t<div>",
+            "[o]:u\n<a>\n-",
+            "<a>&#x20;\n[\n-",
+            "[o]: u\n<a>",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_line_that_would_open_description_details_stays_text() {
+        for source in ["a\n   : `", "~\n: ]", "``\n   ~\t``", "[\n~ _\n    ~~~"] {
+            assert_round_trips(source);
+        }
     }
 }

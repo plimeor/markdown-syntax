@@ -106,3 +106,35 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 #### Scenario: Fence length
 - **WHEN** the document parsed from ``"```\n```*"`` is serialized
 - **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
+
+#### Scenario: Text that would open an extension construct
+- **WHEN** the documents parsed with `parse` from `":b["`, `"\\:p"`, `":\\+:"`, `"\\:p://"`, and `"`\\$[<a>[$>"` are serialized and reparsed
+- **THEN** each reparsed paragraph equals the parsed one
+
+#### Scenario: Literal tilde beside an emphasis run
+- **WHEN** the document parsed from `"a**~**"` with `parse` is serialized
+- **THEN** `to_markdown()` returns `"a**~**\n"`
+
+#### Scenario: Pipe written by an inline in a table cell
+- **WHEN** the document parsed from `"$\\|$||\n-|-"` with `parse` is serialized and reparsed
+- **THEN** the reparsed cell holds the same dollar `Math` with value `"|"`
+
+#### Scenario: List before an indented HTML block
+- **WHEN** the document parsed from `"-\t(\n  <v>"` is serialized and reparsed
+- **THEN** the reparsed document holds the `List` followed by the `HtmlBlock` `"  <v>"`
+
+#### Scenario: Thematic break opening a list item
+- **WHEN** the document parsed from `"-\n  ---"` is serialized
+- **THEN** `to_markdown()` returns `"-\n  ---\n"`
+
+#### Scenario: Code fence a content line would close
+- **WHEN** the document parsed from `" ~~~\n    ~~~"` is serialized
+- **THEN** `to_markdown()` returns `" ~~~\n    ~~~\n ~~~\n"`, keeping the fence length 3
+
+#### Scenario: Raw HTML after a definition
+- **WHEN** the document parsed from `"[o]:u\n\t<div>"` is serialized and reparsed
+- **THEN** the reparsed document holds the `Definition` and a `Paragraph` holding the `Html` inline
+
+#### Scenario: Line that would open description details
+- **WHEN** the document parsed from `"a\n   : `"` with `parse` is serialized and reparsed
+- **THEN** the reparsed document holds the same single `Paragraph`

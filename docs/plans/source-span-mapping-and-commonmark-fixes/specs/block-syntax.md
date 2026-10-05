@@ -64,6 +64,14 @@ specification defines them.
 - **WHEN** ``"- ```\n  ~\r"`` is parsed with the CommonMark preset
 - **THEN** the list item's fenced `CodeBlock` holds `"~\n"`
 
+#### Scenario: Complete tag after a definition
+- **WHEN** `"[o]: u\n<a>"` is parsed with the CommonMark preset
+- **THEN** the document holds a `Definition` followed by a `Paragraph` holding an `Html` inline
+
+#### Scenario: Indented table header row
+- **WHEN** `"a\n    |b\n----"` is parsed with `parse`
+- **THEN** the document holds one setext `Heading`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
@@ -85,6 +93,10 @@ does not end a paragraph.
 #### Scenario: Invalid name
 - **WHEN** a leaf directive opener has a malformed name
 - **THEN** an error-severity `InvalidDirectiveName` diagnostic is reported
+
+#### Scenario: Directive attribute without a valid name
+- **WHEN** `":b{<} :c{a <=1 d}"` is parsed with `parse` and serialized
+- **THEN** `to_markdown()` returns `":b :c{a d}\n"`
 
 #### Scenario: Malformed directive line inside a paragraph
 - **WHEN** `"a\n::1bad"` or `"a\n:::"` is parsed with `parse`
