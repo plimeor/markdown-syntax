@@ -7,17 +7,18 @@ The serializer SHALL write every backtick in a text value as `` \` ``.
 
 #### Scenario: Backtick run before a lone backtick
 - **WHEN** a hand-built paragraph holding ```Text("b ``a`")``` is serialized
-- **THEN** `to_markdown()` returns ``"b \`\`a\`\n"`` and reparsing it yields the same text and no code span
+- **THEN** `to_markdown()` returns ``"b \\`\\`a\\`\n"`` and reparsing it yields the same text and no code span
 
 #### Scenario: Paired backticks
 - **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
-- **THEN** it returns ``"Test \`hello world\` here.\n"``
+- **THEN** it returns ``"Test \\`hello world\\` here.\n"``
 
 ## MODIFIED Requirements
 
 ### Requirement: Escaping keeps text literal
 The serializer SHALL escape text so that reparsing the output yields the same
-text, and leaves the nodes beside it as they were, rather than new constructs.
+text and leaves the nodes beside it unchanged, rather than forming new
+constructs.
 
 #### Scenario: Literal asterisks in text
 - **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized and reparsed
@@ -96,12 +97,12 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs, since a paragraph whose runs abut, or touch a text `*` or `~`, is written with the first delimiter choice that reads back, which may leave that text `*` raw to join a run
 
 #### Scenario: Text beside a literal autolink
-- **WHEN** the documents parsed from `"a\\-://`"`, `"ab&#99;://x"`, `"*://*&mp;"`, `"**://**&mp;"`, and `"://^&mp;"` with `parse` are serialized and reparsed
+- **WHEN** the documents parsed from `` "a\\-://`" ``, `"ab&#99;://x"`, `"*://*&mp;"`, `"**://**&mp;"`, and `"://^&mp;"` with `parse` are serialized and reparsed
 - **THEN** each reparsed paragraph holds the same `Autolink` with the same text around it, since a scheme char before a `://` autolink and the first char of text after one, past any span delimiters, are written in a form the URL scan stops at
 
 #### Scenario: Backtick after a reference's raw label
-- **WHEN** the document parsed from `"[^`]``"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"[^`]&#96;&#96;\n"`, since an escaped backtick would close a code span that the label's backtick opens
+- **WHEN** the document parsed from ``` "[^`]``" ``` with `parse` is serialized
+- **THEN** `to_markdown()` returns `` "[^`]&#96;&#96;\n" ``, since an escaped backtick would close a code span that the label's backtick opens
 
 #### Scenario: Bang before a wiki link
 - **WHEN** the document parsed from `"![[$[]]a$>"` with `parse` is serialized
@@ -184,7 +185,7 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
 
 #### Scenario: Text that would open an extension construct
-- **WHEN** the documents parsed with `parse` from `":b["`, `"\\:p"`, `":\\+:"`, `"\\:p://"`, and `"`\\$[<a>[$>"` are serialized and reparsed
+- **WHEN** the documents parsed with `parse` from `":b["`, `"\\:p"`, `":\\+:"`, `"\\:p://"`, and `` "`\\$[<a>[$>" `` are serialized and reparsed
 - **THEN** each reparsed paragraph equals the parsed one
 
 #### Scenario: Literal tilde beside an emphasis run
@@ -212,5 +213,70 @@ text, and leaves the nodes beside it as they were, rather than new constructs.
 - **THEN** the reparsed document holds the `Definition` and a `Paragraph` holding the `Html` inline
 
 #### Scenario: Line that would open description details
-- **WHEN** the document parsed from `"a\n   : `"` with `parse` is serialized and reparsed
+- **WHEN** the document parsed from `` "a\n   : `" `` with `parse` is serialized and reparsed
 - **THEN** the reparsed document holds the same single `Paragraph`
+
+#### Scenario: Run delimiters inside a link or mark
+- **WHEN** the documents parsed from `"[__**)**&__](u)"` and `"==__***/***__=="` with `parse` are serialized and reparsed
+- **THEN** each reparsed paragraph equals the parsed one, since the runs inside a link or mark take the delimiter choices of the paragraph's
+
+#### Scenario: Strong after an emphasis with underline enabled
+- **WHEN** the document parsed from `"*a***b**"` with underline enabled is serialized
+- **THEN** `to_markdown()` returns `"*a***b**\n"`, which reparses with a `Strong` and no `Underline`
+
+#### Scenario: Doubled delimiter that could close its span
+- **WHEN** the document parsed from `"==a\\== b=="` with `parse` is serialized
+- **THEN** `to_markdown()` returns `"==a\\== b==\n"`
+
+#### Scenario: Math opening a definition's paragraph
+- **WHEN** the document parsed from `"[o]:u\n\t$$\na$$"` with `parse` is serialized
+- **THEN** `to_markdown()` returns `"[o]: u\n    $$\na$$\n"`, which keeps the math inline in the paragraph the definition was read from
+
+#### Scenario: Cell pipe after an escaped backslash
+- **WHEN** the document parsed from `"| <a b=\"x\\\\\\|y\"> |\n| --- |"` with the GFM preset is serialized and reparsed
+- **THEN** the reparsed table holds the same raw HTML in one cell
+
+#### Scenario: Raw label backtick before a span
+- **WHEN** the document parsed from `` "*[foo`bar]* &#96;\n\n[foo`bar]: /u" `` with `parse` is serialized and reparsed
+- **THEN** the reparsed paragraph equals the parsed one, since a backtick after the reference is written as a character reference inside and after the span around it
+
+#### Scenario: What borders spans, cells, items, and quotes
+- **WHEN** the documents parsed with `parse` from `` "-[^\\`]://\\`" ``, `"++:++\\:"`, `"&#x20;://>|>\n-|-"`, `"- *  (\n    <a>"`, `"~~:~ :e~"`, `"++\\+>++"`, and `">\n>[!NOTE]:>"` are serialized and reparsed
+- **THEN** each reparsed document equals the parsed one, since an escaped label backtick opens no code span, a `:` the span's delimiters would make a shortcode is escaped, whitespace opening a cell is encoded, a nested list is indented past the block after it, whitespace before a text directive stays raw, a `+` beside a `++` delimiter is escaped, and a quote whose first line would read as an alert marker opens with an empty line
+
+### Requirement: Canonical output
+`Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
+spelling the AST records for it, such as a list marker, a fence's char and
+length, a heading's style, or a reference's kind, or else one fixed spelling,
+independent of source details the AST does not record.
+
+#### Scenario: Paragraph and heading
+- **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
+- **THEN** it returns `"# Title\n\nHello *world*.\n"`
+
+#### Scenario: Marker the AST records
+- **WHEN** `parse("+ a").document.to_markdown()` runs
+- **THEN** it returns `"+ a\n"`
+
+### Requirement: Serialize options
+`SerializeOptions` SHALL control the line ending and the trailing newline; a
+bullet marker, ordered-list delimiter, or code fence character other than its
+default SHALL replace the one the AST records, while the default keeps it.
+Options SHALL be constructed by mutating `SerializeOptions::default()`.
+
+#### Scenario: CRLF without final newline
+- **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
+- **THEN** it returns `"# Title"`
+
+#### Scenario: Bullet override
+- **WHEN** `parse("- a\n\n+ b").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
+- **THEN** both lists are written with `+`
+
+### Requirement: No HTML filtering or style preservation
+The serializer SHALL write raw HTML and MDX node values as they are, without
+safety filtering, and SHALL NOT recover source spelling that the AST does not
+record.
+
+#### Scenario: Raw HTML passes through
+- **WHEN** `parse("<script>alert(1)</script>").document.to_markdown()` runs
+- **THEN** the output contains `<script>alert(1)</script>`

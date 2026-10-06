@@ -3,12 +3,14 @@
 ## ADDED Requirements
 
 ### Requirement: Spans map stripped lines back to the source
-A parsed node's span SHALL start at the source byte where its first character
-was read and end after the source byte where its last character was read,
-wherever the parser removes indentation, container markers, or table-cell
-padding before reading a line, joins lines whose source line ending is `\r\n`,
-or reads `\|` in a table cell as `|`; a space the parser produces by splitting a
-tab SHALL map to that tab.
+A parsed node's span SHALL end after the source byte where its last character
+was read, and SHALL start at the source byte where its first character was
+read, or for a block, where its first line starts after the markers and
+indentation of the containers around it. This SHALL hold wherever the parser
+removes indentation, container markers, or table-cell padding before reading a
+line, joins lines whose source line ending is `\r\n`, or reads `\|` in a table
+cell as `|`, which maps to both of its bytes; a space the parser produces by
+splitting a tab SHALL map to that tab.
 
 #### Scenario: Leading whitespace on a paragraph line
 - **WHEN** `parse("  a *b*")` runs
@@ -70,9 +72,13 @@ tab SHALL map to that tab.
 - **WHEN** `parse("| a\\|b |\n|-|")` runs
 - **THEN** the header cell holds `Text("a|b")` spanning bytes 2..6
 
+#### Scenario: Escaped pipe opening a table cell
+- **WHEN** `parse("| \\|a |\n|-|")` runs
+- **THEN** the header cell holds `Text("|a")` spanning bytes 2..5
+
 #### Scenario: Split tab
 - **WHEN** `parse(">\t\tfoo")` runs
-- **THEN** the block quote holds an indented code block with value `  foo` spanning bytes 1..6
+- **THEN** the block quote holds an indented code block with value `"  foo\n"` spanning bytes 1..6
 
 #### Scenario: Container span regression cases
 - **WHEN** `inline_spans_address_source_inside_containers` in `tests/parse_span_contract.rs` parses each of its 31 cases (lists, task lists, block quotes, alerts, tables, footnote definitions, HTML containers, container directives, frontmatter, CRLF, and tabs)

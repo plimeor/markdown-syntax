@@ -137,6 +137,25 @@ span, an inline link, or a link reference definition.
   holds `]:`, over the lines the main pass reads; inline content is scanned
   for literal autolinks only when it holds `://`, `www.`, or `@`; and a table
   delimiter row is checked by its chars before its cells are split.
+- Serialization stays linear on nested emphasis, including when every
+  delimiter choice of a paragraph is tried, and on long `~` runs; parsing
+  stays linear on inline diagnostics that run to a paragraph's end.
+- A quoted line short of the list item an open paragraph sits in, or of a
+  block quote inside that item, continues it only as a lazy line; a block
+  open in a list item ends at a line indented less than the item's content;
+  a lazy line in an item opens no fence; a fence a nested container
+  directive leaves open ends with it; a setext underline is no delimiter row
+  wherever a table start is checked; and the `|` read from a cell's `\|`
+  spans both of its bytes.
+- The plain rendering keeps `**` after a `*`, and the serializer also writes
+  these so that they reparse to the same tree: runs inside links, images,
+  and marks; a strong at the edge of the run around it; a cell pipe after an
+  escaped backslash; text after a reference's raw label backtick, inside and
+  after spans; an `==` or `++` that could close its span, or a `+` or `=`
+  beside one; math opening a definition's paragraph; a `:` that a span's
+  delimiters would make a shortcode; whitespace opening a cell, or before a
+  text directive; a list in a list item before an indented block; and a
+  quote whose first line would read as an alert marker.
 
 Specs:
 - `public-api` (modified)
@@ -144,6 +163,7 @@ Specs:
 - `serialization` (modified)
 - `block-syntax` (modified)
 - `validation` (modified)
+- `untrusted-input-cost` (modified)
 
 ## Design
 
@@ -265,13 +285,29 @@ Specs:
   context] → A paragraph whose `Strong` and `Emphasis` runs abut is
   reparsed once under the default dialect, and other delimiter choices are
   tried only when the first does not read back. Generated inputs still fail
-  to round-trip in two classes: a relaxed `://` literal autolink followed by a
-  span whose content opens with a char that only a named character reference
-  stops the URL scan before (`://~&mp;~`), which needs a reverse named
-  reference table in the serializer; and a `www` literal autolink whose
-  domain scan an escape ends early (`www.\[]_(`), where escaping the `]` after
-  it lets the scan reach a `_` that rejects the domain. This plan adds
-  neither.
+  to round-trip in five classes, and this plan adds a fix for none:
+  - a relaxed `://` literal autolink followed by a span whose content opens
+    with a char that only a named character reference stops the URL scan
+    before (`://~&mp;~`), which needs a reverse named reference table;
+  - a `www` literal autolink whose domain scan an escape ends early
+    (`www.\[]_(`), where escaping the `]` after it lets the scan reach a `_`
+    that rejects the domain;
+  - attention runs that abut inside another run (`***b_*_b_*`,
+    `_^*^*_c__`), whose delimiters must be chosen together, which no choice
+    the read-back tries does: an emphasis-heavy fuzz over 100,000 inputs
+    fails on 59;
+  - an `_` run after a letter that the default preset's strikethrough bonus
+    opens beside a `~` (`t_~>___~`), a reading CommonMark and GFM do not
+    share;
+  - a container directive opener inside an HTML block, which the directive
+    counts as nested (`:::e\n<y>\n:::e`).
+
+- [Tabs after a split tab] → Once a container marker splits a tab, the later
+  tabs that open the line are expanded to spaces, inside a fence or HTML
+  block too: `>\t\t\tfoo` gives a code block of six spaces and `foo` where
+  cmark, commonmark.js, and micromark keep `  \tfoo`. The behavior predates
+  this plan, whose comparisons generated no line with three tabs after a
+  split, and is left to a later one.
 
 - [A derived string built without its map leaves a shifted span] → The "Spans
   nest" check runs over the corpus and over generated inputs that mix block
@@ -363,12 +399,12 @@ Specs:
 ### 11. Top-level tab columns
 - [x] 11.1 Add a test for "Tab after a top-level block quote marker", with guards for a list item's continuation, a tab past an indented code block's indentation, and a tab inside a fence; verified by the quote case failing on the group-10 code.
 - [x] 11.2 Expand the leading tabs of a top-level block quote's or list item's content line at their source columns, up to four columns and not inside an open fence or HTML block; verified by conformance staying at 2233 of 2236, by the comparison with cmark/commonmark.js and micromark on the 95,474 inputs where they agree going from 751 mismatches to 289 with none newly mismatching, and by fourteen hand-written tab layouts (tab-indented code in lists and quotes, tab-separated markers, nested tab lists) all matching commonmark.js.
+- [x] 11.3 Give each line the source column it starts at, recorded by `DerivedText` for derived lines, and read tabs from it in list markers, list continuations, block quote markers, fence indentation, and the container line classification; verified by `a_tab_inside_nested_containers_spans_its_source_columns` (failing before), by the block comparison going from 286 mismatches to 8 (all under the GH-19 rule) with none newly mismatching, by the hand-written tab layouts all matching, and by conformance staying at 2233 of 2236.
 
 ### 12. Inline comparison
 - [x] 12.1 Add a test for "Quoted paragraph opening with backticks"; verified by it failing on the group-11 code.
 - [x] 12.2 Read a quoted content line's block without the lazy-line GH-19 rule; verified by a comparison with commonmark.js and micromark, with raw HTML allowed, on 30,000 generated inline inputs (links, references, images, code spans, entities, escapes, autolinks, emphasis, raw HTML) where they agree on 29,971: 5 mismatches before and 3 after, one the GH-19 rule the conformance oracle (markdown-rs) keeps and two the link-text autolink demotion the 0.3.0 delimiter stack chose; and by the block comparison staying with no input newly mismatching.
 - [x] 12.3 Leave a list tight across a blank line that a fence opened in a nested item holds; verified by `a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight` (failing before) and by the block comparison's last non-tab, non-GH-19 mismatch matching, with none newly mismatching (286 left: 280 tab cases in nested containers and 6 under the GH-19 rule).
-- [x] 11.3 Give each line the source column it starts at, recorded by `DerivedText` for derived lines, and read tabs from it in list markers, list continuations, block quote markers, fence indentation, and the container line classification; verified by `a_tab_inside_nested_containers_spans_its_source_columns` (failing before), by the block comparison going from 286 mismatches to 8 (all under the GH-19 rule) with none newly mismatching, by the hand-written tab layouts all matching, and by conformance staying at 2233 of 2236.
 
 ### 13. Abutting attention runs and literal autolink neighbours
 - [x] 13.1 Add tests for "Abutting attention runs" and "Text beside a literal autolink"; verified by `nested_attention_runs_pick_delimiters_that_reparse_to_them` and `text_around_a_literal_autolink_does_not_move_its_end` failing on the group-12 code.
@@ -409,3 +445,11 @@ Specs:
 - [x] 18.2 Close a processing instruction only at a `?>` after its `<?`; make a hard break, and strip whitespace before a soft break, only from the spaces and tabs the source holds; start a list right after a definition only where it could interrupt a paragraph; and write raw HTML opening a paragraph as it is, leaving the definition join to keep it off an HTML block, and a break opening a line as written before; verified by the tests, by a comparison with commonmark.js and micromark on 40,000 generated inputs mixing block markers, raw HTML, entities, references, emphasis, and non-ASCII whitespace, where they agree on 36,200: 75 mismatches before and none after; by the 155,000 corpus inputs staying byte-identical; by conformance staying at 2233 of 2236; and by both round-trip fuzzes failing on 0–2 inputs per seed, each in one of the two classes under Risks.
 - [x] 18.3 Add tests for "Delimiter row without pipes" and "Lazy delimiter row", and start a GFM table only where its delimiter row is neither a setext underline nor a lazy line; verified by `a_setext_underline_wins_over_a_delimiter_row_without_pipes` and `a_lazy_line_is_no_delimiter_row` failing before, by a comparison with micromark and its GFM extensions on 25,000 generated GFM inputs, where the structural mismatches outside link markup fall from 38 to 32, each a disputed nested empty list, the GH-19 rule, an emphasis or strikethrough run around a literal autolink that the cmark-gfm order reads, or the relaxed scheme the GFM preset enables, and by conformance staying at 2233 of 2236.
 - [x] 18.4 Add a test for "Table header row that looks like an empty list item", and parse the table that ended a paragraph on the line after it before any block its header row would otherwise open, with no table below a lazy line; verified by `a_table_that_ends_a_paragraph_starts_on_its_header_row` failing before, by the 155,000 corpus inputs staying byte-identical, by the GFM comparison staying at 32 structural mismatches, and by both round-trip fuzzes failing on 0–1 inputs per seed.
+
+### 19. Review fixes
+- [x] 19.1 Reuse an emphasis's renders by its content and context, take a `~` run's length from the scan's memo, and find an inline diagnostic's end by galloping or at the last segment; verified by `parsing_grows_linearly_with_lines_and_diagnostics`, `serialization_grows_linearly_with_runs`, and `nested_emphasis_that_does_not_read_back_serializes_in_bounded_time` failing before (a 151-byte paragraph took 4.4 s to serialize, 80,000 `~` took 1.1 s, and 64,000 diagnostic lines took 1.3 s to parse) and passing in debug and release builds.
+- [x] 19.2 Keep `**` in the plain rendering after a `*`; read runs inside links, images, and marks for the read-back gate; add an edge-strong `__` choice; let an escaped `_` edge or a `_` opening the next text allow `_`; escape a cell pipe after an escaped backslash; carry a reference's raw label backtick through spans; escape an `==` or `++` that could close its span; and write math opening a definition's paragraph as its continuation; verified by five `round_trip_edges` tests failing before, by the emphasis-heavy fuzz going from 94 failures to 59, and by serialization of the 400 KB fixture document at 51M instructions against 50.6M.
+- [x] 19.3 Record the list item and inner block quotes an open quoted paragraph sits in, and the item column of a block open in a list item; open no fence on a lazy line in an item; end a nested directive's open fence with it; reject a setext underline as a delimiter row wherever a table start is checked; and map a cell's `\|` to both bytes; verified by six tests failing before, by a comparison with commonmark.js and micromark on 38,577 generated nested-container inputs where they agree, going from 99 mismatches to 88 with none newly mismatching, and by the block, mixed, and GFM comparisons staying byte-identical.
+- [x] 19.4 Read the round-trip cases, which name their body's length, in the span nesting check (2,308 more inputs); pin only the round trip of `d_~_`, whose default-preset parse no reference shares; and correct the spec text the review found wrong; verified by `cargo test` passing.
+- [x] 19.5 Fix the round trips that further fuzz seeds found: an escaped label backtick, a `:` a span's delimiters would make a shortcode, whitespace opening a cell, a nested list before an indented block, whitespace before a text directive, a `+` or `=` beside a doubled delimiter, and a quote opening with an alert-like label; verified by `spans_cells_and_items_keep_what_borders_them` failing before, and by the inline fuzz over 200,000 inputs on eight seeds and the block-oriented fuzz over 100,000 inputs on ten seeds failing only in the classes under Risks.
+- [x] 19.6 `cargo fmt --check`, `cargo test` with and without `html`, the doc, wasm, and MSRV builds, and the release pathological tests pass, and conformance stays at 2233 of 2236.

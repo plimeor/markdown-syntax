@@ -49,7 +49,7 @@ specification defines them.
 - **THEN** the document holds one `Paragraph` holding `Text("a")`, a `SoftBreak`, and `Text("#)")`
 
 #### Scenario: Backtick run with a backtick in its info
-- **WHEN** ``"a\n``` `` ```"`` is parsed with the CommonMark preset
+- **WHEN** ````"a\n``` `` ```"```` is parsed with the CommonMark preset
 - **THEN** the document holds one `Paragraph` whose second line is a code span
 
 #### Scenario: Unclosed fence in a block quote
@@ -88,6 +88,22 @@ specification defines them.
 - **WHEN** `"* - \tb c"` is parsed with the CommonMark preset
 - **THEN** the inner list item holds an indented `CodeBlock`, since the tab spans columns 4 to 8
 
+#### Scenario: Lazy list marker inside a quoted item
+- **WHEN** `"> - a\n> 2.\nz"` is parsed with the CommonMark preset
+- **THEN** the document holds a `BlockQuote` holding two lists, followed by a `Paragraph` holding `Text("z")`
+
+#### Scenario: Setext-like line short of a quoted item
+- **WHEN** `"> 1. a\n> ===\nb"` is parsed with the CommonMark preset
+- **THEN** the item holds one `Paragraph` holding `Text("a")`, `Text("===")`, and `Text("b")` with soft breaks between
+
+#### Scenario: Sibling item ending a nested fence
+- **WHEN** ``"- - ```\n  - a\n\n- b"`` is parsed with the CommonMark preset
+- **THEN** the outer `List` is loose
+
+#### Scenario: Lazy fence-like line in an item
+- **WHEN** ``"1.   a\n    ```\n\nb"`` is parsed with the CommonMark preset
+- **THEN** the document holds a `List` followed by a `Paragraph` holding `Text("b")`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
@@ -95,8 +111,8 @@ specification defines them.
 ### Requirement: Block directives
 When directives are enabled, the parser SHALL recognize `::name[label]{attrs}`
 leaf directives and `:::name` container directives, whose container closes at a
-fence of at least the opening fence's length. A line with a malformed opener
-does not end a paragraph.
+fence of at least the opening fence's length, and a line with a malformed
+opener SHALL NOT end a paragraph.
 
 #### Scenario: Container directive
 - **WHEN** `":::note\nbody\n:::"` is parsed with `parse`
@@ -148,11 +164,16 @@ other whitespace char, such as a no-break space or a form feed, is content.
 ### Requirement: Fenced code inside a container directive
 A fenced code block inside a container directive SHALL hold its lines as code:
 a line in it that looks like a directive opener opens no nested directive,
-while a closing fence of the directive still closes it.
+while a closing fence of the directive still closes it, and a fence that a
+nested directive leaves open ends with that directive.
 
 #### Scenario: Directive opener inside fenced code
 - **WHEN** `":::t\n```\n:::e\n```\n:::"` is parsed
 - **THEN** the document holds one `ContainerDirective` named `t` holding a `CodeBlock` whose value is `":::e\n"`
+
+#### Scenario: Fence left open in a nested directive
+- **WHEN** ``":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter"`` is parsed
+- **THEN** the `ContainerDirective` named `outer` holds the directives `inner` and `inner2`, a `Paragraph` holding `Text("after")` follows it, and no diagnostic is reported
 
 ### Requirement: Footnote definition content
 A footnote definition's content SHALL start after the spaces and tabs that
@@ -181,6 +202,10 @@ underline; such a line keeps its other reading.
 #### Scenario: Delimiter row without pipes
 - **WHEN** `"| --- |\n-- "` is parsed with the GFM preset
 - **THEN** the document holds a level-2 setext `Heading`, not a `Table`
+
+#### Scenario: Setext underline below a header row
+- **WHEN** `"a\n|b\n---"` is parsed with the GFM preset
+- **THEN** the document holds one level-2 setext `Heading` holding both lines
 
 #### Scenario: Lazy delimiter row
 - **WHEN** `"1. ---(\n:-:"` is parsed with the GFM preset
