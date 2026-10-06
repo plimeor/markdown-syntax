@@ -1829,7 +1829,7 @@ mod round_trip_edges {
     }
 
     #[test]
-    fn a_tilde_beside_an_attention_run_keeps_the_runs_bonus() {
+    fn a_tilde_beside_an_attention_run_reads_back() {
         for source in [
             "b**~\n~**",
             "b_~~_~",

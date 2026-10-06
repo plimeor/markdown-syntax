@@ -365,7 +365,7 @@ Specs:
   - html-rendering "Shortcodes render their glyph".
 
   Release wasm size is recorded before and after.
-- [ ] 4.3 Drop the strikethrough bonus for `_` runs. Verified by inline-syntax "Underscores around a tilde" and serialization "Tilde beside an attention run".
+- [x] 4.3 Drop the strikethrough bonus for `_` runs. Verified by inline-syntax "Underscores around a tilde" and serialization "Tilde beside an attention run".
 
 ### 5. Test gaps from #11
 - [ ] 5.1 `spans_nest_in_the_fixture_corpus` reads cases through `read_derived_cases` and parses each under its profile. Verified by the test running every case under the case's own options.

@@ -1879,10 +1879,10 @@ fn push_delimiter(
 /// `_` intraword punctuation rules.
 ///
 /// `strikethrough` enables the GFM cross-marker bonus: when strikethrough is an
-/// active construct, a `*`/`_` run immediately adjacent to a `~` counts as
+/// active construct, a `*` run immediately adjacent to a `~` counts as
 /// openable/closeable even though `~` is a punctuation character (this is what
-/// makes `a*~b~*c` emphasize). The bonus is never granted to a `~` run itself —
-/// tilde gets plain CommonMark flanking.
+/// makes `a*~b~*c` emphasize). A `_` run or a `~` run gets plain CommonMark
+/// flanking beside a `~`.
 ///
 /// A side that touches the boundary of an enclosing mark span (`bounded_before`
 /// / `bounded_after`) flanks as the end of the span's content.
@@ -1907,10 +1907,10 @@ fn emphasis_roles(
         (flanking.left, flanking.right)
     };
 
-    // GFM: a `*`/`_` run touching a `~` strikethrough marker may open/close even
+    // GFM: a `*` run touching a `~` strikethrough marker may open/close even
     // when ordinary flanking refuses it (the `~` would otherwise be a blocking
-    // punctuation neighbour). Tilde itself never receives this bonus.
-    if strikethrough && marker != b'~' {
+    // punctuation neighbour).
+    if strikethrough && marker == b'*' {
         if flanking.next == Some('~') {
             can_open = true;
         }

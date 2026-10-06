@@ -1033,3 +1033,23 @@ mod gemoji_shortcodes {
         assert_eq!(unknown.glyph(), None);
     }
 }
+
+mod underscore_beside_tilde {
+    //! A `_` run gets no strikethrough bonus beside a `~`.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn underscores_around_a_tilde_stay_text() {
+        for options in [SyntaxOptions::default(), SyntaxOptions::gfm()] {
+            let document = options.parse("d_~_").document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{document:?}");
+            };
+            assert!(
+                matches!(paragraph.children.as_slice(), [Inline::Text(text)] if text.value == "d_~_"),
+                "{paragraph:?}"
+            );
+        }
+    }
+}
