@@ -264,32 +264,6 @@ impl DerivedText {
         self.text.push_str(derived);
     }
 
-    /// Appends `line.text` with `inserted` placed before byte `offset`, joined
-    /// to the previous line. The inserted bytes have no source of their own.
-    pub(super) fn push_line_with_insertion(
-        &mut self,
-        line: &Line<'_>,
-        offset: usize,
-        inserted: &str,
-    ) {
-        self.join();
-        self.columns.push(line.column);
-        let at = self.text.len();
-        line.copy_into(&mut self.map, at, 0, offset);
-        let source = line.source_start(offset);
-        self.map.push(at + offset, inserted.len(), source, source);
-        line.copy_into(
-            &mut self.map,
-            at + offset + inserted.len(),
-            offset,
-            line.text.len(),
-        );
-        self.text.push_str(&line.text[..offset]);
-        self.text.push_str(inserted);
-        self.text.push_str(&line.text[offset..]);
-        self.pending_eol = Some(line.eol_source());
-    }
-
     /// Ends the last pushed line with `\n`, mapped to the line ending it was
     /// read with, as the lines before it are joined.
     pub(super) fn push_pending_eol(&mut self) {

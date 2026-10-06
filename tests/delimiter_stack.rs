@@ -5,7 +5,8 @@
 use markdown_syntax::prelude::*;
 
 /// A compact rendering of inline structure: text in quotes, a soft break as
-/// `/`, code spans as `Code(...)`, containers as `Kind[...]`.
+/// `/`, an escape as `\c`, code spans as `Code(...)`, containers as
+/// `Kind[...]`.
 fn shape(inlines: &[Inline]) -> String {
     let mut out = String::new();
     for inline in inlines {
@@ -16,6 +17,11 @@ fn shape(inlines: &[Inline]) -> String {
             }
             Inline::SoftBreak(_) => {
                 out.push('/');
+                continue;
+            }
+            Inline::Escape(escape) => {
+                out.push('\\');
+                out.push(escape.value);
                 continue;
             }
             Inline::Code(code) => {
@@ -327,7 +333,7 @@ fn a_link_inside_a_directive_label_inside_a_mark_keeps_links_from_nesting() {
 fn an_escaped_dot_after_a_bracket_is_a_dot() {
     let mut gfm = SyntaxOptions::gfm();
     gfm.constructs.relaxed_autolinks = false;
-    assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. . x""#);
+    assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. "\." x""#);
 }
 
 #[test]
@@ -405,7 +411,7 @@ fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
 fn an_escaped_backslash_before_a_line_ending_is_no_hard_break() {
     assert_eq!(
         parsed(&SyntaxOptions::commonmark(), "a\\\\\nb"),
-        r#""a\\"/"b""#
+        r#""a"\\/"b""#
     );
 }
 
@@ -460,7 +466,8 @@ fn a_referenced_space_makes_no_hard_break() {
     assert!(
         matches!(
             paragraph.children.as_slice(),
-            [Inline::Text(text), Inline::SoftBreak(_), Inline::Text(_)] if text.value == "a "
+            [Inline::Text(text), Inline::CharacterReference(space), Inline::SoftBreak(_), Inline::Text(_)]
+                if text.value == "a" && space.value == " "
         ),
         "{blocks:?}"
     );

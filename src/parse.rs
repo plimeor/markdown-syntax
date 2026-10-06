@@ -1428,27 +1428,6 @@ fn parse_block_quote(
             break;
         };
 
-        let mut escaped_lazy = String::new();
-        let mut inserted_escape = None;
-        let line = if !marked
-            && last_content_line.as_deref().is_some_and(|previous| {
-                table_can_start_source(
-                    previous,
-                    line,
-                    options.constructs.indented_code,
-                    options.constructs.spoiler,
-                )
-            }) {
-            escaped_lazy.push_str(line);
-            if let Some(offset) = escaped_lazy.find('-') {
-                escaped_lazy.insert(offset, '\\');
-                inserted_escape = Some(offset);
-            }
-            &escaped_lazy
-        } else {
-            line
-        };
-
         let starts_table = last_content_line.as_deref().is_some_and(|previous| {
             table_can_start_source(
                 previous,
@@ -1480,11 +1459,7 @@ fn parse_block_quote(
             );
         }
         last_content_line = Some(line.into());
-        match inserted_escape {
-            // Only a lazy line, read whole from `raw`, gets an escape inserted.
-            Some(offset) => content.push_line_with_insertion(&lines[cursor], offset, "\\"),
-            None => content.push_line(&lines[cursor], line, from),
-        }
+        content.push_line(&lines[cursor], line, from);
         lazy_flags.push(!marked);
         cursor += 1;
     }
@@ -3982,9 +3957,10 @@ fn parse_table(
 
     let parse_cell = |cell: &TableCellSource, diagnostics: &mut Vec<Diagnostic>| TableCell {
         meta: NodeMeta::new(Some(cell.span)),
-        children: parse_inlines(
+        children: parse_cell_inlines(
             &cell.text.text,
             cell.text.map(),
+            cell.escaped_pipes.clone(),
             options,
             definitions,
             diagnostics,
@@ -4015,6 +3991,7 @@ fn parse_table(
         // A cell missing from a short row sits, empty, at the row's end.
         let missing = TableCellSource {
             text: DerivedText::default(),
+            escaped_pipes: Vec::new(),
             span: Span::new(lines[cursor].end, lines[cursor].end),
         };
         rows.push(TableRow {
@@ -5837,19 +5814,49 @@ fn parse_inlines(
     definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
+    parse_inlines_in(
+        input,
+        map,
+        InlineState::default(),
+        options,
+        definitions,
+        diagnostics,
+    )
+}
+
+/// The inline content of a table cell, whose input reads each `\|` as `|`:
+/// `escaped_pipes` holds the offset of each such `|`, which is an `Escape`
+/// where it stands in text.
+fn parse_cell_inlines(
+    input: &str,
+    map: &SourceMap,
+    escaped_pipes: Vec<usize>,
+    options: &SyntaxOptions,
+    definitions: Option<&[String]>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Inline> {
+    let state = InlineState {
+        escaped_pipes,
+        ..InlineState::default()
+    };
+    parse_inlines_in(input, map, state, options, definitions, diagnostics)
+}
+
+fn parse_inlines_in(
+    input: &str,
+    map: &SourceMap,
+    mut state: InlineState,
+    options: &SyntaxOptions,
+    definitions: Option<&[String]>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
     if definitions.is_none() {
         return Vec::new();
     }
     let first_diagnostic = diagnostics.len();
-    let mut nodes = parse_inlines_with_context(
-        input,
-        0,
-        options,
-        definitions,
-        diagnostics,
-        &mut InlineState::default(),
-    );
+    let mut nodes =
+        parse_inlines_with_context(input, 0, options, definitions, diagnostics, &mut state);
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
     nodes
 }
@@ -5867,6 +5874,15 @@ const MAX_INLINE_NESTING: usize = 32;
 struct InlineState {
     /// How many inline parses enclose the current one.
     depth: usize,
+    /// In a table cell, the sorted offsets of the `|`s the cell's input reads
+    /// from `\|`.
+    escaped_pipes: Vec<usize>,
+}
+
+impl InlineState {
+    fn is_escaped_pipe(&self, offset: usize) -> bool {
+        !self.escaped_pipes.is_empty() && self.escaped_pipes.binary_search(&offset).is_ok()
+    }
 }
 
 /// What one inline pass threads through its construct parsers: the state it
@@ -5939,24 +5955,16 @@ fn parse_inline_content(
         if bytes[index] == b'\\' {
             if let Some((next_index, char)) = next_char(input, index + 1) {
                 if char.is_ascii_punctuation() {
-                    if options.parse.preserve_character_escapes {
-                        flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                        nodes.push(Inline::Escape(Escape {
-                            meta: NodeMeta::new(Some(Span::new(
-                                base_offset + index,
-                                base_offset + next_index,
-                            ))),
-                            value: char,
-                        }));
-                        index = next_index;
-                        text_start = index;
-                        continue;
-                    }
-                    if text.is_empty() {
-                        text_start = base_offset + index;
-                    }
-                    text.push(char);
+                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                    nodes.push(Inline::Escape(Escape {
+                        meta: NodeMeta::new(Some(Span::new(
+                            base_offset + index,
+                            base_offset + next_index,
+                        ))),
+                        value: char,
+                    }));
                     index = next_index;
+                    text_start = index;
                     continue;
                 }
             }
@@ -5964,27 +5972,31 @@ fn parse_inline_content(
 
         if bytes[index] == b'&' {
             if let Some((end, value)) = parse_character_reference(input, index) {
-                if options.parse.preserve_character_references {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::CharacterReference(CharacterReference {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        reference: input[index..end].into(),
-                        value,
-                    }));
-                    index = end;
-                    text_start = index;
-                    continue;
-                }
-                if text.is_empty() {
-                    text_start = base_offset + index;
-                }
-                text.push_str(&value);
+                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                nodes.push(Inline::CharacterReference(CharacterReference {
+                    meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
+                    reference: input[index..end].into(),
+                    value,
+                }));
                 index = end;
+                text_start = index;
                 continue;
             }
+        }
+
+        // A cell's `|` read from `\|` is an escape, never a spoiler bar.
+        if bytes[index] == b'|' && pass.state.is_escaped_pipe(base_offset + index) {
+            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            nodes.push(Inline::Escape(Escape {
+                meta: NodeMeta::new(Some(Span::new(
+                    base_offset + index,
+                    base_offset + index + 1,
+                ))),
+                value: '|',
+            }));
+            index += 1;
+            text_start = index;
+            continue;
         }
 
         if bytes[index] == b'\n' {
@@ -6087,14 +6099,19 @@ fn parse_inline_content(
         }
 
         if options.constructs.spoiler && bytes[index] == b'|' {
-            let run_len = delimiter_byte_run_len(input, index, b'|');
+            // A cell's escaped pipe ends the run and is no bar before it.
+            let run_len = (index..index + delimiter_byte_run_len(input, index, b'|'))
+                .position(|at| pass.state.is_escaped_pipe(base_offset + at))
+                .unwrap_or_else(|| delimiter_byte_run_len(input, index, b'|'));
             if run_len >= 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 // A spoiler run opens with its last two bars and closes with
                 // its first two, unless a bar precedes it.
                 let roles = DelimRoles {
                     can_open: true,
-                    can_close: index == 0 || bytes[index - 1] != b'|',
+                    can_close: index == 0
+                        || bytes[index - 1] != b'|'
+                        || pass.state.is_escaped_pipe(base_offset + index - 1),
                     ..DelimRoles::default()
                 };
                 push_delimiter(
@@ -8587,10 +8604,8 @@ fn table_indent_line(input: &str, indented_code: bool) -> Option<&str> {
 /// pairs them within one cell: a run opens with its last two bars, the next run
 /// closes with its first two (and opens again with what it has left), and every
 /// pipe between the two stays in the cell. The other bars of a run, and both
-/// bars of an opener with no closer, delimit. Runs are read as the cell's text
-/// has them, where an escaped pipe has lost its backslash and joins the bars
-/// beside it; it never delimits, and a pair that uses one forms only when no
-/// pipe that delimits lies between its bars, so it never joins two cells. Code
+/// bars of an opener with no closer, delimit. An escaped pipe is an escape in
+/// the cell's inline content: it never delimits and is no bar of a run. Code
 /// spans are matched as the inline parser matches them, and only when the span
 /// closes before any pipe that would delimit inside it, so it lies within one
 /// cell. The pairing does not consider other inline constructs.
@@ -8674,11 +8689,10 @@ fn scan_table_row(row: &str, spoiler: bool) -> (Vec<usize>, Vec<(usize, usize)>)
     };
 
     // Decide which bars delimit; `held` collects the ranges a spoiler keeps in
-    // its cell. `blocked` records a bar that would delimit since the opener.
+    // its cell.
     let mut delimits = vec![false; bars.len()];
     let mut held = Vec::new();
     let mut opener: Option<usize> = None;
-    let mut blocked = false;
     let mut code = code_spans.iter().peekable();
     for (first, length) in runs {
         let end = first + length;
@@ -8688,32 +8702,21 @@ fn scan_table_row(row: &str, spoiler: bool) -> (Vec<usize>, Vec<(usize, usize)>)
         }
         if code.peek().is_some_and(|&&(open, _)| open < position) {
             delimits[first..end].copy_from_slice(&code_delimits[first..end]);
-            blocked |= code_delimits[first..end].contains(&true);
             continue;
         }
         if length == 1 {
             delimits[first] = true;
-            blocked |= !bars[first].escaped;
             continue;
         }
         let mut rest = first;
         if let Some(opened) = opener.take() {
-            let escaped = bars[opened..opened + 2]
-                .iter()
-                .chain(&bars[first..first + 2])
-                .any(|bar| bar.escaped);
-            if escaped && blocked {
-                delimits[opened..opened + 2].fill(true);
-            } else {
-                held.push((bars[opened].position, bars[first + 1].position));
-                rest = first + 2;
-            }
+            held.push((bars[opened].position, bars[first + 1].position));
+            rest = first + 2;
         }
         let mut open_at = end;
         if end - rest >= 2 {
             open_at = end - 2;
             opener = Some(open_at);
-            blocked = false;
         }
         delimits[rest..open_at].fill(true);
     }
@@ -8808,7 +8811,8 @@ struct TableBar {
 }
 
 /// Adds the pipe at `position` to the bar runs, joining the previous run when
-/// the cell text has the two side by side.
+/// the cell text has the two side by side. An escaped pipe is an escape in the
+/// cell's inline content, so it joins no run and no run joins it.
 fn push_table_bar(
     bars: &mut Vec<TableBar>,
     runs: &mut Vec<(usize, usize)>,
@@ -8816,9 +8820,10 @@ fn push_table_bar(
     text_start: usize,
     escaped: bool,
 ) {
-    let joins = bars
-        .last()
-        .is_some_and(|previous| previous.position + 1 == text_start);
+    let joins = !escaped
+        && bars
+            .last()
+            .is_some_and(|previous| !previous.escaped && previous.position + 1 == text_start);
     match runs.last_mut() {
         Some(run) if joins => run.1 += 1,
         _ => runs.push((bars.len(), 1)),
@@ -8829,7 +8834,7 @@ fn push_table_bar(
 fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
     table_row_cell_ranges(input, spoiler)
         .into_iter()
-        .map(|(start, end)| table_cell_text(&input[start..end]))
+        .map(|(start, end)| table_cell_text(&input[start..end]).0)
         .collect()
 }
 
@@ -8864,6 +8869,8 @@ fn table_row_cell_ranges(input: &str, spoiler: bool) -> Vec<(usize, usize)> {
 /// `|`), its source map, and its span.
 struct TableCellSource {
     text: DerivedText,
+    /// The offsets in `text` of the `|`s read from `\|`.
+    escaped_pipes: Vec<usize>,
     span: Span,
 }
 
@@ -8882,6 +8889,7 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
                 line.source_end(offset + content.len()),
             );
             let mut text = DerivedText::default();
+            let mut escaped_pipes = Vec::new();
             // The same unescaping as `table_cell_text`, keeping each copied run's
             // source: the `|` read from `\|` maps to both of its bytes.
             let bytes = content.as_bytes();
@@ -8892,6 +8900,7 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
                     let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
                     if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
                         text.append(line, &content[copied..pipe - 1], 0);
+                        escaped_pipes.push(text.text.len());
                         text.append_replacing(
                             "|",
                             line.source_start(offset + pipe - 1),
@@ -8905,17 +8914,23 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
                 }
             }
             text.append(line, &content[copied..], 0);
-            TableCellSource { text, span }
+            TableCellSource {
+                text,
+                escaped_pipes,
+                span,
+            }
         })
         .collect()
 }
 
-/// A cell's source with each escaped pipe unescaped. GitHub/cmark-gfm treats an
-/// odd backslash run before `|` as a literal cell-content pipe; the run keeps
-/// its other backslashes so the inline parser resolves them as written.
-fn table_cell_text(source: &str) -> String {
+/// A cell's source with each escaped pipe unescaped, and the offset in it of
+/// each `|` read from `\\|`. GitHub/cmark-gfm treats an odd backslash run before
+/// `|` as a literal cell-content pipe; the run keeps its other backslashes so
+/// the inline parser resolves them as written.
+fn table_cell_text(source: &str) -> (String, Vec<usize>) {
     let bytes = source.as_bytes();
     let mut cell = String::with_capacity(source.len());
+    let mut escaped_pipes = Vec::new();
     let mut copied = 0;
     let mut cursor = 0;
     while cursor < bytes.len() {
@@ -8923,6 +8938,7 @@ fn table_cell_text(source: &str) -> String {
             let pipe = cursor + delimiter_byte_run_len(source, cursor, b'\\');
             if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
                 cell.push_str(&source[copied..pipe - 1]);
+                escaped_pipes.push(cell.len());
                 copied = pipe;
             }
             cursor = pipe;
@@ -8931,7 +8947,7 @@ fn table_cell_text(source: &str) -> String {
         }
     }
     cell.push_str(&source[copied..]);
-    cell
+    (cell, escaped_pipes)
 }
 
 fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) -> bool {

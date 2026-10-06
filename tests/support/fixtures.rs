@@ -34,10 +34,7 @@ pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
         }
         "preserve-escapes" => SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_escapes: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         },
         "extras" => SyntaxOptions {
             constructs: extra_constructs(),
@@ -87,8 +84,6 @@ fn extra_constructs() -> Constructs {
 fn extra_parse_options() -> ParseOptions {
     ParseOptions {
         single_tilde_strikethrough: true,
-        preserve_character_escapes: false,
-        preserve_character_references: false,
     }
 }
 

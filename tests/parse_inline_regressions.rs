@@ -630,3 +630,83 @@ mod review_unicode {
         }
     }
 }
+
+mod escapes_and_references {
+    //! Backslash escapes and character references are always nodes of their
+    //! own; inside raw-text constructs they stay part of the raw text.
+
+    use markdown_syntax::prelude::*;
+
+    /// Inlines as tokens: text quoted, `Escape(c)`, `Ref(value)`, and other
+    /// nodes by kind.
+    fn shape(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => format!("{:?}", text.value),
+                Inline::Escape(escape) => format!("Escape({})", escape.value),
+                Inline::CharacterReference(reference) => format!("Ref({})", reference.value),
+                Inline::Code(code) => format!("Code({})", code.value),
+                Inline::Html(html) => format!("Html({})", html.value),
+                Inline::Math(math) => format!("Math({})", math.value),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn paragraph(source: &str) -> Vec<String> {
+        match parse(source).document.children.as_slice() {
+            [Block::Paragraph(paragraph)] => shape(&paragraph.children),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    fn first_cell(source: &str, options: &SyntaxOptions) -> Vec<String> {
+        match options.parse(source).document.children.as_slice() {
+            [Block::Table(table)] => shape(&table.rows[0].cells[0].children),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn escaped_punctuation_is_an_escape_node() {
+        assert_eq!(
+            paragraph("\\*not em\\* and \\#tag"),
+            [
+                "Escape(*)",
+                "\"not em\"",
+                "Escape(*)",
+                "\" and \"",
+                "Escape(#)",
+                "\"tag\""
+            ]
+        );
+    }
+
+    #[test]
+    fn a_numeric_character_reference_is_a_reference_node() {
+        assert_eq!(paragraph("&#35;tag"), ["Ref(#)", "\"tag\""]);
+    }
+
+    #[test]
+    fn a_backslash_inside_a_code_span_stays_raw() {
+        assert_eq!(paragraph("`\\*`"), ["Code(\\*)"]);
+    }
+
+    #[test]
+    fn an_escaped_pipe_in_a_cell_is_an_escape_in_text_and_a_pipe_in_raw_text() {
+        let gfm = SyntaxOptions::gfm();
+        assert_eq!(
+            first_cell("| a\\|b |\n|-|", &gfm),
+            ["\"a\"", "Escape(|)", "\"b\""]
+        );
+        assert_eq!(
+            first_cell("| <a b=\"x\\|y\"> |\n|-|", &gfm),
+            ["Html(<a b=\"x|y\">)"]
+        );
+        assert_eq!(
+            first_cell("$\\|$||\n-|-", &SyntaxOptions::default()),
+            ["Math(|)"]
+        );
+    }
+}

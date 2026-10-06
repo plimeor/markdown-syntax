@@ -6,6 +6,9 @@
 //! that helper functions and test names cannot collide across the merged
 //! sources.
 
+#[path = "support/normalize.rs"]
+mod normalize;
+
 mod serializer {
     use markdown_syntax::*;
 
@@ -320,7 +323,9 @@ mod serializer {
         );
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
-        assert_single_tilde_delete_with_internal_runs_shape(&reparsed);
+        assert_single_tilde_delete_with_internal_runs_shape(
+            &crate::normalize::normalized_document(&reparsed),
+        );
     }
 
     #[test]
@@ -338,7 +343,10 @@ mod serializer {
         let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "a \\~\\~two/one~ b\n");
 
-        let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
+        let reparsed = crate::normalize::normalized_document(&parse_document(
+            &markdown,
+            &SyntaxOptions::gfm(),
+        ));
         assert!(matches!(
             &reparsed.children[..],
             [Block::Paragraph(Paragraph {
@@ -378,7 +386,10 @@ mod serializer {
         let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, "~text\\~\\~\\~\\~ is \\~\\~\\~\\~curious~\n");
 
-        let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
+        let reparsed = crate::normalize::normalized_document(&parse_document(
+            &markdown,
+            &SyntaxOptions::gfm(),
+        ));
         assert!(matches!(
             &reparsed.children[..],
             [Block::Paragraph(Paragraph {
@@ -614,10 +625,7 @@ mod serializer {
 
         let options = SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_escapes: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         };
         let reparsed = parse_document(&markdown, &options);
         assert!(matches!(
@@ -780,10 +788,7 @@ mod serializer_escape {
     fn preserve_escape_options(constructs: Constructs) -> SyntaxOptions {
         SyntaxOptions {
             constructs: constructs,
-            parse: ParseOptions {
-                preserve_character_escapes: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         }
     }
 
@@ -840,7 +845,7 @@ mod serializer_escape {
         assert_eq!(markdown, "Invalid \\&unknown; &copy and &#x; stay text.\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
-        assert_single_text(&reparsed, value);
+        assert_single_text(&crate::normalize::normalized_document(&reparsed), value);
     }
 
     #[test]
@@ -986,7 +991,10 @@ mod serializer_escape {
         assert!(markdown.contains("[ref&#x7C;text][pipe\\|id]"));
         assert!(markdown.contains(":note[label&#x7C;text]{data=\"value\\|pipe\"}"));
 
-        let reparsed = parse_document(&markdown, &table_extension_options());
+        let reparsed = crate::normalize::normalized_document(&parse_document(
+            &markdown,
+            &table_extension_options(),
+        ));
         match &reparsed.children[..] {
             [Block::Table(table), Block::Definition(_)] => {
                 assert_eq!(table.rows[1].cells.len(), 7);
@@ -1144,10 +1152,7 @@ mod review_serialize {
 
     fn preserve_references_options() -> SyntaxOptions {
         let constructs = Constructs::commonmark();
-        let parse = ParseOptions {
-            preserve_character_references: true,
-            ..ParseOptions::default()
-        };
+        let parse = ParseOptions::default();
         SyntaxOptions {
             constructs: constructs,
             parse: parse,
@@ -1322,7 +1327,7 @@ mod review_serialize {
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
         assert!(matches!(
-            reparsed.children.as_slice(),
+            crate::normalize::normalized_document(&reparsed).children.as_slice(),
             [Block::Paragraph(Paragraph { children, .. })]
                 if matches!(
                     children.as_slice(),
@@ -1348,7 +1353,7 @@ mod review_serialize {
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
         assert!(matches!(
-            reparsed.children.as_slice(),
+            crate::normalize::normalized_document(&reparsed).children.as_slice(),
             [Block::Heading(Heading { depth: 1, children, .. })]
                 if matches!(children.as_slice(), [Inline::Text(Text { value, .. })] if value == "foo #")
         ));
@@ -1500,25 +1505,11 @@ mod literal_text {
         let markdown = document.to_markdown().expect("document serializes");
         let reparsed = options.parse(&markdown).document;
         assert_eq!(
-            without_spans(&format!("{:?}", reparsed.children)),
-            without_spans(&format!("{:?}", document.children)),
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
             "{markdown:?}"
         );
         markdown
-    }
-
-    /// `debug` with every `Some(Span { .. })` written as `None`.
-    fn without_spans(debug: &str) -> String {
-        let mut out = String::new();
-        let mut rest = debug;
-        while let Some(start) = rest.find("Some(Span { ") {
-            out.push_str(&rest[..start]);
-            out.push_str("None");
-            let end = rest[start..].find("})").expect("span ends") + start + 2;
-            rest = &rest[end..];
-        }
-        out.push_str(rest);
-        out
     }
 
     #[test]
@@ -1649,20 +1640,6 @@ mod round_trip_edges {
 
     use markdown_syntax::prelude::*;
 
-    /// `debug` with every `Some(Span { .. })` written as `None`.
-    fn without_spans(debug: &str) -> String {
-        let mut out = String::new();
-        let mut rest = debug;
-        while let Some(start) = rest.find("Some(Span { ") {
-            out.push_str(&rest[..start]);
-            out.push_str("None");
-            let end = rest[start..].find("})").expect("span ends") + start + 2;
-            rest = &rest[end..];
-        }
-        out.push_str(rest);
-        out
-    }
-
     /// Checks the round trip of `source` under the CommonMark preset and the
     /// default dialect, and returns the default dialect's output.
     fn assert_round_trips(source: &str) -> String {
@@ -1672,8 +1649,8 @@ mod round_trip_edges {
             markdown = document.to_markdown().expect("document serializes");
             let reparsed = options.parse(&markdown).document;
             assert_eq!(
-                without_spans(&format!("{:?}", reparsed.children)),
-                without_spans(&format!("{:?}", document.children)),
+                format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+                format!("{:?}", crate::normalize::normalized(&document.children)),
                 "{source:?} -> {markdown:?}"
             );
         }
@@ -1965,8 +1942,8 @@ mod round_trip_edges {
         let markdown = document.to_markdown().expect("document serializes");
         let reparsed = options.parse(&markdown).document;
         assert_eq!(
-            without_spans(&format!("{:?}", reparsed.children)),
-            without_spans(&format!("{:?}", document.children)),
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
             "{source:?} -> {markdown:?}"
         );
     }
@@ -2036,7 +2013,7 @@ mod round_trip_edges {
     #[test]
     fn a_doubled_delimiter_that_could_close_its_span_is_escaped() {
         assert_eq!(assert_round_trips("==a\\== b=="), "==a\\== b==\n");
-        assert_eq!(assert_round_trips("++a\\++ b++"), "++a\\+\\+ b++\n");
+        assert_eq!(assert_round_trips("++a\\++ b++"), "++a\\++ b++\n");
     }
 
     #[test]
@@ -2118,5 +2095,72 @@ mod round_trip_edges {
         ] {
             assert_eq!(assert_round_trips(source), format!("{source}\n"));
         }
+    }
+}
+
+mod escapes_as_recorded {
+    //! Escapes and character references are written as the AST records them,
+    //! and a reparse compares with the written tree as serialization's tree
+    //! comparison reads it.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph_document(children: Vec<Inline>) -> Document {
+        Document {
+            meta: NodeMeta::default(),
+            children: vec![Paragraph::new(children).into()],
+        }
+    }
+
+    #[test]
+    fn an_escape_the_author_wrote_is_written_as_written() {
+        let markdown = parse("a\\.b \\#tag").document.to_markdown().unwrap();
+        assert_eq!(markdown, "a\\.b \\#tag\n");
+    }
+
+    #[test]
+    fn a_character_reference_the_author_wrote_is_written_as_written() {
+        let markdown = parse("&#35;tag &amp; x").document.to_markdown().unwrap();
+        assert_eq!(markdown, "&#35;tag &amp; x\n");
+    }
+
+    #[test]
+    fn an_escape_the_serializer_adds_reads_back_as_an_escape() {
+        let document = paragraph_document(vec![Text::from("*a*").into()]);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "\\*a\\*\n");
+        let reparsed = parse(&markdown).document;
+        let [Block::Paragraph(paragraph)] = reparsed.children.as_slice() else {
+            panic!("{reparsed:?}");
+        };
+        assert!(matches!(
+            paragraph.children.as_slice(),
+            [Inline::Escape(open), Inline::Text(text), Inline::Escape(close)]
+                if open.value == '*' && text.value == "a" && close.value == '*'
+        ));
+        assert_eq!(
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
+        );
+        assert_eq!(reparsed.to_markdown().unwrap(), markdown);
+    }
+
+    #[test]
+    fn a_reference_without_its_definition_is_written_as_a_reference() {
+        let reference = Inline::LinkReference(LinkReference {
+            meta: NodeMeta::default(),
+            identifier: "foo".into(),
+            label: "foo".into(),
+            kind: ReferenceKind::Shortcut,
+            children: vec![Text::from("foo").into()],
+        });
+        let markdown = paragraph_document(vec![reference]).to_markdown().unwrap();
+        assert_eq!(markdown, "[foo]\n");
+    }
+
+    #[test]
+    fn split_text_is_written_as_one() {
+        let document = paragraph_document(vec![Text::from("a").into(), Text::from("b").into()]);
+        assert_eq!(document.to_markdown().unwrap(), "ab\n");
     }
 }

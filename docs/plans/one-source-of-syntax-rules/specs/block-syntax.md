@@ -310,9 +310,8 @@ With spoilers enabled, a table row SHALL keep inside one cell every pipe that a
 spoiler in that cell holds, pairing `||` runs outside code spans first-closer
 style: a run opens with its last two bars and pairs with the next run, which
 closes with its first two; the pipes between the two stay in the cell, and the
-bars of a run that opens no spoiler delimit. Runs are read as the cell's text
-has them, with each escaped pipe unescaped; an escaped pipe never delimits, and
-a pair that uses one SHALL NOT hold a pipe that would otherwise delimit. A code
+bars of a run that opens no spoiler delimit. An escaped pipe is an `Escape`
+in the cell's inline content, so it never delimits and is no bar of a run. A code
 span counts only when it closes before a pipe that would split the row inside
 it. The pairing does not consider links, emphasis, inline math, raw HTML, or
 autolinks, so a spoiler one of them keeps from forming leaves its bars and the

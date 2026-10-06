@@ -14,6 +14,8 @@ Document
     Autolink "foo.!#$%&'*+/=?^_`{|}~-@example.com" kind=angle
     Text "."
     SoftBreak
-    Text "Invalid email <foo..bar@example.com> <foo@example-.com> <foo@-example.com> <foo+@bar.example.com>."
+    Text "Invalid email <foo..bar@example.com> <foo@example-.com> <foo@-example.com> <foo"
+    Escape "+"
+    Text "@bar.example.com>."
     SoftBreak
     Text "Invalid <m:abc> <http://foo.bar/baz bim>."

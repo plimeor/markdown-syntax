@@ -2776,7 +2776,12 @@ fn escape_text_with_context(
     let in_underscore_emphasis = context.in_underscore_emphasis;
     let mut output = String::with_capacity(input.len() + input.len() / 8);
     let mut output_line = OutputLine::default();
-    let mut line_digit_prefix = 0usize;
+    // Digits open a list marker only where the text opens a line.
+    let mut line_digit_prefix = if context.text_opens_line {
+        0
+    } else {
+        usize::MAX
+    };
     // Only the space or tab at a preserved edge is written as a reference:
     // the ones beside it are no longer at the edge of the line or span.
     let trailing_start = if preserve_trailing && input.ends_with([' ', '\t']) {
@@ -2867,7 +2872,7 @@ fn escape_text_with_context(
             line_digit_prefix = usize::MAX;
             continue;
         }
-        if output_line.len(&output) == 0
+        if breaks_line_start(&output, &mut output_line, context.text_opens_line)
             && matches!(char, '-' | '+')
             && chars
                 .peek()
@@ -2879,7 +2884,7 @@ fn escape_text_with_context(
             line_digit_prefix = usize::MAX;
             continue;
         }
-        if output_line.len(&output) == 0
+        if breaks_line_start(&output, &mut output_line, context.text_opens_line)
             && ((char == '-' && chars.peek().is_some_and(|(_, next)| *next == '-')) || char == '=')
         {
             output.push('\\');
@@ -2891,7 +2896,7 @@ fn escape_text_with_context(
         match char {
             '*' if avoid_star_edges => output.push_str("&#x2A;"),
             '|' if context.table_cell => output.push_str("&#x7C;"),
-            '|' if output_line.len(&output) == 0 => {
+            '|' if breaks_line_start(&output, &mut output_line, context.text_opens_line) => {
                 output.push('\\');
                 output.push(char);
             }
@@ -2929,7 +2934,7 @@ fn escape_text_with_context(
             // A text that starts a line may sit on a paragraph's continuation
             // line, where an HTML block start (types 1–6) or a directive
             // opener would interrupt the paragraph.
-            '<' if output_line.len(&output) == 0
+            '<' if breaks_line_start(&output, &mut output_line, context.text_opens_line)
                 && line_starts_interrupting_html_block(&view[offset..]) =>
             {
                 output.push('\\');
@@ -2948,7 +2953,8 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            ':' if (output_line.len(&output) == 0 && input[offset..].starts_with("::"))
+            ':' if (breaks_line_start(&output, &mut output_line, context.text_opens_line)
+                && input[offset..].starts_with("::"))
                 || text_directive_can_start(view, offset)
                 || shortcode_can_form(view, offset, &mut scan) =>
             {
@@ -2959,7 +2965,7 @@ fn escape_text_with_context(
                 output.push('\\');
                 output.push(char);
             }
-            '>' if output_line.len(&output) == 0 => {
+            '>' if breaks_line_start(&output, &mut output_line, context.text_opens_line) => {
                 output.push('\\');
                 output.push(char);
             }

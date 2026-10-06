@@ -526,9 +526,11 @@ mod parser {
         let [Inline::TextDirective(directive)] = paragraph.children.as_slice() else {
             panic!("expected text directive");
         };
-        assert!(
-            matches!(directive.label.as_slice(), [Inline::Text(text)] if text.value == "has ] bracket")
-        );
+        assert!(matches!(
+            directive.label.as_slice(),
+            [Inline::Text(before), Inline::Escape(escape), Inline::Text(after)]
+                if before.value == "has " && escape.value == ']' && after.value == " bracket"
+        ));
         assert_eq!(directive.attributes.len(), 1);
         assert_eq!(directive.attributes[0].name, "title");
         assert_eq!(directive.attributes[0].value.as_deref(), Some("x } y"));
@@ -540,10 +542,7 @@ mod parser {
             "&semi; &trade; &NotEqualTilde; &CounterClockwiseContourIntegral; &acE; &nGg; &fjlig; &AMP;\n";
         let options = SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_references: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         };
         let output = options.parse(source);
 
@@ -573,15 +572,6 @@ mod parser {
                 ("&AMP;", "&"),
             ]
         );
-
-        let resolved = SyntaxOptions::commonmark().parse(source);
-        let Some(Block::Paragraph(paragraph)) = resolved.document.children.first() else {
-            panic!("expected resolved paragraph");
-        };
-        assert!(matches!(
-            paragraph.children.as_slice(),
-            [Inline::Text(text)] if text.value == ";\u{20}\u{2122}\u{20}\u{2242}\u{0338}\u{20}\u{2233}\u{20}\u{223E}\u{0333}\u{20}\u{22D9}\u{0338}\u{20}fj\u{20}&"
-        ));
     }
 
     #[test]
@@ -638,10 +628,7 @@ mod parser {
             "&#x41; &#9; &#10; &#0; &#1; &#127; &#128; &#xFDD0; &#xFFFE; &#xD800; &#x110000;\n";
         let options = SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_references: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         };
         let output = options.parse(source);
 
@@ -771,6 +758,7 @@ mod parser {
                     .iter()
                     .map(|inline| match inline {
                         Inline::Text(text) => text.value.clone(),
+                        Inline::Escape(escape) => format!("\\{}", escape.value),
                         Inline::Code(code) => format!("Code({})", code.value),
                         Inline::Spoiler(spoiler) => format!(
                             "Spoiler({})",
@@ -779,6 +767,7 @@ mod parser {
                                 .iter()
                                 .map(|inline| match inline {
                                     Inline::Text(text) => text.value.clone(),
+                                    Inline::Escape(escape) => format!("\\{}", escape.value),
                                     Inline::Code(code) => format!("Code({})", code.value),
                                     other => format!("{other:?}"),
                                 })
@@ -818,17 +807,17 @@ mod parser {
         // one never holds a pipe that delimits.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
-            ["a || b", "or, like c || d"]
+            ["a \\|\\| b", "or, like c \\|\\| d"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
-            ["| a", "b |"]
+            ["\\| a", "b \\|"]
         );
         // An escaped backtick opens no code span, so the `||` after it opens a
         // spoiler that holds the pipe.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),
-            ["`Spoiler(a` | b)", ""]
+            ["\\`Spoiler(a\\` | b)", ""]
         );
         // Bars with no closer are delimiters around an empty cell.
         assert_eq!(

@@ -764,7 +764,11 @@ fn spans_map_stripped_lines_back_to_the_source() {
     assert_eq!(nth_span(cell, "TableCell", 0), (2, 7));
     assert_eq!(nth_span(cell, "Text", 0), (2, 4));
     assert_eq!(nth_span(cell, "Emphasis", 0), (4, 7));
-    assert_eq!(nth_span("| a\\|b |\n|-|", "Text", 0), (2, 6));
+    let escaped_pipe = "| a\\|b |\n|-|";
+    assert_eq!(nth_span(escaped_pipe, "TableCell", 0), (2, 6));
+    assert_eq!(nth_span(escaped_pipe, "Text", 0), (2, 3));
+    assert_eq!(nth_span(escaped_pipe, "Escape", 0), (3, 5));
+    assert_eq!(nth_span(escaped_pipe, "Text", 1), (5, 6));
     // A split tab.
     assert_eq!(nth_span(">\t\tfoo", "CodeBlock", 0), (1, 6));
 }
@@ -776,7 +780,7 @@ fn table_cells_carry_spans() {
 }
 
 #[test]
-fn an_unescaped_cell_pipe_spans_its_escape() {
+fn an_escaped_cell_pipe_spans_its_backslash() {
     let spans = |source: &str| -> Vec<(usize, usize)> {
         let document = parse(source).document;
         let Some(Block::Table(table)) = document.children.first() else {
@@ -791,7 +795,7 @@ fn an_unescaped_cell_pipe_spans_its_escape() {
             })
             .collect()
     };
-    assert_eq!(spans("| \\|a |\n|-|"), [(2, 5)]);
+    assert_eq!(spans("| \\|a |\n|-|"), [(2, 4), (4, 5)]);
     assert_eq!(spans("| `a`\\|`b` |\n|-|"), [(2, 5), (5, 7), (7, 10)]);
 }
 

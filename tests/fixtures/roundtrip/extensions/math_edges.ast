@@ -14,7 +14,9 @@ Document
     SoftBreak
     Text "$."
   Paragraph
-    Text "The cost is between $10 and 30$."
+    Text "The cost is between "
+    Escape "$"
+    Text "10 and 30$."
   Paragraph
     Math "b<a>c" dollars=1
     Text " and "

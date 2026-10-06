@@ -1427,14 +1427,27 @@ fn table_row_spoilers_form_where_the_row_scan_predicts() {
                     .iter()
                     .filter(|&&(open, _)| start <= open && open < end)
                     .count();
-                let text = table_cell_text(&row[start..end]);
+                let (text, escaped_pipes) = table_cell_text(&row[start..end]);
                 let mut diagnostics = Vec::new();
-                let content = text.trim();
+                let content = text.trim_start();
+                let trimmed = text.len() - content.len();
+                let content = content.trim_end();
+                let escaped_pipes = escaped_pipes
+                    .into_iter()
+                    .filter_map(|at| at.checked_sub(trimmed))
+                    .collect();
                 let map = SourceMap::verbatim(content.len(), 0);
-                let formed = parse_inlines(content, &map, &options, Some(&[]), &mut diagnostics)
-                    .iter()
-                    .filter(|inline| matches!(inline, Inline::Spoiler(_)))
-                    .count();
+                let formed = parse_cell_inlines(
+                    content,
+                    &map,
+                    escaped_pipes,
+                    &options,
+                    Some(&[]),
+                    &mut diagnostics,
+                )
+                .iter()
+                .filter(|inline| matches!(inline, Inline::Spoiler(_)))
+                .count();
                 let cell = &row[start..end];
                 assert_eq!(formed, predicted, "row {row:?}, cell {cell:?}");
                 start = end + 1;

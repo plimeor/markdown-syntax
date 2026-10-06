@@ -1,6 +1,8 @@
 Document
   Paragraph
-    Text "Escaped * text with "
+    Text "Escaped "
+    Escape "*"
+    Text " text with "
     Code value="code" raw="code" fence=1
     Text " and "
     Strong

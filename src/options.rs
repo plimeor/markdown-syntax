@@ -216,19 +216,13 @@ impl Default for Constructs {
     }
 }
 
-/// Lexing knobs that tune how existing constructs are read or how source text is
-/// preserved, separate from which constructs are recognized ([`Constructs`]).
+/// Lexing knobs that tune how existing constructs are read, separate from which
+/// constructs are recognized ([`Constructs`]).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParseOptions {
     /// Treat a single `~text~` as strikethrough (in addition to `~~text~~`).
     /// Inert unless `gfm_strikethrough` is also enabled.
     pub single_tilde_strikethrough: bool,
-    /// Keep backslash character escapes (e.g. `\*`) as `Escape` nodes instead of
-    /// folding them into text, so the original source can be reproduced.
-    pub preserve_character_escapes: bool,
-    /// Keep character references (e.g. `&amp;`) as `CharacterReference` nodes
-    /// instead of resolving them to their value.
-    pub preserve_character_references: bool,
 }
 
 /// A full syntax configuration: which [`Constructs`] are recognized plus the
@@ -241,7 +235,7 @@ pub struct ParseOptions {
 pub struct SyntaxOptions {
     /// Which syntactic constructs are recognized.
     pub constructs: Constructs,
-    /// Lexing / source-preservation knobs.
+    /// Lexing knobs.
     pub parse: ParseOptions,
 }
 
@@ -260,8 +254,6 @@ impl SyntaxOptions {
             constructs: Constructs::gfm(),
             parse: ParseOptions {
                 single_tilde_strikethrough: true,
-                preserve_character_escapes: false,
-                preserve_character_references: false,
             },
         }
     }

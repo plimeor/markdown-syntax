@@ -137,8 +137,6 @@ fn extension_fixture_snapshots_and_roundtrips() {
         constructs: constructs,
         parse: ParseOptions {
             single_tilde_strikethrough: true,
-            preserve_character_escapes: false,
-            preserve_character_references: false,
         },
     };
     assert_fixture(
@@ -151,10 +149,7 @@ fn extension_fixture_snapshots_and_roundtrips() {
     );
     let escape_options = SyntaxOptions {
         constructs: Constructs::commonmark(),
-        parse: ParseOptions {
-            preserve_character_escapes: true,
-            ..ParseOptions::default()
-        },
+        parse: ParseOptions::default(),
     };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_escapes_preserved",
@@ -162,10 +157,7 @@ fn extension_fixture_snapshots_and_roundtrips() {
     );
     let reference_options = SyntaxOptions {
         constructs: Constructs::commonmark(),
-        parse: ParseOptions {
-            preserve_character_references: true,
-            ..ParseOptions::default()
-        },
+        parse: ParseOptions::default(),
     };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_references_preserved",
@@ -488,8 +480,6 @@ fn strikethrough_can_contain_subscript() {
         constructs: constructs,
         parse: ParseOptions {
             single_tilde_strikethrough: false,
-            preserve_character_escapes: false,
-            preserve_character_references: false,
         },
     };
     let output = options.parse("~~H~2~O~~\n");
