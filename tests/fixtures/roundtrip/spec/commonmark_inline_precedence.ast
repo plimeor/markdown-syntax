@@ -14,4 +14,5 @@ Document
     Code value="](/uri)" raw="](/uri)" fence=1
   Paragraph
     Text "[foo"
-    Autolink "http://example.com/?search=](uri)" kind=angle
+    Link destination=http://example.com/?search=](uri) title=none
+      Text "http://example.com/?search=](uri)"

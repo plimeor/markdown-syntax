@@ -5431,19 +5431,39 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
     }
 }
 
-/// Link text holds no links: autolinks inside it read as their text, an
-/// angle-bracket autolink without its brackets. Image alt text inside it keeps
-/// its own links.
+/// An autolink: a `Link` spanning `span` to `destination`, whose one child is
+/// the URL as written, `text`, spanning `text_span`.
+fn autolink_node(span: Span, text_span: Span, destination: String, text: &str) -> Inline {
+    Inline::Link(Link {
+        meta: NodeMeta::new(Some(span)),
+        destination,
+        destination_kind: LinkDestinationKind::Bare,
+        title: None,
+        title_kind: None,
+        children: vec![Inline::Text(Text {
+            meta: NodeMeta::new(Some(text_span)),
+            value: text.into(),
+        })],
+    })
+}
+
+/// Link text holds no links: autolinks inside it, the only links a formed
+/// link's text can hold, read as their text, an angle-bracket autolink
+/// without its brackets. Image alt text inside it keeps its own links.
 fn demote_links(nodes: &mut Vec<Inline>) {
     for node in nodes.iter_mut() {
         match node {
-            Inline::Autolink(autolink) => {
-                let value = match &autolink.kind {
-                    AutolinkKind::Angle => autolink.destination.clone(),
-                    AutolinkKind::GfmLiteral { original } => original.clone(),
-                };
+            Inline::Link(link) => {
+                let value = link
+                    .children
+                    .iter()
+                    .map(|child| match child {
+                        Inline::Text(text) => text.value.as_str(),
+                        _ => "",
+                    })
+                    .collect::<String>();
                 *node = Inline::Text(Text {
-                    meta: autolink.meta.clone(),
+                    meta: link.meta.clone(),
                     value,
                 });
             }
@@ -6159,16 +6179,8 @@ fn parse_inline_content(
                     &mut pass.scan.literal_autolinks,
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::Autolink(Autolink {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        destination,
-                        kind: AutolinkKind::GfmLiteral {
-                            original: input[index..end].into(),
-                        },
-                    }));
+                    let span = Span::new(base_offset + index, base_offset + end);
+                    nodes.push(autolink_node(span, span, destination, &input[index..end]));
                     index = end;
                     text_start = index;
                     continue;
@@ -6464,13 +6476,8 @@ fn parse_inline_content(
                 &mut pass.scan.literal_autolinks,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                nodes.push(Inline::Autolink(Autolink {
-                    meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
-                    destination,
-                    kind: AutolinkKind::GfmLiteral {
-                        original: input[index..end].into(),
-                    },
-                }));
+                let span = Span::new(base_offset + index, base_offset + end);
+                nodes.push(autolink_node(span, span, destination, &input[index..end]));
                 index = end;
                 text_start = index;
                 continue;
@@ -6479,17 +6486,15 @@ fn parse_inline_content(
 
         if bytes[index] == b'<' {
             if let Some(end) = pass.scan.lookups.find(">", index).map(|close| close + 1) {
-                let raw = &input[index..end];
-                if is_autolink(raw) {
+                let uri = &input[index + 1..end - 1];
+                if let Some(destination) = angle_autolink_destination(uri) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::Autolink(Autolink {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        destination: raw[1..raw.len() - 1].into(),
-                        kind: AutolinkKind::Angle,
-                    }));
+                    nodes.push(autolink_node(
+                        Span::new(base_offset + index, base_offset + end),
+                        Span::new(base_offset + index + 1, base_offset + end - 1),
+                        destination,
+                        uri,
+                    ));
                     index = end;
                     text_start = index;
                     continue;
@@ -9128,7 +9133,7 @@ pub(crate) fn line_starts_interrupting_html_block(input: &str) -> bool {
 /// The end of the `<…>` autolink opening at `index`.
 fn autolink_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
     let end = lookups.find(">", index)? + 1;
-    is_autolink(&input[index..end]).then_some(end)
+    angle_autolink_destination(&input[index + 1..end - 1]).map(|_| end)
 }
 
 /// The end of the inline HTML (comment, processing instruction, CDATA,
@@ -9268,9 +9273,16 @@ fn skip_spaces(input: &str, mut index: usize) -> usize {
     index
 }
 
-fn is_autolink(input: &str) -> bool {
-    let inner = &input[1..input.len() - 1];
-    is_uri_autolink(inner) || is_email_autolink(inner)
+/// The destination of the angle-bracket autolink `<uri>`, when `uri` writes
+/// one: the URI itself, or `mailto:` and an email address.
+pub(crate) fn angle_autolink_destination(uri: &str) -> Option<String> {
+    if is_uri_autolink(uri) {
+        Some(String::from(uri))
+    } else if is_email_autolink(uri) {
+        Some(alloc::format!("mailto:{uri}"))
+    } else {
+        None
+    }
 }
 
 fn is_uri_autolink(input: &str) -> bool {
@@ -9327,16 +9339,6 @@ fn is_email_autolink(input: &str) -> bool {
 // returned destination is the synthesized href (a `http://`/`mailto:` prefix
 // may be prepended); the caller keeps `input[index..end]` as the visible
 // original.
-/// The lengths of the literal autolink that starts `input` under GFM autolinks
-/// and under GFM plus relaxed autolinks, for the serializer to check that text
-/// it writes after an autolink leaves the URL as it was.
-pub(crate) fn literal_autolink_extents(input: &str) -> [Option<usize>; 2] {
-    [false, true].map(|relaxed| {
-        parse_literal_autolink(input, 0, true, relaxed, &mut LiteralAutolinkScan::default())
-            .map(|(end, _)| end)
-    })
-}
-
 fn parse_literal_autolink(
     input: &str,
     index: usize,

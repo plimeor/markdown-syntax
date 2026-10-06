@@ -140,7 +140,6 @@ fn normalize_inlines(inlines: &mut Vec<Inline>) {
             Inline::TextDirective(node) => children(&mut node.meta, &mut node.label),
             Inline::Shortcode(node) => leaf(&mut node.meta),
             Inline::Code(node) => leaf(&mut node.meta),
-            Inline::Autolink(node) => leaf(&mut node.meta),
             Inline::Html(node) => leaf(&mut node.meta),
             Inline::Math(node) => leaf(&mut node.meta),
             Inline::FootnoteReference(node) => leaf(&mut node.meta),

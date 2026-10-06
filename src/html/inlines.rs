@@ -3,13 +3,13 @@
 use alloc::format;
 use alloc::string::String;
 
-use crate::ast::{AutolinkKind, DirectiveAttribute, Inline, MathInlineKind};
+use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
 
 use super::escape::{
     attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
 };
 use super::footnotes;
-use super::refs::{escaped_alt, flatten_alt, visible_text};
+use super::refs::{escaped_alt, flatten_alt};
 use super::{Ctx, SafeRawHtmlForm};
 
 /// Render an inline slice by concatenating each node's HTML.
@@ -133,36 +133,6 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             None => image_reference_fallback(n),
         },
 
-        // 19. Autolink.
-        //   - Angle `<dest>`: an email-shaped destination (`@`, no `scheme:`)
-        //     takes a synthesized `mailto:` href per CommonMark §6.5; the
-        //     visible text is the destination (sans the synthesized prefix).
-        //   - GFM literal: the destination is the already-synthesized href
-        //     (e.g. `http://www…`, `mailto:…`) and may legally contain chars
-        //     like `> [ ] { } | \ ^` and backtick, which `encode_href`
-        //     percent-encodes; the visible text is the raw `original` source.
-        Inline::Autolink(a) => match &a.kind {
-            AutolinkKind::Angle => {
-                let dest = autolink_href_dest(&a.destination);
-                let href = encode_href(&filter_protocol(
-                    &dest,
-                    ctx.allow_dangerous_protocol,
-                    ctx.gfm_url_denylist(),
-                ));
-                let text = escape_text(&visible_text(&a.destination));
-                format!("<a href=\"{href}\">{text}</a>")
-            }
-            AutolinkKind::GfmLiteral { original } => {
-                let href = encode_href(&filter_protocol(
-                    &a.destination,
-                    ctx.allow_dangerous_protocol,
-                    ctx.gfm_url_denylist(),
-                ));
-                let text = escape_text(original);
-                format!("<a href=\"{href}\">{text}</a>")
-            }
-        },
-
         // 20. Html — verbatim under danger (with tagfilter), else text-escape.
         Inline::Html(h) => render_raw_html(&h.value, ctx),
 
@@ -246,35 +216,6 @@ fn title_attr(title: Option<&str>) -> String {
         Some(t) if !t.is_empty() => format!(" title=\"{}\"", attr_escape(t)),
         _ => String::new(),
     }
-}
-
-/// Synthesize the autolink href destination: an email-shaped destination
-/// (contains `@` and has no `scheme:` prefix) gets a `mailto:` prefix; every
-/// other destination is returned unchanged. The visible text is never altered.
-fn autolink_href_dest(dest: &str) -> String {
-    if dest.contains('@') && !has_uri_scheme(dest) {
-        return format!("mailto:{dest}");
-    }
-    String::from(dest)
-}
-
-/// True when `dest` begins with a URI scheme (`scheme:` where scheme starts
-/// with an ASCII letter followed by letters/digits/`+`/`.`/`-`).
-fn has_uri_scheme(dest: &str) -> bool {
-    let mut chars = dest.char_indices();
-    match chars.next() {
-        Some((_, c)) if c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    for (_, c) in chars {
-        if c == ':' {
-            return true;
-        }
-        if !(c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-') {
-            return false;
-        }
-    }
-    false
 }
 
 /// The GFM footnote reference marker `<sup class="footnote-ref">…`. The

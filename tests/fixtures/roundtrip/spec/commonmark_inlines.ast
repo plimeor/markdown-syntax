@@ -20,9 +20,11 @@ Document
     Text " but foo_bar stays."
     SoftBreak
     Text "Autolink "
-    Autolink "https://example.com" kind=angle
+    Link destination=https://example.com title=none
+      Text "https://example.com"
     Text " and email "
-    Autolink "a@example.com" kind=angle
+    Link destination=mailto:a@example.com title=none
+      Text "a@example.com"
     Text "."
     SoftBreak
     Text "Backslash hard break"

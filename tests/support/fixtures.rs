@@ -6,8 +6,8 @@ use std::{
 };
 
 use markdown_syntax::{
-    AutolinkKind, Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions,
-    SerializeOptions, SyntaxOptions,
+    Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions, SerializeOptions,
+    SyntaxOptions,
 };
 
 pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
@@ -867,19 +867,6 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                     format!("ImageReference identifier={}", node.identifier),
                 );
                 snapshot_inlines(&node.alt, indent + 1, lines);
-            }
-            Inline::Autolink(node) => {
-                let kind = match &node.kind {
-                    AutolinkKind::Angle => String::from("angle"),
-                    AutolinkKind::GfmLiteral { original } => {
-                        format!("gfm-literal original={}", quote(original))
-                    }
-                };
-                push(
-                    lines,
-                    indent,
-                    format!("Autolink {} kind={kind}", quote(&node.destination)),
-                );
             }
             Inline::Html(node) => push(lines, indent, format!("HtmlInline {}", quote(&node.value))),
             Inline::SoftBreak(_) => push(lines, indent, "SoftBreak"),

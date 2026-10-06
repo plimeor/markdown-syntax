@@ -447,9 +447,9 @@ mod review_inline {
         );
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)]
+            [Inline::Link(autolink)]
                 if autolink.destination
-                    == "asd@012345678901234567890123456789012345678901234567890123456789012"
+                    == "mailto:asd@012345678901234567890123456789012345678901234567890123456789012"
         ));
     }
 
@@ -496,7 +496,7 @@ mod review_inline {
         let inlines = only_paragraph("www.aaa.bbb_bbb.ccc.ddd\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "http://www.aaa.bbb_bbb.ccc.ddd"
+            [Inline::Link(autolink)] if autolink.destination == "http://www.aaa.bbb_bbb.ccc.ddd"
         ));
     }
 
@@ -505,7 +505,7 @@ mod review_inline {
         let inlines = only_paragraph("a@a_b.c\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "mailto:a@a_b.c"
+            [Inline::Link(autolink)] if autolink.destination == "mailto:a@a_b.c"
         ));
     }
 
@@ -521,7 +521,7 @@ mod review_inline {
     #[test]
     fn hg2_literal_link_excludes_trailing_entity_run() {
         let inlines = only_paragraph("www.example.com&xxx;.\n", true);
-        let [Inline::Autolink(autolink), Inline::Text(rest)] = inlines.as_slice() else {
+        let [Inline::Link(autolink), Inline::Text(rest)] = inlines.as_slice() else {
             panic!("expected an autolink followed by literal text, got {inlines:?}");
         };
         assert_eq!(autolink.destination, "http://www.example.com");
@@ -533,7 +533,7 @@ mod review_inline {
         let inlines = only_paragraph("www.example.com&xxx\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "http://www.example.com&xxx"
+            [Inline::Link(autolink)] if autolink.destination == "http://www.example.com&xxx"
         ));
     }
 
@@ -764,6 +764,70 @@ mod wiki_embeds {
             matches!(inlines.as_slice(), [Inline::WikiLink(link), Inline::Text(rest)]
                 if link.embed && link.target == "a" && rest.value == "(u)"),
             "{inlines:?}"
+        );
+    }
+}
+
+mod autolinks_as_links {
+    //! Literal and angle-bracket autolinks are `Link` nodes whose one child is
+    //! the URL as written.
+
+    use markdown_syntax::prelude::*;
+
+    fn only_link(source: &str, options: &SyntaxOptions) -> (String, String) {
+        let document = options.parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        let links: Vec<_> = paragraph
+            .children
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Link(link) => Some(link),
+                _ => None,
+            })
+            .collect();
+        let [link] = links.as_slice() else {
+            panic!("{source:?}: {paragraph:?}");
+        };
+        assert!(link.title.is_none());
+        assert_eq!(link.destination_kind, LinkDestinationKind::Bare);
+        let [Inline::Text(text)] = link.children.as_slice() else {
+            panic!("{source:?}: {link:?}");
+        };
+        (link.destination.clone(), text.value.clone())
+    }
+
+    #[test]
+    fn a_bare_url_is_a_link_whose_text_is_the_url() {
+        assert_eq!(
+            only_link("see https://example.com", &SyntaxOptions::gfm()),
+            ("https://example.com".into(), "https://example.com".into())
+        );
+        assert_eq!(
+            only_link("www.example.com", &SyntaxOptions::gfm()),
+            ("http://www.example.com".into(), "www.example.com".into())
+        );
+    }
+
+    #[test]
+    fn an_angle_bracket_autolink_is_a_link_whose_text_is_the_uri() {
+        let commonmark = SyntaxOptions::commonmark();
+        assert_eq!(
+            only_link("<http://a\u{a0}b>", &commonmark),
+            ("http://a\u{a0}b".into(), "http://a\u{a0}b".into())
+        );
+        assert_eq!(
+            only_link("<a@b.c>", &commonmark),
+            ("mailto:a@b.c".into(), "a@b.c".into())
+        );
+    }
+
+    #[test]
+    fn an_autolink_in_link_text_is_text() {
+        assert_eq!(
+            only_link("[http://a.b](u)", &SyntaxOptions::gfm()),
+            ("u".into(), "http://a.b".into())
         );
     }
 }

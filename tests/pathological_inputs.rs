@@ -67,7 +67,6 @@ fn inline_depth(nodes: &[Inline]) -> usize {
                     | Inline::CharacterReference(_)
                     | Inline::Shortcode(_)
                     | Inline::Code(_)
-                    | Inline::Autolink(_)
                     | Inline::Html(_)
                     | Inline::SoftBreak(_)
                     | Inline::LineBreak(_)

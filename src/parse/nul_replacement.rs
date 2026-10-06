@@ -155,12 +155,6 @@ fn inlines(inlines: &mut [Inline]) {
                 string(&mut node.label);
                 self::inlines(&mut node.alt);
             }
-            Inline::Autolink(node) => {
-                string(&mut node.destination);
-                if let AutolinkKind::GfmLiteral { original } = &mut node.kind {
-                    string(original);
-                }
-            }
             Inline::Html(node) => string(&mut node.value),
             Inline::Math(node) => string(&mut node.value),
             Inline::FootnoteReference(node) => {

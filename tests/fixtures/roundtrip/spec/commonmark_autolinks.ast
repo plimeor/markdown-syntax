@@ -1,17 +1,21 @@
 Document
   Paragraph
     Text "Autolinks "
-    Autolink "irc://foo.bar:2233/baz" kind=angle
+    Link destination=irc://foo.bar:2233/baz title=none
+      Text "irc://foo.bar:2233/baz"
     Text " and "
-    Autolink "made-up-scheme://foo,bar" kind=angle
+    Link destination=made-up-scheme://foo,bar title=none
+      Text "made-up-scheme://foo,bar"
     Text "."
     SoftBreak
     Text "Email "
-    Autolink "foo+special@Bar.baz-bar0.com" kind=angle
+    Link destination=mailto:foo+special@Bar.baz-bar0.com title=none
+      Text "foo+special@Bar.baz-bar0.com"
     Text "."
     SoftBreak
     Text "Special "
-    Autolink "foo.!#$%&'*+/=?^_`{|}~-@example.com" kind=angle
+    Link destination=mailto:foo.!#$%&'*+/=?^_`{|}~-@example.com title=none
+      Text "foo.!#$%&'*+/=?^_`{|}~-@example.com"
     Text "."
     SoftBreak
     Text "Invalid email <foo..bar@example.com> <foo@example-.com> <foo@-example.com> <foo"

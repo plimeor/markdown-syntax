@@ -21,7 +21,7 @@ use crate::{
     parse::{
         continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
         line_opens_alert, line_starts_html_block, line_starts_interrupting_html_block,
-        line_starts_math_block, literal_autolink_extents,
+        line_starts_math_block,
     },
     validate::{is_directive_name, validate_document},
 };
@@ -466,21 +466,17 @@ fn serialize_reading_back(
     options: &SerializeOptions,
     finish: impl Fn(String) -> String,
 ) -> Result<String, SerializeError> {
-    let render = |run_style: RunStyle,
-                  raw_edge: Option<char>,
-                  autolink_edges: AutolinkEdges|
-     -> Result<String, SerializeError> {
+    let render = |run_style: RunStyle, raw_edge: Option<char>| -> Result<String, SerializeError> {
         let context = InlineSerializeContext {
             run_style,
             raw_edge,
-            autolink_edges,
             ..InlineSerializeContext::block_content()
         };
         Ok(finish(serialize_inlines_with_context(
             children, options, context,
         )?))
     };
-    let output = render(RunStyle::Plain, None, AutolinkEdges::Plain)?;
+    let output = render(RunStyle::Plain, None)?;
     let mut expected = None;
     // The output is read back under the dialect the options name.
     let mut reads_back = |markdown: &str| {
@@ -490,10 +486,8 @@ fn serialize_reading_back(
     // A strong or emphasis run abutting another splits on reparse only as its
     // flanking allows, which the rest of the paragraph decides; one beside a
     // `~` opens or closes only as the GFM bonus for a raw `~` allows, and one
-    // beside a text `*` may take that `*` into its run. A literal autolink's
-    // URL scan runs on through a space written as a reference, which a span
-    // delimiter beside it may need. When the plain rendering does not read
-    // back, the first other style that does is taken.
+    // beside a text `*` may take that `*` into its run. When the plain
+    // rendering does not read back, the first other style that does is taken.
     let mut runs = RunNeighbours::default();
     runs.read(children, 0);
     let RunNeighbours {
@@ -501,11 +495,7 @@ fn serialize_reading_back(
         edge_tildes,
         edge_stars,
     } = runs;
-    let autolink_spaces = autolink_meets_space_in_span(children, false);
-    let autolink_leads = autolink_text_runs_on(children, false);
-    if (abut_runs || edge_tildes || edge_stars || autolink_spaces || autolink_leads)
-        && !reads_back(&output)
-    {
+    if (abut_runs || edge_tildes || edge_stars) && !reads_back(&output) {
         let styles = [
             RunStyle::Plain,
             RunStyle::StrongUnderscore,
@@ -519,58 +509,16 @@ fn serialize_reading_back(
             .into_iter()
             .enumerate()
             .filter(|&(at, raw_edge)| at == 0 || raw_edge.is_some())
-            .flat_map(|(_, raw_edge)| styles.map(|style| (style, raw_edge, AutolinkEdges::Plain)))
-            .skip(1)
-            .filter(|_| abut_runs || edge_tildes || edge_stars);
-        let autolink_alternates = [
-            AutolinkEdges::RawEdges,
-            AutolinkEdges::EncodedBefore,
-            AutolinkEdges::EncodedLead,
-        ]
-        .into_iter()
-        .filter(|_| autolink_spaces || autolink_leads)
-        .map(|edges| (RunStyle::Plain, None, edges));
-        for (style, raw_edge, spaces) in run_alternates.chain(autolink_alternates) {
-            let alternate = render(style, raw_edge, spaces)?;
+            .flat_map(|(_, raw_edge)| styles.map(|style| (style, raw_edge)))
+            .skip(1);
+        for (style, raw_edge) in run_alternates {
+            let alternate = render(style, raw_edge)?;
             if reads_back(&alternate) {
                 return Ok(alternate);
             }
         }
     }
     Ok(output)
-}
-
-/// How a paragraph writes the text around a literal autolink (see
-/// `serialize_paragraph`).
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-enum AutolinkEdges {
-    /// A space or tab at a line's edge is a reference, one before a literal
-    /// autolink is raw, and a text after one opens as written unless the URL
-    /// scan would read on into it.
-    #[default]
-    Plain,
-    /// Every space or tab at a line's edge is raw.
-    RawEdges,
-    /// A space or tab before a literal autolink is written as at any edge.
-    EncodedBefore,
-    /// A text after a literal autolink and before another inline opens with
-    /// its first char escaped or written as a reference.
-    EncodedLead,
-}
-
-/// Whether a literal autolink among `inlines`, within spans, is followed by a
-/// text without whitespace short of its end, which leaves the URL scan to read
-/// on into what follows: another inline, a span's closing delimiter, or a
-/// space written as a reference; `in_span` when `inlines` are a span's content.
-fn autolink_text_runs_on(inlines: &[Inline], in_span: bool) -> bool {
-    inlines.windows(2).enumerate().any(|(index, pair)| {
-        is_gfm_literal_autolink(&pair[0])
-            && matches!(&pair[1], Inline::Text(text)
-                if !text.value.trim_end_matches([' ', '\t']).contains(char::is_whitespace)
-                    && (in_span || index + 2 < inlines.len()))
-    }) || inlines.iter().any(|inline| {
-        span_children(inline).is_some_and(|children| autolink_text_runs_on(children, true))
-    })
 }
 
 /// The content of `inline` when it is a span such as an emphasis, or a
@@ -590,51 +538,6 @@ fn span_children(inline: &Inline) -> Option<&[Inline]> {
         Inline::Superscript(node) => &node.children,
         Inline::Spoiler(node) => &node.children,
         _ => return None,
-    })
-}
-
-/// Whether `inline`, or the first (`at_start`) or last of its span content,
-/// is a text meeting that side with a space or tab; `delimited` when a span
-/// delimiter stands between.
-fn meets_space(inline: Option<&Inline>, at_start: bool, delimited: bool) -> bool {
-    match inline {
-        Some(Inline::Text(text)) => {
-            delimited
-                && if at_start {
-                    text.value.starts_with([' ', '\t'])
-                } else {
-                    text.value.ends_with([' ', '\t'])
-                }
-        }
-        Some(inline) => span_children(inline).is_some_and(|children| {
-            meets_space(
-                if at_start {
-                    children.first()
-                } else {
-                    children.last()
-                },
-                at_start,
-                true,
-            )
-        }),
-        None => false,
-    }
-}
-
-/// Whether a literal autolink among `inlines`, within spans, meets a space or
-/// tab across a span delimiter or inside a span, which the delimiter may need
-/// written as a reference; `in_span` when `inlines` are a span's content.
-fn autolink_meets_space_in_span(inlines: &[Inline], in_span: bool) -> bool {
-    inlines.iter().enumerate().any(|(index, inline)| {
-        if is_gfm_literal_autolink(inline) {
-            return meets_space(inlines.get(index + 1), true, in_span)
-                || meets_space(
-                    index.checked_sub(1).map(|previous| &inlines[previous]),
-                    false,
-                    in_span,
-                );
-        }
-        span_children(inline).is_some_and(|children| autolink_meets_space_in_span(children, true))
     })
 }
 
@@ -671,16 +574,6 @@ impl RunNeighbours {
                         *found |= (after_run && value.first() == Some(&edge))
                             || (before_run && value.last() == Some(&edge));
                     }
-                    // A `www` literal autolink needs the `*`, `_`, or `~`
-                    // before it raw, which a run's delimiter choice decides.
-                    self.abut_runs |= inside != 0
-                        && matches!(value.last(), Some(b'*' | b'_' | b'~'))
-                        && inlines
-                            .get(index + 1)
-                            .and_then(literal_autolink_original)
-                            .is_some_and(|original| {
-                                original.len() >= 3 && original[..3].eq_ignore_ascii_case("www")
-                            });
                     continue;
                 }
                 Inline::Strong(node) => (&node.children, 1),
@@ -846,10 +739,9 @@ fn keep_first_line_off_html_block(children: &[Inline], output: &mut String) {
     // An angle-bracket autolink that looks like an HTML block start comes
     // from a dialect without raw HTML, which reads it back as written; raw
     // HTML is written as it is, as above.
-    if matches!(
-        children.first(),
-        Some(Inline::Autolink(_) | Inline::Html(_))
-    ) {
+    if matches!(children.first(), Some(Inline::Html(_)))
+        || matches!(children.first(), Some(Inline::Link(link)) if autolink_uri(link).is_some())
+    {
         return;
     }
     if let Some(offset) = paragraph_html_block_escape_offset(output) {
@@ -1320,8 +1212,6 @@ struct InlineSerializeContext {
     /// The char whose run opening or closing a text beside a strong or
     /// emphasis delimiter is written raw (see `serialize_paragraph`).
     raw_edge: Option<char>,
-    /// How spaces and tabs around a literal autolink are written.
-    autolink_edges: AutolinkEdges,
     /// A reference before the inlines, at any level, wrote a backtick in its
     /// raw label, which an escaped backtick after it could close as a code
     /// span.
@@ -1437,8 +1327,6 @@ impl DelimiterChars {
                     caret
                 }
             }
-            // A URL's chars are scanned after the delimiters before it pair.
-            Inline::Autolink(node) => Self::of_str(&node.destination).union(Self::of_char('>')),
             // A wiki link's text can close what a char before it opens.
             Inline::WikiLink(node) => Self::of_str(&node.target).union(Self::of_str(&node.label)),
             Inline::Shortcode(_) | Inline::TextDirective(_) => Self::of_char(':'),
@@ -1460,7 +1348,6 @@ impl InlineSerializeContext {
             run_style: RunStyle::Plain,
             opens_span: false,
             raw_edge: None,
-            autolink_edges: AutolinkEdges::Plain,
             raw_backtick_before: false,
             inside: DelimiterChars(0),
             enclosed: None,
@@ -1498,7 +1385,6 @@ impl InlineSerializeContext {
             run_style: RunStyle::Plain,
             opens_span: false,
             raw_edge: None,
-            autolink_edges: AutolinkEdges::Plain,
             raw_backtick_before: false,
             inside: DelimiterChars(0),
             enclosed: None,
@@ -1553,47 +1439,18 @@ fn escape_trailing_bang(output: &mut String) {
     }
 }
 
-// A GFM literal autolink is serialized as its raw URL text. If the preceding
-// output ends with `<`, that `<` plus the URL plus a following `>` could be
-// reparsed as an angle autolink (`<http://x>`) instead of the literal. Escaping
-// the trailing `<` keeps it literal text, so the URL stays a GFM literal on the
-// round trip (`\<` before `http://…` is just text + literal).
-fn escape_trailing_less_than(output: &mut String) {
-    if output.ends_with('<') && !output.ends_with("\\<") {
-        output.pop();
-        output.push_str("\\<");
-    }
-}
-
-// A GFM bare-email literal anchors at its leftmost run of email-local chars
-// (`[A-Za-z0-9.+_-]`). If the preceding output ends with such a char, the
-// reparse would extend the email's local part leftward into that text (e.g.
-// `A` + `i@i.a` → `Ai@i.a`). Re-emit the trailing email-local char as a numeric
-// character reference (which decodes back to the same text but is not an
-// email-local char), preserving the boundary on the round trip.
-fn escape_trailing_email_local(output: &mut String) {
-    let Some(last) = output.chars().next_back() else {
-        return;
+/// The URI `link` writes as an angle-bracket autolink: a link with no title
+/// whose one child is a text the autolink `<text>` reads back to the link's
+/// destination from.
+fn autolink_uri(link: &Link) -> Option<&str> {
+    let [Inline::Text(text)] = link.children.as_slice() else {
+        return None;
     };
-    // An email-local char immediately before the email forces a leftward
-    // re-anchor on reparse (the local part starts at the leftmost local-char
-    // run): an ASCII alphanumeric is written as a reference, and an unescaped
-    // `.`, `+`, `-`, or `_` takes a backslash.
-    if last.is_ascii_alphanumeric() {
-        output.pop();
-        output.push_str(&alloc::format!("&#{};", last as u32));
-    } else if matches!(last, '.' | '+' | '-' | '_') && ends_with_unescaped(output, last) {
-        output.insert(output.len() - 1, '\\');
-    }
-}
-
-// True when `inline` is a GFM literal autolink (its raw URL serialization can
-// re-absorb a following text char on reparse).
-fn is_gfm_literal_autolink(inline: &Inline) -> bool {
-    matches!(
-        inline,
-        Inline::Autolink(node) if matches!(node.kind, AutolinkKind::GfmLiteral { .. })
-    )
+    (link.title.is_none()
+        && link.destination_kind == LinkDestinationKind::Bare
+        && crate::parse::angle_autolink_destination(&text.value).as_deref()
+            == Some(link.destination.as_str()))
+    .then_some(text.value.as_str())
 }
 
 // True when `inline` is a shortcut link or image reference or a footnote
@@ -1621,86 +1478,6 @@ fn escape_leading_char_after_shortcut(value: &str, reference_index: usize) -> Op
         Some(b':') if reference_index == 0 => Some("\\:"),
         _ => None,
     }
-}
-
-fn is_gfm_literal_email(inline: &Inline) -> bool {
-    matches!(
-        inline,
-        Inline::Autolink(node)
-            if matches!(&node.kind, AutolinkKind::GfmLiteral { original }
-                if node.destination.strip_prefix("mailto:") == Some(original.as_str()))
-    )
-}
-
-/// The source spelling of a GFM literal autolink.
-fn literal_autolink_original(inline: &Inline) -> Option<&str> {
-    match inline {
-        Inline::Autolink(Autolink {
-            kind: AutolinkKind::GfmLiteral { original },
-            ..
-        }) => Some(original),
-        _ => None,
-    }
-}
-
-/// The spelling of the literal autolink that `inline` is, or that its last
-/// child is, through spans.
-fn last_literal_autolink(inline: &Inline) -> Option<&str> {
-    if let Some(original) = literal_autolink_original(inline) {
-        return Some(original);
-    }
-    let children = match inline {
-        Inline::Emphasis(node) => &node.children,
-        Inline::Strong(node) => &node.children,
-        Inline::Underline(node) => &node.children,
-        Inline::Delete(node) => &node.children,
-        Inline::Insert(node) => &node.children,
-        Inline::Mark(node) => &node.children,
-        Inline::Subscript(node) => &node.children,
-        Inline::Superscript(node) => &node.children,
-        Inline::Spoiler(node) => &node.children,
-        _ => return None,
-    };
-    last_literal_autolink(children.last()?)
-}
-
-/// How `inline` is written when that takes no escaping: a literal autolink or
-/// a shortcode, which a literal autolink's URL scan may run on into; empty
-/// for any other inline.
-fn plain_spelling(inline: &Inline) -> String {
-    match inline {
-        Inline::Shortcode(node) => alloc::format!(":{}:", node.name),
-        _ => literal_autolink_original(inline).map_or(String::new(), String::from),
-    }
-}
-
-/// Whether `rendered` text written right after the literal autolink
-/// `original`, and before `following` (the [`plain_spelling`] of the next
-/// inline), leaves the autolink as it is under at least one
-/// autolink dialect (GFM, or GFM plus relaxed): the parser's own scan reads
-/// exactly `original`. The dialect the document came from is not known here;
-/// the source spelling keeps it under that one.
-fn text_keeps_literal_autolink(original: &str, rendered: &str, following: &str) -> bool {
-    let mut joined = String::from(original);
-    joined.push_str(rendered);
-    joined.push_str(following);
-    literal_autolink_extents(&joined).contains(&Some(original.len()))
-}
-
-/// Spellings of `value`'s first char that a literal autolink's URL scan may
-/// stop at, most readable first: a backslash escape for ASCII punctuation, then
-/// a character reference, which the scan trims back off the URL's end.
-fn leading_char_encodings(value: &str) -> Vec<(String, &str)> {
-    let Some(first) = value.chars().next() else {
-        return Vec::new();
-    };
-    let rest = &value[first.len_utf8()..];
-    let mut encodings = Vec::new();
-    if first.is_ascii_punctuation() {
-        encodings.push((alloc::format!("\\{first}"), rest));
-    }
-    encodings.push((alloc::format!("&#x{:X};", first as u32), rest));
-    encodings
 }
 
 fn serialize_inlines_with_context(
@@ -1792,12 +1569,10 @@ fn render_inlines(
     });
     let mut written_until = context.written_before;
     let mut raw_backtick_before = context.raw_backtick_before;
-    // Where the output of the inline before the current one starts.
-    let mut segment_start = 0;
     for (index, inline) in inlines.iter().enumerate() {
         let written_before = written_until;
-        let previous_start = segment_start;
-        segment_start = output.len();
+        // Where the current inline's output starts.
+        let segment_start = output.len();
         let written_later = match &written {
             Some((own, from)) => {
                 written_until = written_until.union(own[index]);
@@ -1813,33 +1588,11 @@ fn render_inlines(
         };
         match inline {
             Inline::Text(node) => {
-                // A literal autolink just before the text, ending this run's
-                // previous inline or the last span inside it: its spelling,
-                // and the span delimiters written after it.
-                let autolink_before = index.checked_sub(1).and_then(|prev| {
-                    let original = last_literal_autolink(&inlines[prev])?;
-                    // The URL may itself end with a delimiter char, so each
-                    // split of the trailing delimiters is tried, shortest tail
-                    // first.
-                    let segment = &output[previous_start..];
-                    let delimiters = segment.len()
-                        - segment
-                            .trim_end_matches(['*', '_', '~', '=', '+', '^', '|'])
-                            .len();
-                    (0..=delimiters).find_map(|tail| {
-                        let body = &segment[..segment.len() - tail];
-                        body.ends_with(original)
-                            .then(|| (original, &segment[segment.len() - tail..]))
-                    })
-                });
                 // A text directive opens only after whitespace, so the
-                // whitespace before one stays raw too.
-                let before_literal_autolink = context.autolink_edges
-                    != AutolinkEdges::EncodedBefore
-                    && inlines.get(index + 1).is_some_and(|next| {
-                        is_gfm_literal_autolink(next) || matches!(next, Inline::TextDirective(_))
-                    });
-                let raw_edges = context.autolink_edges == AutolinkEdges::RawEdges;
+                // whitespace before one stays raw.
+                let before_text_directive = inlines
+                    .get(index + 1)
+                    .is_some_and(|next| matches!(next, Inline::TextDirective(_)));
                 let at_line_start = output_line.len(&output) == 0;
                 let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
                 let at_line_end = text_is_at_line_end(inlines, index);
@@ -1862,12 +1615,10 @@ fn render_inlines(
                     ..context
                 };
 
-                // Trailing guard: when this text is immediately followed by a
-                // www/http/email literal, its trailing whitespace must survive
-                // as a real whitespace preceder. A trailing space/tab is
-                // otherwise re-encoded (`&#x20;`/`&#x9;`) at an edge or as a
-                // control char, which would break the literal's left boundary on
-                // reparse — emit the trailing space/tab run literally instead.
+                // Trailing guard: the whitespace right before a text directive
+                // is written raw, since a space or tab at the edge would
+                // otherwise be written as a reference, which opens no
+                // directive.
                 let render = |lead: &str, body: &str| {
                     let head = body.trim_end_matches([' ', '\t']);
                     // Whitespace that opens a line or a table cell stays
@@ -1876,8 +1627,7 @@ fn render_inlines(
                     let cell_start = context.table_cell && !opens_span && index == 0;
                     let whole_line_start =
                         (opens_block_line || cell_start) && lead.is_empty() && head.is_empty();
-                    let (escape_body, trailing_ws) = if before_literal_autolink && !whole_line_start
-                    {
+                    let (escape_body, trailing_ws) = if before_text_directive && !whole_line_start {
                         (head, &body[head.len()..])
                     } else {
                         (body, "")
@@ -1886,11 +1636,8 @@ fn render_inlines(
                     rendered.push_str(lead);
                     rendered.push_str(&escape_text_with_context(
                         escape_body,
-                        !raw_edges
-                            && lead.is_empty()
-                            && trailing_ws.len() != body.len()
-                            && at_line_start,
-                        !raw_edges && trailing_ws.is_empty() && at_line_end,
+                        lead.is_empty() && trailing_ws.len() != body.len() && at_line_start,
+                        trailing_ws.is_empty() && at_line_end,
                         text_context,
                     ));
                     rendered.push_str(trailing_ws);
@@ -1917,67 +1664,6 @@ fn render_inlines(
                         rendered = unescape_edge(&rendered, edge, at_start, at_end);
                     }
                 }
-                // Leading guard: text right after a literal autolink must not
-                // extend its URL on reparse. When it would, its first char is
-                // written in the first form the URL scan stops at.
-                if let Some((original, tail)) = autolink_before {
-                    let following = inlines.get(index + 1).map_or(String::new(), plain_spelling);
-                    let keeps = |rendered: &str| {
-                        text_keeps_literal_autolink(
-                            original,
-                            &format!("{tail}{rendered}"),
-                            &following,
-                        )
-                    };
-                    let encode_lead = context.autolink_edges == AutolinkEdges::EncodedLead
-                        && (index + 1 < inlines.len() || opens_span);
-                    if encode_lead || !keeps(&rendered) {
-                        for (lead, rest) in leading_char_encodings(&node.value) {
-                            let candidate = render(&lead, rest);
-                            if keeps(&candidate) {
-                                rendered = candidate;
-                                break;
-                            }
-                        }
-                    }
-                }
-                // A scheme char ending the text would join the scheme of a
-                // literal autolink after it (`://x` or `p://x` under the
-                // relaxed dialect).
-                if inlines
-                    .get(index + 1)
-                    .and_then(literal_autolink_original)
-                    .is_some_and(|original| {
-                        let scheme = original
-                            .bytes()
-                            .take_while(|byte| {
-                                byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
-                            })
-                            .count();
-                        original[scheme..].starts_with("://")
-                    })
-                {
-                    // A relaxed scheme opens with a letter, so a run of
-                    // scheme chars without one joins nothing.
-                    let scheme_run = &rendered[rendered
-                        .trim_end_matches(|char: char| {
-                            char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-')
-                        })
-                        .len()..];
-                    if let Some(last) = rendered.chars().next_back().filter(|char| {
-                        (char.is_ascii_alphanumeric() || matches!(char, '+' | '.' | '-'))
-                            && scheme_run.bytes().any(|byte| byte.is_ascii_alphabetic())
-                    }) {
-                        if !ends_with_unescaped(&rendered, last) || last.is_ascii_alphanumeric() {
-                            if last.is_ascii_alphanumeric() {
-                                rendered.pop();
-                                rendered.push_str(&alloc::format!("&#x{:X};", last as u32));
-                            }
-                        } else {
-                            rendered.insert(rendered.len() - 1, '\\');
-                        }
-                    }
-                }
                 // An escaped backtick still closes a code span that a raw
                 // backtick before it opens; a character reference does not.
                 if raw_backtick_before && rendered.contains("\\`") {
@@ -1992,18 +1678,9 @@ fn render_inlines(
                 {
                     rendered.insert(0, '\\');
                 }
-                // An `@` ending the text would open an email whose domain the
-                // literal autolink after it writes.
-                if inlines.get(index + 1).is_some_and(is_gfm_literal_autolink)
-                    && rendered.ends_with('@')
-                {
-                    rendered.pop();
-                    rendered.push_str("&#x40;");
-                }
-                // A `:` ending the text would open a shortcode that a `:` in
-                // the literal autolink after it closes, or that a span after it,
-                // or the end of the span around it, names with its `++` or `_`
-                // delimiters.
+                // A `:` ending the text would open a shortcode that a span
+                // after it, or the end of the span around it, names with its
+                // `++` or `_` delimiters.
                 let names_shortcode = written_later.contains(':')
                     && match inlines.get(index + 1) {
                         Some(
@@ -2015,13 +1692,7 @@ fn render_inlines(
                         Some(_) => false,
                         None => matches!(enclosed, Some('+' | '_')),
                     };
-                if (inlines
-                    .get(index + 1)
-                    .and_then(literal_autolink_original)
-                    .is_some()
-                    || names_shortcode)
-                    && ends_with_unescaped(&rendered, ':')
-                {
+                if names_shortcode && ends_with_unescaped(&rendered, ':') {
                     rendered.insert(rendered.len() - 1, '\\');
                 }
                 output.push_str(&rendered);
@@ -2266,20 +1937,28 @@ fn render_inlines(
                 output.push_str(&fence);
             }
             Inline::Link(node) => {
-                escape_trailing_bang(&mut output);
-                output.push('[');
-                output.push_str(&render_inlines(memo, &node.children, options, context)?);
-                output.push_str("](");
-                output.push_str(&serialize_destination_kind(
-                    &node.destination,
-                    node.destination_kind,
-                    context,
-                ));
-                if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
-                    output.push(' ');
-                    output.push_str(&serialize_title_kind(title, title_kind, context));
+                // A link that an angle-bracket autolink writes is written as
+                // one.
+                if let Some(uri) = autolink_uri(node) {
+                    output.push('<');
+                    output.push_str(uri);
+                    output.push('>');
+                } else {
+                    escape_trailing_bang(&mut output);
+                    output.push('[');
+                    output.push_str(&render_inlines(memo, &node.children, options, context)?);
+                    output.push_str("](");
+                    output.push_str(&serialize_destination_kind(
+                        &node.destination,
+                        node.destination_kind,
+                        context,
+                    ));
+                    if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
+                        output.push(' ');
+                        output.push_str(&serialize_title_kind(title, title_kind, context));
+                    }
+                    output.push(')');
                 }
-                output.push(')');
             }
             Inline::Image(node) => {
                 output.push_str("![");
@@ -2320,37 +1999,6 @@ fn render_inlines(
                     &reference_explicit_label(node.meta.span.is_some(), &node.label, context),
                 );
             }
-            Inline::Autolink(node) => match &node.kind {
-                AutolinkKind::Angle => {
-                    output.push('<');
-                    output.push_str(&node.destination);
-                    output.push('>');
-                }
-                // A GFM literal autolink re-emits its original source text,
-                // which re-parses to the same literal (the synthesized
-                // `http://`/`mailto:` destination is reconstructed on parse).
-                AutolinkKind::GfmLiteral { original } => {
-                    // Bare-email literals (`destination` is the original with a
-                    // synthesized `mailto:` prefix) re-anchor leftward over
-                    // email-local chars on reparse; guard the preceding char.
-                    let is_bare_email = node.destination == alloc::format!("mailto:{original}");
-                    let follows_literal_email_plus = original.starts_with('+')
-                        && index
-                            .checked_sub(1)
-                            .is_some_and(|prev| is_gfm_literal_email(&inlines[prev]));
-                    // A span's closing delimiter run is read before the
-                    // email, so only a text's last char can join it.
-                    let after_span = index
-                        .checked_sub(1)
-                        .is_some_and(|prev| span_children(&inlines[prev]).is_some());
-                    if is_bare_email && !follows_literal_email_plus && !after_span {
-                        escape_trailing_email_local(&mut output);
-                    } else {
-                        escape_trailing_less_than(&mut output);
-                    }
-                    output.push_str(original);
-                }
-            },
             Inline::Html(node) => output.push_str(&node.value),
             // A break that opens a line, as `&#x20;\n` and `&#x20; \n` parse
             // (the whitespace before a line ending is dropped), is written the

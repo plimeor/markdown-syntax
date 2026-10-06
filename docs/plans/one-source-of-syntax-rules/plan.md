@@ -317,7 +317,7 @@ Specs:
   - block-syntax Spoilers in table rows.
 - [x] 1.3 Add `WikiLink.embed`: parse `![[…]]`, serialize it, and render `data-wikilink-embed`. Verified by inline-syntax "Wiki embeds", serialization "Wiki embed" and "Bang before a wiki link", and html-rendering "Wiki embeds are marked".
 - [x] 1.4 Add `SerializeOptions::syntax`, used by the current read-back in place of the preset cascade. Round-trip fixtures pass their profile's options. Verified by `cargo test --test fixtures` and serialization "Content that reads back only under its preset".
-- [ ] 1.5 Fold `Inline::Autolink`/`AutolinkKind` into `Link` across the parser, `validate.rs`, `html/`, `source_map.rs`, and `nul_replacement.rs`. The current serializer writes these through its `Link` path until 3.5. Verified by the inline-syntax Literal autolinks "Bare URL" and Angle-bracket autolink URI scenarios, and by regenerated, read goldens.
+- [x] 1.5 Fold `Inline::Autolink`/`AutolinkKind` into `Link` across the parser, `validate.rs`, `html/`, `source_map.rs`, and `nul_replacement.rs`. The current serializer writes these through its `Link` path until 3.5. Verified by the inline-syntax Literal autolinks "Bare URL" and Angle-bracket autolink URI scenarios, and by regenerated, read goldens.
 
 ### 2. Block parser on an open-block stack
 - [ ] 2.1 Line loop with the open-block stack for block quotes, list items, and paragraphs with lazy continuation, spans through `source_map.rs`. Add `nested_containers_match_the_reference` with every parse case listed in #11 and commonmark.js's HTML for it, noting where micromark differs. Verified by the block-syntax "One pass over open blocks" and CommonMark blocks scenarios.
