@@ -2092,4 +2092,31 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn adjacent_strongs_split_wherever_their_inlines_are_written() {
+        // Without a read-back, the plain rendering itself keeps them apart.
+        for source in [
+            "| h |\n| - |\n| **a**__b__ |",
+            "::d[**a**__b__]",
+            "Term **a**__b__\n: def",
+            "Term\n: **a**__b__",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn prose_beside_spans_keeps_its_plain_spelling() {
+        for source in [
+            "**Note:** use snake_case: here",
+            "*Warning:* set MY_VAR: 1",
+            "a +\nb + c",
+            "a =\nb = c",
+            "if a == b\nthen c== d",
+            "**See [docs] and `cfg`** then use \\` quote\n\n[docs]: /u",
+        ] {
+            assert_eq!(assert_round_trips(source), format!("{source}\n"));
+        }
+    }
 }

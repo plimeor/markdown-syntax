@@ -1387,6 +1387,13 @@ struct InlineSerializeContext {
     /// raw label, which an escaped backtick after it could close as a code
     /// span.
     raw_backtick_before: bool,
+    /// The delimiter chars of the spans around the inlines, at every level.
+    inside: DelimiterChars,
+    /// The delimiter char of the span whose content the inlines are.
+    enclosed: Option<char>,
+    /// For a text, the `+` or `=` of a `++` or `==` delimiter written right
+    /// before and right after it.
+    text_edges: (Option<char>, Option<char>),
 }
 
 /// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
@@ -1516,6 +1523,9 @@ impl InlineSerializeContext {
             raw_edge: None,
             autolink_edges: AutolinkEdges::Plain,
             raw_backtick_before: false,
+            inside: DelimiterChars(0),
+            enclosed: None,
+            text_edges: (None, None),
         }
     }
 
@@ -1551,6 +1561,9 @@ impl InlineSerializeContext {
             raw_edge: None,
             autolink_edges: AutolinkEdges::Plain,
             raw_backtick_before: false,
+            inside: DelimiterChars(0),
+            enclosed: None,
+            text_edges: (None, None),
         }
     }
 
@@ -1562,6 +1575,15 @@ impl InlineSerializeContext {
     const fn avoiding_star_edges(self) -> Self {
         Self {
             avoid_star_edges: true,
+            ..self
+        }
+    }
+
+    /// For the content of a span delimited by `delimiter`.
+    fn enclosed_by(self, delimiter: char) -> Self {
+        Self {
+            inside: self.inside.union(DelimiterChars::of_char(delimiter)),
+            enclosed: Some(delimiter),
             ..self
         }
     }
@@ -1765,6 +1787,18 @@ impl RenderMemo {
         options: &SerializeOptions,
         context: InlineSerializeContext,
     ) -> Result<String, SerializeError> {
+        // Only content holding a span can double its work by nesting;
+        // rendering other content twice is cheaper than keeping it.
+        let nests = inlines.iter().any(|inline| {
+            span_children(inline).is_some()
+                || matches!(
+                    inline,
+                    Inline::Image(_) | Inline::ImageReference(_) | Inline::TextDirective(_)
+                )
+        });
+        if !nests {
+            return render_inlines(self, inlines, options, context);
+        }
         let key = (inlines.as_ptr() as usize, inlines.len(), context);
         if let Some(rendered) = self.0.get(&key) {
             return Ok(rendered.clone());
@@ -1783,11 +1817,14 @@ fn render_inlines(
 ) -> Result<String, SerializeError> {
     let opens_line = context.opens_line;
     let opens_span = context.opens_span;
+    let enclosed = context.enclosed;
     // Nested inlines follow their parent's opening delimiter.
     let base_context = InlineSerializeContext {
         opens_line: false,
         text_opens_line: false,
         opens_span: false,
+        enclosed: None,
+        text_edges: (None, None),
         ..context
     };
     let mut output = String::new();
@@ -1867,8 +1904,22 @@ fn render_inlines(
                 let at_line_start = output_line.len(&output) == 0;
                 let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
                 let at_line_end = text_is_at_line_end(inlines, index);
+                let doubled_delimiter = |inline: &Inline| match inline {
+                    Inline::Insert(_) => Some('+'),
+                    Inline::Mark(_) => Some('='),
+                    _ => None,
+                };
+                let edge_before = match index.checked_sub(1) {
+                    Some(previous) => doubled_delimiter(&inlines[previous]),
+                    None => enclosed.filter(|_| opens_span),
+                };
+                let edge_after = match inlines.get(index + 1) {
+                    Some(next) => doubled_delimiter(next),
+                    None => enclosed,
+                };
                 let text_context = InlineSerializeContext {
                     text_opens_line: opens_block_line,
+                    text_edges: (edge_before, edge_after),
                     ..context
                 };
 
@@ -2023,7 +2074,7 @@ fn render_inlines(
                             | Inline::Emphasis(_),
                         ) => true,
                         Some(_) => false,
-                        None => written_later.contains('+') || written_later.contains('_'),
+                        None => matches!(enclosed, Some('+' | '_')),
                     };
                 if (inlines
                     .get(index + 1)
@@ -2049,7 +2100,10 @@ fn render_inlines(
                 let children = memo.render(
                     &node.children,
                     options,
-                    context.inside_underscore_emphasis().opening_span(),
+                    context
+                        .inside_underscore_emphasis()
+                        .opening_span()
+                        .enclosed_by('_'),
                 )?;
                 // An escaped `_` at an edge joins no run.
                 let touches_underscore =
@@ -2114,24 +2168,28 @@ fn render_inlines(
                     options,
                     context.avoiding_star_edges().opening_span(),
                 )?;
-                // A `**` right after a `*` that closes a span would join its
-                // run, so the read-back choice writes the strong with `__`
-                // there when `_` can flank and its content does not touch
-                // `_`. The plain rendering keeps `**`: `__` reparses as
-                // `Underline` when that construct is enabled, which the
-                // serializer has no signal for.
-                // So is a strong opening or closing its parent's run, which
-                // its `**` would lengthen.
+                // A `**` right after a closing `**` joins it into a run of
+                // four, which by the rule of three closes neither strong, so
+                // the strong is written with `__` there when `_` can flank
+                // and its content does not touch `_`. After a lone closing
+                // `*` the run of three splits as written, and `__` would read
+                // back as `Underline` where that construct is enabled, so
+                // only the read-back choices write `__` there, or at the edge
+                // of the run around the strong.
+                let raw_star_edge = context.raw_edge == Some('*');
+                let after_strong = ends_with_unescaped(&output, '*')
+                    && ends_with_unescaped(&output[..output.len() - 1], '*')
+                    && !raw_star_edge;
                 let edge_of_run =
                     context.inside_run() && (index == 0 || index + 1 == inlines.len());
-                let after_star = matches!(
-                    context.run_style,
-                    RunStyle::StrongUnderscore | RunStyle::EdgeStrongUnderscore
-                ) && ((ends_with_unescaped(&output, '*')
-                    && context.raw_edge != Some('*'))
-                    || (edge_of_run && context.run_style == RunStyle::EdgeStrongUnderscore)
-                    || children.starts_with('*')
-                    || children.ends_with('*'));
+                let after_star = after_strong
+                    || (matches!(
+                        context.run_style,
+                        RunStyle::StrongUnderscore | RunStyle::EdgeStrongUnderscore
+                    ) && ((ends_with_unescaped(&output, '*') && !raw_star_edge)
+                        || (edge_of_run && context.run_style == RunStyle::EdgeStrongUnderscore)
+                        || children.starts_with('*')
+                        || children.ends_with('*')));
                 // A `_` opening the next text is escaped beside the run.
                 let underscore_fits = !children.starts_with('_')
                     && !ends_with_unescaped(&children, '_')
@@ -2161,7 +2219,7 @@ fn render_inlines(
                     memo,
                     &node.children,
                     options,
-                    context.opening_span(),
+                    context.opening_span().enclosed_by('_'),
                 )?);
                 output.push_str("__");
             }
@@ -2186,7 +2244,7 @@ fn render_inlines(
                     memo,
                     &node.children,
                     options,
-                    context.opening_span().delimited_by('+'),
+                    context.opening_span().delimited_by('+').enclosed_by('+'),
                 )?);
                 output.push_str("++");
             }
@@ -2196,7 +2254,7 @@ fn render_inlines(
                     memo,
                     &node.children,
                     options,
-                    context.opening_span().delimited_by('='),
+                    context.opening_span().delimited_by('=').enclosed_by('='),
                 )?);
                 output.push_str("==");
             }
@@ -2461,9 +2519,15 @@ fn render_inlines(
                 }
             }
         }
-        if holds_unescaped_backtick(&output[segment_start..]) && holds_reference(inline) {
-            raw_backtick_before = true;
-        }
+        // A reference writes its raw label, whose backtick is unescaped; a
+        // span is judged by the labels of the references inside it, since
+        // its output also holds its code spans' backticks.
+        raw_backtick_before |= match inline {
+            Inline::FootnoteReference(_) | Inline::LinkReference(_) | Inline::ImageReference(_) => {
+                holds_unescaped_backtick(&output[segment_start..])
+            }
+            other => holds_raw_label_backtick(other),
+        };
     }
     Ok(output)
 }
@@ -2476,13 +2540,21 @@ fn holds_unescaped_backtick(written: &str) -> bool {
         .any(|(index, _)| !ends_with_unescaped(&written[..index], '\\'))
 }
 
-/// Whether `inline` is a reference or a span holding one, whose raw label
-/// the serializer writes as its source.
-fn holds_reference(inline: &Inline) -> bool {
+/// Whether `inline` is a reference whose raw label holds an unescaped
+/// backtick, or a span holding one.
+fn holds_raw_label_backtick(inline: &Inline) -> bool {
     match inline {
-        Inline::FootnoteReference(_) | Inline::LinkReference(_) | Inline::ImageReference(_) => true,
-        Inline::Image(node) => node.alt.iter().any(holds_reference),
-        other => span_children(other).is_some_and(|children| children.iter().any(holds_reference)),
+        Inline::FootnoteReference(node) => holds_unescaped_backtick(&node.label),
+        Inline::LinkReference(node) => {
+            holds_unescaped_backtick(&node.label)
+                || node.children.iter().any(holds_raw_label_backtick)
+        }
+        Inline::ImageReference(node) => {
+            holds_unescaped_backtick(&node.label) || node.alt.iter().any(holds_raw_label_backtick)
+        }
+        Inline::Image(node) => node.alt.iter().any(holds_raw_label_backtick),
+        other => span_children(other)
+            .is_some_and(|children| children.iter().any(holds_raw_label_backtick)),
     }
 }
 
@@ -2990,16 +3062,16 @@ fn escape_text_with_context(
             // autolink's local part, so a run is escaped whole.
             '+' if run_escaped(view, offset, b'+', &mut scan, &mut plus_run, |scan, at| {
                 text_attention_delimiter_can_start(view, at, "++", false, scan)
-                    || text_doubled_delimiter_can_close(view, at, "++", scan)
-                    || text_edge_joins_delimiter(view, at, '+', scan)
+                    || text_doubled_delimiter_can_close(view, at, "++", context.inside)
+                    || text_edge_joins_delimiter(view, at, '+', context.text_edges)
             }) =>
             {
                 output.push('\\');
                 output.push(char);
             }
             '=' if text_attention_delimiter_can_start(view, offset, "==", false, &mut scan)
-                || text_doubled_delimiter_can_close(view, offset, "==", &scan)
-                || text_edge_joins_delimiter(view, offset, '=', &scan) =>
+                || text_doubled_delimiter_can_close(view, offset, "==", context.inside)
+                || text_edge_joins_delimiter(view, offset, '=', context.text_edges) =>
             {
                 output.push('\\');
                 output.push(char);
@@ -3042,25 +3114,31 @@ fn text_attention_delimiter_can_start(
 }
 
 /// Whether the `+` or `=` at `offset` opens or ends the text beside a `++` or
-/// `==` delimiter written before or after it, whose run it would lengthen.
-fn text_edge_joins_delimiter(input: &str, offset: usize, char: char, scan: &TextScan) -> bool {
-    (offset == 0 && scan.written_before.contains(char))
-        || (offset + char.len_utf8() == input.len() && scan.written_later.contains(char))
+/// `==` delimiter written right before or after it (`edges`), whose run it
+/// would lengthen.
+fn text_edge_joins_delimiter(
+    input: &str,
+    offset: usize,
+    char: char,
+    edges: (Option<char>, Option<char>),
+) -> bool {
+    (offset == 0 && edges.0 == Some(char))
+        || (offset + char.len_utf8() == input.len() && edges.1 == Some(char))
 }
 
-/// Whether the `++` or `==` at `offset` could close one written before the
-/// text, such as the delimiter of the insert or mark the text sits in.
+/// Whether the `++` or `==` at `offset` could close an insert or mark the
+/// text sits in (`inside`).
 fn text_doubled_delimiter_can_close(
     input: &str,
     offset: usize,
     marker: &str,
-    scan: &TextScan,
+    inside: DelimiterChars,
 ) -> bool {
     input[offset..].starts_with(marker)
         && marker
             .chars()
             .next()
-            .is_some_and(|char| scan.written_before.contains(char))
+            .is_some_and(|char| inside.contains(char))
         && text_delimiter_can_close(input, offset, marker.len(), false)
 }
 
