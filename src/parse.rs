@@ -3486,6 +3486,7 @@ fn parse_inline_content(
                     index,
                     options.constructs.gfm_autolink_literal,
                     options.constructs.relaxed_autolinks,
+                    wikilinks_enabled(options),
                     &mut pass.scan.literal_autolinks,
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
@@ -3783,6 +3784,7 @@ fn parse_inline_content(
                 index,
                 options.constructs.gfm_autolink_literal,
                 options.constructs.relaxed_autolinks,
+                wikilinks_enabled(options),
                 &mut pass.scan.literal_autolinks,
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
@@ -6148,11 +6150,16 @@ fn is_email_autolink(input: &str) -> bool {
 // returned destination is the synthesized href (a `http://`/`mailto:` prefix
 // may be prepended); the caller keeps `input[index..end]` as the visible
 // original.
+fn wikilinks_enabled(options: &SyntaxOptions) -> bool {
+    options.constructs.wikilink_title_after_pipe || options.constructs.wikilink_title_before_pipe
+}
+
 fn parse_literal_autolink(
     input: &str,
     index: usize,
     gfm: bool,
     relaxed: bool,
+    wikilinks: bool,
     scan: &mut LiteralAutolinkScan,
 ) -> Option<(usize, String)> {
     let rest = &input[index..];
@@ -6182,7 +6189,13 @@ fn parse_literal_autolink(
                 // The URL extent is scanned from the very start (after `://`) and the
                 // trailing trim runs over the whole URL. Relaxed mode balances
                 // brackets/braces so `[abc]`/`{abc}`/IPv6 hosts stay in the URL.
-                let end = autolink_url_end(input, index + scheme_len, index + scheme_len, relaxed);
+                let end = autolink_url_end(
+                    input,
+                    index + scheme_len,
+                    index + scheme_len,
+                    relaxed,
+                    wikilinks,
+                );
                 if end <= index + scheme_len {
                     return None;
                 }
@@ -6211,7 +6224,7 @@ fn parse_literal_autolink(
                 return None;
             }
             check_domain(rest, false)?;
-            let end = autolink_url_end(input, index, index, relaxed);
+            let end = autolink_url_end(input, index, index, relaxed, wikilinks);
             if end <= index || (!relaxed && end <= index + 3 && !literal_starts_line(input, index))
             {
                 return None;
@@ -6252,7 +6265,7 @@ fn parse_literal_autolink(
                 if next.is_none_or(|char| char.is_whitespace()) && after_slashes == 3 {
                     return None;
                 }
-                let end = autolink_url_end(input, body_start, body_start, true);
+                let end = autolink_url_end(input, body_start, body_start, true, wikilinks);
                 if end > index {
                     if literal_autolink_suppressed_by_link_label(
                         input,
@@ -6315,8 +6328,8 @@ fn literal_scheme_prefix_ok(input: &str, index: usize) -> bool {
 }
 
 // The char before a `www.` literal must be one of cmark-gfm's accepted ASCII
-// delimiters or ordinary Markdown layout whitespace. Unicode whitespace is not
-// a start delimiter for this branch.
+// delimiters or ordinary Markdown layout whitespace. As on GitHub, other
+// Unicode whitespace is not a start delimiter for this branch.
 fn literal_www_prefix_ok(input: &str, index: usize) -> bool {
     if index == 0 {
         return true;
@@ -6512,12 +6525,21 @@ fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
     }
 }
 
-// Forward scan from `start` for the URL extent: every char up to whitespace,
-// `<`, or `]` ends the URL. CommonMark allows `>` and `[` inside (the renderer
-// percent-encodes them); a `]` is additionally treated as a hard URL boundary
-// (autolink-3), so a `]` ends the scan and is never part of the link.
-// `trim_from` is where the trailing trim may reach (the URL start).
-fn autolink_url_end(input: &str, start: usize, trim_from: usize, balanced: bool) -> usize {
+// Forward scan from `start` for the URL extent: Unicode whitespace, `<`, a
+// non-ASCII char in CommonMark's Unicode punctuation set (full-width `，` or
+// `。`) other than the replacement char, `[[` with wikilinks enabled, or `]`
+// ends the URL. CommonMark allows
+// `>` and `[` inside (the renderer percent-encodes them); a `]` is
+// additionally treated as a hard URL boundary (autolink-3), so a `]` ends the
+// scan and is never part of the link. `trim_from` is where the trailing trim
+// may reach (the URL start).
+fn autolink_url_end(
+    input: &str,
+    start: usize,
+    trim_from: usize,
+    balanced: bool,
+    wikilinks: bool,
+) -> usize {
     let bytes = input.as_bytes();
     let mut end = start;
     // Relaxed (cmark-gfm) URL extents balance `[`/`]` and `{`/`}` so an IPv6
@@ -6531,7 +6553,14 @@ fn autolink_url_end(input: &str, start: usize, trim_from: usize, balanced: bool)
     let mut strict_has_open_bracket = false;
     let mut strict_inside_backticks = false;
     for (offset, char) in input[start..].char_indices() {
-        if char.is_whitespace() || char == '<' || is_autolink_terminating_control(char) {
+        if char.is_whitespace()
+            || char == '<'
+            || is_autolink_terminating_control(char)
+            || (!char.is_ascii()
+                && char != '\u{FFFD}'
+                && crate::unicode_punctuation::is_unicode_punctuation(char))
+            || (wikilinks && input[start + offset..].starts_with("[["))
+        {
             break;
         }
         if balanced {
@@ -6835,8 +6864,10 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
 
 fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
     let start = input[..end]
-        .rfind(char::is_whitespace)
-        .map_or(0, |offset| offset + 1);
+        .char_indices()
+        .rev()
+        .find(|(_, char)| char.is_whitespace())
+        .map_or(0, |(offset, char)| offset + char.len_utf8());
     let candidate = &input[start..end];
     let Some(at) = candidate.rfind('@') else {
         return false;

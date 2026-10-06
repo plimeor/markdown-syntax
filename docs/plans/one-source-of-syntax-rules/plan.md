@@ -356,7 +356,7 @@ Specs:
 - [x] 3.6 Add `tests/serialize_roundtrip_fuzz.rs` with inline, block-oriented, and emphasis-heavy generators and their seeds recorded, run in each dialect. Verified by serialization "Seeded round-trip generators" passing.
 
 ### 4. Inline boundaries
-- [ ] 4.1 Literal and relaxed-scheme autolink boundary: Unicode whitespace on char boundaries, the non-ASCII punctuation/symbol stop, and the `[[` stop. Add a seeded no-panic generator over Unicode whitespace and autolink pieces. Verified by the inline-syntax Literal autolinks scenarios and the public-api Infallible parse scenarios.
+- [x] 4.1 Literal and relaxed-scheme autolink boundary: Unicode whitespace on char boundaries, the non-ASCII punctuation/symbol stop, and the `[[` stop. Add a seeded no-panic generator over Unicode whitespace and autolink pieces. Verified by the inline-syntax Literal autolinks scenarios and the public-api Infallible parse scenarios.
 - [ ] 4.2 Add `tools/gemoji/` and a generated `src/gemoji.rs` at a pinned tag with gemoji's MIT notice, plus `Shortcode::glyph()`. The parser applies the name rule and the source-char boundary, validation rejects unknown names, and the HTML renderer uses `glyph()`. Verified by:
   - the inline-syntax shortcode scenarios;
   - public-api "Shortcode glyph";

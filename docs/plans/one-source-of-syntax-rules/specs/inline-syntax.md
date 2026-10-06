@@ -166,9 +166,11 @@ holding the matched source text and whose destination is that text with
 `http://` or `mailto:` prepended where the form needs it. A literal autolink
 of either kind SHALL end before the first Unicode whitespace char, `<`, or
 non-ASCII char in CommonMark's Unicode punctuation set (the Unicode `P` and
-`S` categories), and, with wikilinks enabled, before `[[`;
-the GFM trailing-punctuation trimming then applies to what remains. Every
-boundary check SHALL read whitespace as Unicode whitespace.
+`S` categories) other than the replacement char U+FFFD, and, with wikilinks
+enabled, before `[[`; the GFM trailing-punctuation trimming then applies to
+what remains. The check on the text before an email SHALL read whitespace as
+Unicode whitespace on char boundaries; a `www.` literal SHALL start, as on
+GitHub, only after one of `*_~([]` or a space, tab, or line ending.
 
 #### Scenario: Bare URL
 - **WHEN** `"see https://example.com"` is parsed with the GFM preset

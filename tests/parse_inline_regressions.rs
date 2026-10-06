@@ -831,3 +831,131 @@ mod autolinks_as_links {
         );
     }
 }
+
+mod literal_autolink_boundaries {
+    //! A literal autolink ends before Unicode whitespace, `<`, a non-ASCII
+    //! char in CommonMark's Unicode punctuation set, and, with wikilinks
+    //! enabled, `[[`; every boundary check reads whitespace as Unicode
+    //! whitespace, on char boundaries.
+
+    use markdown_syntax::prelude::*;
+
+    /// The paragraph's inlines, each as its kind and its text or target.
+    fn shape(source: &str, options: &SyntaxOptions) -> Vec<String> {
+        let document = options.parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        paragraph
+            .children
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => format!("text {}", text.value),
+                Inline::Link(link) => format!("link {}", link.destination),
+                Inline::WikiLink(wiki) => format!("wiki {}", wiki.target),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_literal_autolink_ends_where_the_spec_says() {
+        let default = SyntaxOptions::default();
+        for (source, expected) in [
+            (
+                "见 https://example.com/page，然后 [[笔记]]",
+                &[
+                    "text 见 ",
+                    "link https://example.com/page",
+                    "text ，然后 ",
+                    "wiki 笔记",
+                ][..],
+            ),
+            (
+                "www.example.com。下一句",
+                &["link http://www.example.com", "text 。下一句"],
+            ),
+            (
+                "see https://example.com/a[[b]] end",
+                &[
+                    "text see ",
+                    "link https://example.com/a",
+                    "wiki b",
+                    "text  end",
+                ],
+            ),
+            (
+                "https://example.com/page#section、[[笔记#小节]]、",
+                &[
+                    "link https://example.com/page#section",
+                    "text 、",
+                    "wiki 笔记#小节",
+                    "text 、",
+                ],
+            ),
+            (
+                "见 smb://host/share，然后",
+                &["text 见 ", "link smb://host/share", "text ，然后"],
+            ),
+        ] {
+            assert_eq!(shape(source, &default), expected, "{source:?}");
+        }
+        assert_eq!(
+            shape(
+                "https://zh.wikipedia.org/wiki/中文 x",
+                &SyntaxOptions::gfm()
+            ),
+            ["link https://zh.wikipedia.org/wiki/中文", "text  x"]
+        );
+        assert_eq!(
+            shape("see https://example.com", &SyntaxOptions::gfm()),
+            ["text see ", "link https://example.com"]
+        );
+    }
+
+    #[test]
+    fn a_no_break_space_before_an_email_like_run_is_text() {
+        for options in [SyntaxOptions::default(), SyntaxOptions::gfm()] {
+            assert_eq!(shape("\u{a0}e+@", &options), ["text \u{a0}e+@"]);
+        }
+    }
+
+    /// A small deterministic xorshift generator, so failures reproduce.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    #[test]
+    fn generated_whitespace_and_autolink_pieces_never_panic() {
+        const PIECES: &[&str] = &[
+            " ", "\t", "\n", "\u{a0}", "\u{85}", "\u{1680}", "\u{2000}", "\u{2007}", "\u{200a}",
+            "\u{2028}", "\u{2029}", "\u{202f}", "\u{205f}", "\u{3000}", "\u{b}", "\u{c}", "www.",
+            "://", "http", "https://", "mailto:", "@", ".", "+", "_", "-", "a", "b", "x", "，",
+            "。", "、", "：", "[[", "]]", "<", ">", "(", ")",
+        ];
+        // Recorded seed of this generator.
+        let mut rng = Rng(0x0a17_0115);
+        for options in [
+            SyntaxOptions::commonmark(),
+            SyntaxOptions::gfm(),
+            SyntaxOptions::default(),
+            SyntaxOptions::mdx(),
+        ] {
+            for _ in 0..4_000 {
+                let count = 1 + rng.below(10);
+                let input: String = (0..count)
+                    .map(|_| PIECES[rng.below(PIECES.len())])
+                    .collect();
+                let document = options.parse(&input).document;
+                let _ = document.to_markdown();
+            }
+        }
+    }
+}
