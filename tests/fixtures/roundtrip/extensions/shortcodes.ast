@@ -16,8 +16,7 @@ Document
     Text ":"
     Shortcode "smile"
   Paragraph
-    Text "Unknown names stay syntax: "
-    Shortcode "diego"
+    Text "Unknown names are no shortcodes: :diego:"
   Paragraph
     Text "Specials: "
     Shortcode "+1"

@@ -1,0 +1,12 @@
+[package]
+name = "gemoji-table"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Generates src/gemoji.rs, the crate's shortcode table, from github/gemoji's db/emoji.json"
+
+# Its own workspace: the library's build never sees this tool.
+[workspace]
+
+[dependencies]
+serde_json = "1"

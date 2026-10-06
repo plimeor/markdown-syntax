@@ -23,6 +23,8 @@ pub enum DiagnosticCode {
     InvalidDirectiveName,
     /// A container directive (`:::name`) was never closed.
     UnclosedDirectiveContainer,
+    /// A directive attribute without a valid name was dropped.
+    InvalidDirectiveAttribute,
     /// Malformed MDX syntax.
     InvalidMdx,
     /// A strict-mode parse promoted a configured extension diagnostic to an error.
@@ -30,6 +32,8 @@ pub enum DiagnosticCode {
     /// AST validation failure (an invalid or unsupported node shape), the single
     /// code used by `Document::validate` and by serialize/HTML pre-validation.
     InvalidDocument,
+    /// A node has no Markdown that reads back as the same tree.
+    Unrepresentable,
 }
 
 /// A single diagnostic across every domain — parser, AST validation, and the

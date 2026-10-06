@@ -447,9 +447,9 @@ mod review_inline {
         );
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)]
+            [Inline::Link(autolink)]
                 if autolink.destination
-                    == "asd@012345678901234567890123456789012345678901234567890123456789012"
+                    == "mailto:asd@012345678901234567890123456789012345678901234567890123456789012"
         ));
     }
 
@@ -496,7 +496,7 @@ mod review_inline {
         let inlines = only_paragraph("www.aaa.bbb_bbb.ccc.ddd\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "http://www.aaa.bbb_bbb.ccc.ddd"
+            [Inline::Link(autolink)] if autolink.destination == "http://www.aaa.bbb_bbb.ccc.ddd"
         ));
     }
 
@@ -505,7 +505,7 @@ mod review_inline {
         let inlines = only_paragraph("a@a_b.c\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "mailto:a@a_b.c"
+            [Inline::Link(autolink)] if autolink.destination == "mailto:a@a_b.c"
         ));
     }
 
@@ -521,7 +521,7 @@ mod review_inline {
     #[test]
     fn hg2_literal_link_excludes_trailing_entity_run() {
         let inlines = only_paragraph("www.example.com&xxx;.\n", true);
-        let [Inline::Autolink(autolink), Inline::Text(rest)] = inlines.as_slice() else {
+        let [Inline::Link(autolink), Inline::Text(rest)] = inlines.as_slice() else {
             panic!("expected an autolink followed by literal text, got {inlines:?}");
         };
         assert_eq!(autolink.destination, "http://www.example.com");
@@ -533,7 +533,7 @@ mod review_inline {
         let inlines = only_paragraph("www.example.com&xxx\n", true);
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Autolink(autolink)] if autolink.destination == "http://www.example.com&xxx"
+            [Inline::Link(autolink)] if autolink.destination == "http://www.example.com&xxx"
         ));
     }
 
@@ -628,5 +628,498 @@ mod review_unicode {
             Inline::LinkReference(reference) => assert_eq!(reference.identifier, "ref"),
             other => panic!("expected a resolved link reference, got {other:?}"),
         }
+    }
+}
+
+mod escapes_and_references {
+    //! Backslash escapes and character references are always nodes of their
+    //! own; inside raw-text constructs they stay part of the raw text.
+
+    use markdown_syntax::prelude::*;
+
+    /// Inlines as tokens: text quoted, `Escape(c)`, `Ref(value)`, and other
+    /// nodes by kind.
+    fn shape(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => format!("{:?}", text.value),
+                Inline::Escape(escape) => format!("Escape({})", escape.value),
+                Inline::CharacterReference(reference) => format!("Ref({})", reference.value),
+                Inline::Code(code) => format!("Code({})", code.value),
+                Inline::Html(html) => format!("Html({})", html.value),
+                Inline::Math(math) => format!("Math({})", math.value),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn paragraph(source: &str) -> Vec<String> {
+        match parse(source).document.children.as_slice() {
+            [Block::Paragraph(paragraph)] => shape(&paragraph.children),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    fn first_cell(source: &str, options: &SyntaxOptions) -> Vec<String> {
+        match options.parse(source).document.children.as_slice() {
+            [Block::Table(table)] => shape(&table.rows[0].cells[0].children),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn escaped_punctuation_is_an_escape_node() {
+        assert_eq!(
+            paragraph("\\*not em\\* and \\#tag"),
+            [
+                "Escape(*)",
+                "\"not em\"",
+                "Escape(*)",
+                "\" and \"",
+                "Escape(#)",
+                "\"tag\""
+            ]
+        );
+    }
+
+    #[test]
+    fn a_numeric_character_reference_is_a_reference_node() {
+        assert_eq!(paragraph("&#35;tag"), ["Ref(#)", "\"tag\""]);
+    }
+
+    #[test]
+    fn a_backslash_inside_a_code_span_stays_raw() {
+        assert_eq!(paragraph("`\\*`"), ["Code(\\*)"]);
+    }
+
+    #[test]
+    fn an_escaped_pipe_in_a_cell_is_an_escape_in_text_and_a_pipe_in_raw_text() {
+        let gfm = SyntaxOptions::gfm();
+        assert_eq!(
+            first_cell("| a\\|b |\n|-|", &gfm),
+            ["\"a\"", "Escape(|)", "\"b\""]
+        );
+        assert_eq!(
+            first_cell("| <a b=\"x\\|y\"> |\n|-|", &gfm),
+            ["Html(<a b=\"x|y\">)"]
+        );
+        assert_eq!(
+            first_cell("$\\|$||\n-|-", &SyntaxOptions::default()),
+            ["Math(|)"]
+        );
+    }
+}
+
+mod wiki_embeds {
+    //! A `!` directly before a wikilink's `[[` makes it an embed.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph(source: &str) -> Vec<Inline> {
+        match parse(source).document.children.as_slice() {
+            [Block::Paragraph(paragraph)] => paragraph.children.clone(),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_embed_forms_past_the_bracket_nesting_limit() {
+        let source = "[x ".repeat(40) + "![[a]]";
+        let inlines = paragraph(&source);
+        let last = inlines.last().expect("inlines");
+        assert!(
+            matches!(last, Inline::WikiLink(link) if link.embed && link.meta.span == Some(Span::new(120, 126))),
+            "{last:?}"
+        );
+    }
+
+    #[test]
+    fn a_bang_before_a_wikilink_makes_an_embed_spanning_from_it() {
+        let inlines = paragraph("see ![[x.png]]");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Text(text), Inline::WikiLink(link)]
+                if text.value == "see "
+                    && link.target == "x.png"
+                    && link.embed
+                    && link.meta.span == Some(Span::new(4, 14))),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn an_escaped_bang_leaves_a_plain_wikilink() {
+        let inlines = paragraph("\\![[x.png]]");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Escape(bang), Inline::WikiLink(link)]
+                if bang.value == '!' && link.target == "x.png" && !link.embed),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_bang_before_brackets_that_form_no_wikilink_stays_text() {
+        let inlines = paragraph("![[x]");
+        assert!(
+            !inlines
+                .iter()
+                .any(|inline| matches!(inline, Inline::WikiLink(_))),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn an_embed_wins_over_an_image_with_a_destination() {
+        let inlines = paragraph("![[a]](u)");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::WikiLink(link), Inline::Text(rest)]
+                if link.embed && link.target == "a" && rest.value == "(u)"),
+            "{inlines:?}"
+        );
+    }
+}
+
+mod autolinks_as_links {
+    //! Literal and angle-bracket autolinks are `Link` nodes whose one child is
+    //! the URL as written.
+
+    use markdown_syntax::prelude::*;
+
+    fn only_link(source: &str, options: &SyntaxOptions) -> (String, String) {
+        let document = options.parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        let links: Vec<_> = paragraph
+            .children
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Link(link) => Some(link),
+                _ => None,
+            })
+            .collect();
+        let [link] = links.as_slice() else {
+            panic!("{source:?}: {paragraph:?}");
+        };
+        assert!(link.title.is_none());
+        assert_eq!(link.destination_kind, LinkDestinationKind::Bare);
+        let [Inline::Text(text)] = link.children.as_slice() else {
+            panic!("{source:?}: {link:?}");
+        };
+        (link.destination.clone(), text.value.clone())
+    }
+
+    #[test]
+    fn a_bare_url_is_a_link_whose_text_is_the_url() {
+        assert_eq!(
+            only_link("see https://example.com", &SyntaxOptions::gfm()),
+            ("https://example.com".into(), "https://example.com".into())
+        );
+        assert_eq!(
+            only_link("www.example.com", &SyntaxOptions::gfm()),
+            ("http://www.example.com".into(), "www.example.com".into())
+        );
+    }
+
+    #[test]
+    fn an_angle_bracket_autolink_is_a_link_whose_text_is_the_uri() {
+        let commonmark = SyntaxOptions::commonmark();
+        assert_eq!(
+            only_link("<http://a\u{a0}b>", &commonmark),
+            ("http://a\u{a0}b".into(), "http://a\u{a0}b".into())
+        );
+        assert_eq!(
+            only_link("<a@b.c>", &commonmark),
+            ("mailto:a@b.c".into(), "a@b.c".into())
+        );
+    }
+
+    #[test]
+    fn an_autolink_in_link_text_is_text() {
+        assert_eq!(
+            only_link("[http://a.b](u)", &SyntaxOptions::gfm()),
+            ("u".into(), "http://a.b".into())
+        );
+    }
+}
+
+mod literal_autolink_boundaries {
+    //! A literal autolink ends before Unicode whitespace, `<`, a non-ASCII
+    //! char in CommonMark's Unicode punctuation set, and, with wikilinks
+    //! enabled, `[[`; every boundary check reads whitespace as Unicode
+    //! whitespace, on char boundaries.
+
+    use markdown_syntax::prelude::*;
+
+    /// The paragraph's inlines, each as its kind and its text or target.
+    fn shape(source: &str, options: &SyntaxOptions) -> Vec<String> {
+        let document = options.parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        paragraph
+            .children
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => format!("text {}", text.value),
+                Inline::Link(link) => format!("link {}", link.destination),
+                Inline::WikiLink(wiki) => format!("wiki {}", wiki.target),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_literal_autolink_ends_where_the_spec_says() {
+        let default = SyntaxOptions::default();
+        for (source, expected) in [
+            (
+                "见 https://example.com/page，然后 [[笔记]]",
+                &[
+                    "text 见 ",
+                    "link https://example.com/page",
+                    "text ，然后 ",
+                    "wiki 笔记",
+                ][..],
+            ),
+            (
+                "www.example.com。下一句",
+                &["link http://www.example.com", "text 。下一句"],
+            ),
+            (
+                "see https://example.com/a[[b]] end",
+                &[
+                    "text see ",
+                    "link https://example.com/a",
+                    "wiki b",
+                    "text  end",
+                ],
+            ),
+            (
+                "https://example.com/page#section、[[笔记#小节]]、",
+                &[
+                    "link https://example.com/page#section",
+                    "text 、",
+                    "wiki 笔记#小节",
+                    "text 、",
+                ],
+            ),
+            (
+                "见 smb://host/share，然后",
+                &["text 见 ", "link smb://host/share", "text ，然后"],
+            ),
+        ] {
+            assert_eq!(shape(source, &default), expected, "{source:?}");
+        }
+        assert_eq!(
+            shape(
+                "https://zh.wikipedia.org/wiki/中文 x",
+                &SyntaxOptions::gfm()
+            ),
+            ["link https://zh.wikipedia.org/wiki/中文", "text  x"]
+        );
+        assert_eq!(
+            shape("see https://example.com", &SyntaxOptions::gfm()),
+            ["text see ", "link https://example.com"]
+        );
+    }
+
+    #[test]
+    fn a_no_break_space_before_an_email_like_run_is_text() {
+        for options in [SyntaxOptions::default(), SyntaxOptions::gfm()] {
+            assert_eq!(shape("\u{a0}e+@", &options), ["text \u{a0}e+@"]);
+        }
+    }
+
+    /// A small deterministic xorshift generator, so failures reproduce.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    #[test]
+    fn generated_whitespace_and_autolink_pieces_never_panic() {
+        const PIECES: &[&str] = &[
+            " ", "\t", "\n", "\u{a0}", "\u{85}", "\u{1680}", "\u{2000}", "\u{2007}", "\u{200a}",
+            "\u{2028}", "\u{2029}", "\u{202f}", "\u{205f}", "\u{3000}", "\u{b}", "\u{c}", "www.",
+            "://", "http", "https://", "mailto:", "@", ".", "+", "_", "-", "a", "b", "x", "，",
+            "。", "、", "：", "[[", "]]", "<", ">", "(", ")",
+        ];
+        // Recorded seed of this generator.
+        let mut rng = Rng(0x0a17_0115);
+        for options in [
+            SyntaxOptions::commonmark(),
+            SyntaxOptions::gfm(),
+            SyntaxOptions::default(),
+            SyntaxOptions::mdx(),
+        ] {
+            for _ in 0..4_000 {
+                let count = 1 + rng.below(10);
+                let input: String = (0..count)
+                    .map(|_| PIECES[rng.below(PIECES.len())])
+                    .collect();
+                let document = options.parse(&input).document;
+                let _ = document.to_markdown();
+            }
+        }
+    }
+}
+
+mod gemoji_shortcodes {
+    //! A shortcode names an entry of the pinned gemoji table, with no letter
+    //! or digit as the source char directly outside either colon.
+
+    use markdown_syntax::prelude::*;
+
+    fn inlines(source: &str) -> Vec<Inline> {
+        let document = parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        paragraph.children.clone()
+    }
+
+    fn shortcodes(source: &str) -> Vec<String> {
+        inlines(source)
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Shortcode(node) => Some(node.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_name_followed_by_a_colon_opens_no_text_directive() {
+        // As micromark reads it: the name of a text directive cannot run
+        // into a colon, so an unknown or blocked `:word:` stays text.
+        for source in ["a :not_an_emoji_name: b", "x :smile:b", ":smile:中"] {
+            let inlines = inlines(source);
+            assert!(
+                matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == source),
+                "{source:?}: {inlines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_gemoji_name_between_colons_is_a_shortcode() {
+        assert!(
+            matches!(&inlines("a :tada: b")[1], Inline::Shortcode(node) if node.name == "tada")
+        );
+        assert!(
+            matches!(&inlines("score :100: today")[1], Inline::Shortcode(node) if node.name == "100")
+        );
+    }
+
+    #[test]
+    fn a_letter_or_digit_beside_a_colon_or_an_unknown_name_is_no_shortcode() {
+        for source in [
+            "meet at 10:30:45 today",
+            "时间:10:30",
+            "a:smile:b",
+            "a :not_an_emoji_name: b",
+        ] {
+            assert_eq!(shortcodes(source), Vec::<String>::new(), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_character_reference_before_a_shortcode_leaves_it_a_shortcode() {
+        let inlines = inlines("&#97;:smile:");
+        assert!(
+            matches!(
+                inlines.as_slice(),
+                [Inline::CharacterReference(reference), Inline::Shortcode(shortcode)]
+                    if reference.value == "a" && shortcode.name == "smile"
+            ),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_shortcode_gives_its_glyph() {
+        let inlines = inlines(":tada:");
+        let [Inline::Shortcode(tada)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert_eq!(tada.glyph(), Some("\u{1F389}"));
+        let unknown = Shortcode {
+            meta: NodeMeta::default(),
+            name: "not_an_emoji_name".into(),
+        };
+        assert_eq!(unknown.glyph(), None);
+    }
+}
+
+mod underscore_beside_tilde {
+    //! A `_` run gets no strikethrough bonus beside a `~`.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn underscores_around_a_tilde_stay_text() {
+        for options in [SyntaxOptions::default(), SyntaxOptions::gfm()] {
+            let document = options.parse("d_~_").document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{document:?}");
+            };
+            assert!(
+                matches!(paragraph.children.as_slice(), [Inline::Text(text)] if text.value == "d_~_"),
+                "{paragraph:?}"
+            );
+        }
+    }
+}
+
+mod autolinks_inside_link_text {
+    //! An autolink keeps no open bracket from forming a link around it; one
+    //! in the label of a text directive inside link text is text, as in any
+    //! link text.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn an_autolink_in_a_directive_label_keeps_the_link_around_it() {
+        for source in ["[:abbr[<http://a>]](u)", "[:abbr[https://a.com]](u)"] {
+            let document = parse(source).document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{source:?}: {document:?}");
+            };
+            let [Inline::Link(link)] = paragraph.children.as_slice() else {
+                panic!("{source:?}: {:?}", paragraph.children);
+            };
+            assert_eq!(link.destination, "u");
+            let [Inline::TextDirective(directive)] = link.children.as_slice() else {
+                panic!("{source:?}: {:?}", link.children);
+            };
+            assert!(
+                matches!(directive.label.as_slice(), [Inline::Text(_)]),
+                "{source:?}: {:?}",
+                directive.label
+            );
+        }
+    }
+
+    #[test]
+    fn a_backslash_before_punctuation_ends_a_literal_autolink() {
+        // cmark-gfm keeps `\*x` inside the URL. Here it ends the URL, so the
+        // escapes the serializer writes after an autolink read back as text.
+        let document = SyntaxOptions::gfm().parse("www.a.com\\*x").document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        assert!(
+            matches!(paragraph.children.as_slice(), [Inline::Link(link), Inline::Escape(escape), Inline::Text(_)]
+                if link.destination == "http://www.a.com" && escape.value == '*'),
+            "{:?}",
+            paragraph.children
+        );
     }
 }

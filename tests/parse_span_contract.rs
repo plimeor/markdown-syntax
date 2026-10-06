@@ -4,6 +4,10 @@ use markdown_syntax::{
 };
 use std::path::{Path, PathBuf};
 
+#[path = "support/fixtures.rs"]
+#[allow(dead_code)]
+mod fixtures;
+
 #[test]
 fn top_level_block_spans_slice_the_original_source() {
     for (name, source) in [
@@ -561,25 +565,6 @@ fn corpus_inputs() -> Vec<(String, String)> {
                 inputs.push((format!("{name} case {index}"), after[..end].to_string()));
                 rest = &after[end..];
             }
-            // Round-trip cases name their body's length in bytes:
-            // `--- case N [profile P] bytes B`, the body, then `--- end`.
-            let mut rest = if text.starts_with("# markdown-syntax AST->HTML conformance suite") {
-                ""
-            } else {
-                text.as_str()
-            };
-            while let Some(start) = rest.find("--- case ") {
-                let header_end = start + rest[start..].find('\n').expect("case header ends");
-                let header = &rest[start..header_end];
-                let bytes: usize = header
-                    .rsplit(' ')
-                    .next()
-                    .and_then(|len| len.parse().ok())
-                    .unwrap_or_else(|| panic!("{name}: case header {header:?}"));
-                let body = &rest[header_end + 1..header_end + 1 + bytes];
-                inputs.push((format!("{name} {header}"), body.to_string()));
-                rest = &rest[header_end + 1 + bytes..];
-            }
         } else if name.ends_with(".md") && !name.ends_with(".canonical.md") {
             inputs.push((name, text));
         }
@@ -632,8 +617,11 @@ const PIECES: &[&str] = &[
     "> [!NOTE]\n",
 ];
 
+/// The recorded seed of the generated inputs.
+const GENERATED_SEED: u64 = 0x2545_f491_4f6c_dd1d;
+
 fn generated_inputs(count: usize) -> Vec<String> {
-    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut state = GENERATED_SEED;
     let mut next = move |bound: usize| {
         state ^= state << 13;
         state ^= state >> 7;
@@ -657,6 +645,45 @@ fn spans_nest_in_the_fixture_corpus() {
         assert_document_spans_nest(&name, &source, &SyntaxOptions::commonmark());
         assert_document_spans_nest(&name, &source, &SyntaxOptions::default());
     }
+    // Round-trip cases parse under the profile each names.
+    let mut cases = 0;
+    for path in derived_case_files() {
+        for case in fixtures::read_derived_cases(&path) {
+            let label = format!("{} case {}", path.display(), case.index);
+            let options = fixtures::profile_options(&case.profile);
+            assert_document_spans_nest(&label, &case.input, &options);
+            cases += 1;
+        }
+    }
+    assert!(cases > 0, "no derived cases read");
+}
+
+/// The `.cases` files of the fixture corpus that hold round-trip cases,
+/// `--- case N [profile P] bytes B` headers each, rather than the AST->HTML
+/// conformance suites.
+fn derived_case_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut directories = vec![PathBuf::from("tests/fixtures")];
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(&directory).expect("fixture directory reads") {
+            let path = entry.expect("fixture entry reads").path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "cases")
+            {
+                let text = std::fs::read(&path).expect("case file reads");
+                let conformance =
+                    text.starts_with(b"# markdown-syntax AST->HTML conformance suite");
+                if !conformance && text.windows(9).any(|window| window == b"--- case ") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 #[test]
@@ -764,7 +791,11 @@ fn spans_map_stripped_lines_back_to_the_source() {
     assert_eq!(nth_span(cell, "TableCell", 0), (2, 7));
     assert_eq!(nth_span(cell, "Text", 0), (2, 4));
     assert_eq!(nth_span(cell, "Emphasis", 0), (4, 7));
-    assert_eq!(nth_span("| a\\|b |\n|-|", "Text", 0), (2, 6));
+    let escaped_pipe = "| a\\|b |\n|-|";
+    assert_eq!(nth_span(escaped_pipe, "TableCell", 0), (2, 6));
+    assert_eq!(nth_span(escaped_pipe, "Text", 0), (2, 3));
+    assert_eq!(nth_span(escaped_pipe, "Escape", 0), (3, 5));
+    assert_eq!(nth_span(escaped_pipe, "Text", 1), (5, 6));
     // A split tab.
     assert_eq!(nth_span(">\t\tfoo", "CodeBlock", 0), (1, 6));
 }
@@ -776,7 +807,7 @@ fn table_cells_carry_spans() {
 }
 
 #[test]
-fn an_unescaped_cell_pipe_spans_its_escape() {
+fn an_escaped_cell_pipe_spans_its_backslash() {
     let spans = |source: &str| -> Vec<(usize, usize)> {
         let document = parse(source).document;
         let Some(Block::Table(table)) = document.children.first() else {
@@ -791,11 +822,31 @@ fn an_unescaped_cell_pipe_spans_its_escape() {
             })
             .collect()
     };
-    assert_eq!(spans("| \\|a |\n|-|"), [(2, 5)]);
+    assert_eq!(spans("| \\|a |\n|-|"), [(2, 4), (4, 5)]);
     assert_eq!(spans("| `a`\\|`b` |\n|-|"), [(2, 5), (5, 7), (7, 10)]);
 }
 
 #[test]
 fn emphasis_on_a_block_quote_continuation_line_covers_its_delimiters() {
     assert_eq!(nth_span("> a\n> *b*", "Emphasis", 0), (6, 9));
+}
+
+#[test]
+fn a_task_checkbox_is_part_of_the_items_marker() {
+    assert_eq!(nth_span("- [ ] task", "Paragraph", 0), (6, 10));
+    assert_eq!(nth_span("- [ ] task", "Text", 0), (6, 10));
+    let markup = "- [x] done *x*";
+    assert_eq!(nth_span(markup, "Paragraph", 0), (6, 14));
+    assert_eq!(nth_span(markup, "Text", 0), (6, 11));
+    assert_eq!(nth_span(markup, "Emphasis", 0), (11, 14));
+    assert_eq!(nth_span("1. [ ] step", "Paragraph", 0), (7, 11));
+    assert_eq!(nth_span("1. [ ] step", "Text", 0), (7, 11));
+}
+
+#[test]
+fn a_container_directives_last_child_ends_after_its_line_ending() {
+    assert_eq!(
+        nth_span(":::note\n```\nx\n```\n:::\n", "CodeBlock", 0),
+        (8, 18)
+    );
 }

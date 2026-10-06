@@ -4,9 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[path = "normalize.rs"]
+mod normalize;
+
 use markdown_syntax::{
-    AutolinkKind, Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions,
-    SerializeOptions, SyntaxOptions,
+    Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions, SerializeOptions,
+    SyntaxOptions,
 };
 
 pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
@@ -31,13 +34,6 @@ pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
                 parse: ParseOptions::default(),
             }
         }
-        "preserve-escapes" => SyntaxOptions {
-            constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_escapes: true,
-                ..ParseOptions::default()
-            },
-        },
         "extras" => SyntaxOptions {
             constructs: extra_constructs(),
             parse: extra_parse_options(),
@@ -86,8 +82,6 @@ fn extra_constructs() -> Constructs {
 fn extra_parse_options() -> ParseOptions {
     ParseOptions {
         single_tilde_strikethrough: true,
-        preserve_character_escapes: false,
-        preserve_character_references: false,
     }
 }
 
@@ -106,21 +100,28 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
 
     let markdown = output
         .document
-        .to_markdown_with(&SerializeOptions::default())
+        .to_markdown_with(&reading_back_under(&options))
         .expect("document serializes");
     assert_eq!(markdown, expected_markdown);
 
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document)
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document)
     );
 
     let second = reparsed
         .document
-        .to_markdown()
+        .to_markdown_with(&reading_back_under(&options))
         .expect("reparsed document serializes");
     assert_eq!(second, markdown);
+}
+
+/// Serialize options that read the output back under `options`.
+pub(crate) fn reading_back_under(options: &SyntaxOptions) -> SerializeOptions {
+    let mut serialize = SerializeOptions::default();
+    serialize.syntax = options.clone();
+    serialize
 }
 
 pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions) {
@@ -135,17 +136,20 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
         output.diagnostics
     );
 
-    let markdown = output.document.to_markdown().expect("document serializes");
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .expect("document serializes");
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document),
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document),
         "{path}: AST changed after serialize/reparse"
     );
 
     let second = reparsed
         .document
-        .to_markdown()
+        .to_markdown_with(&reading_back_under(options))
         .expect("reparsed document serializes");
     assert_eq!(second, markdown, "{path}: serializer is not idempotent");
 }
@@ -332,13 +336,15 @@ pub(crate) fn read_derived_metadata(path: &Path) -> DerivedMetadata {
     }
 }
 
-struct DerivedCase {
-    index: usize,
-    profile: String,
-    input: String,
+/// One case of a derived `.cases` file: its number, the profile it parses
+/// under, and its input.
+pub(crate) struct DerivedCase {
+    pub(crate) index: usize,
+    pub(crate) profile: String,
+    pub(crate) input: String,
 }
 
-fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
+pub(crate) fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
     let source =
         fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let mut cases = Vec::new();
@@ -418,14 +424,33 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, String, usize) {
 fn assert_source_stable(source: &str, path: &Path, index: usize, options: &SyntaxOptions) {
     let output = options.parse(source);
 
-    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
-        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
-    });
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .unwrap_or_else(|error| {
+            panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
+        });
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document),
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document),
         "{}#{index}: AST changed after serialize/reparse",
+        path.display()
+    );
+    let again = reparsed
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .unwrap_or_else(|error| {
+            panic!(
+                "{}#{index}: reserialize failed: {:?}",
+                path.display(),
+                error
+            )
+        });
+    assert_eq!(
+        again,
+        markdown,
+        "{}#{index}: serializing the reparsed document changed the Markdown",
         path.display()
     );
 }
@@ -455,6 +480,13 @@ fn normalize_expected_markdown(input: &str) -> String {
     let mut output = input.trim_end_matches('\n').to_string();
     output.push('\n');
     output
+}
+
+/// The snapshot of `document` as serialization's tree comparison reads it:
+/// each `Escape` and `CharacterReference` as text, with adjacent text merged.
+/// Spans are never part of a snapshot.
+pub(crate) fn snapshot_document_normalized(document: &Document) -> String {
+    snapshot_document(&normalize::normalized_document(document))
 }
 
 pub(crate) fn snapshot_document(document: &Document) -> String {
@@ -815,19 +847,6 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 );
                 snapshot_inlines(&node.alt, indent + 1, lines);
             }
-            Inline::Autolink(node) => {
-                let kind = match &node.kind {
-                    AutolinkKind::Angle => String::from("angle"),
-                    AutolinkKind::GfmLiteral { original } => {
-                        format!("gfm-literal original={}", quote(original))
-                    }
-                };
-                push(
-                    lines,
-                    indent,
-                    format!("Autolink {} kind={kind}", quote(&node.destination)),
-                );
-            }
             Inline::Html(node) => push(lines, indent, format!("HtmlInline {}", quote(&node.value))),
             Inline::SoftBreak(_) => push(lines, indent, "SoftBreak"),
             Inline::LineBreak(node) => push(
@@ -864,13 +883,14 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 lines,
                 indent,
                 format!(
-                    "WikiLink target={} label={} order={}",
+                    "WikiLink target={} label={} order={}{}",
                     quote(&node.target),
                     quote(&node.label),
                     match node.label_order {
                         markdown_syntax::WikiLinkLabelOrder::AfterPipe => "after",
                         markdown_syntax::WikiLinkLabelOrder::BeforePipe => "before",
-                    }
+                    },
+                    if node.embed { " embed" } else { "" }
                 ),
             ),
             Inline::MdxExpression(node) => push(

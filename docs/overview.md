@@ -26,15 +26,15 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-Releasing the delimiter-stack inline parser, CommonMark input handling (leading
-BOM, NUL), and source-mapped spans as a SemVer-breaking version.
+Releasing, as one SemVer-breaking version, the delimiter-stack inline parser,
+CommonMark input handling (leading BOM, NUL), source-mapped spans, block
+parsing on one stack of open blocks, serializer escapes and delimiter choices
+taken from the parser, and autolinks folded into `Link`.
 
 ## Next
 
-- `parse` panics on `"\u{a0}e+@"`; fix it before the release.
-- Rebuild block parsing on one stack of open blocks, take the serializer's
-  escapes and delimiter choices from the parser, and fold autolinks into
-  `Link` (plimeor/markdown-syntax#11).
+- One normative syntax in place of the dialect presets and their
+  configuration surface (plimeor/markdown-syntax#14).
 
 ## Non-goals
 

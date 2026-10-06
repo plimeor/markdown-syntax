@@ -518,8 +518,6 @@ pub enum Inline {
     LinkReference(LinkReference),
     /// A reference image: `![alt][label]`.
     ImageReference(ImageReference),
-    /// An autolink: `<url>` or a GFM bare URL.
-    Autolink(Autolink),
     /// Raw inline HTML such as `<span>`.
     Html(HtmlInline),
     /// A soft line break (a plain newline within a paragraph).
@@ -663,7 +661,7 @@ pub struct Spoiler {
     pub children: Vec<Inline>,
 }
 
-/// An emoji-style shortcode: `:name:`.
+/// An emoji shortcode: `:name:`, where `name` is a gemoji name or alias.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Shortcode {
     /// Node metadata (source span).
@@ -685,7 +683,9 @@ pub struct CodeInline {
     pub fence_length: usize,
 }
 
-/// An inline link: `[text](destination "title")`.
+/// An inline link: `[text](destination "title")`. An autolink, `<url>` or a
+/// bare literal URL or email, is a `Link` whose one child is a `Text` holding
+/// the URL as written, with no title.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     /// Node metadata (source span).
@@ -782,35 +782,6 @@ pub enum ReferenceKind {
     Shortcut,
 }
 
-/// An autolink: `<url>` or a GFM bare URL.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Autolink {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The resolved link href.
-    pub destination: String,
-    /// Whether the link was angle-bracketed or a GFM literal.
-    pub kind: AutolinkKind,
-}
-
-/// Whether an [`Autolink`] is angle-bracketed or a GFM bare literal.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AutolinkKind {
-    /// An angle-bracket autolink `<dest>`. The destination is the raw text
-    /// between the brackets; `>` is forbidden in the destination and the
-    /// serializer re-emits `<dest>`.
-    Angle,
-    /// A GFM literal autolink (bare `www.`/`http(s)://`/`mailto:`/`xmpp:` URL
-    /// or email). `original` is the raw source text that produced the link
-    /// (the visible label); `destination` is the synthesized href (e.g. a
-    /// `http://`/`mailto:` prefix may have been prepended). The serializer
-    /// re-emits `original`, which re-parses to the same literal.
-    GfmLiteral {
-        /// The raw source text that produced the link (the visible label).
-        original: String,
-    },
-}
-
 /// Raw inline HTML such as `<span>` or `</em>`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HtmlInline {
@@ -890,10 +861,10 @@ pub struct InlineFootnote {
     pub children: Vec<Inline>,
 }
 
-/// A wiki link: `[[target|label]]`.
+/// A wiki link: `[[target|label]]`, or an embed: `![[target|label]]`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WikiLink {
-    /// Node metadata (source span).
+    /// Node metadata (source span). An embed's span starts at its `!`.
     pub meta: NodeMeta,
     /// The link target (page name).
     pub target: String,
@@ -901,6 +872,8 @@ pub struct WikiLink {
     pub label: String,
     /// Whether the label appeared before or after the `|` in the source.
     pub label_order: WikiLinkLabelOrder,
+    /// Whether a `!` directly before the `[[` marks the link as an embed.
+    pub embed: bool,
 }
 
 /// Whether a [`WikiLink`]'s label preceded or followed the `|` separator.
@@ -1042,7 +1015,6 @@ impl_meta_accessors!(Inline {
     Image,
     LinkReference,
     ImageReference,
-    Autolink,
     Html,
     SoftBreak,
     LineBreak,
@@ -1060,8 +1032,8 @@ impl_from_variants!(Inline {
     Emphasis(Emphasis), Strong(Strong), Underline(Underline), Delete(Delete),
     Insert(Insert), Mark(Mark), Subscript(Subscript), Superscript(Superscript),
     Spoiler(Spoiler), Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
-    LinkReference(LinkReference), ImageReference(ImageReference), Autolink(Autolink),
-    Html(HtmlInline), SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
+    LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
+    SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
     MdxExpression(MdxExpressionInline), MdxJsx(MdxJsxInline), TextDirective(TextDirective),
 });
@@ -1089,6 +1061,14 @@ impl Inline {
             Inline::TextDirective(n) => &n.label,
             _ => &[],
         }
+    }
+}
+
+impl Shortcode {
+    /// The emoji the crate's pinned gemoji table gives this shortcode's
+    /// name, or `None` for a name the table does not hold.
+    pub fn glyph(&self) -> Option<&'static str> {
+        crate::gemoji::glyph(&self.name)
     }
 }
 

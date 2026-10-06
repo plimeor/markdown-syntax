@@ -3,13 +3,13 @@
 use alloc::format;
 use alloc::string::String;
 
-use crate::ast::{AutolinkKind, DirectiveAttribute, Inline, MathInlineKind};
+use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
 
 use super::escape::{
     attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
 };
 use super::footnotes;
-use super::refs::{escaped_alt, flatten_alt, visible_text};
+use super::refs::{escaped_alt, flatten_alt};
 use super::{Ctx, SafeRawHtmlForm};
 
 /// Render an inline slice by concatenating each node's HTML.
@@ -69,8 +69,12 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             )
         }
 
-        // 13. Shortcode — emoji glyph (gemoji), text-escaped, no wrapper.
-        Inline::Shortcode(s) => escape_text(&emoji_glyph(&s.name)),
+        // 13. Shortcode — its gemoji glyph, text-escaped, no wrapper; a
+        // name gemoji does not hold stays as written.
+        Inline::Shortcode(s) => match s.glyph() {
+            Some(glyph) => escape_text(glyph),
+            None => escape_text(&format!(":{}:", s.name)),
+        },
 
         // 14. Code — `value` already code-span-normalized; text-escape only.
         Inline::Code(c) => format!("<code>{}</code>", escape_text(&c.value)),
@@ -133,46 +137,16 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             None => image_reference_fallback(n),
         },
 
-        // 19. Autolink.
-        //   - Angle `<dest>`: an email-shaped destination (`@`, no `scheme:`)
-        //     takes a synthesized `mailto:` href per CommonMark §6.5; the
-        //     visible text is the destination (sans the synthesized prefix).
-        //   - GFM literal: the destination is the already-synthesized href
-        //     (e.g. `http://www…`, `mailto:…`) and may legally contain chars
-        //     like `> [ ] { } | \ ^` and backtick, which `encode_href`
-        //     percent-encodes; the visible text is the raw `original` source.
-        Inline::Autolink(a) => match &a.kind {
-            AutolinkKind::Angle => {
-                let dest = autolink_href_dest(&a.destination);
-                let href = encode_href(&filter_protocol(
-                    &dest,
-                    ctx.allow_dangerous_protocol,
-                    ctx.gfm_url_denylist(),
-                ));
-                let text = escape_text(&visible_text(&a.destination));
-                format!("<a href=\"{href}\">{text}</a>")
-            }
-            AutolinkKind::GfmLiteral { original } => {
-                let href = encode_href(&filter_protocol(
-                    &a.destination,
-                    ctx.allow_dangerous_protocol,
-                    ctx.gfm_url_denylist(),
-                ));
-                let text = escape_text(original);
-                format!("<a href=\"{href}\">{text}</a>")
-            }
-        },
-
-        // 20. Html — verbatim under danger (with tagfilter), else text-escape.
+        // 19. Html — verbatim under danger (with tagfilter), else text-escape.
         Inline::Html(h) => render_raw_html(&h.value, ctx),
 
-        // 21. SoftBreak.
+        // 20. SoftBreak.
         Inline::SoftBreak(_) => String::from("\n"),
 
-        // 22. LineBreak — both kinds identical.
+        // 21. LineBreak — both kinds identical.
         Inline::LineBreak(_) => String::from("<br />\n"),
 
-        // 23. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
+        // 22. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
         //     inline, and `$`…`$` code-math is an inline `<code>`.
         Inline::Math(m) => match m.kind {
             MathInlineKind::Code => format!(
@@ -189,7 +163,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             ),
         },
 
-        // 24. FootnoteReference (GFM shape). An undefined reference renders
+        // 23. FootnoteReference (GFM shape). An undefined reference renders
         //     as its literal `[^label]` source text.
         Inline::FootnoteReference(fr) => {
             if ctx.footnotes.is_defined(&fr.identifier) {
@@ -199,29 +173,34 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             }
         }
 
-        // 25. InlineFootnote — renders like a footnote reference; its body was
+        // 24. InlineFootnote — renders like a footnote reference; its body was
         //     harvested into the doc-end section during the pre-pass.
         Inline::InlineFootnote(_) => {
             let id = footnotes::next_inline_id(ctx.footnotes);
             footnote_marker(&id, ctx)
         }
 
-        // 26. WikiLink — GFM shape; both label orders identical output.
+        // 25. WikiLink — GFM shape; both label orders identical output.
         Inline::WikiLink(w) => {
             let href = attr_escape_gfm(&encode_href(&w.target));
+            let embed = if w.embed {
+                " data-wikilink-embed=\"true\""
+            } else {
+                ""
+            };
             format!(
-                "<a href=\"{href}\" data-wikilink=\"true\">{}</a>",
+                "<a href=\"{href}\" data-wikilink=\"true\"{embed}>{}</a>",
                 escape_text(&w.label)
             )
         }
 
-        // 27. MDX expression (inline) — no HTML.
+        // 26. MDX expression (inline) — no HTML.
         Inline::MdxExpression(_) => String::new(),
 
-        // 28. MDX JSX (inline) — no HTML (node carries no children).
+        // 27. MDX JSX (inline) — no HTML (node carries no children).
         Inline::MdxJsx(_) => String::new(),
 
-        // 29. TextDirective [CONV] — classed span carrying name + attrs.
+        // 28. TextDirective [CONV] — classed span carrying name + attrs.
         Inline::TextDirective(d) => {
             let attrs = directive_attrs(&d.attributes);
             format!(
@@ -241,35 +220,6 @@ fn title_attr(title: Option<&str>) -> String {
         Some(t) if !t.is_empty() => format!(" title=\"{}\"", attr_escape(t)),
         _ => String::new(),
     }
-}
-
-/// Synthesize the autolink href destination: an email-shaped destination
-/// (contains `@` and has no `scheme:` prefix) gets a `mailto:` prefix; every
-/// other destination is returned unchanged. The visible text is never altered.
-fn autolink_href_dest(dest: &str) -> String {
-    if dest.contains('@') && !has_uri_scheme(dest) {
-        return format!("mailto:{dest}");
-    }
-    String::from(dest)
-}
-
-/// True when `dest` begins with a URI scheme (`scheme:` where scheme starts
-/// with an ASCII letter followed by letters/digits/`+`/`.`/`-`).
-fn has_uri_scheme(dest: &str) -> bool {
-    let mut chars = dest.char_indices();
-    match chars.next() {
-        Some((_, c)) if c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    for (_, c) in chars {
-        if c == ':' {
-            return true;
-        }
-        if !(c.is_ascii_alphanumeric() || c == '+' || c == '.' || c == '-') {
-            return false;
-        }
-    }
-    false
 }
 
 /// The GFM footnote reference marker `<sup class="footnote-ref">…`. The
@@ -389,27 +339,4 @@ fn image_reference_fallback(n: &crate::ast::ImageReference) -> String {
         ReferenceKind::Collapsed => format!("![{inner}][]"),
         ReferenceKind::Full => format!("![{inner}][{}]", escape_text(&n.label)),
     }
-}
-
-/// Resolve a gemoji shortcode alias to its glyph. The table covers the aliases
-/// exercised by the GFM `shortcodes` oracle; an unknown alias round-trips
-/// to its `:name:` source form (deterministic and lossless).
-fn emoji_glyph(name: &str) -> String {
-    let glyph = match name {
-        "smile" => "\u{1F604}",
-        "+1" | "thumbsup" => "\u{1F44D}",
-        "-1" | "thumbsdown" => "\u{1F44E}",
-        "clock12" => "\u{1F55B}",
-        "heart" => "\u{2764}\u{FE0F}",
-        "tada" => "\u{1F389}",
-        "rocket" => "\u{1F680}",
-        "100" => "\u{1F4AF}",
-        "x" => "\u{274C}",
-        "1234" => "\u{1F522}",
-        "1st_place_medal" => "\u{1F947}",
-        "e-mail" => "\u{1F4E7}",
-        "non-potable_water" => "\u{1F6B1}",
-        _ => return format!(":{name}:"),
-    };
-    String::from(glyph)
 }

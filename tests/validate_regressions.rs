@@ -5,8 +5,30 @@
 //! that helper functions and test names cannot collide across the merged
 //! sources.
 
+#[path = "support/normalize.rs"]
+mod normalize;
+
 mod validation {
     use markdown_syntax::*;
+
+    #[test]
+    fn a_shortcode_name_outside_gemoji_is_invalid() {
+        let document = Document {
+            meta: NodeMeta::default(),
+            children: vec![Block::Paragraph(Paragraph {
+                meta: NodeMeta::default(),
+                children: vec![Inline::Shortcode(Shortcode {
+                    meta: NodeMeta::default(),
+                    name: "not_an_emoji_name".into(),
+                })],
+            })],
+        };
+        assert!(!document.validate().is_empty());
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+    }
 
     #[test]
     fn empty_table_is_invalid() {
@@ -191,28 +213,42 @@ mod review_validate {
         assert!(good.validate().is_empty());
     }
 
-    // SR8 — an autolink destination containing whitespace or angle brackets cannot
-    // serialize as `<dest>` and round-trip.
+    // SR8 — a link whose text no angle-bracket autolink can write is valid and
+    // is written as an inline link that reads back as the same link.
     #[test]
-    fn sr8_autolink_with_whitespace_or_angles_is_invalid() {
-        for dest in ["has space", "has<angle", "has>angle"] {
-            let bad = paragraph(vec![Inline::Autolink(Autolink {
+    fn sr8_link_text_that_no_angle_bracket_autolink_can_write_is_valid() {
+        let link = |destination: &str, text: &str| {
+            paragraph(vec![Inline::Link(Link {
                 meta: NodeMeta::default(),
-                destination: dest.into(),
-                kind: AutolinkKind::Angle,
-            })]);
-            assert!(
-                !bad.validate().is_empty(),
-                "autolink `{dest}` should be rejected"
-            );
-        }
+                destination: destination.into(),
+                destination_kind: LinkDestinationKind::Bare,
+                title: None,
+                title_kind: None,
+                children: vec![Text::from(text).into()],
+            })])
+        };
+        let document = link("mailto:a\u{a0}b@c.d", "a\u{a0}b@c.d");
+        assert!(document.validate().is_empty());
+        let markdown = document.to_markdown().expect("document serializes");
+        assert!(
+            markdown.starts_with('[') && markdown.ends_with("](mailto:a\u{a0}b@c.d)\n"),
+            "{markdown:?}"
+        );
+        let reparsed = markdown_syntax::parse(&markdown).document;
+        assert_eq!(
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
+        );
 
-        let good = paragraph(vec![Inline::Autolink(Autolink {
-            meta: NodeMeta::default(),
-            destination: "https://example.com/path?q=1".into(),
-            kind: AutolinkKind::Angle,
-        })]);
-        assert!(good.validate().is_empty());
+        let angle = link(
+            "https://example.com/path?q=1",
+            "https://example.com/path?q=1",
+        );
+        assert!(angle.validate().is_empty());
+        assert_eq!(
+            angle.to_markdown().expect("document serializes"),
+            "<https://example.com/path?q=1>\n"
+        );
     }
 
     // SR9 — inline code stored as a raw passthrough whose backtick run is at least

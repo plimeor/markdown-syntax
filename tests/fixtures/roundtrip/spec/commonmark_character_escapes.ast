@@ -1,26 +1,66 @@
 Document
   Paragraph
-    Text "!\"#$%&'()*+,-./:;<=>?@[]^_`{|}~"
+    Escape "!"
+    Escape "\""
+    Escape "#"
+    Escape "$"
+    Escape "%"
+    Escape "&"
+    Escape "'"
+    Escape "("
+    Escape ")"
+    Escape "*"
+    Escape "+"
+    Escape ","
+    Escape "-"
+    Escape "."
+    Escape "/"
+    Escape ":"
+    Escape ";"
+    Escape "<"
+    Escape "="
+    Escape ">"
+    Escape "?"
+    Escape "@"
+    Escape "["
+    Escape "]"
+    Escape "^"
+    Escape "_"
+    Escape "`"
+    Escape "{"
+    Escape "|"
+    Escape "}"
+    Escape "~"
   Paragraph
     Text "\\→\\A\\a\\ \\3\\φ\\«"
   Paragraph
-    Text "*not emphasized*"
+    Escape "*"
+    Text "not emphasized*"
     SoftBreak
-    Text "<br/> not a tag"
+    Escape "<"
+    Text "br/> not a tag"
     SoftBreak
-    Text "[not a link](/foo)"
+    Escape "["
+    Text "not a link](/foo)"
     SoftBreak
-    Text "`not code`"
+    Escape "`"
+    Text "not code`"
     SoftBreak
-    Text "1. not a list"
+    Text "1"
+    Escape "."
+    Text " not a list"
     SoftBreak
-    Text "* not a list"
+    Escape "*"
+    Text " not a list"
     SoftBreak
-    Text "# not a heading"
+    Escape "#"
+    Text " not a heading"
     SoftBreak
-    Text "[foo]: /url \"not a reference\""
+    Escape "["
+    Text "foo]: /url \"not a reference\""
     SoftBreak
-    Text "&ouml; not a character entity"
+    Escape "&"
+    Text "ouml; not a character entity"
   Paragraph
     Text "foo"
     LineBreak kind=backslash

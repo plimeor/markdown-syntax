@@ -5,6 +5,6 @@
 [empty]( "empty title")
 [wrapped](/url "wrapped title")
 
-\[blank\](/url
+[blank](/url
 
 "not title")

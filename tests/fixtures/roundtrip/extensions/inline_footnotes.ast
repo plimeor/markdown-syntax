@@ -30,7 +30,9 @@ Document
   Paragraph
     Text "A "
     InlineFootnote
-      Text "square bracket ] inside"
+      Text "square bracket "
+      Escape "]"
+      Text " inside"
     Text "."
   Paragraph
     Text "A "
@@ -43,7 +45,9 @@ Document
   Paragraph
     Text "Text^[] and Text^[   ] should stay literal."
   Paragraph
-    Text "Escaped: ^[not a note]. Text^ [not a note]."
+    Text "Escaped: "
+    Escape "^"
+    Text "[not a note]. Text^ [not a note]."
   FootnoteDefinition label=1
     Paragraph
       Text "First regular footnote."

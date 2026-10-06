@@ -25,9 +25,17 @@ input size, except MDX JSX tag matching, which SHALL take at most `n log n`.
 - **WHEN** a paragraph holding tens of thousands of `~` between two words is parsed and serialized
 - **THEN** quadrupling the run at most roughly quadruples the serialization time
 
-#### Scenario: Nested emphasis that does not read back
-- **WHEN** a paragraph holding 16 levels of nested emphasis, a mark around further nested emphasis, and a tail whose plain rendering does not read back is serialized
-- **THEN** it finishes in milliseconds, since nesting does not multiply the renders a delimiter choice makes
+#### Scenario: Deeply nested emphasis
+- **WHEN** a paragraph holding 16 levels of nested emphasis, a mark around further nested emphasis, and a tail that abuts the runs is serialized
+- **THEN** it finishes within 1 s in a debug build, and doubling the nesting depth from 4 to 8 to 16 at most roughly doubles the time
+
+#### Scenario: Long description details
+- **WHEN** a description list whose details hold thousands of continuation lines, `"a\n: b\n"` followed by `"c\n"` repeated, is parsed
+- **THEN** quadrupling the lines at most roughly quadruples the time
+
+#### Scenario: Long nested containers
+- **WHEN** inputs of thousands of lines inside nested block quotes and list items are parsed and serialized
+- **THEN** quadrupling the lines at most roughly quadruples the time
 
 #### Scenario: Pathological suite
 - **WHEN** `tests/pathological_inputs.rs` runs

@@ -4,7 +4,9 @@ Document
   Paragraph
     Text "Use "
     LinkReference identifier=foo\]
-      Text "escaped ] label"
+      Text "escaped "
+      Escape "]"
+      Text " label"
     Text " and "
     LinkReference identifier=a &amp; b
       Text "entity"
@@ -14,4 +16,6 @@ Document
       Text "nested [label]"
     SoftBreak
     Image destination=/img title=none
-      Text "alt ] [inner]"
+      Text "alt "
+      Escape "]"
+      Text " [inner]"

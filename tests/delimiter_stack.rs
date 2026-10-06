@@ -5,7 +5,8 @@
 use markdown_syntax::prelude::*;
 
 /// A compact rendering of inline structure: text in quotes, a soft break as
-/// `/`, code spans as `Code(...)`, containers as `Kind[...]`.
+/// `/`, an escape as `\c`, code spans as `Code(...)`, containers as
+/// `Kind[...]`.
 fn shape(inlines: &[Inline]) -> String {
     let mut out = String::new();
     for inline in inlines {
@@ -16,6 +17,11 @@ fn shape(inlines: &[Inline]) -> String {
             }
             Inline::SoftBreak(_) => {
                 out.push('/');
+                continue;
+            }
+            Inline::Escape(escape) => {
+                out.push('\\');
+                out.push(escape.value);
                 continue;
             }
             Inline::Code(code) => {
@@ -292,14 +298,14 @@ fn brackets_past_the_limit_close_as_text() {
 }
 
 #[test]
-fn an_image_that_does_not_form_yields_to_a_wikilink_at_its_bracket() {
+fn a_wikilink_after_a_bang_is_an_embed_and_wins_over_the_image() {
     let document = SyntaxOptions::default().parse("![[a]b]]").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
     assert!(
-        matches!(paragraph.children.as_slice(), [Inline::Text(bang), Inline::WikiLink(link)]
-            if bang.value == "!" && link.target == "a]b"),
+        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
+            if link.embed && link.target == "a]b" && link.meta.span == Some(Span::new(0, 8))),
         "{:?}",
         paragraph.children
     );
@@ -324,10 +330,10 @@ fn a_link_inside_a_directive_label_inside_a_mark_keeps_links_from_nesting() {
 }
 
 #[test]
-fn an_escaped_dot_after_a_bracket_is_a_dot() {
+fn an_escaped_dot_after_a_bracket_is_an_escape() {
     let mut gfm = SyntaxOptions::gfm();
     gfm.constructs.relaxed_autolinks = false;
-    assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. . x""#);
+    assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. "\." x""#);
 }
 
 #[test]
@@ -347,14 +353,14 @@ fn delimiters_past_the_limit_stay_in_the_output() {
 }
 
 #[test]
-fn an_image_whose_label_cannot_close_yields_to_a_wikilink() {
+fn an_image_whose_label_cannot_close_yields_to_an_embed() {
     let document = SyntaxOptions::default().parse("![[a[b]]").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
     assert!(
-        matches!(paragraph.children.as_slice(), [Inline::Text(bang), Inline::WikiLink(link)]
-            if bang.value == "!" && link.target == "a[b"),
+        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
+            if link.embed && link.target == "a[b"),
         "{:?}",
         paragraph.children
     );
@@ -405,7 +411,7 @@ fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
 fn an_escaped_backslash_before_a_line_ending_is_no_hard_break() {
     assert_eq!(
         parsed(&SyntaxOptions::commonmark(), "a\\\\\nb"),
-        r#""a\\"/"b""#
+        r#""a"\\/"b""#
     );
 }
 
@@ -460,7 +466,8 @@ fn a_referenced_space_makes_no_hard_break() {
     assert!(
         matches!(
             paragraph.children.as_slice(),
-            [Inline::Text(text), Inline::SoftBreak(_), Inline::Text(_)] if text.value == "a "
+            [Inline::Text(text), Inline::CharacterReference(space), Inline::SoftBreak(_), Inline::Text(_)]
+                if text.value == "a" && space.value == " "
         ),
         "{blocks:?}"
     );

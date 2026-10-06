@@ -6,6 +6,9 @@
 //! that helper functions and test names cannot collide across the merged
 //! sources.
 
+#[path = "support/normalize.rs"]
+mod normalize;
+
 mod review_block {
     //! Regression tests for the block-level parser defects fixed in the 2026-06-18
     //! review. Each asserts the CommonMark-correct
@@ -413,6 +416,37 @@ mod parser {
     }
 
     #[test]
+    fn tab_indented_details_in_an_item_measure_columns_from_the_item() {
+        // The item takes two of the tab's columns; the rest is indentation
+        // of at most three columns, so these are details containers.
+        for source in [
+            "- a\n\t<details>\n\n\tx\n\t</details>",
+            "- <details>\n\n  x\n  \t</details>",
+            "- a\n\t<details>\n\t<summary>\n\t\t\tExample\n\t</summary>\n\n\tb\n\t</details>\n",
+        ] {
+            let document = SyntaxOptions::default().parse(source).document;
+            let [Block::List(list)] = document.children.as_slice() else {
+                panic!("{source:?}: expected one list, got {:?}", document.children);
+            };
+            assert!(
+                list.children[0]
+                    .children
+                    .iter()
+                    .any(|block| matches!(block, Block::HtmlContainer(_))),
+                "{source:?}: {:?}",
+                list.children[0].children
+            );
+            let markdown = document.to_markdown().expect("document serializes");
+            let reparsed = SyntaxOptions::default().parse(&markdown).document;
+            assert_eq!(
+                format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+                format!("{:?}", crate::normalize::normalized(&document.children)),
+                "{source:?} -> {markdown:?}"
+            );
+        }
+    }
+
+    #[test]
     fn details_container_scan_ignores_closing_tag_inside_fenced_code() {
         let source = "<details>\n<summary>Log</summary>\n\n```\n</details>\n```\n\n</details>\n";
         let output = SyntaxOptions::default().parse(source);
@@ -526,9 +560,11 @@ mod parser {
         let [Inline::TextDirective(directive)] = paragraph.children.as_slice() else {
             panic!("expected text directive");
         };
-        assert!(
-            matches!(directive.label.as_slice(), [Inline::Text(text)] if text.value == "has ] bracket")
-        );
+        assert!(matches!(
+            directive.label.as_slice(),
+            [Inline::Text(before), Inline::Escape(escape), Inline::Text(after)]
+                if before.value == "has " && escape.value == ']' && after.value == " bracket"
+        ));
         assert_eq!(directive.attributes.len(), 1);
         assert_eq!(directive.attributes[0].name, "title");
         assert_eq!(directive.attributes[0].value.as_deref(), Some("x } y"));
@@ -540,10 +576,7 @@ mod parser {
             "&semi; &trade; &NotEqualTilde; &CounterClockwiseContourIntegral; &acE; &nGg; &fjlig; &AMP;\n";
         let options = SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_references: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         };
         let output = options.parse(source);
 
@@ -573,15 +606,6 @@ mod parser {
                 ("&AMP;", "&"),
             ]
         );
-
-        let resolved = SyntaxOptions::commonmark().parse(source);
-        let Some(Block::Paragraph(paragraph)) = resolved.document.children.first() else {
-            panic!("expected resolved paragraph");
-        };
-        assert!(matches!(
-            paragraph.children.as_slice(),
-            [Inline::Text(text)] if text.value == ";\u{20}\u{2122}\u{20}\u{2242}\u{0338}\u{20}\u{2233}\u{20}\u{223E}\u{0333}\u{20}\u{22D9}\u{0338}\u{20}fj\u{20}&"
-        ));
     }
 
     #[test]
@@ -638,10 +662,7 @@ mod parser {
             "&#x41; &#9; &#10; &#0; &#1; &#127; &#128; &#xFDD0; &#xFFFE; &#xD800; &#x110000;\n";
         let options = SyntaxOptions {
             constructs: Constructs::commonmark(),
-            parse: ParseOptions {
-                preserve_character_references: true,
-                ..ParseOptions::default()
-            },
+            parse: ParseOptions::default(),
         };
         let output = options.parse(source);
 
@@ -771,6 +792,7 @@ mod parser {
                     .iter()
                     .map(|inline| match inline {
                         Inline::Text(text) => text.value.clone(),
+                        Inline::Escape(escape) => format!("\\{}", escape.value),
                         Inline::Code(code) => format!("Code({})", code.value),
                         Inline::Spoiler(spoiler) => format!(
                             "Spoiler({})",
@@ -779,6 +801,7 @@ mod parser {
                                 .iter()
                                 .map(|inline| match inline {
                                     Inline::Text(text) => text.value.clone(),
+                                    Inline::Escape(escape) => format!("\\{}", escape.value),
                                     Inline::Code(code) => format!("Code({})", code.value),
                                     other => format!("{other:?}"),
                                 })
@@ -818,17 +841,17 @@ mod parser {
         // one never holds a pipe that delimits.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
-            ["a || b", "or, like c || d"]
+            ["a \\|\\| b", "or, like c \\|\\| d"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
-            ["| a", "b |"]
+            ["\\| a", "b \\|"]
         );
         // An escaped backtick opens no code span, so the `||` after it opens a
         // spoiler that holds the pipe.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),
-            ["`Spoiler(a` | b)", ""]
+            ["\\`Spoiler(a\\` | b)", ""]
         );
         // Bars with no closer are delimiters around an empty cell.
         assert_eq!(
@@ -1621,5 +1644,673 @@ mod list_items_in_containers {
             matches!(list.children[0].children.as_slice(), [Block::Paragraph(_), Block::List(_), Block::Paragraph(paragraph)] if paragraph.children.len() == 3),
             "{lazy:?}"
         );
+    }
+}
+#[cfg(feature = "html")]
+mod nested_containers {
+    //! The nested-container parse cases of plimeor/markdown-syntax#11, each
+    //! with the HTML commonmark.js renders for it. Where micromark renders
+    //! something else, the case says so; commonmark.js is the reference.
+
+    use markdown_syntax::{HtmlOptions, SyntaxOptions};
+
+    struct Case {
+        name: &'static str,
+        source: &'static str,
+        commonmark_js: &'static str,
+        /// micromark's rendering where it differs from commonmark.js's.
+        micromark: Option<&'static str>,
+    }
+
+    const CASES: &[Case] = &[
+        Case {
+            name: "item indentation measured from the quote's content",
+            source: "  > - a\n>   ===\nb",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<h1>a</h1>\n</li>\n</ul>\n</blockquote>\n<p>b</p>",
+            micromark: None,
+        },
+        Case {
+            name: "quote marker indented on a later line",
+            source: ">- >a\n > >\nb",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n</blockquote>\n</li>\n</ul>\n<blockquote>\n</blockquote>\n</blockquote>\n<p>b</p>",
+            micromark: None,
+        },
+        Case {
+            name: "setext-like line past a quoted item",
+            source: "   > q\n  > - c\n>    ===\n    :::d",
+            commonmark_js: "<blockquote>\n<p>q</p>\n<ul>\n<li>\n<h1>c</h1>\n</li>\n</ul>\n</blockquote>\n<pre><code>:::d\n</code></pre>",
+            micromark: None,
+        },
+        Case {
+            name: "fence in nested items behind a quote",
+            source: "   > - - ```\n>     code\n> c",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ul>\n</li>\n</ul>\n<p>c</p>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "nested item behind an inner quote",
+            source: "> - > - a\n>   > 2.\nz",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<ul>\n<li>a</li>\n</ul>\n<ol start=\"2\">\n<li></li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</blockquote>\n<p>z</p>",
+            micromark: None,
+        },
+        Case {
+            name: "setext-like line in an inner quote",
+            source: "> - - > a\n>   > ===\nc",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n</blockquote>\n</li>\n</ul>\n<blockquote>\n<p>===\nc</p>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "a quote marker four columns in is text",
+            source: "- - >=\n\t\t>```\n=",
+            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>=\n&gt;```\n=</p>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "item continuation indented four columns more",
+            source: ">- >a\n>     >- =\n=",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "item continuation indented four columns more, spaced",
+            source: "> - >a\n>     >- =\n=",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "tab-indented continuation of a nested quote",
+            source: "- - >a\n\t  >1. c\n->",
+            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ol>\n<li>c\n-&gt;</li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "open fence in a nested item is not trusted after it closes",
+            source: "- 1. c\n  2. ```\n  \tx",
+            commonmark_js: "<ul>\n<li>\n<ol>\n<li>c</li>\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\nx</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "open tilde fence in a nested item",
+            source: "2) 2. c\n   0. ~~~\n   \ty",
+            commonmark_js: "<ol start=\"2\">\n<li>\n<ol start=\"2\">\n<li>c</li>\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\ny</li>\n</ol>",
+            micromark: None,
+        },
+        Case {
+            name: "setext and fence checks inside an item",
+            source: "1. 0. ```\n   - a\n       -\n->",
+            commonmark_js: "<ol>\n<li>\n<ol start=\"0\">\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\n<ul>\n<li>\n<h2>a</h2>\n</li>\n</ul>\n</li>\n</ol>\n<p>-&gt;</p>",
+            micromark: None,
+        },
+        Case {
+            name: "three tabs after a quote marker",
+            source: ">\t\t\tfoo",
+            commonmark_js: "<blockquote>\n<pre><code>  \tfoo\n</code></pre>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "tabs inside a quoted fence",
+            source: "> ```\n>\t\tcode\n> ```",
+            commonmark_js: "<blockquote>\n<pre><code>  \tcode\n</code></pre>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "tabs inside an indented fence",
+            source: "  ```\n\t\tx\n  ```",
+            commonmark_js: "<pre><code>  \tx\n</code></pre>",
+            micromark: None,
+        },
+        Case {
+            name: "tabs after an item marker",
+            source: "-\t\t\tcode",
+            commonmark_js: "<ul>\n<li>\n<pre><code>  \tcode\n</code></pre>\n</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "delimiter-row-like line with tables off",
+            source: "- a\n  |-|\nx",
+            commonmark_js: "<ul>\n<li>a\n|-|\nx</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "delimiter-row-like line in a quoted item",
+            source: "> - z\n>   |-|\n>$$",
+            commonmark_js: "<blockquote>\n<ul>\n<li>z\n|-|\n$$</li>\n</ul>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "blank line inside a nested fence",
+            source: "- a\n  - ```\n\n    x\n\n- b",
+            commonmark_js: "<ul>\n<li>a\n<ul>\n<li>\n<pre><code>\nx\n\n</code></pre>\n</li>\n</ul>\n</li>\n<li>b</li>\n</ul>",
+            micromark: Some("<ul>\n<li>a\n<ul>\n<li>\n<pre><code>x\n</code></pre>\n</li>\n</ul>\n</li>\n<li>b</li>\n</ul>"),
+        },
+        Case {
+            name: "blank line inside an HTML comment in an item",
+            source: "\n\n- <!--\n\n- text",
+            commonmark_js: "<ul>\n<li>\n<!--\n\n</li>\n<li>text</li>\n</ul>",
+            micromark: None,
+        },
+        Case {
+            name: "blank lines of an unclosed fence before a paragraph",
+            source: "- ```\n\n\nb",
+            commonmark_js: "<ul>\n<li>\n<pre><code>\n\n</code></pre>\n</li>\n</ul>\n<p>b</p>",
+            micromark: None,
+        },
+        Case {
+            name: "trailing blank line of an unclosed fence",
+            source: "- ```\n  x\n\n- b",
+            commonmark_js: "<ul>\n<li>\n<pre><code>x\n\n</code></pre>\n</li>\n<li>b</li>\n</ul>",
+            micromark: Some("<ul>\n<li>\n<pre><code>x\n\n\n</code></pre>\n</li>\n<li>b</li>\n</ul>"),
+        },
+        Case {
+            name: "unclosed fence in a quote before a lazy line",
+            source: "> ```\n> a\n>\nb",
+            commonmark_js: "<blockquote>\n<pre><code>a\n\n</code></pre>\n</blockquote>\n<p>b</p>",
+            micromark: None,
+        },
+        Case {
+            name: "lazy line from an outer quote does not enter a fence",
+            source: "> - ```\n>   x\n  y",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<pre><code>x\n</code></pre>\n</li>\n</ul>\n</blockquote>\n<p>y</p>",
+            micromark: None,
+        },
+        Case {
+            name: "dedented lazy line opens no block",
+            source: "   - > q\n    1. a\n1.  ```",
+            commonmark_js: "<ul>\n<li>\n<blockquote>\n<p>q\n1. a</p>\n</blockquote>\n</li>\n</ul>\n<ol>\n<li>\n<pre><code></code></pre>\n</li>\n</ol>",
+            micromark: None,
+        },
+        Case {
+            name: "HTML block on an item's continuation line in a quote",
+            source: "> - <div>\n>   <!--\n> - x\n>   y\nz",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<div>\n<!--\n</li>\n<li>x\ny\nz</li>\n</ul>\n</blockquote>",
+            micromark: None,
+        },
+        Case {
+            name: "sibling item ends a fence behind a quote",
+            source: "- > - ```\n  > - b\nc",
+            commonmark_js: "<ul>\n<li>\n<blockquote>\n<ul>\n<li>\n<pre><code></code></pre>\n</li>\n<li>b\nc</li>\n</ul>\n</blockquote>\n</li>\n</ul>",
+            micromark: None,
+        },
+    ];
+
+    #[test]
+    fn nested_containers_match_the_reference() {
+        let mut options = HtmlOptions::default();
+        options.allow_dangerous_html = true;
+        for case in CASES {
+            let document = SyntaxOptions::commonmark().parse(case.source).document;
+            let html = document
+                .to_html_with(&options)
+                .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+            assert_eq!(
+                html.trim_end(),
+                case.commonmark_js,
+                "{} ({:?}); micromark: {:?}",
+                case.name,
+                case.source,
+                case.micromark
+            );
+        }
+    }
+}
+
+mod one_pass_over_open_blocks {
+    //! Block structure read in one pass over one stack of open blocks: the
+    //! block-syntax "One pass over open blocks", indentation, tab, and blank
+    //! line scenarios.
+
+    use markdown_syntax::{
+        parse, Block, CodeBlockKind, HeadingKind, Inline, List, ListItem, SyntaxOptions,
+    };
+
+    fn commonmark(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    fn code_value(block: &Block) -> &str {
+        match block {
+            Block::CodeBlock(code) => &code.value,
+            other => panic!("expected a code block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unclosed_fence_keeps_an_empty_last_line_without_a_line_ending() {
+        // commonmark.js gives `a\n\n` for each.
+        assert_eq!(code_value(&commonmark("  ```\na\n  ")[0]), "a\n\n");
+        assert_eq!(
+            code_value(&only_item(&commonmark("- ```\n  a\n  ")[0]).children[0]),
+            "a\n\n"
+        );
+        assert_eq!(code_value(&commonmark("```\r\na\r\n")[0]), "a\r\n");
+    }
+
+    #[test]
+    fn the_task_checkbox_follows_cmark_gfm_and_micromark() {
+        let gfm = |source: &str| SyntaxOptions::gfm().parse(source).document.children;
+        // A setext heading is no paragraph, so `[x]` stays its text.
+        let blocks = gfm("- [x] a\n  ===");
+        let item = only_item(&blocks[0]);
+        assert_eq!(item.checked, None);
+        assert!(
+            matches!(&item.children[0], Block::Heading(heading) if heading.kind == HeadingKind::Setext)
+        );
+        // The checkbox starts the paragraph left after its definitions.
+        let blocks = gfm("- [a]: /u\n  [x] b");
+        let item = only_item(&blocks[0]);
+        assert_eq!(item.checked, Some(true));
+        assert!(matches!(
+            item.children.as_slice(),
+            [Block::Definition(_), Block::Paragraph(_)]
+        ));
+        // The whitespace after the checkbox's space stays text.
+        let blocks = gfm("- [x]   b");
+        assert_eq!(paragraph(&only_item(&blocks[0]).children[0]), ["  b"]);
+    }
+
+    #[test]
+    fn a_definition_title_drops_the_indentation_of_its_lines() {
+        let blocks = commonmark("[a]: /u \"x\n   y\"\n\n[a]");
+        let Block::Definition(definition) = &blocks[0] else {
+            panic!("expected a definition, got {blocks:?}");
+        };
+        assert_eq!(definition.title.as_deref(), Some("x\ny"));
+    }
+
+    #[test]
+    fn indented_code_does_not_interrupt_an_alert_marker_line() {
+        for source in ["> [!NOTE]\n    code", "> [!NOTE]\n>     code"] {
+            let blocks = SyntaxOptions::default().parse(source).document.children;
+            let [Block::Alert(alert)] = blocks.as_slice() else {
+                panic!("{source:?}: expected one alert, got {blocks:?}");
+            };
+            assert_eq!(paragraph(&alert.children[0]), ["code"], "{source:?}");
+        }
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::SoftBreak(_) => "\n".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn list(block: &Block) -> &List {
+        match block {
+            Block::List(list) => list,
+            other => panic!("expected a list, got {other:?}"),
+        }
+    }
+
+    fn quote(block: &Block) -> &[Block] {
+        match block {
+            Block::BlockQuote(quote) => &quote.children,
+            other => panic!("expected a block quote, got {other:?}"),
+        }
+    }
+
+    fn only_item(block: &Block) -> &ListItem {
+        let list = list(block);
+        assert_eq!(list.children.len(), 1, "{list:?}");
+        &list.children[0]
+    }
+
+    fn paragraph(block: &Block) -> Vec<String> {
+        match block {
+            Block::Paragraph(paragraph) => texts(&paragraph.children),
+            other => panic!("expected a paragraph, got {other:?}"),
+        }
+    }
+
+    fn code(block: &Block) -> (&CodeBlockKind, &str) {
+        match block {
+            Block::CodeBlock(code) => (&code.kind, code.value.as_str()),
+            other => panic!("expected a code block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn item_indentation_is_measured_from_the_quotes_content() {
+        let blocks = commonmark("  > - a\n>   ===\nb");
+        let [quoted, after] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let item = only_item(&quote(quoted)[0]);
+        let [Block::Heading(heading)] = item.children.as_slice() else {
+            panic!("{item:?}");
+        };
+        assert_eq!(
+            (heading.depth, heading.kind, texts(&heading.children)),
+            (1, HeadingKind::Setext, vec!["a".to_owned()])
+        );
+        assert_eq!(paragraph(after), ["b"]);
+    }
+
+    #[test]
+    fn a_nested_item_behind_an_inner_quote_ends_with_the_outer_quote() {
+        let blocks = commonmark("> - > - a\n>   > 2.\nz");
+        assert!(matches!(blocks[0], Block::BlockQuote(_)), "{blocks:?}");
+        assert_eq!(paragraph(&blocks[1]), ["z"]);
+    }
+
+    #[test]
+    fn a_quote_marker_four_columns_in_is_text() {
+        let blocks = commonmark("- - >=\n\t\t>```\n=");
+        let outer = only_item(&blocks[0]);
+        let inner = only_item(&outer.children[0]);
+        let inner_quote = quote(&inner.children[0]);
+        assert_eq!(paragraph(&inner_quote[0]), ["=", "\n", ">```", "\n", "="]);
+        assert_eq!(blocks.len(), 1, "{blocks:?}");
+    }
+
+    #[test]
+    fn item_continuation_indented_four_columns_more_continues_the_paragraph() {
+        let blocks = commonmark("> - >a\n>     >- =\n=");
+        let item = only_item(&quote(&blocks[0])[0]);
+        let inner_quote = quote(&item.children[0]);
+        let innermost = only_item(&inner_quote[1]);
+        assert_eq!(paragraph(&innermost.children[0]), ["=", "\n", "="]);
+    }
+
+    #[test]
+    fn an_open_fence_in_a_nested_item_is_not_trusted_after_it_closes() {
+        let blocks = commonmark("- 1. c\n  2. ```\n  \tx");
+        let item = only_item(&blocks[0]);
+        assert!(matches!(item.children[0], Block::List(_)), "{item:?}");
+        assert_eq!(paragraph(&item.children[1]), ["x"]);
+        assert!(
+            !format!("{blocks:?}").contains("Indented"),
+            "no indented code: {blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_line_from_an_outer_quote_does_not_enter_a_fence() {
+        let blocks = commonmark("> - ```\n>   x\n  y");
+        let item = only_item(&quote(&blocks[0])[0]);
+        assert!(matches!(
+            code(&item.children[0]),
+            (CodeBlockKind::Fenced { .. }, "x\n")
+        ));
+        assert_eq!(paragraph(&blocks[1]), ["y"]);
+    }
+
+    #[test]
+    fn a_dedented_lazy_line_opens_no_block() {
+        let blocks = commonmark("   - > q\n    1. a\n1.  ```");
+        let item = only_item(&blocks[0]);
+        assert_eq!(paragraph(&quote(&item.children[0])[0]), ["q", "\n", "1. a"]);
+    }
+
+    #[test]
+    fn an_html_block_on_a_quoted_items_continuation_line_ends_at_the_next_item() {
+        let blocks = commonmark("> - <div>\n>   <!--\n> - x\n>   y\nz");
+        let items = &list(&quote(&blocks[0])[0]).children;
+        assert_eq!(
+            paragraph(&items[1].children[0]),
+            ["x", "\n", "y", "\n", "z"]
+        );
+    }
+
+    #[test]
+    fn a_sibling_item_ends_a_fence_behind_a_quote() {
+        let blocks = commonmark("- > - ```\n  > - b\nc");
+        let item = only_item(&blocks[0]);
+        let nested = &list(&quote(&item.children[0])[0]).children;
+        assert_eq!(paragraph(&nested[1].children[0]), ["b", "\n", "c"]);
+    }
+
+    #[test]
+    fn block_extensions_indent_at_most_three_columns() {
+        for (source, value) in [("    [^1]: x", "[^1]: x\n"), ("    ::name", "::name\n")] {
+            let blocks = parse(source).document.children;
+            let [block] = blocks.as_slice() else {
+                panic!("{source:?}: {blocks:?}");
+            };
+            assert_eq!(code(block), (&CodeBlockKind::Indented, value), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn tabs_after_a_split_tab_keep_their_columns() {
+        let blocks = commonmark(">\t\t\tfoo");
+        assert_eq!(
+            code(&quote(&blocks[0])[0]),
+            (&CodeBlockKind::Indented, "  \tfoo\n")
+        );
+        let blocks = commonmark("> ```\n>\t\tcode\n> ```");
+        assert_eq!(code(&quote(&blocks[0])[0]).1, "  \tcode\n");
+    }
+
+    #[test]
+    fn blank_lines_inside_open_leaf_blocks_loosen_no_list() {
+        for source in ["- a\n  - ```\n\n    x\n\n- b", "\n\n- <!--\n\n- text"] {
+            assert!(list(&commonmark(source)[0]).tight, "{source:?}");
+        }
+        assert!(list(&parse("- $$\n\n- b").document.children[0]).tight);
+    }
+
+    #[test]
+    fn an_unclosed_fence_keeps_its_trailing_blank_lines() {
+        let blocks = commonmark("- ```\n  x\n\n- b");
+        assert_eq!(code(&list(&blocks[0]).children[0].children[0]).1, "x\n\n");
+        let blocks = commonmark("> ```\n> a\n>\nb");
+        assert_eq!(code(&quote(&blocks[0])[0]).1, "a\n\n");
+    }
+
+    #[test]
+    fn container_lines_follow_the_open_blocks() {
+        let blocks = commonmark("2. a\n   1. ```\n\n2. b");
+        assert!(blocks.len() == 1 && list(&blocks[0]).tight, "{blocks:?}");
+
+        let blocks = commonmark("> - a\n> 2.\nz");
+        let inner = quote(&blocks[0]);
+        assert!(
+            matches!(inner, [Block::List(_), Block::List(_)]),
+            "{inner:?}"
+        );
+        assert_eq!(paragraph(&blocks[1]), ["z"]);
+
+        let blocks = commonmark("> 1. a\n> ===\nb");
+        let item = only_item(&quote(&blocks[0])[0]);
+        assert_eq!(paragraph(&item.children[0]), ["a", "\n", "===", "\n", "b"]);
+
+        assert!(!list(&commonmark("- - ```\n  - a\n\n- b")[0]).tight);
+
+        let blocks = commonmark("1.   a\n    ```\n\nb");
+        assert!(matches!(blocks[0], Block::List(_)), "{blocks:?}");
+        assert_eq!(paragraph(&blocks[1]), ["b"]);
+
+        let blocks = commonmark("- a\n  |-|\nx");
+        assert_eq!(
+            paragraph(&only_item(&blocks[0]).children[0]),
+            ["a", "\n", "|-|", "\n", "x"]
+        );
+    }
+
+    #[test]
+    fn an_alerts_paragraph_takes_lazy_lines() {
+        let blocks = parse("> [!NOTE]\n> a\n===").document.children;
+        let [Block::Alert(alert)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [only] = alert.children.as_slice() else {
+            panic!("{alert:?}");
+        };
+        assert_eq!(paragraph(only), ["a", "\n", "==="]);
+    }
+
+    #[test]
+    fn a_quoted_footnote_definition_takes_lazy_lines() {
+        let blocks = SyntaxOptions::gfm()
+            .parse("> [^1]: a\nb\n\nx[^1]")
+            .document
+            .children;
+        let [Block::FootnoteDefinition(definition)] = quote(&blocks[0]) else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(paragraph(&definition.children[0]), ["a", "\n", "b"]);
+    }
+}
+
+mod directive_containers {
+    //! Directive scenarios of the block-syntax spec: leaf directives stand
+    //! alone, and a closing fence closes the innermost directive it can.
+
+    use markdown_syntax::{parse, Block, DiagnosticCode, Inline};
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::SoftBreak(_) => "\n".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn text_after_a_leaf_directive_makes_the_line_paragraph_text() {
+        let blocks = parse("x\n::a b").document.children;
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(texts(&paragraph.children), ["x", "\n", "::a b"]);
+    }
+
+    #[test]
+    fn nested_directives_close_innermost_first() {
+        let blocks = parse(":::outer\n:::inner\nx\n:::\n:::\nafter")
+            .document
+            .children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::ContainerDirective(inner)] = outer.children.as_slice() else {
+            panic!("{outer:?}");
+        };
+        assert_eq!(
+            (outer.name.as_str(), inner.name.as_str()),
+            ("outer", "inner")
+        );
+        assert!(matches!(inner.children.as_slice(), [Block::Paragraph(_)]));
+        assert_eq!(texts(&after.children), ["after"]);
+    }
+
+    #[test]
+    fn a_directive_opener_inside_an_html_block_is_its_content() {
+        let output = parse(":::e\n<y>\n:::e");
+        let [Block::ContainerDirective(directive)] = output.document.children.as_slice() else {
+            panic!("{:?}", output.document);
+        };
+        let [Block::HtmlBlock(html)] = directive.children.as_slice() else {
+            panic!("{directive:?}");
+        };
+        assert_eq!(html.value, "<y>\n:::e");
+        assert!(output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::UnclosedDirectiveContainer));
+    }
+
+    #[test]
+    fn a_closing_fence_like_line_inside_an_items_fence_is_code() {
+        let blocks = parse(":::t\n- ```\n  :::e\n  ```\n:::\nafter")
+            .document
+            .children;
+        let [Block::ContainerDirective(directive), Block::Paragraph(after)] = blocks.as_slice()
+        else {
+            panic!("{blocks:?}");
+        };
+        let [Block::List(list)] = directive.children.as_slice() else {
+            panic!("{directive:?}");
+        };
+        let [Block::CodeBlock(code)] = list.children[0].children.as_slice() else {
+            panic!("{list:?}");
+        };
+        assert_eq!(code.value, ":::e\n");
+        assert_eq!(texts(&after.children), ["after"]);
+    }
+
+    #[test]
+    fn a_leaf_directive_in_an_item_leaves_later_lines_lazy() {
+        let blocks = parse("- ::name[x]\n  foo\nbar").document.children;
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::LeafDirective(_), Block::Paragraph(paragraph)] =
+            list.children[0].children.as_slice()
+        else {
+            panic!("{list:?}");
+        };
+        assert_eq!(texts(&paragraph.children), ["foo", "\n", "bar"]);
+    }
+}
+
+mod directive_attributes {
+    //! An attribute without a valid name is dropped and reported.
+
+    use markdown_syntax::{parse, Block, DiagnosticCode, DiagnosticSeverity, Span};
+
+    fn dropped(source: &str) -> Vec<Span> {
+        parse(source)
+            .diagnostics
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code == DiagnosticCode::InvalidDirectiveAttribute)
+            .map(|diagnostic| {
+                assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+                diagnostic.span.expect("a parser diagnostic has a span")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_text_directives_nameless_attributes_are_reported() {
+        let source = ":b{<} :c{a <=1 d}";
+        let document = parse(source).document;
+        assert_eq!(document.to_markdown().unwrap(), ":b :c{a d}\n");
+        let spans = dropped(source);
+        let texts: Vec<&str> = spans
+            .iter()
+            .map(|span| &source[span.start..span.end])
+            .collect();
+        assert_eq!(texts, ["<", "<=1"]);
+    }
+
+    #[test]
+    fn a_leaf_directives_dotted_and_colon_led_names_are_reported() {
+        let source = "::a{x.y=1 :b=2 data-x=3}";
+        let blocks = parse(source).document.children;
+        let [Block::LeafDirective(directive)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let names: Vec<&str> = directive
+            .attributes
+            .iter()
+            .map(|attribute| attribute.name.as_str())
+            .collect();
+        assert_eq!(names, ["data-x"]);
+        let spans = dropped(source);
+        let texts: Vec<&str> = spans
+            .iter()
+            .map(|span| &source[span.start..span.end])
+            .collect();
+        assert_eq!(texts, ["x.y=1", ":b=2"]);
+    }
+
+    #[test]
+    fn a_container_directives_nameless_attribute_is_reported() {
+        let source = ":::a{=x}\nbody\n:::";
+        let spans = dropped(source);
+        let texts: Vec<&str> = spans
+            .iter()
+            .map(|span| &source[span.start..span.end])
+            .collect();
+        assert_eq!(texts, ["=x"]);
     }
 }

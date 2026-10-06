@@ -6,9 +6,9 @@ use alloc::vec::Vec;
 
 use crate::{
     ast::{
-        Autolink, AutolinkKind, Block, CodeInline, ContainerDirective, DirectiveAttribute,
-        Document, Escape, Heading, HtmlContainer, HtmlContainerContent, Inline, LeafDirective,
-        List, MathInlineKind, Table, TextDirective,
+        Block, CodeInline, ContainerDirective, DirectiveAttribute, Document, Escape, Heading,
+        HtmlContainer, HtmlContainerContent, Inline, LeafDirective, List, MathInlineKind, Table,
+        TextDirective,
     },
     diagnostic::Diagnostic,
     span::Span,
@@ -258,10 +258,10 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                 validate_emphasis_container(&node.children, node.meta.span, diagnostics)
             }
             Inline::Shortcode(node) => {
-                if node.name.is_empty() {
+                if node.glyph().is_none() {
                     diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
-                        "shortcode name cannot be empty",
+                        "shortcode name must be a gemoji name",
                     ));
                 }
             }
@@ -319,7 +319,6 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                 }
             }
             Inline::Code(node) => validate_code_inline(node, diagnostics),
-            Inline::Autolink(node) => validate_autolink(node, diagnostics),
             Inline::Math(node) => {
                 if let MathInlineKind::Dollar { dollars: 0 } = node.kind {
                     diagnostics.push(Diagnostic::invalid(
@@ -357,25 +356,6 @@ fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
         diagnostics.push(Diagnostic::invalid(
             escape.meta.span,
             "escaped value must be an ASCII punctuation character",
-        ));
-    }
-}
-
-fn validate_autolink(autolink: &Autolink, diagnostics: &mut Vec<Diagnostic>) {
-    // GFM literal autolinks carry a synthesized destination that MAY contain
-    // `>` (the renderer percent-encodes it). Only angle-bracket autolinks
-    // forbid a space, an ASCII control char, `<`, and `>` in the destination.
-    if matches!(autolink.kind, AutolinkKind::GfmLiteral { .. }) {
-        return;
-    }
-    if autolink
-        .destination
-        .chars()
-        .any(|char| matches!(char, ' ' | '<' | '>') || char.is_ascii_control())
-    {
-        diagnostics.push(Diagnostic::invalid(
-            autolink.meta.span,
-            "autolink destination cannot contain a space, a control char, `<`, or `>`",
         ));
     }
 }

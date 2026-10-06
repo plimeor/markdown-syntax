@@ -4,7 +4,9 @@
 
 extern crate alloc;
 
+mod compare;
 mod entities;
+mod gemoji;
 mod memo;
 #[cfg(test)]
 mod test_support;
@@ -30,6 +32,13 @@ pub use options::{
 pub use parse::{parse, ParseOutput, ParseStrictError};
 pub use serialize::{LineEnding, SerializeError, SerializeOptions};
 pub use span::{LineIndex, LinePosition, Span};
+
+/// Not part of the public API: the tree comparison serialization reads back
+/// with, exported so the crate's integration tests compare trees the same way.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::compare::normalized_blocks;
+}
 
 /// Common imports for working with `markdown-syntax`: `use
 /// markdown_syntax::prelude::*;` brings the AST, options, diagnostics, parse

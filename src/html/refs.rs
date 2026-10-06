@@ -1,5 +1,4 @@
-//! Link-definition map, reference resolution, image-alt flattening, and
-//! autolink visible-text reduction.
+//! Link-definition map, reference resolution, and image-alt flattening.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -119,37 +118,21 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::SoftBreak(_) => out.push('\n'),
             Inline::LineBreak(_) => out.push('\n'),
             Inline::Html(h) => out.push_str(&h.value),
-            Inline::Autolink(a) => out.push_str(&visible_text(&a.destination)),
             Inline::WikiLink(w) => out.push_str(&w.label),
-            Inline::Shortcode(s) => out.push_str(&s.name),
+            Inline::Shortcode(s) => match s.glyph() {
+                Some(glyph) => out.push_str(glyph),
+                None => {
+                    out.push(':');
+                    out.push_str(&s.name);
+                    out.push(':');
+                }
+            },
             Inline::FootnoteReference(_) => {}
             Inline::TextDirective(d) => flatten_into(&d.label, out),
             Inline::MdxExpression(_) => {}
             Inline::MdxJsx(_) => {}
         }
     }
-}
-
-/// Autolink display text: strip the parser-synthesized `mailto:` (email form)
-/// or `http://` (GFM bare-www form) prefix, keeping literally-typed prefixes.
-/// Returns the un-escaped visible text; the caller applies [`escape_text`].
-pub fn visible_text(dest: &str) -> String {
-    if let Some(rest) = dest.strip_prefix("mailto:") {
-        // Strip ONLY the synthesized email-autolink prefix (remainder is an
-        // address with `@`); a literal `<mailto:a>` URI keeps `mailto:a`.
-        if rest.contains('@') {
-            return String::from(rest);
-        }
-    }
-    if let Some(rest) = dest.strip_prefix("http://") {
-        // Only strip the synthetic www-prefix form; the parser only ever
-        // prepends `http://` to a `www`-leading literal (which may have been
-        // trimmed down to a bare `www`).
-        if rest.starts_with("www") {
-            return String::from(rest);
-        }
-    }
-    String::from(dest)
 }
 
 /// Escape the flattened alt text in one step.

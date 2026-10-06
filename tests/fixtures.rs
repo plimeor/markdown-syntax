@@ -10,7 +10,7 @@ use markdown_syntax::{
 use support::fixtures::{
     assert_case_file_stable, assert_fixture, assert_parse_serialize_stable,
     assert_required_profiles, assert_semantic_input_corpus_stable, profile_options,
-    snapshot_document,
+    reading_back_under, snapshot_document, snapshot_document_normalized,
 };
 
 #[test]
@@ -137,8 +137,6 @@ fn extension_fixture_snapshots_and_roundtrips() {
         constructs: constructs,
         parse: ParseOptions {
             single_tilde_strikethrough: true,
-            preserve_character_escapes: false,
-            preserve_character_references: false,
         },
     };
     assert_fixture(
@@ -151,10 +149,7 @@ fn extension_fixture_snapshots_and_roundtrips() {
     );
     let escape_options = SyntaxOptions {
         constructs: Constructs::commonmark(),
-        parse: ParseOptions {
-            preserve_character_escapes: true,
-            ..ParseOptions::default()
-        },
+        parse: ParseOptions::default(),
     };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_escapes_preserved",
@@ -162,10 +157,7 @@ fn extension_fixture_snapshots_and_roundtrips() {
     );
     let reference_options = SyntaxOptions {
         constructs: Constructs::commonmark(),
-        parse: ParseOptions {
-            preserve_character_references: true,
-            ..ParseOptions::default()
-        },
+        parse: ParseOptions::default(),
     };
     assert_fixture(
         "tests/fixtures/roundtrip/extensions/character_references_preserved",
@@ -392,11 +384,14 @@ fn html_syntax_nodes_are_preserved() {
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<span data-x=\\\"1\\\">\""));
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<!-- inline -->\""));
 
-    let markdown = output.document.to_markdown().unwrap();
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(&SyntaxOptions::commonmark()))
+        .unwrap();
     let reparsed = SyntaxOptions::commonmark().parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document)
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document)
     );
 }
 
@@ -488,8 +483,6 @@ fn strikethrough_can_contain_subscript() {
         constructs: constructs,
         parse: ParseOptions {
             single_tilde_strikethrough: false,
-            preserve_character_escapes: false,
-            preserve_character_references: false,
         },
     };
     let output = options.parse("~~H~2~O~~\n");
