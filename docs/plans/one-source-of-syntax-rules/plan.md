@@ -73,9 +73,10 @@ producing new ones of the same kind (#11), and `parse` can panic.
   `[text](url)` otherwise.
 - A literal or relaxed-scheme autolink ends at Unicode whitespace, `<`, a
   non-ASCII Unicode punctuation or symbol char, or, with wikilinks on, `[[`.
-  This holds under every preset (#10). Every boundary check reads Unicode
-  whitespace on char boundaries, which removes the
-  `prefix_ends_with_gfm_email` panic.
+  This holds under every preset (#10). The check on the text before an
+  email reads Unicode whitespace on char boundaries, which removes the
+  `prefix_ends_with_gfm_email` panic; a `www.` literal still starts only
+  after an ASCII delimiter or layout whitespace, as on GitHub.
 - `Escape` and `CharacterReference` nodes are always produced (#8), and
   `ParseOptions::preserve_character_escapes` and
   `ParseOptions::preserve_character_references` are removed:
@@ -373,7 +374,7 @@ Specs:
 - [x] 5.3 Replace `"==\\=a=="` and the CommonMark/default `"*a***b**"` runs with inputs that fail at `f987d66`, and name the seed of every generated-input test. Verified the same way as 5.2.
 
 ### 6. Docs and release notes
-- [ ] 6.1 Add a `CHANGELOG.md` migration note covering:
+- [x] 6.1 Add a `CHANGELOG.md` migration note covering:
   - `Autolink` → `Link`, the always-on `Escape`/`CharacterReference`, the removed `preserve_*` fields, and `WikiLink.embed`;
   - the gemoji shortcodes and `Shortcode::glyph()`;
   - `SerializeOptions::syntax`, `SerializeError::Unrepresentable`, and the new diagnostic codes;

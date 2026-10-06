@@ -148,7 +148,7 @@ match SyntaxOptions::default().parse_strict("# clean input") {
 ### Customize serialization
 
 ```rust
-use markdown_syntax::{parse, SerializeOptions, LineEnding};
+use markdown_syntax::{parse, LineEnding, SerializeOptions, SyntaxOptions};
 
 // `SerializeOptions` is #[non_exhaustive]: mutate a default rather than using a
 // struct literal.
@@ -158,10 +158,21 @@ options.final_newline = false;
 
 let markdown = parse("# Title").document.to_markdown_with(&options)?;
 assert_eq!(markdown, "# Title");
+
+// The output reads back as the same tree under `options.syntax`, the maximal
+// dialect by default: `==` marks a highlight there, so text holding it is
+// escaped, while CommonMark leaves it as it is.
+let text = SyntaxOptions::commonmark().parse("a ==b== c").document;
+assert_eq!(text.to_markdown()?, "a \\=\\=b\\=\\= c\n");
+let mut commonmark = SerializeOptions::default();
+commonmark.syntax = SyntaxOptions::commonmark();
+assert_eq!(text.to_markdown_with(&commonmark)?, "a ==b== c\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 
 Because `SerializeOptions` is `#[non_exhaustive]`, external code cannot struct-literal-construct it (even with `..Default::default()`, E0639) — mutate a `default()` instead.
+
+The serializer escapes only what a parse of its own output reads as syntax, so the canonical output stays close to what an author writes. A hand-built tree that no Markdown reads back as — a link inside a link, say — returns `SerializeError::Unrepresentable` with a diagnostic naming the node.
 
 ### Source positions (optional)
 
