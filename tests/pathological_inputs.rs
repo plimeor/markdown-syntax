@@ -437,6 +437,27 @@ fn parsing_grows_linearly_with_lines_and_diagnostics() {
 }
 
 #[test]
+fn block_containers_grow_linearly_with_their_lines() {
+    // A description's details continue with lazy lines.
+    assert_linear_growth("long description details", 2_000, |n| {
+        time_parse(
+            &(String::from("a\n: b\n") + &"c\n".repeat(n)),
+            SyntaxOptions::default(),
+        )
+    });
+    // Each line passes the same nested containers.
+    let prefix = "> - ".repeat(8);
+    assert_linear_growth("long nested containers", 500, |n| {
+        let mut input = format!("{prefix}x\n");
+        let continuation = "> ".repeat(1) + &"  ".repeat(8);
+        for line in 0..n {
+            input.push_str(&format!("{continuation}line {line} *a*\n"));
+        }
+        time_parse(&input, SyntaxOptions::default())
+    });
+}
+
+#[test]
 fn serialization_grows_linearly_with_runs() {
     assert_linear_growth("tilde run", 20_000, |n| {
         time_serialize(&parse(&format!("a {} b", "~".repeat(n))).document)

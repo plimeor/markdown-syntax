@@ -803,3 +803,23 @@ fn an_escaped_cell_pipe_spans_its_backslash() {
 fn emphasis_on_a_block_quote_continuation_line_covers_its_delimiters() {
     assert_eq!(nth_span("> a\n> *b*", "Emphasis", 0), (6, 9));
 }
+
+#[test]
+fn a_task_checkbox_is_part_of_the_items_marker() {
+    assert_eq!(nth_span("- [ ] task", "Paragraph", 0), (6, 10));
+    assert_eq!(nth_span("- [ ] task", "Text", 0), (6, 10));
+    let markup = "- [x] done *x*";
+    assert_eq!(nth_span(markup, "Paragraph", 0), (6, 14));
+    assert_eq!(nth_span(markup, "Text", 0), (6, 11));
+    assert_eq!(nth_span(markup, "Emphasis", 0), (11, 14));
+    assert_eq!(nth_span("1. [ ] step", "Paragraph", 0), (7, 11));
+    assert_eq!(nth_span("1. [ ] step", "Text", 0), (7, 11));
+}
+
+#[test]
+fn a_container_directives_last_child_ends_after_its_line_ending() {
+    assert_eq!(
+        nth_span(":::note\n```\nx\n```\n:::\n", "CodeBlock", 0),
+        (8, 18)
+    );
+}

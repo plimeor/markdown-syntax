@@ -213,7 +213,7 @@ specification defines them.
 
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
-- **THEN** the output matches the expected HTML
+- **THEN** the output matches the expected HTML, except where commonmark.js renders a case otherwise, where it matches commonmark.js: blank lines inside a fence in a list item hold no whitespace past the item's indentation, and a fence a container ends right after its opening line is empty
 
 ### Requirement: GFM blocks
 When the corresponding constructs are enabled, the parser SHALL recognize GFM

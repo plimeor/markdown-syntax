@@ -23,6 +23,8 @@ pub enum DiagnosticCode {
     InvalidDirectiveName,
     /// A container directive (`:::name`) was never closed.
     UnclosedDirectiveContainer,
+    /// A directive attribute without a valid name was dropped.
+    InvalidDirectiveAttribute,
     /// Malformed MDX syntax.
     InvalidMdx,
     /// A strict-mode parse promoted a configured extension diagnostic to an error.

@@ -1,11 +1,10 @@
 //! Where the text the parser reads came from in the original input.
 //!
-//! Containers and inline parsing read derived strings: lines with container
-//! markers and indentation removed, tabs split into spaces, lines joined with
-//! `\n`, and table cells with `\|` read as `|`. A [`SourceMap`] pairs runs of a
-//! derived string with the source bytes they were read from, always in
-//! original-input coordinates, so a position in any derived string translates
-//! to a span of the input without walking the nesting that produced it.
+//! Inline parsing reads derived strings: a block's lines from where its
+//! containers leave them, joined with `\n`, and table cells with `\|` read as
+//! `|`. A [`SourceMap`] pairs runs of a derived string with the source bytes
+//! they were read from, always in original-input coordinates, so a position in
+//! a derived string translates to a span of the input.
 
 use alloc::{string::String, vec::Vec};
 
@@ -198,17 +197,11 @@ pub(super) struct DerivedText {
     map: SourceMap,
     /// The source range of the line ending the next joiner stands for.
     pending_eol: Option<(usize, usize)>,
-    /// The source column each pushed line starts at.
-    columns: Vec<usize>,
 }
 
 impl DerivedText {
     pub(super) fn map(&self) -> &SourceMap {
         &self.map
-    }
-
-    pub(super) fn into_map(self) -> SourceMap {
-        self.map
     }
 
     fn join(&mut self) {
@@ -222,53 +215,23 @@ impl DerivedText {
         }
     }
 
-    /// Appends `derived`, which `line` read from its text: either a slice of
-    /// `line.text`, or the text from byte `from` of `line.text` on with its
-    /// leading whitespace expanded (a tab split into spaces), joined to the
-    /// previous line.
-    pub(super) fn push_line(&mut self, line: &Line<'_>, derived: &str, from: usize) {
+    /// Appends `slice`, a sub-slice of `line.text`, joined to the previous
+    /// line.
+    pub(super) fn push_line(&mut self, line: &Line<'_>, slice: &str) {
         self.join();
-        self.columns.push(derived_column(line, derived, from));
-        self.append(line, derived, from);
+        self.append(line, slice);
         self.pending_eol = Some(line.eol_source());
     }
 
-    /// The lines of the text, each starting at the source column it was read
-    /// from.
-    pub(super) fn lines(&self) -> Vec<Line<'_>> {
-        let mut lines = super::collect_lines(&self.text, &self.map);
-        for (line, column) in lines.iter_mut().zip(&self.columns) {
-            line.column = *column;
-        }
-        lines
-    }
-
-    /// Appends `derived` to the current line without a joiner.
-    pub(super) fn append(&mut self, line: &Line<'_>, derived: &str, from: usize) {
-        let at = self.text.len();
-        match slice_offset(line.text, derived) {
-            Some(offset) => line.copy_into(&mut self.map, at, offset, offset + derived.len()),
-            None => {
-                // `derived` expands the whitespace at the start of
-                // `line.text[from..]`; the rest is verbatim.
-                let raw = &line.text[from..];
-                let suffix = common_suffix_len(raw, derived);
-                let head = derived.len() - suffix;
-                let raw_head_end = from + raw.len() - suffix;
-                let source_start = line.source_start(from);
-                let source_end = line.source_end(raw_head_end);
-                self.map.push(at, head, source_start, source_end);
-                line.copy_into(&mut self.map, at + head, raw_head_end, line.text.len());
-            }
-        }
-        self.text.push_str(derived);
-    }
-
-    /// Ends the last pushed line with `\n`, mapped to the line ending it was
-    /// read with, as the lines before it are joined.
-    pub(super) fn push_pending_eol(&mut self) {
-        self.join();
-        self.pending_eol = None;
+    /// Appends `slice`, a sub-slice of `line.text`, to the current line. An
+    /// empty string adds nothing, wherever it points.
+    pub(super) fn append(&mut self, line: &Line<'_>, slice: &str) {
+        let Some(offset) = slice_offset(line.text, slice) else {
+            debug_assert!(slice.is_empty(), "a slice of the line");
+            return;
+        };
+        line.copy_into(&mut self.map, self.text.len(), offset, offset + slice.len());
+        self.text.push_str(slice);
     }
 
     /// Drops the spaces and tabs that end the text, with the map runs they
@@ -286,28 +249,6 @@ impl DerivedText {
             .push(self.text.len(), text.len(), source_start, source_end);
         self.text.push_str(text);
     }
-
-    /// Appends text the parser adds that the source does not hold.
-    pub(super) fn push_synthetic(&mut self, text: &str) {
-        let at = end_of(self.map.segments(), self.text.len());
-        self.map.push(self.text.len(), text.len(), at, at);
-        self.text.push_str(text);
-    }
-}
-
-/// The source column `derived` starts at, which `line` read from byte `from`
-/// of its text (see [`DerivedText::push_line`]): the column of its offset
-/// when it is a slice of the text, or else the column its verbatim tail starts
-/// at less the spaces its expanded head writes.
-pub(super) fn derived_column(line: &Line<'_>, derived: &str, from: usize) -> usize {
-    if let Some(offset) = slice_offset(line.text, derived) {
-        return line.column_at(offset);
-    }
-    let raw = &line.text[from..];
-    let suffix = common_suffix_len(raw, derived);
-    let head = derived.len() - suffix;
-    line.column_at(from + raw.len() - suffix)
-        .saturating_sub(head)
 }
 
 /// The offset of `slice` inside `text` when it is a borrowed sub-slice of it.
@@ -315,14 +256,6 @@ fn slice_offset(text: &str, slice: &str) -> Option<usize> {
     let start = text.as_ptr() as usize;
     let offset = (slice.as_ptr() as usize).checked_sub(start)?;
     (offset + slice.len() <= text.len()).then_some(offset)
-}
-
-fn common_suffix_len(a: &str, b: &str) -> usize {
-    a.bytes()
-        .rev()
-        .zip(b.bytes().rev())
-        .take_while(|(x, y)| x == y)
-        .count()
 }
 
 /// Translates spans that an inline parse produced in its input's coordinates

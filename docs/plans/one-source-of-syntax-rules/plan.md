@@ -320,18 +320,18 @@ Specs:
 - [x] 1.5 Fold `Inline::Autolink`/`AutolinkKind` into `Link` across the parser, `validate.rs`, `html/`, `source_map.rs`, and `nul_replacement.rs`. The current serializer writes these through its `Link` path until 3.5. Verified by the inline-syntax Literal autolinks "Bare URL" and Angle-bracket autolink URI scenarios, and by regenerated, read goldens.
 
 ### 2. Block parser on an open-block stack
-- [ ] 2.1 Line loop with the open-block stack for block quotes, list items, and paragraphs with lazy continuation, spans through `source_map.rs`. Add `nested_containers_match_the_reference` with every parse case listed in #11 and commonmark.js's HTML for it, noting where micromark differs. Verified by the block-syntax "One pass over open blocks" and CommonMark blocks scenarios.
-- [ ] 2.2 Leaf blocks on the stack: fences, indented code, HTML blocks, math blocks, setext and ATX headings, thematic breaks, tables, and definitions. Verified by the CommonMark oracle cases, the GFM table start scenarios, and "Delimiter-row-like line with tables off".
-- [ ] 2.3 Extension containers on the stack:
+- [x] 2.1 Line loop with the open-block stack for block quotes, list items, and paragraphs with lazy continuation, spans through `source_map.rs`. Add `nested_containers_match_the_reference` with every parse case listed in #11 and commonmark.js's HTML for it, noting where micromark differs. Verified by the block-syntax "One pass over open blocks" and CommonMark blocks scenarios.
+- [x] 2.2 Leaf blocks on the stack: fences, indented code, HTML blocks, math blocks, setext and ATX headings, thematic breaks, tables, and definitions. Verified by the CommonMark oracle cases, the GFM table start scenarios, and "Delimiter-row-like line with tables off".
+- [x] 2.3 Extension containers on the stack:
   - container directives, with innermost-first closing fences and the last child ending after its line ending;
   - footnote definitions with lazy lines;
   - HTML containers, description details, and alerts;
   - leaf directives alone on their line, the three-column indent limit, and the `InvalidDirectiveAttribute` warning.
 
   Verified by the block-syntax Block directives, Footnote definition content, GFM blocks, and Block extensions indent scenarios, and public-api "Last child of a container directive".
-- [ ] 2.4 Tabs after a split tab, blank lines inside open leaf blocks, and trailing blank lines of unclosed fences. Verified by "Tabs after a split tab" and "Blank lines inside open leaf blocks".
-- [ ] 2.5 Task checkbox as part of the item marker. Verified by the public-api task item span scenarios.
-- [ ] 2.6 Delete `content_line_state`, `OpenParagraph`/`OpenParagraphIn`, `OpenBlock`, `lazy_flags`, `continues_verbatim`, and the lazy `\` insertion. Add the description-details and nested-container growth cases to `tests/pathological_inputs.rs`. Verified by `grep` finding none of these names, by the untrusted-input-cost "Long description details" and "Long nested containers" scenarios, and by `cargo test`.
+- [x] 2.4 Tabs after a split tab, blank lines inside open leaf blocks, and trailing blank lines of unclosed fences. Verified by "Tabs after a split tab" and "Blank lines inside open leaf blocks".
+- [x] 2.5 Task checkbox as part of the item marker. Verified by the public-api task item span scenarios.
+- [x] 2.6 Delete `content_line_state`, `OpenParagraph`/`OpenParagraphIn`, `OpenBlock`, `lazy_flags`, `continues_verbatim`, and the lazy `\` insertion. Add the description-details and nested-container growth cases to `tests/pathological_inputs.rs`. Verified by `grep` finding none of these names, by the untrusted-input-cost "Long description details" and "Long nested containers" scenarios, and by `cargo test`.
 
 ### 3. Parser-sourced serializer
 - [ ] 3.1 Add the crate-private syntax trace: bytes read as syntax, the flanking roles of each delimiter run, and the container and block each line landed in. Verified by unit tests comparing the trace with the parsed tree over the generated inputs from `src/test_support.rs`.
