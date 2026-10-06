@@ -113,7 +113,9 @@ Specs:
   cmark-gfm emphasis/autolink order, and the relaxed scheme in the GFM
   preset. The new literal-autolink boundary also applies under the GFM
   preset, as one more registered divergence from cmark-gfm. All of these
-  were confirmed in the interview.
+  were confirmed in the interview. A literal autolink also keeps ending at a
+  `\` before ASCII punctuation other than `.` (cmark-gfm keeps `\*x` in
+  `www.a.com\*x`), so the escapes written after an autolink read back.
 - A 0.3.x patch release for the `"\u{a0}e+@"` panic. The fix lands with the
   rewrite and ships in the next breaking release.
 - Widening the directive attribute-name rule. Names stay
@@ -412,7 +414,7 @@ The verify run found defects in the work above. Each task lands with a test that
 - [x] 7.7 Inline: autolinks in a directive label do not block the enclosing link; `![[` past the bracket limit is an embed; a text directive name followed by `:` is not a directive, as in micromark; the `\<punct>` autolink guard stays as a recorded divergence: cmark-gfm keeps `\*x` in `www.a.com\*x`, but removing the guard makes trees with escaped text after an autolink unwritable (stress fuzz). A scheme with no domain char after it still links, as cmark-gfm's relaxed pass links `https://` before whitespace; only the comment that claimed otherwise is corrected. Verified by `tests/parse_inline_regressions.rs` cases and comrak and micromark output.
 - [x] 7.8 Tests: depth-growth tests assert `Ok` and measure enough work to fail; "Long nested containers" times serialization; growth bounds stay at 8x; the tests in `tests/pathological_inputs.rs` run one at a time, so that their timings do not share cores; the reference cases need the `html` feature, which CI now runs; the duplicated `#[test]`, dead profile alias, lost `![[a[b]]` case, misnamed test, and missing idempotence check in `assert_source_stable` are fixed. Verified by `cargo test` and five consecutive `cargo test --features html` runs.
 - [x] 7.9 Cleanups: dead serializer and parser code, single-use wrappers, one tree comparison shared by `compare.rs` and the read-back, the gemoji tool emitting rustfmt-stable output, crate-private visibility of helpers whose outside callers were deleted. Verified by `cargo test` and `cargo fmt --check`. The text directive writer closes from the trace instead of predicting from the next sibling; list marker scanning and the description marker check each have one owner; the regenerated gemoji table carries `#[rustfmt::skip]` and holds the same 1913 entries.
-- [ ] 7.10 Docs: `CHANGELOG.md` lists the parse changes, the `syntax` migration step, the `SerializeError` variant, and before/after examples; spec change files match the code (bullet override, scenario titles); stale comments in `src/html/` and stale paths in `docs/specs/` and `README.md` are corrected. Verified by reading the files against the code.
+- [x] 7.10 Docs: `CHANGELOG.md` lists the parse changes, the `syntax` migration step, the `SerializeError` variant, and before/after examples; spec change files match the code (bullet override, scenario titles); stale comments in `src/html/` and stale paths in `docs/specs/` and `README.md` are corrected. Verified by reading the files against the code. `README.md` names the current minor version; the docs/specs path is fixed now rather than at archive.
 
 ### 8. Integration checks
 - [ ] 8.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.

@@ -156,7 +156,8 @@ byte for byte.
 syntax options the output is read back under (`syntax`, the maximal default
 dialect by default); a bullet marker, ordered-list delimiter, or code fence
 character other than its default SHALL replace the one the AST records, while
-the default keeps it. Options SHALL be constructed by mutating
+the default keeps it. A replaced marker SHALL yield where two adjacent lists
+would read back as one: that list keeps another marker. Options SHALL be constructed by mutating
 `SerializeOptions::default()`.
 
 #### Scenario: CRLF without final newline
@@ -164,8 +165,8 @@ the default keeps it. Options SHALL be constructed by mutating
 - **THEN** it returns `"# Title"`
 
 #### Scenario: Bullet override
-- **WHEN** `parse("- a\n\n+ b").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
-- **THEN** both lists are written with `+`
+- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
+- **THEN** it returns `"+ a\n\n- b\n\n+ c\n"`
 
 #### Scenario: Escapes follow the read-back dialect
 - **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized once with default options and once with `syntax = SyntaxOptions::commonmark()`

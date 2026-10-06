@@ -1,5 +1,4 @@
-//! Link-definition map, reference resolution, image-alt flattening, and
-//! autolink visible-text reduction.
+//! Link-definition map, reference resolution, and image-alt flattening.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;

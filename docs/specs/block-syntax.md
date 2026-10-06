@@ -3,7 +3,7 @@
 ## Purpose
 
 Recognition of a document's block structure: which lines form which blocks and
-how containers nest. Owned by the block parser in `src/parse.rs`.
+how containers nest. Owned by the block parser in `src/parse/blocks.rs`.
 
 ## Requirements
 

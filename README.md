@@ -30,7 +30,7 @@ Or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-markdown-syntax = "0.1"
+markdown-syntax = "0.3"
 ```
 
 ## Quickstart

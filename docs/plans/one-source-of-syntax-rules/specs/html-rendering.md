@@ -6,7 +6,7 @@
 The renderer SHALL write a `Shortcode` as the escaped text of its
 `Shortcode::glyph()`, with no wrapper element.
 
-#### Scenario: Name outside the old built-in list
+#### Scenario: Name from the gemoji table
 - **WHEN** `":sparkles:"` is rendered
 - **THEN** the output is `<p>✨</p>`
 

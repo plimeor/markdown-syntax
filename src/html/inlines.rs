@@ -137,16 +137,16 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             None => image_reference_fallback(n),
         },
 
-        // 20. Html — verbatim under danger (with tagfilter), else text-escape.
+        // 19. Html — verbatim under danger (with tagfilter), else text-escape.
         Inline::Html(h) => render_raw_html(&h.value, ctx),
 
-        // 21. SoftBreak.
+        // 20. SoftBreak.
         Inline::SoftBreak(_) => String::from("\n"),
 
-        // 22. LineBreak — both kinds identical.
+        // 21. LineBreak — both kinds identical.
         Inline::LineBreak(_) => String::from("<br />\n"),
 
-        // 23. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
+        // 22. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
         //     inline, and `$`…`$` code-math is an inline `<code>`.
         Inline::Math(m) => match m.kind {
             MathInlineKind::Code => format!(
@@ -163,7 +163,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             ),
         },
 
-        // 24. FootnoteReference (GFM shape). An undefined reference renders
+        // 23. FootnoteReference (GFM shape). An undefined reference renders
         //     as its literal `[^label]` source text.
         Inline::FootnoteReference(fr) => {
             if ctx.footnotes.is_defined(&fr.identifier) {
@@ -173,14 +173,14 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             }
         }
 
-        // 25. InlineFootnote — renders like a footnote reference; its body was
+        // 24. InlineFootnote — renders like a footnote reference; its body was
         //     harvested into the doc-end section during the pre-pass.
         Inline::InlineFootnote(_) => {
             let id = footnotes::next_inline_id(ctx.footnotes);
             footnote_marker(&id, ctx)
         }
 
-        // 26. WikiLink — GFM shape; both label orders identical output.
+        // 25. WikiLink — GFM shape; both label orders identical output.
         Inline::WikiLink(w) => {
             let href = attr_escape_gfm(&encode_href(&w.target));
             let embed = if w.embed {
@@ -194,13 +194,13 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             )
         }
 
-        // 27. MDX expression (inline) — no HTML.
+        // 26. MDX expression (inline) — no HTML.
         Inline::MdxExpression(_) => String::new(),
 
-        // 28. MDX JSX (inline) — no HTML (node carries no children).
+        // 27. MDX JSX (inline) — no HTML (node carries no children).
         Inline::MdxJsx(_) => String::new(),
 
-        // 29. TextDirective [CONV] — classed span carrying name + attrs.
+        // 28. TextDirective [CONV] — classed span carrying name + attrs.
         Inline::TextDirective(d) => {
             let attrs = directive_attrs(&d.attributes);
             format!(

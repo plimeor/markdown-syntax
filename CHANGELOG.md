@@ -29,14 +29,19 @@ output needs these updates.
   marks an embed with `data-wikilink-embed="true"`.
 - **Shortcodes come from gemoji.** A shortcode needs a name in the pinned
   github/gemoji v4.1.0 table and no letter or digit directly outside either
-  colon, so clock times and `a:b:c` stay text. `Shortcode::glyph()` returns
-  the emoji, validation rejects a name outside the table, and the HTML
-  renderer writes the glyph.
+  colon, so clock times and `a:b:c` stay text. A `:word:` outside the table
+  stays text too: a text directive's name followed by a `:` opens no
+  directive. `Shortcode::glyph()` returns the emoji, validation rejects a
+  name outside the table, and the HTML renderer writes the glyph.
 - **Serialization reads its output back.** `SerializeOptions` gains
   `syntax: SyntaxOptions`, the dialect the output is read back under (the
-  maximal dialect by default). `SerializeError::Unrepresentable` is returned,
-  with `DiagnosticCode::Unrepresentable`, when no Markdown the serializer can
-  write reads back as the same tree.
+  maximal dialect by default). Set it to the preset you parse with: a
+  CommonMark parse of `a ==b== c` otherwise writes `a \=\=b\=\= c`, since
+  the maximal dialect reads `==` as highlight.
+  `SerializeError::Unrepresentable` is returned, with
+  `DiagnosticCode::Unrepresentable`, when no Markdown the serializer can
+  write reads back as the same tree; an exhaustive `match` on
+  `SerializeError` needs an arm for it.
 - **New diagnostic codes.** `DiagnosticCode::InvalidDirectiveAttribute`
   warns about a directive attribute without a valid name, which is dropped;
   `DiagnosticCode::Unrepresentable` names the node serialization cannot
@@ -49,7 +54,7 @@ output needs these updates.
     `x`);
   - a delimiter run the parse uses is escaped whole (`\=\=a\=\=`);
   - emphasis and strong take `*` unless that does not read back
-    (`***(a b)_.***\*#`);
+    (`***(a b)\_.***\*#`, was `_**(a b)\_.**_\*#`);
   - an invalid character reference such as `&unknown;` stays raw;
   - a nested list is indented only when the block after it would join its
     last item, and a list marker override yields where two adjacent lists
@@ -61,6 +66,19 @@ output needs these updates.
   lists. A task item's checkbox is part of its marker, so its paragraph
   starts after it. `::name text` is a paragraph; a leaf directive stands alone
   on its line.
+- **Block parse changes that move the AST of existing input:**
+  - footnote definitions, directive openers, math fences, and description
+    details open only up to three columns in;
+  - a container directive's closing fence closes the innermost open one,
+    and its last child's span ends after its line ending;
+  - footnote definitions and alert paragraphs take lazy continuation lines;
+  - tabs after a tab split by a container prefix keep their columns;
+  - blank lines inside a fence or HTML block do not loosen a list;
+  - an unclosed fence keeps its trailing blank lines;
+  - a multi-line definition title drops its continuation lines'
+    indentation;
+  - an alert's marker line keeps a following indented line from starting
+    indented code, as a paragraph line does.
 - **Literal autolinks end earlier.** A literal or relaxed-scheme autolink
   ends at Unicode whitespace, `<`, a non-ASCII punctuation or symbol char
   (`，`, `。`, `、`), or, with wikilinks on, `[[`. `parse` no longer panics on
