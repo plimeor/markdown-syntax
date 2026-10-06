@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
@@ -112,8 +113,8 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
 
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document)
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document)
     );
 
     let second = reparsed
@@ -138,8 +139,8 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
     let markdown = output.document.to_markdown().expect("document serializes");
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document),
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document),
         "{path}: AST changed after serialize/reparse"
     );
 
@@ -423,8 +424,8 @@ fn assert_source_stable(source: &str, path: &Path, index: usize, options: &Synta
     });
     let reparsed = options.parse(&markdown);
     assert_eq!(
-        snapshot_document(&reparsed.document),
-        snapshot_document(&output.document),
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document),
         "{}#{index}: AST changed after serialize/reparse",
         path.display()
     );
@@ -455,6 +456,43 @@ fn normalize_expected_markdown(input: &str) -> String {
     let mut output = input.trim_end_matches('\n').to_string();
     output.push('\n');
     output
+}
+
+thread_local! {
+    static NORMALIZED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The snapshot of `document` as serialization's tree comparison reads it:
+/// each `Escape` and `CharacterReference` as text, with adjacent text merged.
+/// Spans are never part of a snapshot.
+pub(crate) fn snapshot_document_normalized(document: &Document) -> String {
+    NORMALIZED.with(|normalized| normalized.set(true));
+    let snapshot = snapshot_document(document);
+    NORMALIZED.with(|normalized| normalized.set(false));
+    snapshot
+}
+
+/// `inlines` with escapes and character references read as text and
+/// adjacent text merged, one level deep; nested content is folded when its
+/// own level is snapshotted.
+fn fold_text(inlines: &[Inline]) -> Vec<Inline> {
+    let mut folded: Vec<Inline> = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        let value = match inline {
+            Inline::Text(node) => node.value.clone(),
+            Inline::Escape(node) => node.value.to_string(),
+            Inline::CharacterReference(node) => node.value.clone(),
+            other => {
+                folded.push(other.clone());
+                continue;
+            }
+        };
+        match folded.last_mut() {
+            Some(Inline::Text(last)) => last.value.push_str(&value),
+            _ => folded.push(Inline::Text(value.into())),
+        }
+    }
+    folded
 }
 
 pub(crate) fn snapshot_document(document: &Document) -> String {
@@ -711,6 +749,13 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
 }
 
 fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) {
+    let folded;
+    let inlines = if NORMALIZED.with(Cell::get) {
+        folded = fold_text(inlines);
+        &folded[..]
+    } else {
+        inlines
+    };
     for inline in inlines {
         match inline {
             Inline::Text(node) => push(lines, indent, format!("Text {}", quote(&node.value))),

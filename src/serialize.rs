@@ -484,7 +484,7 @@ fn serialize_reading_back(
         crate::options::SyntaxOptions::mdx(),
     ];
     let mut reads_back = |markdown: &str, presets: &[crate::options::SyntaxOptions]| {
-        let expected = expected.get_or_insert_with(|| without_spans(children));
+        let expected = expected.get_or_insert_with(|| crate::compare::normalized_inlines(children));
         reparses_to(markdown, children, expected, presets)
     };
     // A strong or emphasis run abutting another splits on reparse only as its
@@ -763,7 +763,8 @@ fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> St
 }
 
 /// Whether `markdown` parses, under one of `presets`, to one paragraph or
-/// heading holding `inlines`, which `expected` holds without spans.
+/// heading holding `inlines`, which `expected` holds normalized as the tree
+/// comparison reads it.
 fn reparses_to(
     markdown: &str,
     inlines: &[Inline],
@@ -789,9 +790,7 @@ fn reparses_to(
                     .iter()
                     .all(|block| matches!(block, Block::Definition(_))) =>
             {
-                let mut reparsed = children.clone();
-                clear_spans(&mut reparsed);
-                reparsed == expected
+                crate::compare::normalized_inlines(children) == expected
             }
             _ => false,
         }
@@ -819,53 +818,6 @@ fn reference_labels<'a>(inlines: &'a [Inline], labels: &mut Vec<&'a str>) {
             },
         };
         reference_labels(children, labels);
-    }
-}
-
-/// `inlines` with every span cleared, which compare by their content.
-fn without_spans(inlines: &[Inline]) -> Vec<Inline> {
-    let mut inlines = inlines.to_vec();
-    clear_spans(&mut inlines);
-    inlines
-}
-
-fn clear_spans(inlines: &mut [Inline]) {
-    for inline in inlines {
-        let (meta, children) = match inline {
-            Inline::Text(node) => (&mut node.meta, None),
-            Inline::Escape(node) => (&mut node.meta, None),
-            Inline::SoftBreak(node) => (&mut node.meta, None),
-            Inline::LineBreak(node) => (&mut node.meta, None),
-            Inline::CharacterReference(node) => (&mut node.meta, None),
-            Inline::Emphasis(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Strong(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Underline(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Delete(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Insert(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Mark(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Subscript(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Superscript(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Spoiler(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::InlineFootnote(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Shortcode(node) => (&mut node.meta, None),
-            Inline::Code(node) => (&mut node.meta, None),
-            Inline::Link(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::Image(node) => (&mut node.meta, Some(&mut node.alt)),
-            Inline::LinkReference(node) => (&mut node.meta, Some(&mut node.children)),
-            Inline::ImageReference(node) => (&mut node.meta, Some(&mut node.alt)),
-            Inline::Autolink(node) => (&mut node.meta, None),
-            Inline::Html(node) => (&mut node.meta, None),
-            Inline::Math(node) => (&mut node.meta, None),
-            Inline::FootnoteReference(node) => (&mut node.meta, None),
-            Inline::WikiLink(node) => (&mut node.meta, None),
-            Inline::MdxExpression(node) => (&mut node.meta, None),
-            Inline::MdxJsx(node) => (&mut node.meta, None),
-            Inline::TextDirective(node) => (&mut node.meta, Some(&mut node.label)),
-        };
-        meta.span = None;
-        if let Some(children) = children {
-            clear_spans(children);
-        }
     }
 }
 

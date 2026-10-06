@@ -309,7 +309,7 @@ Specs:
 ## Tasks
 
 ### 1. Comparison and AST surface
-- [ ] 1.1 Add the crate-private tree comparison and use it in the serializer's read-back and the test helpers' round-trip checks. Verified by the serialization "Tree comparison" scenarios, with `cargo test` otherwise unchanged.
+- [x] 1.1 Add the crate-private tree comparison and use it in the serializer's read-back and the test helpers' round-trip checks. Verified by the serialization "Tree comparison" scenarios, with `cargo test` otherwise unchanged.
 - [ ] 1.2 Always produce `Escape` and `CharacterReference`, with the cell `\|` rule. Remove both `preserve_*` fields and the tests that set them, and write both nodes as recorded. Verified by:
   - inline-syntax "Escapes and character references are nodes", and its modified CommonMark inlines and Hard line breaks from spaces scenarios;
   - serialization Canonical output "Escape the author wrote" and "Character reference the author wrote";

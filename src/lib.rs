@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+mod compare;
 mod entities;
 mod memo;
 #[cfg(test)]
