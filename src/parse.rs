@@ -5365,12 +5365,17 @@ fn end_last_line(value: &mut String) {
     if value.is_empty() || ends_with_line_ending(value) {
         return;
     }
-    let ending = match value.find(['\r', '\n']) {
+    value.push_str(value_line_ending(value));
+}
+
+/// The line ending a code or math value's lines take: its first one, `\n`
+/// when it has none.
+fn value_line_ending(value: &str) -> &'static str {
+    match value.find(['\r', '\n']) {
         Some(index) if value[index..].starts_with("\r\n") => "\r\n",
         Some(index) if value[index..].starts_with('\r') => "\r",
         _ => "\n",
-    };
-    value.push_str(ending);
+    }
 }
 
 fn ends_with_line_ending(input: &str) -> bool {

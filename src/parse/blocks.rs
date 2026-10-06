@@ -636,6 +636,9 @@ struct BlockParser<'a, 'o> {
     matched: usize,
     /// Every open block the line did not continue is closed.
     all_closed: bool,
+    /// The line follows an alert's marker line, which it continues as a
+    /// paragraph's first line, so no indented code interrupts it.
+    after_alert_marker: bool,
     /// The lookaheads of closed containers, with what their open blocks
     /// read of a line and whether they take lazy lines. A container that
     /// opens later under blocks that read lines alike takes one over, so
@@ -679,6 +682,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             diagnostics: Vec::new(),
             matched: 1,
             all_closed: true,
+            after_alert_marker: false,
             retired: Vec::new(),
         }
     }
@@ -691,6 +695,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             Some(Kind::BlockQuote { marker_open, .. }) => mem::take(marker_open),
             _ => false,
         };
+        self.after_alert_marker = alert_open;
         let leaf = self.stack.last().is_some_and(Frame::is_leaf);
         let containers = self.stack.len() - usize::from(leaf);
 
@@ -858,7 +863,13 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             Kind::Code(code) => {
                 let content = cursor.content();
                 content.push_into(&mut code.value);
-                code.value.push_str(code_line_ending(&line, in_container));
+                // A last line without a line ending still ends one, empty or
+                // not, as every line of the value does.
+                if line.eol.is_empty() {
+                    code.value.push_str(value_line_ending(&code.value));
+                } else {
+                    code.value.push_str(code_line_ending(&line, in_container));
+                }
                 if let CodeKind::Indented = code.kind {
                     if !is_blank(&content.whole()) {
                         code.content_len = code.value.len();
@@ -1536,6 +1547,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         // Indented code.
         if indented
             && constructs.indented_code
+            && !self.after_alert_marker
             && !self.stack.last().is_some_and(Frame::is_paragraph)
         {
             cursor.advance_offset(4, true);
@@ -2792,10 +2804,11 @@ fn take_definitions<'a>(lines: &[ParagraphLine<'a>]) -> (Vec<Child<'a>>, usize) 
     {
         return (Vec::new(), 0);
     }
-    // Continuation lines keep the indentation a label or title holds.
+    // Each line is read from its first char other than a space or tab, as
+    // a paragraph's lines are.
     let views: Vec<Line<'a>> = lines
         .iter()
-        .map(|line| view(&line.content.line, line.from.min(line.content.offset)))
+        .map(|line| view(&line.content.line, line.content.offset))
         .collect();
     let mut found = Vec::new();
     let mut index = 0;

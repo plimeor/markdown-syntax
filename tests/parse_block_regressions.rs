@@ -1867,6 +1867,44 @@ mod one_pass_over_open_blocks {
         SyntaxOptions::commonmark().parse(source).document.children
     }
 
+    fn code_value(block: &Block) -> &str {
+        match block {
+            Block::CodeBlock(code) => &code.value,
+            other => panic!("expected a code block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unclosed_fence_keeps_an_empty_last_line_without_a_line_ending() {
+        // commonmark.js gives `a\n\n` for each.
+        assert_eq!(code_value(&commonmark("  ```\na\n  ")[0]), "a\n\n");
+        assert_eq!(
+            code_value(&only_item(&commonmark("- ```\n  a\n  ")[0]).children[0]),
+            "a\n\n"
+        );
+        assert_eq!(code_value(&commonmark("```\r\na\r\n")[0]), "a\r\n");
+    }
+
+    #[test]
+    fn a_definition_title_drops_the_indentation_of_its_lines() {
+        let blocks = commonmark("[a]: /u \"x\n   y\"\n\n[a]");
+        let Block::Definition(definition) = &blocks[0] else {
+            panic!("expected a definition, got {blocks:?}");
+        };
+        assert_eq!(definition.title.as_deref(), Some("x\ny"));
+    }
+
+    #[test]
+    fn indented_code_does_not_interrupt_an_alert_marker_line() {
+        for source in ["> [!NOTE]\n    code", "> [!NOTE]\n>     code"] {
+            let blocks = SyntaxOptions::default().parse(source).document.children;
+            let [Block::Alert(alert)] = blocks.as_slice() else {
+                panic!("{source:?}: expected one alert, got {blocks:?}");
+            };
+            assert_eq!(paragraph(&alert.children[0]), ["code"], "{source:?}");
+        }
+    }
+
     fn texts(inlines: &[Inline]) -> Vec<String> {
         inlines
             .iter()
