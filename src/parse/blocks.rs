@@ -710,25 +710,20 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             let blank = cursor.blank;
             let has_children =
                 !self.stack[matched].children.is_empty() || matched + 1 < self.stack.len();
-            let continues = match &self.stack[matched].kind {
-                Kind::Document | Kind::List { .. } | Kind::DescriptionList(_) => true,
-                Kind::BlockQuote { .. } => quote_continues(&mut cursor),
-                Kind::Item { indent, .. } => item_continues(&mut cursor, *indent, has_children),
-                Kind::ContainerDirective(_) => {
-                    directives.push((matched, cursor));
-                    true
-                }
-                Kind::FootnoteDefinition { .. } | Kind::Details => indent_continues(&mut cursor),
-                Kind::HtmlContainer { close_line, .. } => {
-                    if *close_line == index {
+            let continues =
+                match continuation(&self.stack[matched].kind, &mut cursor, has_children, index) {
+                    Continuation::Continues => true,
+                    Continuation::Ends => false,
+                    Continuation::Directive => {
+                        directives.push((matched, cursor));
+                        true
+                    }
+                    Continuation::HtmlClose => {
                         self.extend_frames(&extended, index, line.end_with_eol);
                         self.close_html_container(matched, &cursor, index);
                         return;
                     }
-                    true
-                }
-                _ => unreachable!("leaf blocks are innermost"),
-            };
+                };
             if !continues {
                 break;
             }
@@ -1887,10 +1882,14 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let mut cursor = Cursor::new(self.lines[index]);
         for open in &self.stack[1..=frame] {
             cursor.find_next_nonspace();
-            let continues = match &open.kind {
-                Kind::BlockQuote { .. } => quote_continues(&mut cursor),
-                Kind::Item { indent, .. } => item_continues(&mut cursor, *indent, true),
-                Kind::ContainerDirective(directive) => {
+            // A line past the one being read follows content in each item.
+            let continues = match continuation(&open.kind, &mut cursor, true, index) {
+                Continuation::Continues => true,
+                Continuation::Ends => false,
+                Continuation::Directive => {
+                    let Kind::ContainerDirective(directive) = &open.kind else {
+                        unreachable!("a directive continues as one");
+                    };
                     if !cursor.indented()
                         && directive_container_closing_fence(
                             cursor.nonspace_rest(),
@@ -1902,14 +1901,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     }
                     true
                 }
-                Kind::FootnoteDefinition { .. } | Kind::Details => indent_continues(&mut cursor),
-                Kind::HtmlContainer { close_line, .. } => {
-                    if *close_line == index {
-                        return None;
-                    }
-                    true
-                }
-                _ => true,
+                Continuation::HtmlClose => return None,
             };
             if !continues {
                 return (lazy && !cursor.blank).then(|| cursor.rest_view());
@@ -2563,6 +2555,49 @@ fn quote_continues(cursor: &mut Cursor<'_>) -> bool {
 
 /// A list item's continuation: a blank line when the item holds a block, or
 /// a line indented to the item's content.
+/// What an open container does with a line.
+enum Continuation {
+    /// The container continues, its markers read.
+    Continues,
+    /// The container does not continue.
+    Ends,
+    /// A container directive, which continues unless its closing fence is on
+    /// the line; the caller checks that once the containers inside it read.
+    Directive,
+    /// An HTML container whose closing line this is.
+    HtmlClose,
+}
+
+/// What the open container `kind` does with line `index`, reading its markers
+/// from `cursor`, which is at the line's first nonspace char; `has_children`
+/// is whether a list item holds content already.
+fn continuation(
+    kind: &Kind<'_>,
+    cursor: &mut Cursor<'_>,
+    has_children: bool,
+    index: usize,
+) -> Continuation {
+    let continues = match kind {
+        Kind::Document | Kind::List { .. } | Kind::DescriptionList(_) => true,
+        Kind::BlockQuote { .. } => quote_continues(cursor),
+        Kind::Item { indent, .. } => item_continues(cursor, *indent, has_children),
+        Kind::ContainerDirective(_) => return Continuation::Directive,
+        Kind::FootnoteDefinition { .. } | Kind::Details => indent_continues(cursor),
+        Kind::HtmlContainer { close_line, .. } => {
+            if *close_line == index {
+                return Continuation::HtmlClose;
+            }
+            true
+        }
+        _ => unreachable!("leaf blocks are innermost"),
+    };
+    if continues {
+        Continuation::Continues
+    } else {
+        Continuation::Ends
+    }
+}
+
 fn item_continues(cursor: &mut Cursor<'_>, indent: usize, has_children: bool) -> bool {
     if cursor.blank {
         if !has_children {

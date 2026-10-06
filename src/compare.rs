@@ -21,8 +21,7 @@ pub(crate) fn normalized_inlines(inlines: &[Inline]) -> Vec<Inline> {
 
 /// `blocks` normalized for comparison, as [`normalized_inlines`] does for
 /// inline content.
-#[cfg(test)]
-pub(crate) fn normalized_blocks(blocks: &[Block]) -> Vec<Block> {
+pub fn normalized_blocks(blocks: &[Block]) -> Vec<Block> {
     let mut blocks = blocks.to_vec();
     normalize_blocks(&mut blocks, false);
     blocks
@@ -156,13 +155,27 @@ fn normalize_blocks(blocks: &mut [Block], layout: bool) {
     }
 }
 
+/// Appends the text `inline` reads as when it is text, as the comparison
+/// reads a `Text`, an `Escape`, or a `CharacterReference`. Whether it is.
+pub(crate) fn push_text(inline: &Inline, out: &mut String) -> bool {
+    match inline {
+        Inline::Text(node) => out.push_str(&node.value),
+        Inline::Escape(node) => out.push(node.value),
+        Inline::CharacterReference(node) => out.push_str(&node.value),
+        _ => return false,
+    }
+    true
+}
+
 fn normalize_inlines(inlines: &mut Vec<Inline>) {
     let mut normalized = Vec::with_capacity(inlines.len());
     for mut inline in inlines.drain(..) {
         let text = match &mut inline {
-            Inline::Text(node) => Some(core::mem::take(&mut node.value)),
-            Inline::Escape(node) => Some(String::from(node.value)),
-            Inline::CharacterReference(node) => Some(core::mem::take(&mut node.value)),
+            Inline::Text(_) | Inline::Escape(_) | Inline::CharacterReference(_) => {
+                let mut value = String::new();
+                push_text(&inline, &mut value);
+                Some(value)
+            }
             Inline::SoftBreak(node) => {
                 clear(&mut node.meta);
                 None

@@ -80,11 +80,16 @@ when any footnote is referenced.
 
 ### Requirement: Shortcodes render their glyph
 The renderer SHALL write a `Shortcode` as the escaped text of its
-`Shortcode::glyph()`, with no wrapper element.
+`Shortcode::glyph()`, with no wrapper element, and SHALL read it as that glyph
+in an image's alt text.
 
 #### Scenario: Name from the gemoji table
 - **WHEN** `":sparkles:"` is rendered
 - **THEN** the output is `<p>✨</p>`
+
+#### Scenario: Shortcode in image alt text
+- **WHEN** `"![:tada: x](i.png)"` is rendered
+- **THEN** the image's `alt` attribute is `🎉 x`
 
 ### Requirement: Wiki embeds are marked
 The renderer SHALL write a `WikiLink` marked as an embed as the same anchor it

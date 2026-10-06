@@ -30,7 +30,7 @@ use super::inline::{inline_children, Choices, Form, Writer, WrittenChar, Written
 use super::{Place, SerializeError};
 use crate::{
     ast::*,
-    compare::same_node,
+    compare::{push_text, same_node},
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     options::SyntaxOptions,
     parse::{parse_with_definitions, underscore_run_flanks},
@@ -1061,23 +1061,20 @@ enum Item<'a> {
 }
 
 fn items(inlines: &[Inline], first_id: usize) -> Vec<Item<'_>> {
-    let mut items = Vec::new();
+    let mut items: Vec<Item<'_>> = Vec::new();
     let mut id = first_id;
     for inline in inlines {
-        let escaped;
-        let text = match inline {
-            Inline::Text(node) => Some(node.value.as_str()),
-            Inline::CharacterReference(node) => Some(node.value.as_str()),
-            Inline::Escape(node) => {
-                escaped = String::from(node.value);
-                Some(escaped.as_str())
-            }
-            _ => None,
+        let merged = match items.last_mut() {
+            Some(Item::Text { value }) => push_text(inline, value),
+            _ => false,
         };
-        match (text, items.last_mut()) {
-            (Some(text), Some(Item::Text { value })) => value.push_str(text),
-            (Some(text), _) => items.push(Item::Text { value: text.into() }),
-            (None, _) => items.push(Item::Node { inline, id }),
+        if !merged {
+            let mut value = String::new();
+            items.push(if push_text(inline, &mut value) {
+                Item::Text { value }
+            } else {
+                Item::Node { inline, id }
+            });
         }
         id += subtree_size(inline);
     }

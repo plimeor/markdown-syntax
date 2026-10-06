@@ -119,7 +119,14 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::LineBreak(_) => out.push('\n'),
             Inline::Html(h) => out.push_str(&h.value),
             Inline::WikiLink(w) => out.push_str(&w.label),
-            Inline::Shortcode(s) => out.push_str(&s.name),
+            Inline::Shortcode(s) => match s.glyph() {
+                Some(glyph) => out.push_str(glyph),
+                None => {
+                    out.push(':');
+                    out.push_str(&s.name);
+                    out.push(':');
+                }
+            },
             Inline::FootnoteReference(_) => {}
             Inline::TextDirective(d) => flatten_into(&d.label, out),
             Inline::MdxExpression(_) => {}

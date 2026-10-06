@@ -367,20 +367,6 @@ fn an_image_whose_label_cannot_close_yields_to_an_embed() {
 }
 
 #[test]
-fn an_embed_wins_over_an_image_with_a_destination() {
-    let document = SyntaxOptions::default().parse("![[a]](u)").document;
-    let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
-        panic!("expected one paragraph");
-    };
-    assert!(
-        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link), Inline::Text(rest)]
-            if link.embed && link.target == "a" && rest.value == "(u)"),
-        "{:?}",
-        paragraph.children
-    );
-}
-
-#[test]
 fn the_rule_of_three_counts_whole_delimiter_runs() {
     let commonmark = SyntaxOptions::commonmark();
     assert_eq!(

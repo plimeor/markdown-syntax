@@ -397,3 +397,16 @@ fn shortcodes_render_their_gemoji_glyph() {
     );
     assert_eq!(html.trim_end(), "<p>\u{2728}</p>");
 }
+
+#[test]
+fn a_shortcode_in_image_alt_text_reads_as_its_glyph() {
+    let html = parse_render(
+        "![:tada: x](i.png)",
+        &SyntaxOptions::default(),
+        &HtmlOptions::default(),
+    );
+    assert_eq!(
+        html.trim_end(),
+        "<p><img src=\"i.png\" alt=\"\u{1F389} x\" /></p>"
+    );
+}
