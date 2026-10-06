@@ -1108,15 +1108,16 @@ mod autolinks_inside_link_text {
     }
 
     #[test]
-    fn a_backslash_inside_a_literal_autolink_is_part_of_it() {
-        // As cmark-gfm reads it.
+    fn a_backslash_before_punctuation_ends_a_literal_autolink() {
+        // cmark-gfm keeps `\*x` inside the URL. Here it ends the URL, so the
+        // escapes the serializer writes after an autolink read back as text.
         let document = SyntaxOptions::gfm().parse("www.a.com\\*x").document;
         let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
             panic!("{document:?}");
         };
         assert!(
-            matches!(paragraph.children.as_slice(), [Inline::Link(link)]
-                if link.destination == "http://www.a.com\\*x"),
+            matches!(paragraph.children.as_slice(), [Inline::Link(link), Inline::Escape(escape), Inline::Text(_)]
+                if link.destination == "http://www.a.com" && escape.value == '*'),
             "{:?}",
             paragraph.children
         );

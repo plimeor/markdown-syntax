@@ -6663,6 +6663,7 @@ fn autolink_url_end(
     balanced: bool,
     wikilinks: bool,
 ) -> usize {
+    let bytes = input.as_bytes();
     let mut end = start;
     // Relaxed (cmark-gfm) URL extents balance `[`/`]` and `{`/`}` so an IPv6
     // host `nex://[fe80…]/z` and a balanced `[abc]`/`{abc}` run stay inside the
@@ -6711,6 +6712,19 @@ fn autolink_url_end(
                 '`' => strict_inside_backticks = !strict_inside_backticks,
                 ']' if !strict_has_open_bracket && !strict_inside_backticks => break,
                 _ => {}
+            }
+        }
+        // A `\` before ASCII punctuation other than `.` ends the URL. The
+        // serializer writes text after a literal autolink with backslash
+        // escapes (`\*`, `\_`, `\[`, …); stopping here keeps such a tree
+        // writable. cmark-gfm keeps the `\*x` in `www.a.com\*x` inside the
+        // URL; this crate deliberately diverges. A `\` before `.` or a
+        // non-punctuation char stays part of the URL (`www.x.com/a\.`).
+        if char == '\\' {
+            if let Some(&next) = bytes.get(start + offset + 1) {
+                if next.is_ascii_punctuation() && next != b'.' {
+                    break;
+                }
             }
         }
         end = start + offset + char.len_utf8();
