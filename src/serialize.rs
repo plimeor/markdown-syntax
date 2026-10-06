@@ -452,36 +452,36 @@ fn misplaced_within(block: &Block) -> Extracted<'_> {
     }
 }
 
-/// The space or tab opening a task item's first paragraph, and the item's
-/// blocks without it, when content follows it on the line.
-fn task_paragraph_lead(blocks: &[Block]) -> Option<(char, Vec<Block>)> {
-    let Some(Block::Paragraph(paragraph)) = blocks.first() else {
-        return None;
-    };
-    let Some(Inline::Text(text)) = paragraph.children.first() else {
-        return None;
-    };
-    let lead = text
-        .value
-        .chars()
-        .next()
-        .filter(|char| matches!(char, ' ' | '\t'))?;
-    let mut paragraph = paragraph.clone();
-    let rest = &text.value[lead.len_utf8()..];
-    if rest.is_empty() {
-        paragraph.children.remove(0);
-    } else if let Inline::Text(text) = &mut paragraph.children[0] {
-        text.value = rest.into();
-    }
-    // Whitespace before the line's end is dropped.
-    match paragraph.children.first() {
-        None | Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => return None,
-        Some(Inline::Text(text)) if text.value.starts_with(['\n', '\r']) => return None,
-        _ => {}
-    }
-    let mut blocks = blocks.to_vec();
-    blocks[0] = Block::Paragraph(paragraph);
-    Some((lead, blocks))
+/// A task item's first paragraph, read back after its checkbox, which keeps
+/// the whitespace after it as text and holds the paragraph off the line's
+/// start.
+fn serialize_task_paragraph(
+    node: &Paragraph,
+    cx: &Cx<'_>,
+    checked: bool,
+) -> Result<String, SerializeError> {
+    let checkbox = if checked { "- [x] " } else { "- [ ] " };
+    let parts = [
+        Part::Literal(checkbox.into()),
+        Part::Inlines(&node.children, Place::Within),
+    ];
+    let extract = extractor(|blocks| match blocks {
+        [Block::List(list)] => match list.children.as_slice() {
+            [item] if item.checked == Some(checked) => one_block(&item.children, paragraph_content),
+            [_, second, ..] => match second.meta.span {
+                Some(span) => Extracted::Misplaced(span.start),
+                None => Extracted::Mismatch,
+            },
+            _ => Extracted::Mismatch,
+        },
+        [Block::List(_), second, ..] => match second.span() {
+            Some(span) => Extracted::Misplaced(span.start),
+            None => Extracted::Mismatch,
+        },
+        _ => Extracted::Mismatch,
+    });
+    let mut written = write_reading_back(&parts, extract, &cx.read_back)?;
+    Ok(written.remove(0))
 }
 
 /// Whether `node` is written as a setext heading: a setext underline can only
@@ -968,20 +968,7 @@ fn serialize_list_with_marker_spacing(
                 unordered_list_marker(list_delimiter)
             )
         };
-        // The checkbox keeps the whitespace after it as text, so a space or
-        // tab opening the item's paragraph, which a line's start would drop,
-        // is written raw after it, the rest reading back on its own.
-        let lead = item
-            .checked
-            .and_then(|_| task_paragraph_lead(&item.children));
-        let mut inner = match &lead {
-            Some((char, children)) => {
-                let mut inner = String::from(*char);
-                inner.push_str(&serialize_item_blocks(children, options, node.tight)?);
-                inner
-            }
-            None => serialize_item_blocks(&item.children, options, node.tight)?,
-        };
+        let mut inner = serialize_item_blocks(&item.children, options, node.tight, item.checked)?;
         if let Some(checked) = item.checked {
             if let Some(rest) = inner.strip_prefix("- ") {
                 inner = rest.into();
@@ -1014,18 +1001,24 @@ fn serialize_list_with_marker_spacing(
     Ok(output)
 }
 
+/// An item's blocks; a task item's, `task` holding whether it is checked,
+/// have their first paragraph read back after the checkbox.
 fn serialize_item_blocks(
     blocks: &[Block],
     options: &Cx<'_>,
     tight: bool,
+    task: Option<bool>,
 ) -> Result<String, SerializeError> {
     // Written last to first, as at the top level: a list reads the
     // indentation of the block after it.
     let mut written: Vec<String> = Vec::with_capacity(blocks.len());
-    for block in blocks.iter().rev() {
+    for (index, block) in blocks.iter().enumerate().rev() {
         let next = written.last().map(String::as_str);
-        written.push(match block {
-            Block::List(list) => serialize_list_before(block, list, options, next)?,
+        written.push(match (block, task) {
+            (Block::List(list), _) => serialize_list_before(block, list, options, next)?,
+            (Block::Paragraph(paragraph), Some(checked)) if index == 0 => {
+                serialize_task_paragraph(paragraph, options, checked)?
+            }
             _ => serialize_block(block, options, false)?,
         });
     }
@@ -1072,7 +1065,7 @@ fn serialize_description_list(
             }
             output.push_str("\n:");
             let inner = if node.tight {
-                serialize_item_blocks(&detail.children, options, true)?
+                serialize_item_blocks(&detail.children, options, true, None)?
             } else {
                 serialize_blocks_at_start(&detail.children, options, false)?
             };

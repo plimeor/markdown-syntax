@@ -352,8 +352,8 @@ Specs:
   - serialization "Nested list before an indented block" and "Paragraph after an empty quote line in an item";
   - the retained layout scenarios "Thematic break opening a list item", "Whitespace that opens a list item's first block", "Math opening a definition's paragraph", and "Alert title and empty container directive";
   - the round-trip fixtures.
-- [ ] 3.5 Write autolink-form links as `<url>` when that reads back. Verified by serialization "Links written as autolinks" and validation "Link text that no angle-bracket autolink can write".
-- [ ] 3.6 Add `tests/serialize_roundtrip_fuzz.rs` with inline, block-oriented, and emphasis-heavy generators and their seeds recorded, run in each dialect. Verified by serialization "Seeded round-trip generators" passing.
+- [x] 3.5 Write autolink-form links as `<url>` when that reads back. Verified by serialization "Links written as autolinks" and validation "Link text that no angle-bracket autolink can write".
+- [x] 3.6 Add `tests/serialize_roundtrip_fuzz.rs` with inline, block-oriented, and emphasis-heavy generators and their seeds recorded, run in each dialect. Verified by serialization "Seeded round-trip generators" passing.
 
 ### 4. Inline boundaries
 - [ ] 4.1 Literal and relaxed-scheme autolink boundary: Unicode whitespace on char boundaries, the non-ASCII punctuation/symbol stop, and the `[[` stop. Add a seeded no-panic generator over Unicode whitespace and autolink pieces. Verified by the inline-syntax Literal autolinks scenarios and the public-api Infallible parse scenarios.

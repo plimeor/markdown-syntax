@@ -2219,8 +2219,8 @@ mod links_as_autolinks {
 
     #[test]
     fn a_link_no_angle_bracket_autolink_writes_is_an_inline_link() {
-        assert!(written("www.a.b").ends_with("](http://www.a.b)\n"));
-        assert!(written("a://x").ends_with("](a://x)\n"));
+        assert_eq!(written("www.a.b"), "[www.a.b](http://www.a.b)\n");
+        assert_eq!(written("a://x"), "[a://x](a://x)\n");
         assert_eq!(written("[x](<http://a.b>)"), "[x](<http://a.b>)\n");
     }
 }

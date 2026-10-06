@@ -601,6 +601,8 @@ impl<'c> Writer<'c> {
                     let next = match inlines.get(index + 1) {
                         None | Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => None,
                         Some(Inline::Text(text)) => text.value.chars().next(),
+                        Some(Inline::Escape(_)) => Some('\\'),
+                        Some(Inline::CharacterReference(_)) => Some('&'),
                         // Another inline may open with any of them.
                         Some(_) => Some('a'),
                     };
