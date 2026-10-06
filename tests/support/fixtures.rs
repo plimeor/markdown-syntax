@@ -904,13 +904,14 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 lines,
                 indent,
                 format!(
-                    "WikiLink target={} label={} order={}",
+                    "WikiLink target={} label={} order={}{}",
                     quote(&node.target),
                     quote(&node.label),
                     match node.label_order {
                         markdown_syntax::WikiLinkLabelOrder::AfterPipe => "after",
                         markdown_syntax::WikiLinkLabelOrder::BeforePipe => "before",
-                    }
+                    },
+                    if node.embed { " embed" } else { "" }
                 ),
             ),
             Inline::MdxExpression(node) => push(

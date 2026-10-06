@@ -890,10 +890,10 @@ pub struct InlineFootnote {
     pub children: Vec<Inline>,
 }
 
-/// A wiki link: `[[target|label]]`.
+/// A wiki link: `[[target|label]]`, or an embed: `![[target|label]]`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WikiLink {
-    /// Node metadata (source span).
+    /// Node metadata (source span). An embed's span starts at its `!`.
     pub meta: NodeMeta,
     /// The link target (page name).
     pub target: String,
@@ -901,6 +901,8 @@ pub struct WikiLink {
     pub label: String,
     /// Whether the label appeared before or after the `|` in the source.
     pub label_order: WikiLinkLabelOrder,
+    /// Whether a `!` directly before the `[[` marks the link as an embed.
+    pub embed: bool,
 }
 
 /// Whether a [`WikiLink`]'s label preceded or followed the `|` separator.

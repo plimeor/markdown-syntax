@@ -209,8 +209,13 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
         // 26. WikiLink — GFM shape; both label orders identical output.
         Inline::WikiLink(w) => {
             let href = attr_escape_gfm(&encode_href(&w.target));
+            let embed = if w.embed {
+                " data-wikilink-embed=\"true\""
+            } else {
+                ""
+            };
             format!(
-                "<a href=\"{href}\" data-wikilink=\"true\">{}</a>",
+                "<a href=\"{href}\" data-wikilink=\"true\"{embed}>{}</a>",
                 escape_text(&w.label)
             )
         }

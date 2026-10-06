@@ -1838,7 +1838,7 @@ mod round_trip_edges {
     #[test]
     fn text_after_a_reference_or_before_a_wikilink_keeps_its_parse() {
         assert_eq!(assert_round_trips("[^`]``"), "[^`]&#96;&#96;\n");
-        assert_eq!(assert_round_trips("![[$[]]a$>"), "\\![[$\\[]]a$>\n");
+        assert_eq!(assert_round_trips("![[$[]]a$>"), "![[$\\[]]a$>\n");
         for source in ["[a`]``\n\n[a`]: x", "[^`]: x\n\n[^`]``", "://`\\`"] {
             assert_round_trips(source);
         }
@@ -2156,6 +2156,31 @@ mod escapes_as_recorded {
         });
         let markdown = paragraph_document(vec![reference]).to_markdown().unwrap();
         assert_eq!(markdown, "[foo]\n");
+    }
+
+    #[test]
+    fn a_wiki_embed_is_written_with_its_bang() {
+        let markdown = parse("see ![[x.png]]").document.to_markdown().unwrap();
+        assert_eq!(markdown, "see ![[x.png]]\n");
+    }
+
+    #[test]
+    fn a_bang_before_a_plain_wikilink_is_escaped() {
+        let wikilink = Inline::WikiLink(WikiLink {
+            meta: NodeMeta::default(),
+            target: "x".into(),
+            label: "x".into(),
+            label_order: WikiLinkLabelOrder::AfterPipe,
+            embed: false,
+        });
+        let document = paragraph_document(vec![Text::from("a!").into(), wikilink]);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "a\\![[x]]\n");
+        let reparsed = parse(&markdown).document;
+        assert_eq!(
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
+        );
     }
 
     #[test]

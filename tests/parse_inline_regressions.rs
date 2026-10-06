@@ -710,3 +710,60 @@ mod escapes_and_references {
         );
     }
 }
+
+mod wiki_embeds {
+    //! A `!` directly before a wikilink's `[[` makes it an embed.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph(source: &str) -> Vec<Inline> {
+        match parse(source).document.children.as_slice() {
+            [Block::Paragraph(paragraph)] => paragraph.children.clone(),
+            other => panic!("{source:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bang_before_a_wikilink_makes_an_embed_spanning_from_it() {
+        let inlines = paragraph("see ![[x.png]]");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Text(text), Inline::WikiLink(link)]
+                if text.value == "see "
+                    && link.target == "x.png"
+                    && link.embed
+                    && link.meta.span == Some(Span::new(4, 14))),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn an_escaped_bang_leaves_a_plain_wikilink() {
+        let inlines = paragraph("\\![[x.png]]");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Escape(bang), Inline::WikiLink(link)]
+                if bang.value == '!' && link.target == "x.png" && !link.embed),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_bang_before_brackets_that_form_no_wikilink_stays_text() {
+        let inlines = paragraph("![[x]");
+        assert!(
+            !inlines
+                .iter()
+                .any(|inline| matches!(inline, Inline::WikiLink(_))),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn an_embed_wins_over_an_image_with_a_destination() {
+        let inlines = paragraph("![[a]](u)");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::WikiLink(link), Inline::Text(rest)]
+                if link.embed && link.target == "a" && rest.value == "(u)"),
+            "{inlines:?}"
+        );
+    }
+}

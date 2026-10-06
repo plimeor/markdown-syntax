@@ -2408,6 +2408,9 @@ fn render_inlines(
             }
             Inline::WikiLink(node) => {
                 escape_trailing_bang(&mut output);
+                if node.embed {
+                    output.push('!');
+                }
                 output.push_str("[[");
                 let target = escape_wikilink_part(&node.target);
                 let label = escape_wikilink_part(&node.label);

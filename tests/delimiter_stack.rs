@@ -298,14 +298,14 @@ fn brackets_past_the_limit_close_as_text() {
 }
 
 #[test]
-fn an_image_that_does_not_form_yields_to_a_wikilink_at_its_bracket() {
+fn a_wikilink_after_a_bang_is_an_embed_and_wins_over_the_image() {
     let document = SyntaxOptions::default().parse("![[a]b]]").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
     assert!(
-        matches!(paragraph.children.as_slice(), [Inline::Text(bang), Inline::WikiLink(link)]
-            if bang.value == "!" && link.target == "a]b"),
+        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
+            if link.embed && link.target == "a]b" && link.meta.span == Some(Span::new(0, 8))),
         "{:?}",
         paragraph.children
     );
@@ -353,14 +353,14 @@ fn delimiters_past_the_limit_stay_in_the_output() {
 }
 
 #[test]
-fn an_image_whose_label_cannot_close_yields_to_a_wikilink() {
-    let document = SyntaxOptions::default().parse("![[a[b]]").document;
+fn an_embed_wins_over_an_image_with_a_destination() {
+    let document = SyntaxOptions::default().parse("![[a]](u)").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
     assert!(
-        matches!(paragraph.children.as_slice(), [Inline::Text(bang), Inline::WikiLink(link)]
-            if bang.value == "!" && link.target == "a[b"),
+        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link), Inline::Text(rest)]
+            if link.embed && link.target == "a" && rest.value == "(u)"),
         "{:?}",
         paragraph.children
     );

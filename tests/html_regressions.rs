@@ -375,3 +375,15 @@ fn raw_html_and_tagfilter_options_are_independent() {
         "<p>a &lt;iframe></p>",
     );
 }
+
+#[test]
+fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
+    assert_eq!(
+        parse_render(
+            "![[x.png]]",
+            &SyntaxOptions::default(),
+            &HtmlOptions::default()
+        ),
+        "<p><a href=\"x.png\" data-wikilink=\"true\" data-wikilink-embed=\"true\">x.png</a></p>"
+    );
+}

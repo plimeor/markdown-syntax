@@ -38,9 +38,11 @@ value.
 - **THEN** the paragraph holds one code span whose value is `\*` and no `Escape`
 
 ### Requirement: Wiki embeds
-When wikilinks are enabled, a `!` directly before a wikilink's `[[` SHALL be
-part of that `WikiLink`, which is then marked as an embed and spans from the
-`!`; an escaped `\!` SHALL leave the `WikiLink` unmarked.
+When wikilinks are enabled, a `!` directly before a `[[` where a wikilink
+forms SHALL be part of that `WikiLink`, which is then marked as an embed,
+spans from the `!`, and wins over the image the `![` would open, as a wikilink
+wins over a link at a lone `[`; an escaped `\!` SHALL leave the `WikiLink`
+unmarked.
 
 #### Scenario: Embed
 - **WHEN** `"see ![[x.png]]"` is parsed with `parse`
@@ -49,6 +51,10 @@ part of that `WikiLink`, which is then marked as an embed and spans from the
 #### Scenario: Escaped bang
 - **WHEN** `"\\![[x.png]]"` is parsed with `parse`
 - **THEN** the paragraph holds `Escape('!')` and a `WikiLink` with target `x.png` not marked as an embed
+
+#### Scenario: Embed before a link destination
+- **WHEN** `"![[a]](u)"` is parsed with `parse`
+- **THEN** the paragraph holds a `WikiLink` with target `a` marked as an embed, followed by `Text("(u)")`, and no `Image`
 
 #### Scenario: Bang before brackets that form no wikilink
 - **WHEN** `"![[x]"` is parsed with `parse`

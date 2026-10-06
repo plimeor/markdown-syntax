@@ -4455,13 +4455,6 @@ fn close_bracket(
             brackets.formed.push((nodes.len() - 1, marks + 1));
             return Some(end);
         }
-        if let Some((end, wikilink)) = opener.wikilink.take() {
-            if end > close {
-                drop_label(nodes, delimiters, brackets, &opener);
-                nodes.push(wikilink);
-                return Some(end);
-            }
-        }
         // Not an image: the `!` stays text and the `[` may still open a link.
         opener.kind = BracketKind::Link;
         opener.position += 1;
@@ -5316,9 +5309,6 @@ struct BracketOpener {
     /// For an inline footnote, the dormant `^` superscript run recorded before
     /// it, woken if the footnote does not form.
     caret: Option<usize>,
-    /// For an image, the wikilink that starts at its `[`, used if the image
-    /// does not form and the wikilink runs through the image's `]`.
-    wikilink: Option<(usize, Inline)>,
 }
 
 /// What a `]` resolves a link-kind opener to.
@@ -6276,7 +6266,6 @@ fn parse_inline_content(
                 position: index,
                 delimiter_bottom: delimiters.len(),
                 caret,
-                wikilink: None,
             });
             index += 2;
             text_start = index;
@@ -6357,17 +6346,15 @@ fn parse_inline_content(
 
         if bytes[index] == b'!' && bytes.get(index + 1) == Some(&b'[') && bracket_room {
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            let wikilink = parse_wikilink(input, index + 1, base_offset, options, &mut pass.scan);
-            if let Some((end, wikilink)) = wikilink.clone() {
-                // An image label whose brackets never balance cannot close, so
-                // the wikilink at its `[` wins outright.
-                if pass.scan.link_label_end(index + 1).is_none() {
-                    push_text(&mut nodes, base_offset + index, "!");
-                    nodes.push(wikilink);
-                    index = end;
-                    text_start = index;
-                    continue;
-                }
+            // A wikilink at the `[` wins over the image, as it wins over a
+            // link at a lone `[`, and the `!` makes it an embed.
+            if let Some((end, wikilink)) =
+                parse_wikilink(input, index + 1, base_offset, options, &mut pass.scan)
+            {
+                nodes.push(embed(wikilink, base_offset + index));
+                index = end;
+                text_start = index;
+                continue;
             }
             push_text(&mut nodes, base_offset + index, "!");
             push_text(&mut nodes, base_offset + index + 1, "[");
@@ -6377,7 +6364,6 @@ fn parse_inline_content(
                 position: index,
                 delimiter_bottom: delimiters.len(),
                 caret: None,
-                wikilink,
             });
             index += 2;
             text_start = index;
@@ -6403,7 +6389,6 @@ fn parse_inline_content(
                     position: index,
                     delimiter_bottom: delimiters.len(),
                     caret: None,
-                    wikilink: None,
                 });
                 index += 1;
                 text_start = index;
@@ -6730,8 +6715,18 @@ fn parse_wikilink(
             target,
             label,
             label_order,
+            embed: false,
         }),
     ))
+}
+
+/// `wikilink` marked as an embed by the `!` at `bang`, where its span starts.
+fn embed(mut wikilink: Inline, bang: usize) -> Inline {
+    if let Inline::WikiLink(node) = &mut wikilink {
+        node.embed = true;
+        node.meta.span = node.meta.span.map(|span| Span::new(bang, span.end));
+    }
+    wikilink
 }
 
 /// One step of the walk to a wikilink's closing `]]`, which must be on the
