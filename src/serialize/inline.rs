@@ -26,11 +26,11 @@ pub(super) enum Form {
 
 impl Form {
     /// The form a text char takes before the read-back escapes anything: a
-    /// line ending or a control char that the parser would not keep is a
-    /// reference, and a backtick, which could open a code span that an
+    /// control char that the parser would not keep, line endings among them,
+    /// is a reference, and a backtick, which could open a code span that an
     /// escaped one closes, is always escaped.
     fn initial(char: char) -> Self {
-        if char == '\n' || char == '\r' || written_as_reference(char) {
+        if written_as_reference(char) {
             Self::Reference
         } else if char == '`' {
             Self::Backslash
@@ -74,6 +74,9 @@ pub(super) struct Choices {
     /// Whether each link with a literal autolink's shape is written bare, as
     /// its text, by number.
     bare: Vec<bool>,
+    /// How far each text directive is closed, by number: with an empty
+    /// label (1), and with empty attributes too (2).
+    closed: Vec<u8>,
 }
 
 /// A hash of node `id` for `Choices::underscore_hash`, which combines the
@@ -112,6 +115,30 @@ impl Choices {
         self.underscore_hash ^ node_hash(node)
     }
 
+    pub(super) fn closed(&self, node: usize) -> u8 {
+        self.closed.get(node).copied().unwrap_or(0)
+    }
+
+    /// Closes text directive `node` further, when it can be. Whether it was.
+    pub(super) fn close_further(&mut self, node: usize) -> bool {
+        if self.closed(node) >= 2 {
+            return false;
+        }
+        if self.closed.len() <= node {
+            self.closed.resize(node + 1, 0);
+        }
+        self.closed[node] += 1;
+        true
+    }
+
+    pub(super) fn any_closed(&self) -> bool {
+        self.closed.iter().any(|&closed| closed > 0)
+    }
+
+    pub(super) fn clear_closed(&mut self) {
+        self.closed.clear();
+    }
+
     pub(super) fn bare(&self, node: usize) -> bool {
         self.bare.get(node).copied().unwrap_or(false)
     }
@@ -125,6 +152,10 @@ impl Choices {
 
     pub(super) fn any_bare(&self) -> bool {
         self.bare.contains(&true)
+    }
+
+    pub(super) fn clear_bare(&mut self) {
+        self.bare.clear();
     }
 
     pub(super) fn any_underscored(&self) -> bool {
@@ -176,6 +207,8 @@ pub(super) struct WrittenNode {
     /// The node is a link with a literal autolink's shape, which the
     /// read-back may write bare.
     pub(super) bare_shape: bool,
+    /// The node is a text directive, which the read-back may close.
+    pub(super) directive: bool,
 }
 
 /// The child inlines a node holds, in the order the writer visits them.
@@ -285,8 +318,8 @@ impl<'c> Writer<'c> {
         } else {
             InlineSerializeContext::block_content()
         };
-        for (index, inline) in inlines.iter().enumerate() {
-            self.write_inline(inlines, index, inline, context, cell)?;
+        for inline in inlines {
+            self.write_inline(inline, context)?;
         }
         Ok(())
     }
@@ -295,10 +328,9 @@ impl<'c> Writer<'c> {
         &mut self,
         children: &[Inline],
         context: InlineSerializeContext,
-        cell: bool,
     ) -> Result<(), SerializeError> {
-        for (index, inline) in children.iter().enumerate() {
-            self.write_inline(children, index, inline, context, cell)?;
+        for inline in children {
+            self.write_inline(inline, context)?;
         }
         Ok(())
     }
@@ -309,12 +341,11 @@ impl<'c> Writer<'c> {
         &mut self,
         children: &[Inline],
         context: InlineSerializeContext,
-        cell: bool,
     ) -> Result<String, SerializeError> {
         let start = self.out.len();
         let (chars, nodes) = (self.chars.len(), self.nodes.len());
         self.dropping += 1;
-        self.write_children(children, context, cell)?;
+        self.write_children(children, context)?;
         self.dropping -= 1;
         self.chars.truncate(chars);
         self.nodes.truncate(nodes);
@@ -357,13 +388,12 @@ impl<'c> Writer<'c> {
         (open, close): (&str, &str),
         children: &[Inline],
         context: InlineSerializeContext,
-        cell: bool,
         run: u8,
     ) -> Result<(), SerializeError> {
         let start = self.out.len();
         self.out.push_str(open);
         let content_start = self.out.len();
-        self.write_children(children, context, cell)?;
+        self.write_children(children, context)?;
         let content_end = self.out.len();
         self.out.push_str(close);
         self.record(id, start, Some((content_start, content_end)), run);
@@ -379,17 +409,15 @@ impl<'c> Writer<'c> {
                 content,
                 run,
                 bare_shape: false,
+                directive: false,
             });
         }
     }
 
     fn write_inline(
         &mut self,
-        inlines: &[Inline],
-        index: usize,
         inline: &Inline,
         context: InlineSerializeContext,
-        cell: bool,
     ) -> Result<(), SerializeError> {
         let id = self.next_node;
         self.next_node += 1;
@@ -414,7 +442,7 @@ impl<'c> Writer<'c> {
                 } else {
                     "*"
                 };
-                self.write_span(id, (delimiter, delimiter), &node.children, context, cell, 1)?;
+                self.write_span(id, (delimiter, delimiter), &node.children, context, 1)?;
             }
             Inline::Strong(node) => {
                 let delimiter = if self.choices.underscored(id) {
@@ -422,35 +450,35 @@ impl<'c> Writer<'c> {
                 } else {
                     "**"
                 };
-                self.write_span(id, (delimiter, delimiter), &node.children, context, cell, 2)?;
+                self.write_span(id, (delimiter, delimiter), &node.children, context, 2)?;
             }
             Inline::Underline(node) => {
-                self.write_span(id, ("__", "__"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("__", "__"), &node.children, context, 0)?;
             }
             Inline::Delete(node) => {
                 let marker = match node.marker {
                     DeleteMarker::SingleTilde => "~",
                     DeleteMarker::DoubleTilde => "~~",
                 };
-                self.write_span(id, (marker, marker), &node.children, context, cell, 0)?;
+                self.write_span(id, (marker, marker), &node.children, context, 0)?;
             }
             Inline::Insert(node) => {
-                self.write_span(id, ("++", "++"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("++", "++"), &node.children, context, 0)?;
             }
             Inline::Mark(node) => {
-                self.write_span(id, ("==", "=="), &node.children, context, cell, 0)?;
+                self.write_span(id, ("==", "=="), &node.children, context, 0)?;
             }
             Inline::Subscript(node) => {
-                self.write_span(id, ("~", "~"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("~", "~"), &node.children, context, 0)?;
             }
             Inline::Superscript(node) => {
-                self.write_span(id, ("^", "^"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("^", "^"), &node.children, context, 0)?;
             }
             Inline::Spoiler(node) => {
-                self.write_span(id, ("||", "||"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("||", "||"), &node.children, context, 0)?;
             }
             Inline::InlineFootnote(node) => {
-                self.write_span(id, ("^[", "]"), &node.children, context, cell, 0)?;
+                self.write_span(id, ("^[", "]"), &node.children, context, 0)?;
             }
             Inline::Shortcode(node) => {
                 self.out.push(':');
@@ -462,7 +490,7 @@ impl<'c> Writer<'c> {
                 if node.fence_length > 0 && !node.raw.is_empty() {
                     let fence = "`".repeat(node.fence_length);
                     self.out.push_str(&fence);
-                    if cell {
+                    if context.table_cell {
                         self.out.push_str(&table_cell_escape_code_pipes(&node.raw));
                     } else {
                         self.out.push_str(&node.raw);
@@ -471,7 +499,7 @@ impl<'c> Writer<'c> {
                 } else if node.value.is_empty() {
                     self.out.push_str("`` ``");
                 } else {
-                    let value = if cell {
+                    let value = if context.table_cell {
                         table_cell_escape_code_pipes(&node.value)
                     } else {
                         node.value.clone()
@@ -495,7 +523,7 @@ impl<'c> Writer<'c> {
                     // Its text, which the parser reads as a literal autolink.
                     self.next_char += text.chars().count();
                     self.next_node += node.children.len();
-                    self.push_verbatim(text, cell);
+                    self.push_verbatim(text, context);
                     self.record(id, start, None, 0);
                 } else if let Some(uri) = autolink_uri(node) {
                     // A link that an angle-bracket autolink writes is written
@@ -503,13 +531,13 @@ impl<'c> Writer<'c> {
                     self.next_char += node.children.iter().map(text_chars).sum::<usize>();
                     self.next_node += node.children.len();
                     self.out.push('<');
-                    self.push_verbatim(uri, cell);
+                    self.push_verbatim(uri, context);
                     self.out.push('>');
                     self.record(id, start, None, 0);
                 } else {
                     self.out.push('[');
                     let content_start = self.out.len();
-                    self.write_children(&node.children, context, cell)?;
+                    self.write_children(&node.children, context)?;
                     let content_end = self.out.len();
                     self.out.push_str("](");
                     self.out.push_str(&serialize_destination_kind(
@@ -534,7 +562,7 @@ impl<'c> Writer<'c> {
             Inline::Image(node) => {
                 self.out.push_str("![");
                 let content_start = self.out.len();
-                self.write_children(&node.alt, context, cell)?;
+                self.write_children(&node.alt, context)?;
                 let content_end = self.out.len();
                 self.out.push_str("](");
                 self.out.push_str(&serialize_destination_kind(
@@ -561,7 +589,6 @@ impl<'c> Writer<'c> {
                     &node.identifier,
                     &label,
                     context,
-                    cell,
                 )?;
             }
             Inline::ImageReference(node) => {
@@ -575,11 +602,10 @@ impl<'c> Writer<'c> {
                     &node.identifier,
                     &label,
                     context,
-                    cell,
                 )?;
             }
             Inline::Html(node) => {
-                self.push_verbatim(&node.value, cell);
+                self.push_verbatim(&node.value, context);
                 self.record(id, start, None, 0);
             }
             Inline::SoftBreak(_) => {
@@ -595,7 +621,7 @@ impl<'c> Writer<'c> {
             }
             Inline::Math(node) => {
                 let written = super::serialize_inline_math(node)?;
-                self.push_verbatim(&written, cell);
+                self.push_verbatim(&written, context);
                 self.record(id, start, None, 0);
             }
             Inline::FootnoteReference(node) => {
@@ -617,7 +643,7 @@ impl<'c> Writer<'c> {
                 self.out.push_str("[[");
                 let target = escape_wikilink_part(&node.target);
                 let label = escape_wikilink_part(&node.label);
-                let separator = if cell { "\\|" } else { "|" };
+                let separator = if context.table_cell { "\\|" } else { "|" };
                 if node.target == node.label {
                     self.out.push_str(&target);
                 } else {
@@ -634,12 +660,12 @@ impl<'c> Writer<'c> {
             }
             Inline::MdxExpression(node) => {
                 self.out.push('{');
-                self.push_verbatim(&node.value, cell);
+                self.push_verbatim(&node.value, context);
                 self.out.push('}');
                 self.record(id, start, None, 0);
             }
             Inline::MdxJsx(node) => {
-                self.push_verbatim(&node.value, cell);
+                self.push_verbatim(&node.value, context);
                 self.record(id, start, None, 0);
             }
             Inline::TextDirective(node) => {
@@ -649,7 +675,7 @@ impl<'c> Writer<'c> {
                 if !node.label.is_empty() {
                     self.out.push('[');
                     let content_start = self.out.len();
-                    self.write_children(&node.label, context, cell)?;
+                    self.write_children(&node.label, context)?;
                     content = Some((content_start, self.out.len()));
                     self.out.push(']');
                 }
@@ -657,31 +683,23 @@ impl<'c> Writer<'c> {
                     &node.attributes,
                     context,
                 ));
-                // What follows could go on with a name char, or with a `[` or
-                // `{` the directive could read as its label or attributes, so
-                // an empty label, or an empty attribute list, ends the
-                // directive, unless a break or a text that cannot follows.
+                // What follows can go on with the directive's name, label, or
+                // attributes; the read-back closes it where it does.
                 if node.attributes.is_empty() {
-                    let next = match inlines.get(index + 1) {
-                        None | Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => None,
-                        Some(Inline::Text(text)) => text.value.chars().next(),
-                        Some(Inline::Escape(_)) => Some('\\'),
-                        Some(Inline::CharacterReference(_)) => Some('&'),
-                        // Another inline may open with any of them.
-                        Some(_) => Some('a'),
-                    };
-                    if node.label.is_empty()
-                        && next.is_some_and(|char| {
-                            char.is_ascii_alphanumeric() || matches!(char, '_' | '-' | '[' | '{')
-                        })
-                    {
+                    let closed = self.choices.closed(id);
+                    if closed >= 1 && node.label.is_empty() {
                         self.out.push_str("[]");
                     }
-                    if next == Some('{') {
+                    if closed >= 2 || (closed >= 1 && !node.label.is_empty()) {
                         self.out.push_str("{}");
                     }
                 }
                 self.record(id, start, content, 0);
+                if self.dropping == 0 {
+                    if let Some(last) = self.nodes.last_mut() {
+                        last.directive = true;
+                    }
+                }
             }
         }
         Ok(())
@@ -697,7 +715,6 @@ impl<'c> Writer<'c> {
         identifier: &str,
         label: &str,
         context: InlineSerializeContext,
-        cell: bool,
     ) -> Result<(), SerializeError> {
         let start = self.out.len();
         self.out.push_str(bang);
@@ -708,7 +725,7 @@ impl<'c> Writer<'c> {
         // label as its text instead.
         let body_start = self.out.len() + 1;
         self.out.push('[');
-        self.write_children(children, context, cell)?;
+        self.write_children(children, context)?;
         let rendered = String::from(&self.out[body_start..]);
         let matches = normalize_reference_label(&rendered) == identifier;
         if !matches && !matches!(kind, ReferenceKind::Full) {
@@ -717,7 +734,7 @@ impl<'c> Writer<'c> {
             self.nodes.truncate(nodes);
             self.next_char = next_char;
             self.next_node = next_node;
-            let _ = self.render_dropped(children, context, cell)?;
+            let _ = self.render_dropped(children, context)?;
             push_reference_body(&mut self.out, kind, &rendered, false, label);
             self.record(id, start, None, 0);
             return Ok(());
@@ -734,8 +751,8 @@ impl<'c> Writer<'c> {
 
     /// Writes verbatim content, with the pipes a table cell would split at
     /// escaped: the cell reads each `\|` as `|` inside such content.
-    fn push_verbatim(&mut self, text: &str, cell: bool) {
-        if cell {
+    fn push_verbatim(&mut self, text: &str, context: InlineSerializeContext) {
+        if context.table_cell {
             self.out.push_str(&table_cell_escape_code_pipes(text));
         } else {
             self.out.push_str(text);

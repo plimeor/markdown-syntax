@@ -290,7 +290,7 @@ fn settle_inside(block: &Block, cx: &mut Cx<'_>) -> Result<(), SerializeError> {
                         .binary_search_by_key(&address, |&(shape, _)| shape)
                         .map_or(address, |at| pairs[at].1)
                 };
-                let write = |cx: &Cx<'_>| serialize_list_items(block, list, cx, items.clone());
+                let write = |cx: &Cx<'_>| serialize_list_items(list, cx, items.clone());
                 if reads_back(&ours, cx, &write).is_none() {
                     let _ = settle_fragment(&shape, &ours, &translate, cx, &write);
                 }
@@ -787,7 +787,7 @@ fn serialize_definition(node: &Definition) -> String {
     );
     // The label is matched as written, so it is written as the AST holds it;
     // one that does not read back that way is unrepresentable.
-    let label = escape_definition_label_source(&node.label);
+    let label = escape_reference_label_source(&node.label, false);
     let mut output = format!("[{}]: {}", label, destination);
     if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
         output.push(' ');
@@ -910,7 +910,7 @@ fn serialize_block(
             }
             Ok(output)
         }
-        Block::List(node) => serialize_list(node, options),
+        Block::List(node) => serialize_list_before(block, node, options, None),
         Block::DescriptionList(node) => serialize_description_list(node, options),
         Block::CodeBlock(node) => serialize_code_block(node, options),
         // An HTML block's lines are joined with `\n`, so a value ending in one
@@ -1074,13 +1074,8 @@ fn escape_alert_title(input: &str) -> String {
     input.replace(['\n', '\r'], " ")
 }
 
-fn serialize_list(node: &List, options: &Cx<'_>) -> Result<String, SerializeError> {
-    serialize_list_with_marker_spacing(node, options, "", " ", None, 0..node.children.len())
-}
-
 /// The items `items` of a list, written as a list of their own.
 fn serialize_list_items(
-    _block: &Block,
     node: &List,
     options: &Cx<'_>,
     items: core::ops::Range<usize>,
@@ -1702,16 +1697,6 @@ fn reference_explicit_label(
     } else {
         escape_reference_label_with_pipe(label, context.table_cell)
     }
-}
-
-/// Escapes a parsed definition label for re-emission. A definition label may
-/// span several physical lines (CommonMark §4.7), and the parser stores those
-/// interior newlines verbatim in `label`. Emitting them as literal line breaks
-/// (rather than `&#xA;`) lets the multi-line label re-parse to the same raw
-/// label, keeping the round trip stable; other control characters are still
-/// numeric-escaped, and tabs pass through as in `escape_reference_label_source`.
-fn escape_definition_label_source(input: &str) -> String {
-    escape_reference_label_source(input, false)
 }
 
 fn escape_reference_label_source(input: &str, escape_pipe: bool) -> String {

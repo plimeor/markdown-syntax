@@ -2213,6 +2213,30 @@ mod round_trip_edges {
             assert_eq!(assert_round_trips(source), format!("{source}\n"));
         }
     }
+
+    #[test]
+    fn a_link_the_escapes_keep_from_forming_bare_is_bracketed() {
+        assert_round_trips("__://| a |a@b.c_[[");
+        assert_round_trips("_www.x.com__http://x<!-- `[a]: /u[^1]: [x] ");
+    }
+
+    #[test]
+    fn a_link_after_a_blamed_node_is_written_bare() {
+        // `^[` after the superscript would open an inline footnote.
+        assert_eq!(
+            assert_round_trips("[^1]: **^]]| a |- `a[^1]: ^://<"),
+            "[^1]: **^]]| a |- \\`a[^1]: ^://<\n"
+        );
+    }
+
+    #[test]
+    fn directive_closings_the_escapes_made_needless_are_undone() {
+        for source in [":e!://}", ":e!://www.x.com# [[~[x] >> !^~~  "] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+        assert_eq!(assert_round_trips(":e!://}"), ":e\\![://](://)}\n");
+    }
 }
 
 mod escapes_as_recorded {

@@ -1,7 +1,9 @@
-//! The test suite's copy of the serializer's tree comparison: two trees are
-//! the same when they differ only in spans, in text one holds as an `Escape`
-//! or a `CharacterReference` and the other as plain text, and in where
-//! adjacent `Text` nodes split.
+//! The test suite's copy of the serializer's tree comparison, which
+//! `src/compare.rs` owns and the tests cannot reach: two trees are the same
+//! when they differ only in spans, in text one holds as an `Escape` or a
+//! `CharacterReference` and the other as plain text, and in where adjacent
+//! `Text` nodes split. It mirrors that module's strict form, without the
+//! layout normalization the serializer applies to what it chooses itself.
 
 use markdown_syntax::*;
 

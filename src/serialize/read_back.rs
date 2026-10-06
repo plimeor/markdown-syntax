@@ -30,7 +30,7 @@ use super::inline::{inline_children, Choices, Form, Writer, WrittenChar, Written
 use super::{Place, SerializeError};
 use crate::{
     ast::*,
-    compare::normalized_inlines,
+    compare::same_node,
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     options::SyntaxOptions,
     parse::{parse_with_definitions, underscore_run_flanks},
@@ -323,8 +323,8 @@ pub(super) fn write_reading_back<'n>(
     written
 }
 
-/// Writes `parts` so that they read back. A block whose delimiter switches
-/// or bare links stay is written again, up to `again` times, from what its
+/// Writes `parts` so that they read back. A block whose delimiter switches,
+/// directive closings, or bare links stay is written again, up to `again` times, from what its
 /// Markdown reads back as, whose escapes are recorded, so that writing the
 /// reparsed tree gives the same Markdown.
 fn write_parts<'n>(
@@ -463,9 +463,22 @@ fn write_parts<'n>(
 
     // Every ASCII punctuation char of the text escaped, from the escapes
     // alone, and then with the references the fix rounds wrote, which can
-    // themselves keep a construct from forming.
+    // themselves keep a construct from forming; each also with its links
+    // written in brackets, as a bare link that the escapes keep from
+    // forming needs.
     let mut culprits = Vec::new();
-    for mut choices in [escapes_only, choices] {
+    let mut candidates = Vec::new();
+    for choices in [escapes_only, choices] {
+        if choices.any_bare() {
+            let mut bracketed = choices.clone();
+            bracketed.clear_bare();
+            candidates.push(choices);
+            candidates.push(bracketed);
+        } else {
+            candidates.push(choices);
+        }
+    }
+    for mut choices in candidates {
         let rendering = render(parts, &choices, &indented)?;
         for char in &rendering.chars {
             if char.char.is_ascii_punctuation() && char.form == Form::Raw {
@@ -506,9 +519,9 @@ struct Written<'w, 'n> {
     reparsed: &'w [&'w [Inline]],
 }
 
-/// The Markdown of a rendering that reads back. Delimiter switches that the
-/// escapes made needless are undone; a block that keeps switches or bare
-/// links is written again, up to `again` times, from what it read back as,
+/// The Markdown of a rendering that reads back. Delimiter switches and
+/// directive closings that the escapes made needless are undone; a block
+/// that keeps switches, closings, or bare links is written again, up to `again` times, from what it read back as,
 /// whose escapes are recorded, so that writing the reparsed tree gives the
 /// same Markdown.
 fn finish(
@@ -525,15 +538,28 @@ fn finish(
         rendering,
         reparsed,
     } = written;
-    if !choices.any_underscored() && !choices.any_bare() {
+    let (switched, closed) = (choices.any_underscored(), choices.any_closed());
+    if !switched && !closed && !choices.any_bare() {
         return Ok(segments(rendering));
     }
     if !choices.any_bare() {
-        let mut plain = choices.clone();
-        plain.clear_underscores();
-        let rendering = render(parts, &plain, indented)?;
-        if reads_back(&rendering, extract, originals, read_back) {
-            return Ok(segments(&rendering));
+        // Both undone, and failing that each alone.
+        let undos = [(true, true), (true, false), (false, true)];
+        for (unswitch, unclose) in undos {
+            if (unswitch && !switched) || (unclose && !closed) {
+                continue;
+            }
+            let mut plain = choices.clone();
+            if unswitch {
+                plain.clear_underscores();
+            }
+            if unclose {
+                plain.clear_closed();
+            }
+            let rendering = render(parts, &plain, indented)?;
+            if reads_back(&rendering, extract, originals, read_back) {
+                return Ok(segments(&rendering));
+            }
         }
     }
     if again > 0 {
@@ -704,6 +730,7 @@ fn escape_syntax(rendering: &Rendering, trace: &Trace, choices: &mut Choices) ->
     // Other stretches of chars read as syntax; a stretch holding a run's char
     // is escaped with the run.
     let mut index = 0;
+    let mut closed = false;
     while index < chars.len() {
         if !syntax[index] {
             index += 1;
@@ -721,6 +748,19 @@ fn escape_syntax(rendering: &Rendering, trace: &Trace, choices: &mut Choices) ->
             continue;
         }
         let stretch = &chars[start..=index];
+        // A stretch that goes on with the text directive before it closes
+        // the directive rather than escaping its first char.
+        if let Some(directive) = rendering
+            .nodes
+            .iter()
+            .find(|node| node.directive && node.end == stretch[0].start)
+        {
+            if choices.close_further(directive.id) {
+                closed = true;
+                index += 1;
+                continue;
+            }
+        }
         let pick = if stretch.iter().all(|char| char.form == Form::Raw) {
             stretch
                 .iter()
@@ -741,7 +781,7 @@ fn escape_syntax(rendering: &Rendering, trace: &Trace, choices: &mut Choices) ->
         }
         index += 1;
     }
-    changed
+    changed || closed
 }
 
 /// What the fix rounds have tried.
@@ -771,18 +811,41 @@ fn fix(
     if switch_blamed(culprits, rendering, choices, &fixed.tried) {
         return true;
     }
-    // A link with a literal autolink's shape, blamed or inside a blamed
-    // node, is written bare: its source spelling, where its other spellings
-    // open a construct with what is before them.
+    // A blamed text directive, or one inside a blamed node, is closed
+    // further, so that what follows it does not go on with it.
     for &id in culprits {
         let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
             continue;
         };
-        let inside = |link: &&WrittenNode| node.start <= link.start && link.end <= node.end;
-        if let Some(link) = rendering
+        let inside = |directive: &&WrittenNode| {
+            directive.directive && node.start <= directive.start && directive.end <= node.end
+        };
+        if let Some(directive) = rendering
             .nodes
             .iter()
             .filter(inside)
+            .find(|directive| choices.closed(directive.id) < 2)
+        {
+            choices.close_further(directive.id);
+            return true;
+        }
+    }
+    // A link with a literal autolink's shape, blamed, inside a blamed node,
+    // or abutting one, is written bare: its source spelling, where its other
+    // spellings open a construct with what is before them.
+    for &id in culprits {
+        let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
+            continue;
+        };
+        let near = |link: &&WrittenNode| {
+            (node.start <= link.start && link.end <= node.end)
+                || link.start == node.end
+                || link.end == node.start
+        };
+        if let Some(link) = rendering
+            .nodes
+            .iter()
+            .filter(near)
             .find(|link| link.bare_shape && !choices.bare(link.id))
         {
             choices.set_bare(link.id);
@@ -1001,19 +1064,15 @@ fn items(inlines: &[Inline], first_id: usize) -> Vec<Item<'_>> {
     let mut items = Vec::new();
     let mut id = first_id;
     for inline in inlines {
+        let escaped;
         let text = match inline {
             Inline::Text(node) => Some(node.value.as_str()),
             Inline::CharacterReference(node) => Some(node.value.as_str()),
-            Inline::Escape(_) => None,
-            _ => None,
-        };
-        let escaped;
-        let text = match inline {
             Inline::Escape(node) => {
                 escaped = String::from(node.value);
                 Some(escaped.as_str())
             }
-            _ => text,
+            _ => None,
         };
         match (text, items.last_mut()) {
             (Some(text), Some(Item::Text { value })) => value.push_str(text),
@@ -1057,58 +1116,6 @@ fn culprits(original: &[Inline], reparsed: &[Inline], first_id: usize) -> Option
         }
     }
     None
-}
-
-/// Whether two nodes are the same kind with the same values, apart from
-/// spans and children.
-fn same_node(a: &Inline, b: &Inline) -> bool {
-    match (a, b) {
-        (Inline::Emphasis(_), Inline::Emphasis(_))
-        | (Inline::Strong(_), Inline::Strong(_))
-        | (Inline::Underline(_), Inline::Underline(_))
-        | (Inline::Insert(_), Inline::Insert(_))
-        | (Inline::Mark(_), Inline::Mark(_))
-        | (Inline::Subscript(_), Inline::Subscript(_))
-        | (Inline::Superscript(_), Inline::Superscript(_))
-        | (Inline::Spoiler(_), Inline::Spoiler(_))
-        | (Inline::InlineFootnote(_), Inline::InlineFootnote(_)) => true,
-        (Inline::Delete(a), Inline::Delete(b)) => a.marker == b.marker,
-        (Inline::Link(a), Inline::Link(b)) => {
-            a.destination == b.destination
-                && a.destination_kind == b.destination_kind
-                && a.title == b.title
-                && a.title_kind == b.title_kind
-        }
-        (Inline::Image(a), Inline::Image(b)) => {
-            a.destination == b.destination
-                && a.destination_kind == b.destination_kind
-                && a.title == b.title
-                && a.title_kind == b.title_kind
-        }
-        (Inline::LinkReference(a), Inline::LinkReference(b)) => {
-            a.kind == b.kind && a.identifier == b.identifier && a.label == b.label
-        }
-        (Inline::ImageReference(a), Inline::ImageReference(b)) => {
-            a.kind == b.kind && a.identifier == b.identifier && a.label == b.label
-        }
-        (Inline::TextDirective(a), Inline::TextDirective(b)) => {
-            a.name == b.name && a.attributes == b.attributes
-        }
-        // A code span without its source fence is written from its value.
-        (Inline::Code(a), Inline::Code(b)) => {
-            a.value == b.value
-                && (a.fence_length == 0
-                    || a.raw.is_empty()
-                    || (a.raw == b.raw && a.fence_length == b.fence_length))
-        }
-        // Nodes without children compare whole.
-        (a, b) if inline_children(a).is_none() => {
-            core::mem::discriminant(a) == core::mem::discriminant(b)
-                && normalized_inlines(core::slice::from_ref(a))
-                    == normalized_inlines(core::slice::from_ref(b))
-        }
-        _ => false,
-    }
 }
 
 fn unrepresentable(originals: &[&[Inline]], culprits: &[usize]) -> SerializeError {

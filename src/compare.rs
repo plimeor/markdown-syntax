@@ -209,6 +209,80 @@ fn normalize_inlines(inlines: &mut Vec<Inline>) {
     *inlines = normalized;
 }
 
+/// Whether two nodes are the same kind with the same values, apart from
+/// spans and children: what the serializer's read-back blames a node for.
+/// A code span without its source fence compares by value, since it is
+/// written from its value.
+pub(crate) fn same_node(a: &Inline, b: &Inline) -> bool {
+    match (a, b) {
+        (Inline::Emphasis(_), Inline::Emphasis(_))
+        | (Inline::Strong(_), Inline::Strong(_))
+        | (Inline::Underline(_), Inline::Underline(_))
+        | (Inline::Insert(_), Inline::Insert(_))
+        | (Inline::Mark(_), Inline::Mark(_))
+        | (Inline::Subscript(_), Inline::Subscript(_))
+        | (Inline::Superscript(_), Inline::Superscript(_))
+        | (Inline::Spoiler(_), Inline::Spoiler(_))
+        | (Inline::InlineFootnote(_), Inline::InlineFootnote(_)) => true,
+        (Inline::Delete(a), Inline::Delete(b)) => a.marker == b.marker,
+        (Inline::Link(a), Inline::Link(b)) => {
+            a.destination == b.destination
+                && a.destination_kind == b.destination_kind
+                && a.title == b.title
+                && a.title_kind == b.title_kind
+        }
+        (Inline::Image(a), Inline::Image(b)) => {
+            a.destination == b.destination
+                && a.destination_kind == b.destination_kind
+                && a.title == b.title
+                && a.title_kind == b.title_kind
+        }
+        (Inline::LinkReference(a), Inline::LinkReference(b)) => {
+            a.kind == b.kind && a.identifier == b.identifier && a.label == b.label
+        }
+        (Inline::ImageReference(a), Inline::ImageReference(b)) => {
+            a.kind == b.kind && a.identifier == b.identifier && a.label == b.label
+        }
+        (Inline::TextDirective(a), Inline::TextDirective(b)) => {
+            a.name == b.name && a.attributes == b.attributes
+        }
+        // A code span without its source fence is written from its value.
+        (Inline::Code(a), Inline::Code(b)) => {
+            a.value == b.value
+                && (a.fence_length == 0
+                    || a.raw.is_empty()
+                    || (a.raw == b.raw && a.fence_length == b.fence_length))
+        }
+        // Nodes without children compare whole.
+        (a, b) if is_leaf(a) => {
+            core::mem::discriminant(a) == core::mem::discriminant(b)
+                && normalized_inlines(core::slice::from_ref(a))
+                    == normalized_inlines(core::slice::from_ref(b))
+        }
+        _ => false,
+    }
+}
+
+/// Whether `inline` holds no inline children.
+fn is_leaf(inline: &Inline) -> bool {
+    matches!(
+        inline,
+        Inline::Text(_)
+            | Inline::Escape(_)
+            | Inline::CharacterReference(_)
+            | Inline::SoftBreak(_)
+            | Inline::LineBreak(_)
+            | Inline::Shortcode(_)
+            | Inline::Code(_)
+            | Inline::Html(_)
+            | Inline::Math(_)
+            | Inline::FootnoteReference(_)
+            | Inline::WikiLink(_)
+            | Inline::MdxExpression(_)
+            | Inline::MdxJsx(_)
+    )
+}
+
 /// Clears what a code span's writing chooses, so that it compares by value.
 fn clear_code_fences(inlines: &mut [Inline]) {
     for inline in inlines {
