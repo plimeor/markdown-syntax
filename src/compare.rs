@@ -19,8 +19,8 @@ pub(crate) fn normalized_inlines(inlines: &[Inline]) -> Vec<Inline> {
     inlines
 }
 
-/// `blocks` normalized for comparison, as [`normalized_inlines`] does for
-/// inline content.
+/// `blocks` normalized for comparison: spans cleared, escapes and character
+/// references read as text, and adjacent text merged.
 pub fn normalized_blocks(blocks: &[Block]) -> Vec<Block> {
     let mut blocks = blocks.to_vec();
     normalize_blocks(&mut blocks, false);
