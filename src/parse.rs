@@ -3688,18 +3688,23 @@ fn parse_inline_content(
             }
         }
 
-        if bytes[index] == b'!' && bytes.get(index + 1) == Some(&b'[') && bracket_room {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+        if bytes[index] == b'!' && bytes.get(index + 1) == Some(&b'[') {
             // A wikilink at the `[` wins over the image, as it wins over a
-            // link at a lone `[`, and the `!` makes it an embed.
+            // link at a lone `[`, and the `!` makes it an embed; it takes no
+            // bracket nesting, so it forms past the limit too.
             if let Some((end, wikilink)) =
                 parse_wikilink(input, index + 1, base_offset, options, &mut pass.scan)
             {
+                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(embed(wikilink, base_offset + index));
                 index = end;
                 text_start = index;
                 continue;
             }
+        }
+
+        if bytes[index] == b'!' && bytes.get(index + 1) == Some(&b'[') && bracket_room {
+            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
             push_text(&mut nodes, base_offset + index, "!");
             push_text(&mut nodes, base_offset + index + 1, "[");
             brackets.openers.push(BracketOpener {
@@ -4195,11 +4200,31 @@ fn is_inline_container(inline: &Inline) -> bool {
     )
 }
 
+/// Whether `inlines` hold a link formed from brackets, at any depth: an
+/// autolink, which keeps open brackets from nothing, does not count.
 fn contains_link_inline(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| {
-        matches!(inline, Inline::Link(_) | Inline::LinkReference(_))
-            || contains_link_inline(inline.children())
+        let formed = match inline {
+            Inline::Link(link) => !is_autolink(link),
+            Inline::LinkReference(_) => true,
+            _ => false,
+        };
+        formed || contains_link_inline(inline.children())
     })
+}
+
+/// Whether `link`, as parsed, is an autolink: its one text child spans the
+/// whole link, as a literal autolink's does, or all of it but the angle
+/// brackets around it.
+fn is_autolink(link: &Link) -> bool {
+    let [Inline::Text(text)] = link.children.as_slice() else {
+        return false;
+    };
+    let (Some(outer), Some(inner)) = (link.meta.span, text.meta.span) else {
+        return false;
+    };
+    (inner.start == outer.start && inner.end == outer.end)
+        || (inner.start == outer.start + 1 && inner.end + 1 == outer.end)
 }
 
 fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
@@ -4255,6 +4280,14 @@ fn parse_text_directive(
     }
     let opener_source = &input[index + 1..];
     let opener_offset = index + 1;
+    // A name followed by a colon, as in `:word:`, opens no directive.
+    let name_len = opener_source
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        .count();
+    if opener_source.as_bytes().get(name_len) == Some(&b':') {
+        return None;
+    }
     let opener = parse_directive_opener_with(opener_source, |close, open| {
         let found = match close {
             DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
@@ -6341,9 +6374,11 @@ fn parse_literal_autolink(
         // cmark-gfm "relaxed" URL autolinks: a bare `scheme://…` for any scheme
         // (`smb://`, `irc://`, `rdar://`, `we://`, `nex://[…]`, …) or a
         // scheme-less leading `://…` (`://-`). Requires the same non-alphanumeric
-        // preceding char as the http literal and at least one non-whitespace
-        // char after `://`; no host/domain validation (cmark-gfm is permissive
-        // here — `smb:///path` and `://-` both linkify). The extent is balanced.
+        // preceding char as the http literal; a scheme-less `://` also needs a
+        // char other than whitespace after it, while a named scheme links on
+        // its own (`https:// x` links `https://`, as cmark-gfm does). No
+        // host/domain validation (cmark-gfm is permissive here — `smb:///path`
+        // and `://-` both linkify). The extent is balanced.
         if literal_scheme_prefix_ok(input, index) {
             if let Some(after_slashes) =
                 relaxed_scheme_after_slashes(input, index, &mut scan.scheme)
@@ -6628,7 +6663,6 @@ fn autolink_url_end(
     balanced: bool,
     wikilinks: bool,
 ) -> usize {
-    let bytes = input.as_bytes();
     let mut end = start;
     // Relaxed (cmark-gfm) URL extents balance `[`/`]` and `{`/`}` so an IPv6
     // host `nex://[fe80…]/z` and a balanced `[abc]`/`{abc}` run stay inside the
@@ -6677,22 +6711,6 @@ fn autolink_url_end(
                 '`' => strict_inside_backticks = !strict_inside_backticks,
                 ']' if !strict_has_open_bracket && !strict_inside_backticks => break,
                 _ => {}
-            }
-        }
-        // Round-trip guard: when a literal autolink ends (a trailing entity
-        // run, punctuation trim, unbalanced `)`, or the `]`/`<` hard boundary),
-        // the text that follows often begins with a char the serializer escapes
-        // with a backslash (`\&`, `\[`, `\]`, `\<`, `\>`, `\*`, `\_`, …). The
-        // URL scan must stop at such a `\<punct>` so the escape is not re-merged
-        // into the destination. A `\` before `.` (or any non-punctuation) is a
-        // genuine literal backslash inside the URL (e.g. `www.x.com/a\.`), which
-        // the serializer never produces, so it stays part of the URL.
-        if char == '\\' {
-            if let Some(&next) = bytes.get(start + offset + 1) {
-                let next_is_escapable_punct = next.is_ascii_punctuation() && next != b'.';
-                if next_is_escapable_punct {
-                    break;
-                }
             }
         }
         end = start + offset + char.len_utf8();

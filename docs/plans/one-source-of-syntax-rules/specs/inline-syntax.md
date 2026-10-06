@@ -128,7 +128,8 @@ The parser SHALL read `:name:` as a `Shortcode` when shortcodes are enabled,
 `name` is a name in the crate's pinned gemoji table, the source char before
 the opening `:` is not a Unicode letter or digit, and the source char after
 the closing `:` is not one either; it SHALL read `:name[label]{attrs}` as a
-`TextDirective` when text directives are enabled.
+`TextDirective` when text directives are enabled, except where `name` is
+followed directly by a `:`.
 
 #### Scenario: Shortcode
 - **WHEN** `"a :tada: b"` is parsed with `parse`
@@ -152,7 +153,11 @@ the closing `:` is not one either; it SHALL read `:name[label]{attrs}` as a
 
 #### Scenario: Name outside the gemoji table
 - **WHEN** `"a :not_an_emoji_name: b"` is parsed with `parse`
-- **THEN** the paragraph holds no `Shortcode`
+- **THEN** the paragraph is the text `a :not_an_emoji_name: b`, with no `Shortcode` and no `TextDirective`
+
+#### Scenario: Shortcode blocked by a letter after it
+- **WHEN** `"x :smile:b"` is parsed with `parse`
+- **THEN** the paragraph is the text `x :smile:b`
 
 #### Scenario: Text directive
 - **WHEN** `":abbr[HTML]{title=\"Hyper\"}"` is parsed with `parse`

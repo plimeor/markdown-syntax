@@ -16,9 +16,7 @@ Document
     Text ":"
     Shortcode "smile"
   Paragraph
-    Text "Unknown names are no shortcodes: "
-    TextDirective name=diego attrs=none
-    Text ":"
+    Text "Unknown names are no shortcodes: :diego:"
   Paragraph
     Text "Specials: "
     Shortcode "+1"

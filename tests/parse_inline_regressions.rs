@@ -724,6 +724,17 @@ mod wiki_embeds {
     }
 
     #[test]
+    fn an_embed_forms_past_the_bracket_nesting_limit() {
+        let source = "[x ".repeat(40) + "![[a]]";
+        let inlines = paragraph(&source);
+        let last = inlines.last().expect("inlines");
+        assert!(
+            matches!(last, Inline::WikiLink(link) if link.embed && link.meta.span == Some(Span::new(120, 126))),
+            "{last:?}"
+        );
+    }
+
+    #[test]
     fn a_bang_before_a_wikilink_makes_an_embed_spanning_from_it() {
         let inlines = paragraph("see ![[x.png]]");
         assert!(
@@ -985,6 +996,19 @@ mod gemoji_shortcodes {
     }
 
     #[test]
+    fn a_name_followed_by_a_colon_opens_no_text_directive() {
+        // As micromark reads it: the name of a text directive cannot run
+        // into a colon, so an unknown or blocked `:word:` stays text.
+        for source in ["a :not_an_emoji_name: b", "x :smile:b", ":smile:中"] {
+            let inlines = inlines(source);
+            assert!(
+                matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == source),
+                "{source:?}: {inlines:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_gemoji_name_between_colons_is_a_shortcode() {
         assert!(
             matches!(&inlines("a :tada: b")[1], Inline::Shortcode(node) if node.name == "tada")
@@ -1051,5 +1075,50 @@ mod underscore_beside_tilde {
                 "{paragraph:?}"
             );
         }
+    }
+}
+
+mod autolinks_inside_link_text {
+    //! An autolink keeps no open bracket from forming a link around it; one
+    //! in the label of a text directive inside link text is text, as in any
+    //! link text.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn an_autolink_in_a_directive_label_keeps_the_link_around_it() {
+        for source in ["[:abbr[<http://a>]](u)", "[:abbr[https://a.com]](u)"] {
+            let document = parse(source).document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{source:?}: {document:?}");
+            };
+            let [Inline::Link(link)] = paragraph.children.as_slice() else {
+                panic!("{source:?}: {:?}", paragraph.children);
+            };
+            assert_eq!(link.destination, "u");
+            let [Inline::TextDirective(directive)] = link.children.as_slice() else {
+                panic!("{source:?}: {:?}", link.children);
+            };
+            assert!(
+                matches!(directive.label.as_slice(), [Inline::Text(_)]),
+                "{source:?}: {:?}",
+                directive.label
+            );
+        }
+    }
+
+    #[test]
+    fn a_backslash_inside_a_literal_autolink_is_part_of_it() {
+        // As cmark-gfm reads it.
+        let document = SyntaxOptions::gfm().parse("www.a.com\\*x").document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        assert!(
+            matches!(paragraph.children.as_slice(), [Inline::Link(link)]
+                if link.destination == "http://www.a.com\\*x"),
+            "{:?}",
+            paragraph.children
+        );
     }
 }
