@@ -35,6 +35,9 @@ pub(super) enum Alternative {
     /// A dash thematic break is written spaced, `- - -`, so that it cannot
     /// read as the setext underline of the paragraph before it.
     BreakSpaced,
+    /// A block quote's markers are written one column further in, ` > `, so
+    /// that a tab opening a line inside it reaches its tab stop sooner.
+    QuoteIndented,
 }
 
 /// A layout alternative for a node, by its address.
@@ -246,6 +249,11 @@ pub(super) fn candidates(path: &[Step<'_>]) -> Vec<Choice> {
                 if step.index + 1 == step.siblings && parent.index + 1 < parent.siblings =>
             {
                 candidates.push((address(list), Alternative::ListPastNext));
+            }
+            // A block of a quote read as another block, such as indented
+            // code where a tab took four columns.
+            Node::Block(quote @ Block::BlockQuote(_)) if !step.same_kind => {
+                candidates.push((address(quote), Alternative::QuoteIndented));
             }
             _ => {}
         }

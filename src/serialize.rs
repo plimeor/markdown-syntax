@@ -451,9 +451,12 @@ fn serialize_blocks_at_start(
             // A paragraph or setext heading right after a definition may read
             // back only as the continuation of the paragraph the definition
             // was read from.
-            Block::Paragraph(paragraph) => {
-                serialize_paragraph(paragraph, options, definition_before(blocks, index))?
-            }
+            Block::Paragraph(paragraph) => serialize_paragraph(
+                paragraph,
+                options,
+                definition_before(blocks, index),
+                paragraph_before(blocks, index),
+            )?,
             Block::Heading(heading) if writes_setext(heading) => {
                 serialize_setext_heading(heading, options, definition_before(blocks, index))?
             }
@@ -478,6 +481,15 @@ fn serialize_blocks_at_start(
     Ok(output)
 }
 
+/// Whether the block before `blocks[index]` is a paragraph, after which a
+/// paragraph's first line can open a block of its own, such as description
+/// details.
+fn paragraph_before(blocks: &[Block], index: usize) -> bool {
+    index
+        .checked_sub(1)
+        .is_some_and(|before| matches!(blocks[before], Block::Paragraph(_)))
+}
+
 fn definition_before(blocks: &[Block], index: usize) -> Option<&Definition> {
     match index.checked_sub(1).map(|before| &blocks[before]) {
         Some(Block::Definition(definition)) => Some(definition),
@@ -492,13 +504,28 @@ fn serialize_paragraph(
     node: &Paragraph,
     cx: &Cx<'_>,
     after: Option<&Definition>,
+    after_paragraph: bool,
 ) -> Result<(String, bool), SerializeError> {
-    let parts = [Part::Inlines(&node.children, Place::Block)];
-    let error = match write_reading_back(
-        &parts,
-        |blocks| one_block(blocks, paragraph_content),
-        &cx.read_back,
-    ) {
+    // After a paragraph, the paragraph is read back after one.
+    let written = if after_paragraph {
+        let parts = [
+            Part::Literal("p\n\n".into()),
+            Part::Inlines(&node.children, Place::Block),
+        ];
+        let extract = extractor(|blocks| match blocks {
+            [Block::Paragraph(_), rest @ ..] => one_block(rest, paragraph_content),
+            _ => Extracted::Mismatch,
+        });
+        write_reading_back(&parts, extract, &cx.read_back)
+    } else {
+        let parts = [Part::Inlines(&node.children, Place::Block)];
+        write_reading_back(
+            &parts,
+            |blocks| one_block(blocks, paragraph_content),
+            &cx.read_back,
+        )
+    };
+    let error = match written {
         Ok(mut written) => return Ok((written.remove(0), false)),
         Err(error) => error,
     };
@@ -620,7 +647,7 @@ fn serialize_task_paragraph(
     let checkbox = if checked { "- [x] " } else { "- [ ] " };
     let parts = [
         Part::Literal(checkbox.into()),
-        Part::Inlines(&node.children, Place::Within),
+        Part::Inlines(&node.children, Place::ItemContent),
     ];
     let extract = extractor(|blocks| match blocks {
         [Block::List(list)] => match list.children.as_slice() {
@@ -637,8 +664,15 @@ fn serialize_task_paragraph(
         },
         _ => Extracted::Mismatch,
     });
-    let mut written = write_reading_back(&parts, extract, &cx.read_back)?;
-    Ok(written.remove(0))
+    let written = write_reading_back(&parts, extract, &cx.read_back)?.remove(0);
+    // The list the item is written in indents its lines past the marker.
+    let mut lines = written.split('\n');
+    let mut output = String::from(lines.next().unwrap_or_default());
+    for line in lines {
+        output.push('\n');
+        output.push_str(line.strip_prefix("  ").unwrap_or(line));
+    }
+    Ok(output)
 }
 
 /// Whether `node` is written as a setext heading: a setext underline can only
@@ -833,7 +867,7 @@ fn serialize_block(
     at_document_start: bool,
 ) -> Result<String, SerializeError> {
     match block {
-        Block::Paragraph(node) => Ok(serialize_paragraph(node, options, None)?.0),
+        Block::Paragraph(node) => Ok(serialize_paragraph(node, options, None, false)?.0),
         Block::Heading(node) => serialize_heading(node, options),
         Block::ThematicBreak(node) => Ok(match node.marker {
             // A Dash break is normally written contiguous (`---`). The spaced
@@ -851,15 +885,21 @@ fn serialize_block(
         }),
         Block::BlockQuote(node) => {
             let inner = serialize_blocks_at_start(&node.children, options, false)?;
-            let mut output = if inner.is_empty() {
-                ">".into()
-            } else if options.layout.has(block, Alternative::QuoteOpensEmpty) {
-                format!(">\n{}", prefix_lines(&inner, "> "))
+            let (marker, prefix) = if options.layout.has(block, Alternative::QuoteIndented) {
+                (" >", " > ")
             } else {
-                prefix_lines(&inner, "> ")
+                (">", "> ")
+            };
+            let mut output = if inner.is_empty() {
+                marker.into()
+            } else if options.layout.has(block, Alternative::QuoteOpensEmpty) {
+                format!("{marker}\n{}", prefix_lines(&inner, prefix))
+            } else {
+                prefix_lines(&inner, prefix)
             };
             if options.layout.has(block, Alternative::QuoteEndsEmpty) {
-                output.push_str("\n>");
+                output.push('\n');
+                output.push_str(marker);
             }
             Ok(output)
         }
@@ -1158,11 +1198,7 @@ fn serialize_list_with_marker_spacing(
                 unordered_list_marker(list_delimiter)
             )
         };
-        let mut inner = serialize_item_blocks(&item.children, options, node.tight, item.checked)?;
-        if let Some(checked) = item.checked {
-            let checkbox = if checked { "[x] " } else { "[ ] " };
-            inner = format!("{checkbox}{inner}");
-        }
+        let inner = serialize_item_blocks(&item.children, options, node.tight, item.checked)?;
         if !node.tight
             && node.children.len() == 1
             && matches!(item.children.as_slice(), [Block::Paragraph(_)])
@@ -1196,18 +1232,37 @@ fn serialize_item_blocks(
     tight: bool,
     task: Option<bool>,
 ) -> Result<String, SerializeError> {
+    // A task item's checkbox opens its first paragraph after the
+    // definitions it starts with, or else the item.
+    let checkbox = |checked: bool| if checked { "[x] " } else { "[ ] " };
+    let definitions = blocks
+        .iter()
+        .take_while(|block| matches!(block, Block::Definition(_)))
+        .count();
+    let task_paragraph =
+        task.filter(|_| matches!(blocks.get(definitions), Some(Block::Paragraph(_))));
     // Written last to first, as at the top level: a list reads the
     // indentation of the block after it.
     let mut written: Vec<String> = Vec::with_capacity(blocks.len());
     for (index, block) in blocks.iter().enumerate().rev() {
         let next = written.last().map(String::as_str);
-        written.push(match (block, task) {
+        written.push(match (block, task_paragraph) {
             (Block::List(list), _) => serialize_list_before(block, list, options, next)?,
-            (Block::Paragraph(paragraph), Some(checked)) if index == 0 => {
-                serialize_task_paragraph(paragraph, options, checked)?
+            (Block::Paragraph(paragraph), Some(checked)) if index == definitions => {
+                let content = serialize_task_paragraph(paragraph, options, checked)?;
+                format!("{}{content}", checkbox(checked))
+            }
+            (Block::Paragraph(paragraph), _) if paragraph_before(blocks, index) => {
+                serialize_paragraph(paragraph, options, None, true)?.0
             }
             _ => serialize_block(block, options, false)?,
         });
+    }
+    if let (Some(checked), None) = (task, task_paragraph) {
+        match written.last_mut() {
+            Some(first) => first.insert_str(0, checkbox(checked)),
+            None => written.push(checkbox(checked).trim_end().into()),
+        }
     }
     let mut output = String::new();
     for (index, written) in written.iter().rev().enumerate() {
@@ -1485,6 +1540,9 @@ enum Place {
     Continuation,
     /// It follows other syntax on its block's first line.
     Within,
+    /// It opens a list item after its marker, written `- `, and its lines
+    /// continue the item.
+    ItemContent,
     /// It is a table cell.
     Cell,
 }
@@ -1877,49 +1935,54 @@ fn prefix_lines(input: &str, prefix: &str) -> String {
 }
 
 fn indent_after_first_line(input: &str, width: usize) -> String {
-    let indent = " ".repeat(width);
-    input
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            if index == 0 {
-                line.into()
-            } else {
-                format!("{indent}{line}")
-            }
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
+    indent_lines_of(input, width, false, true)
 }
 
 fn indent_lines(input: &str, width: usize) -> String {
-    let indent = " ".repeat(width);
-    input
-        .lines()
-        .map(|line| {
-            if line.is_empty() {
-                String::new()
-            } else {
-                format!("{indent}{line}")
-            }
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
+    indent_lines_of(input, width, true, false)
 }
 
 fn indent_continuation(input: &str) -> String {
-    input
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            if index == 0 {
-                line.into()
-            } else {
-                format!("    {line}")
+    indent_lines_of(input, 4, false, true)
+}
+
+/// Indents the lines of `input` by `width` spaces: its first line when
+/// `first`, and empty lines when `empty`. Each line keeps its line ending, a
+/// final one included.
+fn indent_lines_of(input: &str, width: usize, first: bool, empty: bool) -> String {
+    let mut output = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut line_start = 0;
+    let mut index = 0;
+    let push = |output: &mut String, line: &str, number: usize| {
+        let text = line.trim_end_matches(['\n', '\r']);
+        if (number > 0 || first) && (empty || !text.is_empty()) {
+            output.extend(core::iter::repeat_n(' ', width));
+        }
+        output.push_str(line);
+    };
+    let mut number = 0;
+    while index < bytes.len() {
+        let end = match bytes[index] {
+            b'\n' => Some(index + 1),
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(index + 2),
+            b'\r' => Some(index + 1),
+            _ => None,
+        };
+        match end {
+            Some(end) => {
+                push(&mut output, &input[line_start..end], number);
+                number += 1;
+                index = end;
+                line_start = end;
             }
-        })
-        .collect::<Vec<String>>()
-        .join("\n")
+            None => index += 1,
+        }
+    }
+    if line_start < input.len() {
+        push(&mut output, &input[line_start..], number);
+    }
+    output
 }
 
 fn trim_trailing_newline(input: &str) -> &str {

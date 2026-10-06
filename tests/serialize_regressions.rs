@@ -1650,6 +1650,87 @@ mod round_trip_edges {
         assert_eq!(assert_round_trips("[\nfoo](u)"), "[\nfoo](u)\n");
     }
 
+    /// Checks that writing what `source` reads back as, read back again,
+    /// gives the same Markdown under each dialect.
+    fn assert_stable(source: &str) {
+        for options in [
+            SyntaxOptions::commonmark(),
+            SyntaxOptions::gfm(),
+            SyntaxOptions::default(),
+        ] {
+            let serialize = reading_back_under(&options);
+            let document = options.parse(source).document;
+            let markdown = document
+                .to_markdown_with(&serialize)
+                .expect("document serializes");
+            let again = options
+                .parse(&markdown)
+                .document
+                .to_markdown_with(&serialize)
+                .expect("reparsed document serializes");
+            assert_eq!(again, markdown, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn delimiter_switches_the_escapes_made_needless_are_undone() {
+        for source in [
+            "*a****a*a*v",
+            "_)***&b***a_",
+            "&(_.b***b***._",
+            "_,_[www.x.com![{",
+            "&___ab**~&**__~#b",
+        ] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+    }
+
+    #[test]
+    fn emphasis_sharing_a_run_with_text_reads_back() {
+        for source in ["*****$___&___*_*(***", "***___(_~***a"] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+    }
+
+    #[test]
+    fn the_fallback_starts_from_escapes_alone() {
+        for source in [
+            "://[\t:e",
+            "(:w!://[",
+            "{:e>://[",
+            "a@b.c://x\t:e",
+            "^://]^",
+        ] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+    }
+
+    #[test]
+    fn a_link_shaped_as_a_literal_autolink_is_written_bare_where_needed() {
+        for source in [
+            "b]]__目[a@b.c://{:e",
+            "www.x.com-->^[  ://![\t:e<!--#",
+            "^://*| a |[*```^\t[x] <div>~",
+        ] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+    }
+
+    #[test]
+    fn tabs_inside_nested_containers_keep_their_columns() {
+        for source in [
+            "~ \n\n>  > \t<!--[x] 2) *   :::e",
+            ">* \t[x] : # <div>a\n> |-|",
+        ] {
+            assert_round_trips(source);
+            assert_stable(source);
+        }
+    }
+
     #[test]
     fn items_opening_with_a_thematic_break_read_back_at_any_position() {
         for source in [
@@ -1911,16 +1992,15 @@ mod round_trip_edges {
         }
     }
 
+    /// A superscript opening with a link that no angle-bracket autolink can
+    /// write, such as a relaxed `://` link, would write `^[`, which reads back
+    /// as an inline footnote; the link is written bare.
     #[test]
-    /// Blocked: a superscript opening with a link that no angle-bracket
-    /// autolink can write, such as a relaxed `://` or a `www.` literal, writes
-    /// `^[`, which reads back as an inline footnote.
-    #[test]
-    #[ignore = "blocked: a superscript opening with a non-angle link has no spelling that reads back"]
     fn a_superscript_opening_with_a_bare_link_reads_back() {
-        for source in ["^://y ^", "^://. ^", "[foo]:`\n[foo]^://y\t^"] {
-            assert_round_trips(source);
+        for source in ["^://y ^", "^://. ^"] {
+            assert_eq!(assert_round_trips(source), format!("{source}\n"));
         }
+        assert_round_trips("[foo]:`\n[foo]^://y\t^");
     }
 
     #[test]

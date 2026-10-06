@@ -94,10 +94,15 @@ const ESCAPE_ROUNDS: usize = 3;
 
 /// Rounds that switch the delimiters of abutting emphasis and strong runs
 /// with the text raw.
-const SWITCH_ROUNDS: usize = 8;
+const SWITCH_ROUNDS: usize = 12;
 
 /// Rounds that fix a node that does not read back.
 const FIX_ROUNDS: usize = 8;
+
+/// Times a block whose delimiter switches or bare links stay is written
+/// again from what it read back as, until writing that gives the same
+/// Markdown.
+const REWRITES: u8 = 3;
 
 /// Rounds that indent lines while escapes have not settled.
 const UNSETTLED_INDENTS: usize = 2;
@@ -127,11 +132,17 @@ fn render(
             Part::Inlines(inlines, place) => {
                 let start = writer.out.len();
                 writer.write(inlines, *place == Place::Cell)?;
+                if *place == Place::ItemContent {
+                    // Its lines continue the item, past the marker.
+                    let lines = writer.out[start..].matches('\n').count();
+                    let continued: Vec<usize> = (1..=lines).collect();
+                    writer.indent_lines(start, &continued, 2);
+                }
                 if let Some(lines) = indented
                     .get(segments.len())
                     .filter(|lines| !lines.is_empty())
                 {
-                    writer.indent_lines(start, lines);
+                    writer.indent_lines(start, lines, 4);
                 }
                 segments.push((start, writer.out.len()));
             }
@@ -307,15 +318,20 @@ pub(super) fn write_reading_back<'n>(
     if let Some(written) = read_back.written.borrow().get(&key) {
         return written.clone();
     }
-    let written = write_parts(parts, extract, read_back);
+    let written = write_parts(parts, &extract, read_back, REWRITES);
     read_back.written.borrow_mut().insert(key, written.clone());
     written
 }
 
+/// Writes `parts` so that they read back. A block whose delimiter switches
+/// or bare links stay is written again, up to `again` times, from what its
+/// Markdown reads back as, whose escapes are recorded, so that writing the
+/// reparsed tree gives the same Markdown.
 fn write_parts<'n>(
     parts: &[Part<'n>],
-    extract: impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
+    extract: &impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
     read_back: &ReadBack<'_>,
+    again: u8,
 ) -> Result<Vec<String>, SerializeError> {
     let originals: Vec<&[Inline]> = parts
         .iter()
@@ -334,15 +350,27 @@ fn write_parts<'n>(
     let mut indented = vec![Vec::new(); originals.len()];
     let mut indent_rounds = 0;
     let mut choices = Choices::default();
+    let mut escapes_only = Choices::default();
     let mut fixed = Fixed::default();
 
     for _ in 0..FIX_ROUNDS + 2 {
         let (rendering, blocks, settled) =
             escape_rounds(parts, &mut choices, &indented, read_back)?;
+        // The escapes alone, before the fix rounds add their references.
+        escapes_only = choices.clone();
         let culprits = match extract(&blocks) {
             Extracted::Lists(reparsed) if reparsed.len() == originals.len() => {
                 match first_culprit(&originals, &reparsed) {
-                    None => return Ok(segments(&rendering)),
+                    None => {
+                        let written = Written {
+                            parts,
+                            choices: &choices,
+                            indented: &indented,
+                            rendering: &rendering,
+                            reparsed: &reparsed,
+                        };
+                        return finish(written, extract, &originals, read_back, again);
+                    }
                     Some(culprits) => culprits,
                 }
             }
@@ -407,39 +435,160 @@ fn write_parts<'n>(
     for _ in 0..switches {
         let rendering = render(parts, &raw, &indented)?;
         let blocks = parse(&rendering.text, read_back);
-        match extract(&blocks) {
+        let culprits = match extract(&blocks) {
             Extracted::Lists(reparsed) if reparsed.len() == originals.len() => {
-                if first_culprit(&originals, &reparsed).is_none() {
-                    return Ok(segments(&rendering));
+                match first_culprit(&originals, &reparsed) {
+                    None => {
+                        let written = Written {
+                            parts,
+                            choices: &raw,
+                            indented: &indented,
+                            rendering: &rendering,
+                            reparsed: &reparsed,
+                        };
+                        return finish(written, extract, &originals, read_back, again);
+                    }
+                    Some(culprits) => culprits,
                 }
             }
             _ => break,
-        }
+        };
         let trace = Trace::of(&blocks);
-        if !switch_runs(&rendering, &trace, &mut raw, &mut fixed.tried) {
+        if !switch_runs(&rendering, &trace, &mut raw, &mut fixed.tried)
+            && !switch_blamed(&culprits, &rendering, &mut raw, &fixed.tried)
+        {
             break;
         }
     }
 
-    // Every ASCII punctuation char of the text escaped.
-    let rendering = render(parts, &choices, &indented)?;
-    for char in &rendering.chars {
-        if char.char.is_ascii_punctuation() && char.form == Form::Raw {
-            choices.set_form(char.index, Form::Backslash);
-        }
-    }
-    let rendering = render(parts, &choices, &indented)?;
-    let blocks = parse(&rendering.text, read_back);
-    let culprits = match extract(&blocks) {
-        Extracted::Lists(reparsed) if reparsed.len() == originals.len() => {
-            match first_culprit(&originals, &reparsed) {
-                None => return Ok(segments(&rendering)),
-                Some(culprits) => culprits,
+    // Every ASCII punctuation char of the text escaped, from the escapes
+    // alone, and then with the references the fix rounds wrote, which can
+    // themselves keep a construct from forming.
+    let mut culprits = Vec::new();
+    for mut choices in [escapes_only, choices] {
+        let rendering = render(parts, &choices, &indented)?;
+        for char in &rendering.chars {
+            if char.char.is_ascii_punctuation() && char.form == Form::Raw {
+                choices.set_form(char.index, Form::Backslash);
             }
         }
-        _ => Vec::new(),
-    };
+        let rendering = render(parts, &choices, &indented)?;
+        let blocks = parse(&rendering.text, read_back);
+        culprits = match extract(&blocks) {
+            Extracted::Lists(reparsed) if reparsed.len() == originals.len() => {
+                match first_culprit(&originals, &reparsed) {
+                    None => {
+                        let written = Written {
+                            parts,
+                            choices: &choices,
+                            indented: &indented,
+                            rendering: &rendering,
+                            reparsed: &reparsed,
+                        };
+                        return finish(written, extract, &originals, read_back, again);
+                    }
+                    Some(culprits) => culprits,
+                }
+            }
+            _ => Vec::new(),
+        };
+    }
     Err(unrepresentable(&originals, &culprits))
+}
+
+/// A rendering of a block's parts that reads back, with the choices it was
+/// written with and what it read back as.
+struct Written<'w, 'n> {
+    parts: &'w [Part<'n>],
+    choices: &'w Choices,
+    indented: &'w [Vec<usize>],
+    rendering: &'w Rendering,
+    reparsed: &'w [&'w [Inline]],
+}
+
+/// The Markdown of a rendering that reads back. Delimiter switches that the
+/// escapes made needless are undone; a block that keeps switches or bare
+/// links is written again, up to `again` times, from what it read back as,
+/// whose escapes are recorded, so that writing the reparsed tree gives the
+/// same Markdown.
+fn finish(
+    written: Written<'_, '_>,
+    extract: &impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
+    originals: &[&[Inline]],
+    read_back: &ReadBack<'_>,
+    again: u8,
+) -> Result<Vec<String>, SerializeError> {
+    let Written {
+        parts,
+        choices,
+        indented,
+        rendering,
+        reparsed,
+    } = written;
+    if !choices.any_underscored() && !choices.any_bare() {
+        return Ok(segments(rendering));
+    }
+    if !choices.any_bare() {
+        let mut plain = choices.clone();
+        plain.clear_underscores();
+        let rendering = render(parts, &plain, indented)?;
+        if reads_back(&rendering, extract, originals, read_back) {
+            return Ok(segments(&rendering));
+        }
+    }
+    if again > 0 {
+        if let Some(written) =
+            write_reparsed(parts, reparsed, extract, originals, read_back, again - 1)
+        {
+            return Ok(written);
+        }
+    }
+    Ok(segments(rendering))
+}
+
+/// The Markdown of `parts` written from `reparsed`, what their Markdown
+/// read back as, when it reads back as `originals` too.
+fn write_reparsed(
+    parts: &[Part<'_>],
+    reparsed: &[&[Inline]],
+    extract: &impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
+    originals: &[&[Inline]],
+    read_back: &ReadBack<'_>,
+    again: u8,
+) -> Option<Vec<String>> {
+    let mut lists = reparsed.iter();
+    let mut parts_again = Vec::with_capacity(parts.len());
+    for part in parts {
+        parts_again.push(match part {
+            Part::Literal(text) => Part::Literal(text.clone()),
+            Part::Inlines(_, place) => Part::Inlines(lists.next()?, *place),
+        });
+    }
+    let written = write_parts(&parts_again, extract, read_back, again).ok()?;
+    let mut text = String::new();
+    let mut segments = written.iter();
+    for part in parts {
+        match part {
+            Part::Literal(literal) => text.push_str(literal),
+            Part::Inlines(..) => text.push_str(segments.next()?),
+        }
+    }
+    let blocks = parse(&text, read_back);
+    matches!(extract(&blocks), Extracted::Lists(lists)
+        if lists.len() == originals.len() && first_culprit(originals, &lists).is_none())
+    .then_some(written)
+}
+
+/// Whether `rendering` reads back as `originals`.
+fn reads_back(
+    rendering: &Rendering,
+    extract: &impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
+    originals: &[&[Inline]],
+    read_back: &ReadBack<'_>,
+) -> bool {
+    let blocks = parse(&rendering.text, read_back);
+    matches!(extract(&blocks), Extracted::Lists(reparsed)
+        if reparsed.len() == originals.len() && first_culprit(originals, &reparsed).is_none())
 }
 
 fn segments(rendering: &Rendering) -> Vec<String> {
@@ -619,21 +768,28 @@ fn fix(
     if switch_runs(rendering, trace, choices, &mut fixed.tried) {
         return true;
     }
-    // A blamed emphasis or strong switches its delimiter alone.
-    let mut changed = false;
-    for &id in culprits {
-        let Some(node) = rendering
-            .nodes
-            .iter()
-            .find(|node| node.id == id && node.run != 0)
-        else {
-            continue;
-        };
-        changed |= switch_run(&rendering.text, node, choices, &fixed.tried);
-    }
-    if changed {
+    if switch_blamed(culprits, rendering, choices, &fixed.tried) {
         return true;
     }
+    // A link with a literal autolink's shape, blamed or inside a blamed
+    // node, is written bare: its source spelling, where its other spellings
+    // open a construct with what is before them.
+    for &id in culprits {
+        let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
+            continue;
+        };
+        let inside = |link: &&WrittenNode| node.start <= link.start && link.end <= node.end;
+        if let Some(link) = rendering
+            .nodes
+            .iter()
+            .filter(inside)
+            .find(|link| link.bare_shape && !choices.bare(link.id))
+        {
+            choices.set_bare(link.id);
+            return true;
+        }
+    }
+    let mut changed = false;
     for &id in culprits {
         let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
             continue;
@@ -655,6 +811,44 @@ fn fix(
         }
     }
     changed
+}
+
+/// Switches the delimiter of a blamed emphasis or strong alone, or failing
+/// that of the last one inside a blamed node that can switch. Whether it
+/// switched.
+fn switch_blamed(
+    culprits: &[usize],
+    rendering: &Rendering,
+    choices: &mut Choices,
+    tried: &[u64],
+) -> bool {
+    let mut changed = false;
+    for &id in culprits {
+        let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
+            continue;
+        };
+        if node.run != 0 {
+            changed |= switch_run(&rendering.text, node, choices, tried);
+            continue;
+        }
+    }
+    if changed {
+        return true;
+    }
+    for &id in culprits {
+        let Some(node) = rendering.nodes.iter().find(|node| node.id == id) else {
+            continue;
+        };
+        let inside = rendering.nodes.iter().rev().filter(|run| {
+            run.run != 0 && run.id != id && node.start <= run.start && run.end <= node.end
+        });
+        for run in inside {
+            if switch_run(&rendering.text, run, choices, tried) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The opening and closing delimiters of `node`, an emphasis or strong.

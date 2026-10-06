@@ -71,6 +71,9 @@ pub(super) struct Choices {
     /// constant time, so that the delimiter choices tried are told apart
     /// without comparing them whole.
     underscore_hash: u64,
+    /// Whether each link with a literal autolink's shape is written bare, as
+    /// its text, by number.
+    bare: Vec<bool>,
 }
 
 /// A hash of node `id` for `Choices::underscore_hash`, which combines the
@@ -107,6 +110,30 @@ impl Choices {
     /// The hash the delimiter choices would have with `node` switched.
     pub(super) fn underscore_hash_switched(&self, node: usize) -> u64 {
         self.underscore_hash ^ node_hash(node)
+    }
+
+    pub(super) fn bare(&self, node: usize) -> bool {
+        self.bare.get(node).copied().unwrap_or(false)
+    }
+
+    pub(super) fn set_bare(&mut self, node: usize) {
+        if self.bare.len() <= node {
+            self.bare.resize(node + 1, false);
+        }
+        self.bare[node] = true;
+    }
+
+    pub(super) fn any_bare(&self) -> bool {
+        self.bare.contains(&true)
+    }
+
+    pub(super) fn any_underscored(&self) -> bool {
+        self.underscore.contains(&true)
+    }
+
+    pub(super) fn clear_underscores(&mut self) {
+        self.underscore.clear();
+        self.underscore_hash = 0;
     }
 
     pub(super) fn underscored(&self, node: usize) -> bool {
@@ -146,6 +173,9 @@ pub(super) struct WrittenNode {
     /// The node is an emphasis (1) or strong (2), whose delimiters the
     /// read-back may write with `_`.
     pub(super) run: u8,
+    /// The node is a link with a literal autolink's shape, which the
+    /// read-back may write bare.
+    pub(super) bare_shape: bool,
 }
 
 /// The child inlines a node holds, in the order the writer visits them.
@@ -200,10 +230,10 @@ impl<'c> Writer<'c> {
         self.out.push_str(text);
     }
 
-    /// Indents by four spaces each line of the output from `start` on whose
+    /// Indents by `width` spaces each line of the output from `start` on whose
     /// number, counted from that line, `lines` holds, moving the records
     /// after each indentation along.
-    pub(super) fn indent_lines(&mut self, start: usize, lines: &[usize]) {
+    pub(super) fn indent_lines(&mut self, start: usize, lines: &[usize], width: usize) {
         let mut points = Vec::new();
         if lines.first() == Some(&0) {
             points.push(start);
@@ -220,11 +250,11 @@ impl<'c> Writer<'c> {
         if points.is_empty() {
             return;
         }
-        let mut out = String::with_capacity(self.out.len() + 4 * points.len());
+        let mut out = String::with_capacity(self.out.len() + width * points.len());
         let mut copied = 0;
         for &point in &points {
             out.push_str(&self.out[copied..point]);
-            out.push_str("    ");
+            out.extend(core::iter::repeat_n(' ', width));
             copied = point;
         }
         out.push_str(&self.out[copied..]);
@@ -232,9 +262,9 @@ impl<'c> Writer<'c> {
         // A position at an indented line's start moves past the indentation
         // when something starts there, and stays when something ends there.
         let starts =
-            |position: usize| position + 4 * points.partition_point(|point| *point <= position);
+            |position: usize| position + width * points.partition_point(|point| *point <= position);
         let ends =
-            |position: usize| position + 4 * points.partition_point(|point| *point < position);
+            |position: usize| position + width * points.partition_point(|point| *point < position);
         for char in &mut self.chars {
             char.start = starts(char.start);
             char.end = ends(char.end);
@@ -348,6 +378,7 @@ impl<'c> Writer<'c> {
                 end: self.out.len(),
                 content,
                 run,
+                bare_shape: false,
             });
         }
     }
@@ -459,7 +490,14 @@ impl<'c> Writer<'c> {
                 self.record(id, start, None, 0);
             }
             Inline::Link(node) => {
-                if let Some(uri) = autolink_uri(node) {
+                let bare_text = bare_link_text(node);
+                if let (Some(text), true) = (bare_text, self.choices.bare(id)) {
+                    // Its text, which the parser reads as a literal autolink.
+                    self.next_char += text.chars().count();
+                    self.next_node += node.children.len();
+                    self.push_verbatim(text, cell);
+                    self.record(id, start, None, 0);
+                } else if let Some(uri) = autolink_uri(node) {
                     // A link that an angle-bracket autolink writes is written
                     // as one; its text is no text the read-back escapes.
                     self.next_char += node.children.iter().map(text_chars).sum::<usize>();
@@ -486,6 +524,11 @@ impl<'c> Writer<'c> {
                     }
                     self.out.push(')');
                     self.record(id, start, Some((content_start, content_end)), 0);
+                }
+                if bare_text.is_some() && self.dropping == 0 {
+                    if let Some(last) = self.nodes.last_mut().filter(|last| last.id == id) {
+                        last.bare_shape = true;
+                    }
                 }
             }
             Inline::Image(node) => {
@@ -698,6 +741,23 @@ impl<'c> Writer<'c> {
             self.out.push_str(text);
         }
     }
+}
+
+/// The text of `link` when it has the shape of a literal autolink: no
+/// title, one text child, and a destination that is the text, or the text
+/// after `http://` or `mailto:`, as a `www.` or email autolink reads.
+fn bare_link_text(link: &Link) -> Option<&str> {
+    let [Inline::Text(text)] = link.children.as_slice() else {
+        return None;
+    };
+    let destination = link.destination.as_str();
+    let text = text.value.as_str();
+    (link.title.is_none()
+        && link.destination_kind == LinkDestinationKind::Bare
+        && (destination == text
+            || destination.strip_prefix("http://") == Some(text)
+            || destination.strip_prefix("mailto:") == Some(text)))
+    .then_some(text)
 }
 
 /// The text chars `inline` holds at any depth, as the writer numbers them.
