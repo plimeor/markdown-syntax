@@ -1646,7 +1646,9 @@ mod round_trip_edges {
         let mut markdown = String::new();
         for options in [SyntaxOptions::commonmark(), SyntaxOptions::default()] {
             let document = options.parse(source).document;
-            markdown = document.to_markdown().expect("document serializes");
+            markdown = document
+                .to_markdown_with(&reading_back_under(&options))
+                .expect("document serializes");
             let reparsed = options.parse(&markdown).document;
             assert_eq!(
                 format!("{:?}", crate::normalize::normalized(&reparsed.children)),
@@ -1936,10 +1938,19 @@ mod round_trip_edges {
         }
     }
 
+    /// Serialize options that read the output back under `options`.
+    fn reading_back_under(options: &SyntaxOptions) -> SerializeOptions {
+        let mut serialize = SerializeOptions::default();
+        serialize.syntax = options.clone();
+        serialize
+    }
+
     /// `assert_round_trips` under `options` alone.
     fn assert_round_trips_under(options: &SyntaxOptions, source: &str) {
         let document = options.parse(source).document;
-        let markdown = document.to_markdown().expect("document serializes");
+        let markdown = document
+            .to_markdown_with(&reading_back_under(options))
+            .expect("document serializes");
         let reparsed = options.parse(&markdown).document;
         assert_eq!(
             format!("{:?}", crate::normalize::normalized(&reparsed.children)),

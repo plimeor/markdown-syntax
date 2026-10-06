@@ -17,6 +17,7 @@ use crate::{
     ast::*,
     diagnostic::Diagnostic,
     memo::{pattern_starts, PathMemo, Positions, Step},
+    options::SyntaxOptions,
     parse::{
         continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
         line_opens_alert, line_starts_html_block, line_starts_interrupting_html_block,
@@ -58,6 +59,11 @@ pub struct SerializeOptions {
     pub ordered_delimiter: ListDelimiter,
     /// The fence character for fenced code blocks.
     pub fence_marker: FenceMarker,
+    /// The dialect the output is read back under: escapes and delimiter
+    /// choices are made so that parsing the output with these options yields
+    /// the serialized tree. Defaults to the maximal dialect,
+    /// [`SyntaxOptions::default`].
+    pub syntax: SyntaxOptions,
 }
 
 impl Default for SerializeOptions {
@@ -68,6 +74,7 @@ impl Default for SerializeOptions {
             bullet: ListDelimiter::Dash,
             ordered_delimiter: ListDelimiter::Period,
             fence_marker: FenceMarker::Backtick,
+            syntax: SyntaxOptions::default(),
         }
     }
 }
@@ -475,17 +482,10 @@ fn serialize_reading_back(
     };
     let output = render(RunStyle::Plain, None, AutolinkEdges::Plain)?;
     let mut expected = None;
-    // The dialect the content came from is not known here: a rendering that
-    // reads back under the default preset is taken first, and only when none
-    // does, one that reads back under GFM or MDX.
-    let default_preset = [crate::options::SyntaxOptions::default()];
-    let other_presets = [
-        crate::options::SyntaxOptions::gfm(),
-        crate::options::SyntaxOptions::mdx(),
-    ];
-    let mut reads_back = |markdown: &str, presets: &[crate::options::SyntaxOptions]| {
+    // The output is read back under the dialect the options name.
+    let mut reads_back = |markdown: &str| {
         let expected = expected.get_or_insert_with(|| crate::compare::normalized_inlines(children));
-        reparses_to(markdown, children, expected, presets)
+        reparses_to(markdown, children, expected, &options.syntax)
     };
     // A strong or emphasis run abutting another splits on reparse only as its
     // flanking allows, which the rest of the paragraph decides; one beside a
@@ -504,7 +504,7 @@ fn serialize_reading_back(
     let autolink_spaces = autolink_meets_space_in_span(children, false);
     let autolink_leads = autolink_text_runs_on(children, false);
     if (abut_runs || edge_tildes || edge_stars || autolink_spaces || autolink_leads)
-        && !reads_back(&output, &default_preset)
+        && !reads_back(&output)
     {
         let styles = [
             RunStyle::Plain,
@@ -530,19 +530,9 @@ fn serialize_reading_back(
         .into_iter()
         .filter(|_| autolink_spaces || autolink_leads)
         .map(|edges| (RunStyle::Plain, None, edges));
-        let mut alternates = Vec::new();
         for (style, raw_edge, spaces) in run_alternates.chain(autolink_alternates) {
             let alternate = render(style, raw_edge, spaces)?;
-            if reads_back(&alternate, &default_preset) {
-                return Ok(alternate);
-            }
-            alternates.push(alternate);
-        }
-        if !reads_back(&output, &other_presets) {
-            if let Some(alternate) = alternates
-                .into_iter()
-                .find(|alternate| reads_back(alternate, &other_presets))
-            {
+            if reads_back(&alternate) {
                 return Ok(alternate);
             }
         }
@@ -762,14 +752,14 @@ fn unescape_edge(rendered: &str, edge: char, at_start: bool, at_end: bool) -> St
     output
 }
 
-/// Whether `markdown` parses, under one of `presets`, to one paragraph or
-/// heading holding `inlines`, which `expected` holds normalized as the tree
+/// Whether `markdown` parses, under `syntax`, to one paragraph or heading
+/// holding `inlines`, which `expected` holds normalized as the tree
 /// comparison reads it.
 fn reparses_to(
     markdown: &str,
     inlines: &[Inline],
     expected: &[Inline],
-    presets: &[crate::options::SyntaxOptions],
+    syntax: &SyntaxOptions,
 ) -> bool {
     // The references in the paragraph resolve against definitions elsewhere
     // in the document, which a definition per label stands in for.
@@ -781,20 +771,17 @@ fn reparses_to(
         source.push_str(label);
         source.push_str("]: u");
     }
-    presets.iter().any(|options| {
-        let document = options.parse(&source).document;
-        match document.children.as_slice() {
-            [Block::Paragraph(Paragraph { children, .. })
-            | Block::Heading(Heading { children, .. }), definitions @ ..]
-                if definitions
-                    .iter()
-                    .all(|block| matches!(block, Block::Definition(_))) =>
-            {
-                crate::compare::normalized_inlines(children) == expected
-            }
-            _ => false,
+    let document = syntax.parse(&source).document;
+    match document.children.as_slice() {
+        [Block::Paragraph(Paragraph { children, .. }) | Block::Heading(Heading { children, .. }), definitions @ ..]
+            if definitions
+                .iter()
+                .all(|block| matches!(block, Block::Definition(_))) =>
+        {
+            crate::compare::normalized_inlines(children) == expected
         }
-    })
+        _ => false,
+    }
 }
 
 /// The labels of the link and image references in `inlines`, at any depth.

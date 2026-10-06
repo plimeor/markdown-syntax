@@ -102,7 +102,7 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
 
     let markdown = output
         .document
-        .to_markdown_with(&SerializeOptions::default())
+        .to_markdown_with(&reading_back_under(&options))
         .expect("document serializes");
     assert_eq!(markdown, expected_markdown);
 
@@ -114,9 +114,16 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
 
     let second = reparsed
         .document
-        .to_markdown()
+        .to_markdown_with(&reading_back_under(&options))
         .expect("reparsed document serializes");
     assert_eq!(second, markdown);
+}
+
+/// Serialize options that read the output back under `options`.
+pub(crate) fn reading_back_under(options: &SyntaxOptions) -> SerializeOptions {
+    let mut serialize = SerializeOptions::default();
+    serialize.syntax = options.clone();
+    serialize
 }
 
 pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions) {
@@ -131,7 +138,10 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
         output.diagnostics
     );
 
-    let markdown = output.document.to_markdown().expect("document serializes");
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .expect("document serializes");
     let reparsed = options.parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
@@ -141,7 +151,7 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
 
     let second = reparsed
         .document
-        .to_markdown()
+        .to_markdown_with(&reading_back_under(options))
         .expect("reparsed document serializes");
     assert_eq!(second, markdown, "{path}: serializer is not idempotent");
 }
@@ -414,9 +424,12 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, String, usize) {
 fn assert_source_stable(source: &str, path: &Path, index: usize, options: &SyntaxOptions) {
     let output = options.parse(source);
 
-    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
-        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
-    });
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .unwrap_or_else(|error| {
+            panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
+        });
     let reparsed = options.parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
