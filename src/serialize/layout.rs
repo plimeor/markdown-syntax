@@ -29,8 +29,12 @@ pub(super) enum Alternative {
     /// it, whose lines would otherwise continue the list's last item.
     ListPastNext,
     /// A block is followed by the next one without a blank line, which a
-    /// block it ends with, such as an unclosed HTML comment, would take.
+    /// block it ends with, such as an unclosed HTML comment, would take; the
+    /// last block of a list item is so followed by the next item.
     JoinNext,
+    /// A dash thematic break is written spaced, `- - -`, so that it cannot
+    /// read as the setext underline of the paragraph before it.
+    BreakSpaced,
 }
 
 /// A layout alternative for a node, by its address.
@@ -86,6 +90,8 @@ pub(super) struct Step<'a> {
     index: usize,
     siblings: usize,
     same_kind: bool,
+    /// The written block after this one, among its siblings.
+    next: Option<&'a Block>,
 }
 
 /// The way from the document to the deepest written node where the reparse
@@ -112,6 +118,7 @@ fn diverge<'a>(written: &'a [Block], ours: &[Block], theirs: &[Block], path: &mu
                     index,
                     siblings: ours.len(),
                     same_kind,
+                    next: written.get(index + 1),
                 });
                 if let (true, Some(b)) = (same_kind, b) {
                     descend(&written[index], a, b, path);
@@ -126,6 +133,7 @@ fn diverge<'a>(written: &'a [Block], ours: &[Block], theirs: &[Block], path: &mu
                         index: last,
                         siblings: ours.len(),
                         same_kind: true,
+                        next: written.get(index),
                     });
                 }
                 return;
@@ -162,6 +170,7 @@ fn descend<'a>(written: &'a Block, ours: &Block, theirs: &Block, path: &mut Vec<
                             index,
                             siblings: a.children.len(),
                             same_kind: y.is_some(),
+                            next: None,
                         });
                         if let Some(y) = y {
                             diverge(&w.children[index].children, &x.children, &y.children, path);
@@ -192,6 +201,23 @@ pub(super) fn candidates(path: &[Step<'_>]) -> Vec<Choice> {
                 if let Some(item) = list.children.first() {
                     candidates.push((address(item), Alternative::ItemOnNextLine));
                 }
+            }
+            // A paragraph read as a heading over the dash break after it.
+            Node::Block(Block::Paragraph(_)) if !step.same_kind => {
+                if let Some(
+                    next @ Block::ThematicBreak(ThematicBreak {
+                        marker: ThematicBreakMarker::Dash,
+                        ..
+                    }),
+                ) = step.next
+                {
+                    candidates.push((address(next), Alternative::BreakSpaced));
+                }
+            }
+            // An item read as another block, such as a thematic break, or
+            // as no item.
+            Node::Item(item) if !step.same_kind => {
+                candidates.push((address(item), Alternative::ItemOnNextLine));
             }
             // A list read with what follows it: the items of the list after
             // it, or the lines of the block after it.
@@ -225,10 +251,15 @@ pub(super) fn candidates(path: &[Step<'_>]) -> Vec<Choice> {
         }
     }
     // A block that took the blank line after it, nearest the difference
-    // first, joins the next block.
-    for step in path.iter().rev() {
+    // first, joins the next block, or the next item when it ends an item.
+    for (depth, step) in path.iter().enumerate().rev() {
         if let Node::Block(block) = step.node {
-            if step.index + 1 < step.siblings {
+            let ends_item = step.index + 1 == step.siblings
+                && depth.checked_sub(1).is_some_and(|parent| {
+                    matches!(path[parent].node, Node::Item(_))
+                        && path[parent].index + 1 < path[parent].siblings
+                });
+            if step.index + 1 < step.siblings || ends_item {
                 candidates.push((address(block), Alternative::JoinNext));
             }
         }
@@ -248,4 +279,48 @@ pub(super) fn key(path: &[Step<'_>]) -> Option<usize> {
 /// blamed on: the deepest one on its way.
 pub(super) fn blamed<'a>(path: &[Step<'a>]) -> Option<Node<'a>> {
     path.last().map(|step| step.node)
+}
+
+/// Pairs each node of `shape`, a list holding copies of `items` and written
+/// as `list`, with the node it copies, by address: the list itself, each
+/// item, and every block and item inside them.
+pub(super) fn address_pairs_of_items(
+    items: &[ListItem],
+    shape: &[Block],
+    list: &Block,
+    pairs: &mut Vec<(usize, usize)>,
+) {
+    let [shape_block @ Block::List(shape_list)] = shape else {
+        return;
+    };
+    pairs.push((address(shape_block), address(list)));
+    for (copy, item) in shape_list.children.iter().zip(items) {
+        pairs.push((address(copy), address(item)));
+        pair_blocks(&copy.children, &item.children, pairs);
+    }
+}
+
+fn pair_blocks(copies: &[Block], originals: &[Block], pairs: &mut Vec<(usize, usize)>) {
+    for (copy, original) in copies.iter().zip(originals) {
+        pairs.push((address(copy), address(original)));
+        match (copy, original) {
+            (Block::BlockQuote(a), Block::BlockQuote(b)) => {
+                pair_blocks(&a.children, &b.children, pairs)
+            }
+            (Block::Alert(a), Block::Alert(b)) => pair_blocks(&a.children, &b.children, pairs),
+            (Block::FootnoteDefinition(a), Block::FootnoteDefinition(b)) => {
+                pair_blocks(&a.children, &b.children, pairs)
+            }
+            (Block::ContainerDirective(a), Block::ContainerDirective(b)) => {
+                pair_blocks(&a.children, &b.children, pairs)
+            }
+            (Block::List(a), Block::List(b)) => {
+                for (copy, item) in a.children.iter().zip(&b.children) {
+                    pairs.push((address(copy), address(item)));
+                    pair_blocks(&copy.children, &item.children, pairs);
+                }
+            }
+            _ => {}
+        }
+    }
 }

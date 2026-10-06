@@ -34,7 +34,7 @@ pub(super) fn parse_document(
         parser.close_top();
     }
     let document = parser.stack.pop().expect("the document stays open");
-    let mut definitions = known.to_vec();
+    let mut definitions = Vec::new();
     for child in &document.children {
         collect_definitions(&child.block, &mut definitions);
     }
@@ -44,7 +44,10 @@ pub(super) fn parse_document(
     let mut found = parser.diagnostics;
     let finish = Finish {
         options,
-        definitions: &definitions,
+        definitions: Definitions {
+            own: &definitions,
+            known,
+        },
     };
     let blocks = document
         .children
@@ -273,9 +276,8 @@ impl<'a> Content<'a> {
 struct ParagraphLine<'a> {
     /// The line's text from its first char other than a space or tab.
     content: Content<'a>,
-    /// The byte the containers around the paragraph leave the line at, before
-    /// the paragraph's own indentation, and its input position.
-    from: usize,
+    /// The input position the containers around the paragraph leave the
+    /// line at, before the paragraph's own indentation.
     start: usize,
     /// The columns of that indentation.
     indent: usize,
@@ -802,12 +804,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let mut container = matched - 1;
         let mut takes_line = self.stack[container].is_leaf() && !self.stack[container].holds_text();
         let mut block_start = cursor.position();
-        let mut block_from = cursor.offset;
         let mut indent = 0;
         let mut fence_like = false;
         while !takes_line {
             block_start = cursor.position();
-            block_from = cursor.offset;
             cursor.find_next_nonspace();
             indent = cursor.indent;
             match self.start(&mut cursor, container, index) {
@@ -837,7 +837,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     .iter()
                     .any(|frame| matches!(frame.kind, Kind::BlockQuote { .. })))
         {
-            self.add_lazy_line(&cursor, index, (block_from, block_start), indent);
+            self.add_lazy_line(&cursor, index, block_start, indent);
             return;
         }
 
@@ -850,7 +850,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             Kind::Paragraph(paragraph) => {
                 paragraph.lines.push(ParagraphLine {
                     content: cursor.content(),
-                    from: block_from,
                     start: block_start,
                     indent,
                     lazy: false,
@@ -940,7 +939,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                         Kind::Paragraph(ParagraphState {
                             lines: alloc::vec![ParagraphLine {
                                 content,
-                                from: block_from,
                                 start: block_start,
                                 indent,
                                 lazy: false,
@@ -967,7 +965,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         &mut self,
         cursor: &Cursor<'a>,
         index: usize,
-        (block_from, block_start): (usize, usize),
+        block_start: usize,
         indent: usize,
     ) {
         let line = cursor.line;
@@ -985,7 +983,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 Kind::Paragraph(ParagraphState {
                     lines: alloc::vec![ParagraphLine {
                         content,
-                        from: block_from,
                         start: block_start,
                         indent,
                         lazy: true,
@@ -1013,7 +1010,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
             paragraph.lines.push(ParagraphLine {
                 content: cursor.content(),
-                from: block_from,
                 start: block_start,
                 indent,
                 lazy: true,
@@ -2922,7 +2918,7 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
     options: &'o SyntaxOptions,
-    definitions: &'o [String],
+    definitions: Definitions<'o>,
 }
 
 impl Finish<'_> {

@@ -442,7 +442,7 @@ mod reference {
         let mut fence = None;
 
         while cursor < lines.len() {
-            let line = lines[cursor].text;
+            let line = &lines[cursor];
             if let Some(open_fence) = fence {
                 if html_container_fence_closes(line, open_fence) {
                     fence = None;
@@ -1442,7 +1442,10 @@ fn table_row_spoilers_form_where_the_row_scan_predicts() {
                     &map,
                     escaped_pipes,
                     &options,
-                    Some(&[]),
+                    Some(crate::parse::Definitions {
+                        own: &[],
+                        known: &[],
+                    }),
                     &mut diagnostics,
                 )
                 .iter()

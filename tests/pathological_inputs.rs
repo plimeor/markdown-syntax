@@ -492,6 +492,28 @@ fn open_definitions_and_terms_grow_linearly() {
 }
 
 #[test]
+fn serialization_grows_linearly_with_definitions_and_layouts() {
+    // Every block reads back with the labels the document knows.
+    assert_linear_growth("definitions before paragraphs", 500, |n| {
+        let mut input: String = (0..n).map(|i| format!("[a{i}]: /u{i}\n")).collect();
+        input.push('\n');
+        input.push_str(&"plain words here\n\n".repeat(n));
+        time_serialize(&parse(&input).document)
+    });
+    // Each list needs a layout alternative of its own.
+    assert_linear_growth("lists that need a layout", 100, |n| {
+        time_serialize(&parse(&"-\n  ---\n\nx\n\n".repeat(n)).document)
+    });
+    assert_linear_growth("items that need a layout", 100, |n| {
+        time_serialize(&parse(&"-\n  ---\n".repeat(n)).document)
+    });
+    // Groups of abutting runs, each needing a delimiter switch.
+    assert_linear_growth("abutting run groups", 250, |n| {
+        time_serialize(&parse(&"***b_*_b_* ".repeat(n)).document)
+    });
+}
+
+#[test]
 fn serialization_grows_linearly_with_runs() {
     assert_linear_growth("tilde run", 20_000, |n| {
         time_serialize(&parse(&format!("a {} b", "~".repeat(n))).document)

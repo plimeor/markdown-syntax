@@ -233,16 +233,30 @@ Specs:
 - **Block layout from the trace.** The serializer first writes the default
   layout. It then parses the whole output and compares it with the document
   apart from what the serializer chooses (list markers, code fences, heading
-  forms). Where a written line landed in a container or block other than its
-  own, the serializer applies one of its layout alternatives to a node on the
-  way to that difference and then verifies, withdrawing an alternative that
-  leaves the difference where it was:
+  forms, thematic break spacing). Where the whole does not read back, each
+  block is read back with the one after it, and where a pair does not, the
+  sequences inside those blocks and a list's items two at a time, inner
+  levels first. Where a written line landed in a container or block other
+  than its own, the serializer applies one of its layout alternatives to a
+  node on the way to that difference and then verifies, withdrawing an
+  alternative that leaves the difference where it was:
   - an empty quote line that ends a quote's last paragraph;
   - an empty first quote line;
   - an item's first block moved to the line after its marker;
-  - a paragraph continuation line indented;
+  - a paragraph continuation line indented, with the lines after it;
   - a nested list's markers indented past the block after it;
-  - a list marker other than the next list's, so adjacent lists stay apart.
+  - a list marker other than the next list's, so adjacent lists stay apart;
+  - a block, or an item's last block, followed by the next one without a
+    blank line, for a block that takes that line;
+  - a dash thematic break spaced, so that it is no setext underline.
+
+  A pair that no alternative settles leaves its alternatives withdrawn, to
+  be settled with what surrounds it. A document that reads back is parsed
+  once, and the work where it does not is bounded per block and level, so
+  serialization stays linear.
+  - Turned down: re-serializing the whole document once per alternative,
+    which is quadratic in the alternatives a document needs and needs a cap
+    that rejects documents needing more.
 
   Examples are a paragraph read as a lazy line of a quote and an HTML block
   read into a nested item. The trace decides when an alternative applies, so
@@ -393,7 +407,7 @@ The verify run found defects in the work above. Each task lands with a test that
 - [x] 7.2 Lookahead lines keep the split-tab column, and the HTML container close, fence, and indented-line checks measure indentation from the line's column. Verified by the tab-indented `<details>` cases parsing as on `main` and the type-fest reduction round-tripping.
 - [x] 7.3 An unclosed fence at the end of input without a line ending keeps its empty last line; a multi-line definition title drops continuation indentation; an alert marker line blocks indented code as a paragraph line does. Verified against commonmark.js output.
 - [x] 7.4 The task checkbox follows cmark-gfm and micromark: taken from the first paragraph after its definitions, never from a setext heading, with the whitespace after it kept. The review's premise was refuted: both references agree with the code, so only the Design text and tests change. Verified by tests pinning `- [x] a\n  ===`, `- [a]: /u\n  [x] b`, and `- [x]   b` against comrak and micromark output.
-- [ ] 7.5 Serialization stays linear: known labels are sorted once and read without a copy per parse; layout is verified per block, with no document-wide round cap; misplaced continuation lines are indented together; delimiter switching keeps its tried states without copying. Verified by growth cases for each input and by 33+ blocks needing a layout alternative.
+- [x] 7.5 Serialization stays linear: known labels are sorted once and read without a copy per parse; layout is verified per block, with no document-wide round cap; misplaced continuation lines are indented together; delimiter switching keeps its tried states without copying. Verified by growth cases for each input and by 33+ blocks needing a layout alternative.
 - [ ] 7.6 Read-back correctness: an item opening with a thematic break at any position, `JoinNext` between and inside items, the fallback starting from escape-only choices, idempotent output for parsed documents, the emphasis inputs the review listed, and `^://y ^` reading back without `#[ignore]`. Verified by `tests/serialize_regressions.rs` cases and a 20k-per-generator fuzz run with no failures.
 - [ ] 7.7 Inline: autolinks in a directive label do not block the enclosing link; `![[` past the bracket limit is an embed; a text directive name followed by `:` is not a directive; a scheme needs a domain char after it; the `\<punct>` autolink guard is removed. Verified by `tests/parse_inline_regressions.rs` cases.
 - [ ] 7.8 Tests: depth-growth tests assert `Ok` and can fail; "Long nested containers" times serialization; growth bounds stay at 8x; reference cases run without the `html` feature; the duplicated `#[test]`, dead profile alias, lost `![[a[b]]` case, misnamed test, and missing idempotence check in `assert_source_stable` are fixed. Verified by `cargo test` and five consecutive `cargo test --features html` runs.

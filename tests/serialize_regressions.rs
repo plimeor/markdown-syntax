@@ -1651,6 +1651,39 @@ mod round_trip_edges {
     }
 
     #[test]
+    fn items_opening_with_a_thematic_break_read_back_at_any_position() {
+        for source in [
+            "-\n  ---\n-\n  ---",
+            "- a\n\n-\n  ---",
+            "> - a\n> -\n>   ---",
+            "- - a\n  -\n    ---",
+        ] {
+            assert_eq!(assert_round_trips(source), format!("{source}\n"));
+        }
+        // Each block needing its own layout, past any fixed number of them.
+        assert_round_trips(&"-\n  ---\n\nx\n\n".repeat(40));
+        assert_round_trips(&"-\n  ---\n".repeat(40));
+    }
+
+    #[test]
+    fn a_block_ending_an_item_that_takes_the_blank_line_joins_the_next_item() {
+        assert_eq!(
+            assert_round_trips("- a\n\n  <!--\n- b"),
+            "- a\n  \n  <!--\n- b\n"
+        );
+    }
+
+    #[test]
+    fn a_dash_break_after_a_paragraph_in_a_tight_item_is_spaced() {
+        assert_eq!(assert_round_trips("- a\n  - ---"), "- a\n  - - -\n");
+    }
+
+    #[test]
+    fn every_continuation_line_that_would_start_a_block_is_indented_at_once() {
+        assert_round_trips(&format!("a `{}`", "\n    ~~~".repeat(40)));
+    }
+
+    #[test]
     fn a_continuation_line_inside_an_inline_that_would_start_a_block_is_indented() {
         assert_eq!(assert_round_trips("=```\n    ```"), "=```\n    ```\n");
         assert_round_trips("-$$\n    $$");
@@ -2023,7 +2056,7 @@ mod round_trip_edges {
     fn math_opening_a_definitions_paragraph_stays_inline() {
         assert_eq!(
             assert_round_trips("[o]:u\n\t$$\na$$"),
-            "[o]: u\n    $$\na$$\n"
+            "[o]: u\n    $$\n    a$$\n"
         );
     }
 
@@ -2303,7 +2336,7 @@ mod read_back_contract {
             (" ~~~\n    ~~~", " ~~~\n    ~~~\n ~~~\n"),
             ("-\n  ---", "-\n  ---\n"),
             ("==a\\== b==", "==a\\== b==\n"),
-            ("[o]:u\n\t$$\na$$", "[o]: u\n    $$\na$$\n"),
+            ("[o]:u\n\t$$\na$$", "[o]: u\n    $$\n    a$$\n"),
             ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
         ] {
             assert_eq!(written(source), expected, "{source:?}");

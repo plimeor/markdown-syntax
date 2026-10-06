@@ -145,47 +145,30 @@ fn serialize_document_body(
         read_back: ReadBack {
             syntax: &options.syntax,
             known,
+            written: Default::default(),
         },
         layout: Layout::default(),
     };
-    // The document is written with the default layout and read back; where
-    // a written block reads back as another one, a layout alternative applies
-    // there and the document is written again.
-    let ours = layout_normalized_blocks(&document.children);
-    let mut tried: Vec<layout::Choice> = Vec::new();
-    let mut last: Option<(layout::Choice, Option<usize>)> = None;
-    let mut output = loop {
-        let output = serialize_blocks_at_start(&document.children, &cx, true)?;
-        // Read as written with its final line ending.
-        let mut written = output.clone();
-        if !written.is_empty() && !ends_with_carriage_return_ending(&written) {
-            written.push('\n');
-        }
-        let reparsed = parse_with_definitions(&written, &options.syntax, &cx.read_back.known)
-            .document
-            .children;
-        let theirs = layout_normalized_blocks(&reparsed);
-        if ours == theirs {
-            break output;
-        }
-        let path = layout::divergence(&document.children, &ours, &theirs);
-        let key = layout::key(&path);
-        // An alternative that left the difference where it was is withdrawn.
-        if let Some((choice, before)) = last.take() {
-            if before == key {
-                cx.layout.remove(&choice);
-            }
-        }
-        let next = layout::candidates(&path)
-            .into_iter()
-            .find(|choice| !tried.contains(choice) && !cx.layout.holds(choice));
-        match next {
-            Some(choice) if tried.len() < LAYOUT_ROUNDS => {
-                cx.layout.add(choice);
-                tried.push(choice);
-                last = Some((choice, key));
-            }
-            _ => return Err(unrepresentable_block(layout::blamed(&path))),
+    // The document is written with the default layout and read back. Where
+    // it does not read back, each two neighbouring blocks are, and where
+    // those do not, the blocks inside them, so that a layout alternative
+    // applies where a written block reads back as another one. A block is
+    // read back a bounded number of times per level it sits at, and only
+    // where something does not read back.
+    let output = settle_blocks(&document.children, &mut cx, true)?;
+    let mut output = match output {
+        Some(output) => output,
+        None => {
+            // What the neighbours did not settle is settled on the whole.
+            let ours = layout_normalized_blocks(&document.children);
+            settle_fragment(
+                &document.children,
+                &ours,
+                &|address| address,
+                &mut cx,
+                &|cx| serialize_blocks_at_start(&document.children, cx, true),
+            )?;
+            serialize_blocks_at_start(&document.children, &cx, true)?
         }
     };
     if options.line_ending == LineEnding::CrLf {
@@ -200,8 +183,179 @@ fn serialize_document_body(
     Ok(output)
 }
 
-/// Layout alternatives a document's read-back tries at most.
+/// Layout alternatives the read-back of a few blocks tries at most.
 const LAYOUT_ROUNDS: usize = 32;
+
+/// The blocks `output` reads back as, read with its final line ending.
+fn read_back_blocks(output: &str, cx: &Cx<'_>) -> Vec<Block> {
+    let mut written = String::from(output);
+    if !written.is_empty() && !ends_with_carriage_return_ending(&written) {
+        written.push('\n');
+    }
+    parse_with_definitions(&written, &cx.options.syntax, &cx.read_back.known)
+        .document
+        .children
+}
+
+/// Whether what `write` writes reads back as `ours`.
+fn reads_back(
+    ours: &[Block],
+    cx: &Cx<'_>,
+    write: &dyn Fn(&Cx<'_>) -> Result<String, SerializeError>,
+) -> Option<String> {
+    let output = write(cx).ok()?;
+    (layout_normalized_blocks(&read_back_blocks(&output, cx)) == ours).then_some(output)
+}
+
+/// Settles the layout of `blocks`, and returns their Markdown when it reads
+/// back: where the sequence does not, each block with the one after it, and
+/// where those do not, the blocks inside them first.
+fn settle_blocks(
+    blocks: &[Block],
+    cx: &mut Cx<'_>,
+    document_start: bool,
+) -> Result<Option<String>, SerializeError> {
+    let ours = layout_normalized_blocks(blocks);
+    let whole = |cx: &Cx<'_>| serialize_blocks_at_start(blocks, cx, document_start);
+    if let Some(output) = reads_back(&ours, cx, &whole) {
+        return Ok(Some(output));
+    }
+    let windows = blocks.len().saturating_sub(1).max(1).min(blocks.len());
+    for start in 0..windows {
+        let end = (start + 2).min(blocks.len());
+        let window = &blocks[start..end];
+        let ours = layout_normalized_blocks(window);
+        let at_start = document_start && start == 0;
+        let write = |cx: &Cx<'_>| serialize_blocks_at_start(window, cx, at_start);
+        if reads_back(&ours, cx, &write).is_some() {
+            continue;
+        }
+        for block in window {
+            settle_inside(block, cx)?;
+        }
+        // Settled with the blocks around them, if not here.
+        let _ = settle_fragment(window, &ours, &|address| address, cx, &write);
+    }
+    Ok(reads_back(&ours, cx, &whole))
+}
+
+/// Settles the sequences of blocks `block` holds, and the items of a list
+/// two at a time.
+fn settle_inside(block: &Block, cx: &mut Cx<'_>) -> Result<(), SerializeError> {
+    match block {
+        Block::BlockQuote(node) => settle_blocks(&node.children, cx, false).map(drop),
+        Block::Alert(node) => settle_blocks(&node.children, cx, false).map(drop),
+        Block::FootnoteDefinition(node) => settle_blocks(&node.children, cx, false).map(drop),
+        Block::ContainerDirective(node) => settle_blocks(&node.children, cx, false).map(drop),
+        Block::HtmlContainer(HtmlContainer {
+            content: HtmlContainerContent::Blocks(children),
+            ..
+        }) => settle_blocks(children, cx, false).map(drop),
+        Block::DescriptionList(node) => {
+            for item in &node.children {
+                for details in &item.details {
+                    settle_blocks(&details.children, cx, false)?;
+                }
+            }
+            Ok(())
+        }
+        Block::List(list) => {
+            for item in &list.children {
+                settle_blocks(&item.children, cx, false)?;
+            }
+            // Two items at a time, as a list of their own.
+            for start in 0..list.children.len().saturating_sub(1) {
+                let items = start..start + 2;
+                let shape = [Block::List(List {
+                    meta: list.meta.clone(),
+                    ordered: list.ordered,
+                    start: list
+                        .ordered
+                        .then(|| list.start.unwrap_or(1).saturating_add(start as u64)),
+                    delimiter: list.delimiter,
+                    tight: list.tight,
+                    children: list.children[items.clone()].to_vec(),
+                })];
+                let mut pairs = Vec::new();
+                layout::address_pairs_of_items(
+                    &list.children[items.clone()],
+                    &shape,
+                    block,
+                    &mut pairs,
+                );
+                pairs.sort_unstable();
+                let ours = layout_normalized_blocks(&shape);
+                let translate = |address: usize| {
+                    pairs
+                        .binary_search_by_key(&address, |&(shape, _)| shape)
+                        .map_or(address, |at| pairs[at].1)
+                };
+                let write = |cx: &Cx<'_>| serialize_list_items(block, list, cx, items.clone());
+                if reads_back(&ours, cx, &write).is_none() {
+                    let _ = settle_fragment(&shape, &ours, &translate, cx, &write);
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Settles the layout of what `write` writes: `shape` holds the blocks it
+/// writes, or copies of them, whose nodes `translate` maps to the written
+/// ones by address, and `ours` is their layout-normalized form. An
+/// alternative that leaves the difference where it was is withdrawn, and
+/// each is tried once. When no alternative makes it read back, the
+/// alternatives it applied are withdrawn: blocks read back apart from what
+/// is around them can read back otherwise there.
+fn settle_fragment(
+    shape: &[Block],
+    ours: &[Block],
+    translate: &dyn Fn(usize) -> usize,
+    cx: &mut Cx<'_>,
+    write: &dyn Fn(&Cx<'_>) -> Result<String, SerializeError>,
+) -> Result<(), SerializeError> {
+    let mut tried: Vec<layout::Choice> = Vec::new();
+    let mut last: Option<(layout::Choice, Option<usize>)> = None;
+    let give_up = |cx: &mut Cx<'_>, tried: &[layout::Choice], error| {
+        for choice in tried {
+            cx.layout.remove(choice);
+        }
+        Err(error)
+    };
+    loop {
+        let output = match write(cx) {
+            Ok(output) => output,
+            Err(error) => return give_up(cx, &tried, error),
+        };
+        let theirs = layout_normalized_blocks(&read_back_blocks(&output, cx));
+        if ours == theirs {
+            return Ok(());
+        }
+        let path = layout::divergence(shape, ours, &theirs);
+        let key = layout::key(&path);
+        if let Some((choice, before)) = last.take() {
+            if before == key {
+                cx.layout.remove(&choice);
+            }
+        }
+        let next = layout::candidates(&path)
+            .into_iter()
+            .map(|(address, alternative)| (translate(address), alternative))
+            .find(|choice| !tried.contains(choice) && !cx.layout.holds(choice));
+        match next {
+            Some(choice) if tried.len() < LAYOUT_ROUNDS => {
+                cx.layout.add(choice);
+                tried.push(choice);
+                last = Some((choice, key));
+            }
+            _ => {
+                let error = unrepresentable_block(layout::blamed(&path));
+                return give_up(cx, &tried, error);
+            }
+        }
+    }
+}
 
 fn unrepresentable_block(node: Option<Node<'_>>) -> SerializeError {
     let (span, name) = match node {
@@ -682,12 +836,15 @@ fn serialize_block(
         Block::Paragraph(node) => Ok(serialize_paragraph(node, options, None)?.0),
         Block::Heading(node) => serialize_heading(node, options),
         Block::ThematicBreak(node) => Ok(match node.marker {
-            // A Dash break is normally written contiguous (`---`) — the form
-            // that survives after a `-` bullet list, where the spaced `- - -`
-            // would be re-read as nested list items. The one exception is the
-            // document start, where a contiguous `---` opens frontmatter, so the
-            // spaced form (which is not a frontmatter fence) is used there.
-            ThematicBreakMarker::Dash if at_document_start => "- - -".into(),
+            // A Dash break is normally written contiguous (`---`). The spaced
+            // form is used at the document start, where a contiguous `---`
+            // opens frontmatter, and where `---` would be the setext underline
+            // of the paragraph before it.
+            ThematicBreakMarker::Dash
+                if at_document_start || options.layout.has(block, Alternative::BreakSpaced) =>
+            {
+                "- - -".into()
+            }
             ThematicBreakMarker::Dash => "---".into(),
             ThematicBreakMarker::Asterisk => "***".into(),
             ThematicBreakMarker::Underscore => "___".into(),
@@ -878,7 +1035,17 @@ fn escape_alert_title(input: &str) -> String {
 }
 
 fn serialize_list(node: &List, options: &Cx<'_>) -> Result<String, SerializeError> {
-    serialize_list_with_marker_spacing(node, options, "", " ", None)
+    serialize_list_with_marker_spacing(node, options, "", " ", None, 0..node.children.len())
+}
+
+/// The items `items` of a list, written as a list of their own.
+fn serialize_list_items(
+    _block: &Block,
+    node: &List,
+    options: &Cx<'_>,
+    items: core::ops::Range<usize>,
+) -> Result<String, SerializeError> {
+    serialize_list_with_marker_spacing(node, options, "", " ", None, items)
 }
 
 /// A list written before `next`, the Markdown of the block after it. A list
@@ -901,12 +1068,18 @@ fn serialize_list_before(
     let indent = next
         .filter(|_| options.layout.has(block, Alternative::ListPastNext))
         .map(|next| next.len() - next.trim_start_matches(' ').len());
+    let items = 0..node.children.len();
     match indent {
-        Some(indent @ 1..=3) => {
-            serialize_list_with_marker_spacing(node, options, &" ".repeat(indent), " ", avoid)
-        }
-        Some(4..) => serialize_list_with_marker_spacing(node, options, " ", "    ", avoid),
-        _ => serialize_list_with_marker_spacing(node, options, "", " ", avoid),
+        Some(indent @ 1..=3) => serialize_list_with_marker_spacing(
+            node,
+            options,
+            &" ".repeat(indent),
+            " ",
+            avoid,
+            items,
+        ),
+        Some(4..) => serialize_list_with_marker_spacing(node, options, " ", "    ", avoid, items),
+        _ => serialize_list_with_marker_spacing(node, options, "", " ", avoid, items),
     }
 }
 
@@ -916,11 +1089,25 @@ fn serialize_list_with_marker_spacing(
     marker_prefix: &str,
     marker_padding: &str,
     avoid: Option<char>,
+    items: core::ops::Range<usize>,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
-    for (index, item) in node.children.iter().enumerate() {
-        if index > 0 {
-            if node.tight {
+    let first = items.start;
+    for (index, item) in node
+        .children
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(items.len())
+    {
+        if index > first {
+            // An item whose last block takes the blank line after it is
+            // followed by the next one directly.
+            let joins = node.children[index - 1]
+                .children
+                .last()
+                .is_some_and(|last| options.layout.has(last, Alternative::JoinNext));
+            if node.tight || joins {
                 output.push('\n');
             } else {
                 output.push_str("\n\n");
@@ -1025,7 +1212,11 @@ fn serialize_item_blocks(
     let mut output = String::new();
     for (index, written) in written.iter().rev().enumerate() {
         if index > 0 {
-            if tight {
+            if tight
+                || options
+                    .layout
+                    .has(&blocks[index - 1], Alternative::JoinNext)
+            {
                 output.push('\n');
             } else {
                 output.push_str("\n\n");

@@ -22,7 +22,9 @@
 //! 5. A block that still does not read back has every ASCII punctuation char
 //!    of its text escaped; failing that, it is unrepresentable.
 
-use alloc::{format, string::String, vec, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, vec, vec::Vec};
+use core::cell::RefCell;
+use core::fmt::Write as _;
 
 use super::inline::{inline_children, Choices, Form, Writer, WrittenChar, WrittenNode};
 use super::{Place, SerializeError};
@@ -59,6 +61,32 @@ pub(super) struct ReadBack<'o> {
     /// references it uses, sorted: the output is read as if each were
     /// defined.
     pub(super) known: Vec<String>,
+    /// What each block's parts were written as, by the parts: a block is
+    /// written again each time the layout around it is checked, and its
+    /// inline content reads back the same way each time.
+    pub(super) written: RefCell<BTreeMap<String, Result<Vec<String>, SerializeError>>>,
+}
+
+/// The key a block's parts are written under: each inline part by where its
+/// nodes are and where it sits, each literal part by its text.
+fn parts_key(parts: &[Part<'_>]) -> String {
+    let mut key = String::new();
+    for part in parts {
+        match part {
+            Part::Literal(text) => {
+                let _ = write!(key, "L{}:{text}", text.len());
+            }
+            Part::Inlines(inlines, place) => {
+                let _ = write!(
+                    key,
+                    "I{:x}:{}:{place:?}",
+                    inlines.as_ptr() as usize,
+                    inlines.len()
+                );
+            }
+        }
+    }
+    key
 }
 
 /// Escape rounds before the rendering is verified.
@@ -71,7 +99,7 @@ const SWITCH_ROUNDS: usize = 8;
 /// Rounds that fix a node that does not read back.
 const FIX_ROUNDS: usize = 8;
 
-/// Lines indented while escapes have not settled.
+/// Rounds that indent lines while escapes have not settled.
 const UNSETTLED_INDENTS: usize = 2;
 
 /// The rendering of a block's parts.
@@ -275,6 +303,20 @@ pub(super) fn write_reading_back<'n>(
     extract: impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
     read_back: &ReadBack<'_>,
 ) -> Result<Vec<String>, SerializeError> {
+    let key = parts_key(parts);
+    if let Some(written) = read_back.written.borrow().get(&key) {
+        return written.clone();
+    }
+    let written = write_parts(parts, extract, read_back);
+    read_back.written.borrow_mut().insert(key, written.clone());
+    written
+}
+
+fn write_parts<'n>(
+    parts: &[Part<'n>],
+    extract: impl for<'d> Fn(&'d [Block]) -> Extracted<'d>,
+    read_back: &ReadBack<'_>,
+) -> Result<Vec<String>, SerializeError> {
     let originals: Vec<&[Inline]> = parts
         .iter()
         .filter_map(|part| match part {
@@ -290,6 +332,7 @@ pub(super) fn write_reading_back<'n>(
         })
         .collect();
     let mut indented = vec![Vec::new(); originals.len()];
+    let mut indent_rounds = 0;
     let mut choices = Choices::default();
     let mut fixed = Fixed::default();
 
@@ -307,12 +350,7 @@ pub(super) fn write_reading_back<'n>(
             // escaping every ASCII punctuation char, unless a line that
             // landed outside the block is what keeps them going; a few lines
             // are indented before that.
-            Extracted::Misplaced(_)
-                if !settled
-                    && indented.iter().map(Vec::len).sum::<usize>() >= UNSETTLED_INDENTS =>
-            {
-                break
-            }
+            Extracted::Misplaced(_) if !settled && indent_rounds >= UNSETTLED_INDENTS => break,
             Extracted::Lists(_) | Extracted::Mismatch if !settled => break,
             Extracted::Misplaced(offset) => {
                 // A continuation line that lands outside the block is
@@ -322,8 +360,15 @@ pub(super) fn write_reading_back<'n>(
                         if (line > 0 || places[part] == Place::Continuation)
                             && !indented[part].contains(&line) =>
                     {
-                        indented[part].push(line);
+                        // That line and every later one of the part, whose
+                        // indentation the block drops, so that one round
+                        // settles them all.
+                        let (start, end) = rendering.segments[part];
+                        let lines = rendering.text[start..end].matches('\n').count();
+                        indented[part].extend(line..=lines);
                         indented[part].sort_unstable();
+                        indented[part].dedup();
+                        indent_rounds += 1;
                         // What the parse read as syntax is read again under
                         // the new layout.
                         choices = Choices::default();
@@ -553,8 +598,8 @@ fn escape_syntax(rendering: &Rendering, trace: &Trace, choices: &mut Choices) ->
 /// What the fix rounds have tried.
 #[derive(Default)]
 struct Fixed {
-    /// The emphasis and strong nodes written with `_`, by choices tried.
-    tried: Vec<Vec<usize>>,
+    /// The delimiter choices tried, by their hash.
+    tried: Vec<u64>,
     /// The nodes whose edges were written as references.
     encoded: Vec<usize>,
 }
@@ -636,16 +681,14 @@ fn can_switch(text: &str, run: &WrittenNode, choices: &Choices) -> bool {
 
 /// Switches `run`'s delimiter when it can and the switch makes delimiter
 /// choices not tried yet. Whether it switched.
-fn switch_run(text: &str, run: &WrittenNode, choices: &mut Choices, tried: &[Vec<usize>]) -> bool {
+fn switch_run(text: &str, run: &WrittenNode, choices: &mut Choices, tried: &[u64]) -> bool {
     if !can_switch(text, run, choices) {
         return false;
     }
-    let mut state = choices.clone();
-    state.set_underscore(run.id, !choices.underscored(run.id));
-    if tried.contains(&state.underscored_ids().to_vec()) {
+    if tried.contains(&choices.underscore_hash_switched(run.id)) {
         return false;
     }
-    *choices = state;
+    choices.set_underscore(run.id, !choices.underscored(run.id));
     true
 }
 
@@ -659,9 +702,9 @@ fn switch_runs(
     rendering: &Rendering,
     trace: &Trace,
     choices: &mut Choices,
-    tried: &mut Vec<Vec<usize>>,
+    tried: &mut Vec<u64>,
 ) -> bool {
-    tried.push(choices.underscored_ids().to_vec());
+    tried.push(choices.underscore_hash());
     let mut runs: Vec<&WrittenNode> = rendering
         .nodes
         .iter()

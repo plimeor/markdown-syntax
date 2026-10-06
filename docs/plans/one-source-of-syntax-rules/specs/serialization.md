@@ -419,7 +419,7 @@ constructs.
 
 #### Scenario: Math opening a definition's paragraph
 - **WHEN** the document parsed from `"[o]:u\n\t$$\na$$"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"[o]: u\n    $$\na$$\n"`, which keeps the math inline in the paragraph the definition was read from
+- **THEN** `to_markdown()` returns `"[o]: u\n    $$\n    a$$\n"`, which keeps the math inline in the paragraph the definition was read from: a continuation line that would start a block is indented, with the lines after it
 
 #### Scenario: Cell pipe after an escaped backslash
 - **WHEN** the document parsed from `"| <a b=\"x\\\\\\|y\"> |\n| --- |"` with the GFM preset is serialized with `syntax` set to it and reparsed with it

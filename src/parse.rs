@@ -182,6 +182,8 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
 /// sorted and deduplicated identifiers: the serializer reads its own output
 /// back this way, as the document it was written from resolves its
 /// references. Options are not validated.
+/// Parses `input` with each identifier in `known`, sorted and deduplicated,
+/// read as defined.
 pub(crate) fn parse_with_definitions(
     input: &str,
     options: &SyntaxOptions,
@@ -1727,7 +1729,7 @@ fn close_bracket(
     base_offset: usize,
     close: usize,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
@@ -2659,7 +2661,7 @@ fn match_link_target(
     input: &str,
     label_start: usize,
     close: usize,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
 ) -> Option<(usize, LinkTarget)> {
     let label = &input[label_start..close];
     let after = close + 1;
@@ -3150,7 +3152,7 @@ fn parse_inlines(
     input: &str,
     map: &SourceMap,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     parse_inlines_in(
@@ -3171,7 +3173,7 @@ fn parse_cell_inlines(
     map: &SourceMap,
     escaped_pipes: Vec<usize>,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     let state = InlineState {
@@ -3186,7 +3188,7 @@ fn parse_inlines_in(
     map: &SourceMap,
     mut state: InlineState,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
@@ -3235,7 +3237,7 @@ fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -3258,7 +3260,7 @@ fn parse_inline_content(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -4238,7 +4240,7 @@ fn parse_text_directive(
     index: usize,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: Option<&[String]>,
+    definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
@@ -5430,13 +5432,25 @@ pub(crate) fn normalize_label(label: &str) -> String {
         .to_lowercase()
 }
 
-fn definition_exists(definitions: Option<&[String]>, label: &str) -> bool {
+/// The identifiers a document's references can resolve to: those of its own
+/// definitions, and those a caller knows of, each sorted and deduplicated so
+/// that a lookup is a binary search.
+#[derive(Clone, Copy)]
+pub(crate) struct Definitions<'a> {
+    pub(crate) own: &'a [String],
+    pub(crate) known: &'a [String],
+}
+
+fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool {
     if label.is_empty() || !reference_label_is_within_limit(label) {
         return false;
     }
-
-    definitions
-        .is_some_and(|definitions| definitions.binary_search(&normalize_label(label)).is_ok())
+    let Some(definitions) = definitions else {
+        return false;
+    };
+    let identifier = normalize_label(label);
+    definitions.own.binary_search(&identifier).is_ok()
+        || definitions.known.binary_search(&identifier).is_ok()
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {

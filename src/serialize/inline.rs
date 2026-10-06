@@ -65,8 +65,22 @@ pub(super) struct Choices {
     /// The forms of the text chars, by number; a char past the end takes its
     /// initial form.
     forms: Vec<Option<Form>>,
-    /// The emphasis and strong nodes written with `_`, by number.
-    underscore: Vec<usize>,
+    /// Whether each emphasis and strong node is written with `_`, by number.
+    underscore: Vec<bool>,
+    /// A hash of the nodes written with `_`, which a switch updates in
+    /// constant time, so that the delimiter choices tried are told apart
+    /// without comparing them whole.
+    underscore_hash: u64,
+}
+
+/// A hash of node `id` for `Choices::underscore_hash`, which combines the
+/// hashes of the nodes written with `_` by exclusive or.
+fn node_hash(id: usize) -> u64 {
+    // SplitMix64's finalizer.
+    let mut z = (id as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }
 
 impl Choices {
@@ -85,22 +99,29 @@ impl Choices {
         self.forms[index] = Some(form);
     }
 
-    pub(super) fn underscored_ids(&self) -> &[usize] {
-        &self.underscore
+    /// The hash of the delimiter choices: equal choices hash alike.
+    pub(super) fn underscore_hash(&self) -> u64 {
+        self.underscore_hash
+    }
+
+    /// The hash the delimiter choices would have with `node` switched.
+    pub(super) fn underscore_hash_switched(&self, node: usize) -> u64 {
+        self.underscore_hash ^ node_hash(node)
     }
 
     pub(super) fn underscored(&self, node: usize) -> bool {
-        self.underscore.binary_search(&node).is_ok()
+        self.underscore.get(node).copied().unwrap_or(false)
     }
 
     pub(super) fn set_underscore(&mut self, node: usize, underscore: bool) {
-        match (self.underscore.binary_search(&node), underscore) {
-            (Err(at), true) => self.underscore.insert(at, node),
-            (Ok(at), false) => {
-                self.underscore.remove(at);
-            }
-            _ => {}
+        if self.underscored(node) == underscore {
+            return;
         }
+        if self.underscore.len() <= node {
+            self.underscore.resize(node + 1, false);
+        }
+        self.underscore[node] = underscore;
+        self.underscore_hash ^= node_hash(node);
     }
 }
 
