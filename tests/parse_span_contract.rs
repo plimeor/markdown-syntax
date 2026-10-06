@@ -4,6 +4,10 @@ use markdown_syntax::{
 };
 use std::path::{Path, PathBuf};
 
+#[path = "support/fixtures.rs"]
+#[allow(dead_code)]
+mod fixtures;
+
 #[test]
 fn top_level_block_spans_slice_the_original_source() {
     for (name, source) in [
@@ -561,25 +565,6 @@ fn corpus_inputs() -> Vec<(String, String)> {
                 inputs.push((format!("{name} case {index}"), after[..end].to_string()));
                 rest = &after[end..];
             }
-            // Round-trip cases name their body's length in bytes:
-            // `--- case N [profile P] bytes B`, the body, then `--- end`.
-            let mut rest = if text.starts_with("# markdown-syntax AST->HTML conformance suite") {
-                ""
-            } else {
-                text.as_str()
-            };
-            while let Some(start) = rest.find("--- case ") {
-                let header_end = start + rest[start..].find('\n').expect("case header ends");
-                let header = &rest[start..header_end];
-                let bytes: usize = header
-                    .rsplit(' ')
-                    .next()
-                    .and_then(|len| len.parse().ok())
-                    .unwrap_or_else(|| panic!("{name}: case header {header:?}"));
-                let body = &rest[header_end + 1..header_end + 1 + bytes];
-                inputs.push((format!("{name} {header}"), body.to_string()));
-                rest = &rest[header_end + 1 + bytes..];
-            }
         } else if name.ends_with(".md") && !name.ends_with(".canonical.md") {
             inputs.push((name, text));
         }
@@ -632,8 +617,11 @@ const PIECES: &[&str] = &[
     "> [!NOTE]\n",
 ];
 
+/// The recorded seed of the generated inputs.
+const GENERATED_SEED: u64 = 0x2545_f491_4f6c_dd1d;
+
 fn generated_inputs(count: usize) -> Vec<String> {
-    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut state = GENERATED_SEED;
     let mut next = move |bound: usize| {
         state ^= state << 13;
         state ^= state >> 7;
@@ -657,6 +645,45 @@ fn spans_nest_in_the_fixture_corpus() {
         assert_document_spans_nest(&name, &source, &SyntaxOptions::commonmark());
         assert_document_spans_nest(&name, &source, &SyntaxOptions::default());
     }
+    // Round-trip cases parse under the profile each names.
+    let mut cases = 0;
+    for path in derived_case_files() {
+        for case in fixtures::read_derived_cases(&path) {
+            let label = format!("{} case {}", path.display(), case.index);
+            let options = fixtures::profile_options(&case.profile);
+            assert_document_spans_nest(&label, &case.input, &options);
+            cases += 1;
+        }
+    }
+    assert!(cases > 0, "no derived cases read");
+}
+
+/// The `.cases` files of the fixture corpus that hold round-trip cases,
+/// `--- case N [profile P] bytes B` headers each, rather than the AST->HTML
+/// conformance suites.
+fn derived_case_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut directories = vec![PathBuf::from("tests/fixtures")];
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(&directory).expect("fixture directory reads") {
+            let path = entry.expect("fixture entry reads").path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "cases")
+            {
+                let text = std::fs::read(&path).expect("case file reads");
+                let conformance =
+                    text.starts_with(b"# markdown-syntax AST->HTML conformance suite");
+                if !conformance && text.windows(9).any(|window| window == b"--- case ") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 #[test]

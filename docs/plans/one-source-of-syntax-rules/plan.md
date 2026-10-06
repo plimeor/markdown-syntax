@@ -368,9 +368,9 @@ Specs:
 - [x] 4.3 Drop the strikethrough bonus for `_` runs. Verified by inline-syntax "Underscores around a tilde" and serialization "Tilde beside an attention run".
 
 ### 5. Test gaps from #11
-- [ ] 5.1 `spans_nest_in_the_fixture_corpus` reads cases through `read_derived_cases` and parses each under its profile. Verified by the test running every case under the case's own options.
-- [ ] 5.2 Growth tests scale nesting depth for the nested-emphasis and nested-quote cases. Bounds match the scenarios: 1 s in a debug build, and roughly 2x or 4x with the tolerance stated in the test. Verified by each new case failing against `f987d66` in a scratch worktree and passing here.
-- [ ] 5.3 Replace `"==\\=a=="` and the CommonMark/default `"*a***b**"` runs with inputs that fail at `f987d66`, and name the seed of every generated-input test. Verified the same way as 5.2.
+- [x] 5.1 `spans_nest_in_the_fixture_corpus` reads cases through `read_derived_cases` and parses each under its profile. Verified by the test running every case under the case's own options.
+- [x] 5.2 Growth tests scale nesting depth for the nested-emphasis and nested-quote cases. Bounds match the scenarios: 1 s in a debug build, and roughly 2x or 4x with the tolerance stated in the test. Verified by each new case failing against `f987d66` in a scratch worktree and passing here. The nested-emphasis and nested-quote depth cases pass at `f987d66` too: its `RenderMemo` already bounds them, and no commit in the history carries the exponential case. A nested-list depth case, which `f987d66` grows quadratically, fails there and passes here.
+- [x] 5.3 Replace `"==\\=a=="` and the CommonMark/default `"*a***b**"` runs with inputs that fail at `f987d66`, and name the seed of every generated-input test. Verified the same way as 5.2.
 
 ### 6. Docs and release notes
 - [ ] 6.1 Add a `CHANGELOG.md` migration note covering:

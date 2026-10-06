@@ -28,6 +28,9 @@ pub(super) enum Alternative {
     /// A list's markers are indented past the indentation of the block after
     /// it, whose lines would otherwise continue the list's last item.
     ListPastNext,
+    /// A block is followed by the next one without a blank line, which a
+    /// block it ends with, such as an unclosed HTML comment, would take.
+    JoinNext,
 }
 
 /// A layout alternative for a node, by its address.
@@ -219,6 +222,15 @@ pub(super) fn candidates(path: &[Step<'_>]) -> Vec<Choice> {
                 candidates.push((address(list), Alternative::ListPastNext));
             }
             _ => {}
+        }
+    }
+    // A block that took the blank line after it, nearest the difference
+    // first, joins the next block.
+    for step in path.iter().rev() {
+        if let Node::Block(block) = step.node {
+            if step.index + 1 < step.siblings {
+                candidates.push((address(block), Alternative::JoinNext));
+            }
         }
     }
     candidates

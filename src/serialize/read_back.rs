@@ -71,6 +71,9 @@ const SWITCH_ROUNDS: usize = 8;
 /// Rounds that fix a node that does not read back.
 const FIX_ROUNDS: usize = 8;
 
+/// Lines indented while escapes have not settled.
+const UNSETTLED_INDENTS: usize = 2;
+
 /// The rendering of a block's parts.
 struct Rendering {
     text: String,
@@ -301,8 +304,16 @@ pub(super) fn write_reading_back<'n>(
                 }
             }
             // Escapes that have not settled in three rounds give way to
-            // escaping every ASCII punctuation char.
-            _ if !settled => break,
+            // escaping every ASCII punctuation char, unless a line that
+            // landed outside the block is what keeps them going; a few lines
+            // are indented before that.
+            Extracted::Misplaced(_)
+                if !settled
+                    && indented.iter().map(Vec::len).sum::<usize>() >= UNSETTLED_INDENTS =>
+            {
+                break
+            }
+            Extracted::Lists(_) | Extracted::Mismatch if !settled => break,
             Extracted::Misplaced(offset) => {
                 // A continuation line that lands outside the block is
                 // indented past a block start.
@@ -313,6 +324,10 @@ pub(super) fn write_reading_back<'n>(
                     {
                         indented[part].push(line);
                         indented[part].sort_unstable();
+                        // What the parse read as syntax is read again under
+                        // the new layout.
+                        choices = Choices::default();
+                        fixed = Fixed::default();
                         continue;
                     }
                     _ => Vec::new(),

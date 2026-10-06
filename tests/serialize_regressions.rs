@@ -1994,7 +1994,8 @@ mod round_trip_edges {
     fn run_delimiter_choices_reparse_beside_and_inside_other_inlines() {
         for source in [
             "y*x***a_ b**",
-            "*a***b**",
+            "***)__\\_#__*b***",
+            "**~***|_a* ",
             "**__a__~~**b",
             "[__**)**&__](u)",
             "![__**)**&__](u)",
@@ -2064,7 +2065,8 @@ mod round_trip_edges {
             "~\t:e~",
             // A `+` or `=` beside the span's delimiter would lengthen it.
             "++\\+>++",
-            "==\\=a==",
+            "==&#61;==",
+            "++&#43;++",
             // A definition labelled like an alert marker keeps the quote.
             ">\n>[!NOTE]:>",
         ] {

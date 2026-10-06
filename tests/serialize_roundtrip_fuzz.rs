@@ -1,7 +1,7 @@
 //! Seeded round-trip generators: documents built from pieces of inline,
 //! block, and emphasis syntax are parsed, serialized under the same dialect,
 //! and parsed again. Each generated document reads back as the parsed one,
-//! or serialization reports it unrepresentable.
+//! or is listed as unrepresentable with its reason.
 
 #[path = "support/normalize.rs"]
 mod normalize;
@@ -147,6 +147,10 @@ const GENERATORS: &[(&str, &[&str], usize, u64)] = &[
 
 const INPUTS_PER_GENERATOR: usize = 2_000;
 
+/// Generated inputs whose parse no Markdown the serializer writes reads
+/// back as, with the reason.
+const UNREPRESENTABLE: &[(&str, &str)] = &[];
+
 fn dialects() -> [(&'static str, SyntaxOptions); 4] {
     [
         ("commonmark", SyntaxOptions::commonmark()),
@@ -179,7 +183,13 @@ fn generated_documents_round_trip_in_each_dialect() {
                 let document = options.parse(&input).document;
                 let markdown = match document.to_markdown_with(&serialize) {
                     Ok(markdown) => markdown,
-                    Err(SerializeError::Unrepresentable(_)) => continue,
+                    // A parsed document has its source as one spelling, so
+                    // it is unrepresentable only where listed with a reason.
+                    Err(SerializeError::Unrepresentable(_))
+                        if UNREPRESENTABLE.iter().any(|(listed, _)| *listed == input) =>
+                    {
+                        continue
+                    }
                     Err(error) => {
                         failures.push(format!("{dialect} {generator} {input:?}: {error:?}"));
                         continue;

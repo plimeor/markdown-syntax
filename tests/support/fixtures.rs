@@ -338,13 +338,15 @@ pub(crate) fn read_derived_metadata(path: &Path) -> DerivedMetadata {
     }
 }
 
-struct DerivedCase {
-    index: usize,
-    profile: String,
-    input: String,
+/// One case of a derived `.cases` file: its number, the profile it parses
+/// under, and its input.
+pub(crate) struct DerivedCase {
+    pub(crate) index: usize,
+    pub(crate) profile: String,
+    pub(crate) input: String,
 }
 
-fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
+pub(crate) fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
     let source =
         fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let mut cases = Vec::new();

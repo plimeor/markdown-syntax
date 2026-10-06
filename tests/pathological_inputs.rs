@@ -394,13 +394,14 @@ fn long_nested_containers_and_tables_parse_in_bounded_time() {
 }
 
 /// Asserts that the work `run` times grows about linearly: four times the
-/// input may take at most eight times as long, where a quadratic cost takes
-/// sixteen. The best of three runs counts, and a small slack absorbs noise.
+/// input may take at most six times as long, roughly quadruple, where a
+/// quadratic cost takes sixteen. The best of three runs counts, and a small
+/// slack absorbs noise.
 fn assert_linear_growth(name: &str, n: usize, run: impl Fn(usize) -> Duration) {
     let best = |n| (0..3).map(|_| run(n)).min().expect("three runs");
     let (small, large) = (best(n), best(4 * n));
     assert!(
-        large <= small * 8 + Duration::from_millis(20),
+        large <= small * 6 + Duration::from_millis(20),
         "{name}: {small:?} at {n}, {large:?} at {}",
         4 * n
     );
@@ -506,10 +507,84 @@ fn deeply_nested_emphasis_serializes_in_time_linear_in_its_depth() {
 }
 
 #[test]
+fn nested_quote_depth_grows_time_linearly() {
+    // The same lines inside 4, 8, and 16 nested block quotes: each doubling
+    // doubles the input, and must at most roughly double the time to parse
+    // and serialize it.
+    let quoted = |depth: usize| -> String {
+        (0..400)
+            .map(|line| format!("{}line {line} *a*\n", "> ".repeat(depth)))
+            .collect()
+    };
+    let started = Instant::now();
+    let document = parse(&quoted(16)).document;
+    let _ = document.to_markdown();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+
+    let best = |depth| {
+        let input = quoted(depth);
+        (0..3)
+            .map(|_| {
+                let started = Instant::now();
+                let document = parse(&input).document;
+                let _ = document.to_markdown();
+                started.elapsed()
+            })
+            .min()
+            .expect("three runs")
+    };
+    let (four, eight, sixteen) = (best(4), best(8), best(16));
+    assert!(
+        eight <= four * 3 + Duration::from_millis(5)
+            && sixteen <= eight * 3 + Duration::from_millis(5),
+        "{four:?} at 4, {eight:?} at 8, {sixteen:?} at 16"
+    );
+}
+
+#[test]
+fn nested_list_depth_grows_time_linearly() {
+    // The same lines inside 8, 16, and 32 nested list items: each doubling
+    // about doubles the input, and must at most roughly double the time to
+    // parse and serialize it.
+    let listed = |depth: usize| -> String {
+        let mut input: String = (0..depth)
+            .map(|level| format!("{}- i\n", "  ".repeat(level)))
+            .collect();
+        for _ in 0..400 {
+            input.push_str(&format!("{}x\n", "  ".repeat(depth)));
+        }
+        input
+    };
+    let best = |depth| {
+        let input = listed(depth);
+        (0..3)
+            .map(|_| {
+                let started = Instant::now();
+                let document = parse(&input).document;
+                let _ = document.to_markdown();
+                started.elapsed()
+            })
+            .min()
+            .expect("three runs")
+    };
+    let (eight, sixteen, thirty_two) = (best(8), best(16), best(32));
+    assert!(thirty_two < Duration::from_secs(1), "{thirty_two:?}");
+    assert!(
+        sixteen.as_secs_f64() <= eight.as_secs_f64() * 2.75 + 0.005
+            && thirty_two.as_secs_f64() <= sixteen.as_secs_f64() * 2.75 + 0.005,
+        "{eight:?} at 8, {sixteen:?} at 16, {thirty_two:?} at 32"
+    );
+}
+
+#[test]
 fn nested_emphasis_that_does_not_read_back_serializes_in_bounded_time() {
-    // Choosing an emphasis delimiter renders its content in up to two
-    // contexts; nesting must not multiply that, even when every delimiter
-    // choice of the paragraph is tried.
+    // A paragraph that reads back only after its delimiter choices and edge
+    // encodings are tried, nested sixteen deep, serializes within the
+    // scenario's bound rather than the shared limit.
     let input = format!(
         "{}==b {}x{} c=={} ://~&mp;~",
         "*a ".repeat(16),
@@ -517,5 +592,12 @@ fn nested_emphasis_that_does_not_read_back_serializes_in_bounded_time() {
         " a*".repeat(6),
         " d*".repeat(16)
     );
-    parse_bounded("nested emphasis with every delimiter choice", input);
+    let document = parse_bounded("nested emphasis with every delimiter choice", input);
+    let started = Instant::now();
+    let _ = document.to_markdown();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
 }

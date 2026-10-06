@@ -310,7 +310,10 @@ fn serialize_blocks_at_start(
     let mut output = String::new();
     for (index, (written, continues)) in outputs.iter().rev().enumerate() {
         if index > 0 {
-            if *continues {
+            let joins = options
+                .layout
+                .has(&blocks[index - 1], Alternative::JoinNext);
+            if *continues || joins {
                 output.push('\n');
             } else {
                 push_block_gap(&mut output);
@@ -970,9 +973,6 @@ fn serialize_list_with_marker_spacing(
         };
         let mut inner = serialize_item_blocks(&item.children, options, node.tight, item.checked)?;
         if let Some(checked) = item.checked {
-            if let Some(rest) = inner.strip_prefix("- ") {
-                inner = rest.into();
-            }
             let checkbox = if checked { "[x] " } else { "[ ] " };
             inner = format!("{checkbox}{inner}");
         }
