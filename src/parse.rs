@@ -721,7 +721,9 @@ fn parse_container_directive(
         if let Some(trimmed) = trimmed {
             if let Some(nested_len) = nested_fences.last().copied() {
                 if directive_container_closing_fence(trimmed, nested_len).is_some() {
+                    // A fence the nested directive left open ends with it.
                     nested_fences.pop();
+                    code_fence = None;
                     content.push_line(&lines[cursor], line, 0);
                     cursor += 1;
                     continue;
@@ -1060,7 +1062,7 @@ enum ContentLineKind {
     /// Nothing after the container markers.
     Empty,
     /// Paragraph text, which a following lazy line may continue.
-    Paragraph,
+    Paragraph(OpenParagraphIn),
     /// A block that ends with its line (a thematic break or ATX heading), or
     /// indented code, which the next line's own indentation continues or ends.
     Closed,
@@ -1075,9 +1077,10 @@ enum ContentLineKind {
 struct OpenBlock {
     /// How many nested block quotes the block sits in.
     depth: usize,
-    /// Whether a list marker was passed on the way to the block, so that a
-    /// line's indentation, which this does not track, may end it sooner.
-    in_list: bool,
+    /// The column the content of the innermost list item passed on the way
+    /// to the block starts at: a line indented less has left that item, and
+    /// the block with it.
+    item_column: Option<usize>,
     end: OpenBlockEnd,
 }
 
@@ -1156,7 +1159,8 @@ fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> C
     let mut offset = 0;
     let mut column = column;
     let mut depth = 0;
-    let mut in_list = false;
+    let mut item_column = None;
+    let mut item: Option<(usize, usize)> = None;
     for _ in 0..=MAX_BLOCK_NESTING {
         let here = &source[offset..];
         let indent = here.len() - trim_ascii_start(here).len();
@@ -1177,16 +1181,18 @@ fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> C
                 None => (Cow::Borrowed(rest), rest_column),
             }
         } else if let Some(marker) = list_marker_info_at(trimmed, trimmed_column) {
-            in_list = true;
             let marker_end_column = trimmed_column + marker.marker_len;
-            match list_marker_first_content(trimmed, marker) {
+            let (rest, rest_column) = match list_marker_first_content(trimmed, marker) {
                 (Cow::Borrowed(rest), from) => (
                     Cow::Borrowed(rest),
                     advance_columns(trimmed_column, &trimmed[..from]),
                 ),
                 // A tab split after the marker: its rest starts one column on.
                 (Cow::Owned(rest), _) => (Cow::Owned(rest), marker_end_column + 1),
-            }
+            };
+            item.get_or_insert((rest_column, depth));
+            item_column = Some(rest_column);
+            (rest, rest_column)
         } else if parse_thematic_break(Line::detached(trimmed)).is_some()
             || is_atx_heading_line(trimmed)
         {
@@ -1197,13 +1203,13 @@ fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> C
             return match OpenBlockEnd::of_opening_line(trimmed, options) {
                 Some(end) => ContentLineKind::Open(OpenBlock {
                     depth,
-                    in_list,
+                    item_column,
                     end,
                 }),
                 None => ContentLineKind::Closed,
             };
         } else {
-            return ContentLineKind::Paragraph;
+            return ContentLineKind::Paragraph(OpenParagraphIn::new(depth, item));
         };
         column = rest_column;
         match rest {
@@ -1215,7 +1221,7 @@ fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> C
             }
         }
     }
-    ContentLineKind::Paragraph
+    ContentLineKind::Paragraph(OpenParagraphIn::new(depth, item))
 }
 
 /// Whether `trimmed` (indented at most three columns) is an ATX heading line.
@@ -1224,9 +1230,32 @@ fn is_atx_heading_line(trimmed: &str) -> bool {
     (1..=6).contains(&depth) && matches!(trimmed.as_bytes().get(depth), None | Some(b' ' | b'\t'))
 }
 
-/// The open paragraph of a container's content, if any, by the number of
-/// nested block quotes it sits in.
-type OpenParagraph = Option<usize>;
+/// The open paragraph of a container's content, if any.
+type OpenParagraph = Option<OpenParagraphIn>;
+
+/// The containers a paragraph of a container's content sits in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenParagraphIn {
+    /// The block quotes before any list item.
+    depth: usize,
+    /// The column the content of the first list item starts at, and the
+    /// block quotes inside that item.
+    item: Option<(usize, usize)>,
+}
+
+impl OpenParagraphIn {
+    /// From the block quotes a content line peeled, and the content column
+    /// of its first list item with the quotes peeled before it.
+    fn new(depth: usize, item: Option<(usize, usize)>) -> Self {
+        match item {
+            Some((column, before)) => Self {
+                depth: before,
+                item: Some((column, depth - before)),
+            },
+            None => Self { depth, item: None },
+        }
+    }
+}
 
 /// `content` with up to `depth` leading block quote markers removed, and how
 /// many it removed.
@@ -1260,13 +1289,28 @@ fn paragraph_open_after(
     if is_blank(content) {
         return None;
     }
-    if let Some(depth) = open {
-        let (rest, reached) = strip_quote_markers(content, depth);
-        if reached == depth && is_blank(rest) {
+    if let Some(paragraph) = open {
+        let (mut rest, reached) = strip_quote_markers(content, paragraph.depth);
+        if reached == paragraph.depth && is_blank(rest) {
             // A blank line at the paragraph's level ends it.
             return None;
         }
-        if reached == depth {
+        // A line short of the list item the paragraph sits in, or of a block
+        // quote inside that item, continues it only as a lazy line.
+        let mut reaches = reached == paragraph.depth;
+        if let (true, Some((item_column, inner))) = (reaches, paragraph.item) {
+            let rest_column = advance_columns(column, &content[..content.len() - rest.len()]);
+            let indent = rest.len() - trim_ascii_start(rest).len();
+            reaches = advance_columns(rest_column, &rest[..indent]) >= item_column;
+            if reaches && inner > 0 {
+                let (inner_rest, inner_reached) = strip_quote_markers(&rest[indent..], inner);
+                reaches = inner_reached == inner;
+                if reaches {
+                    rest = inner_rest;
+                }
+            }
+        }
+        if reaches {
             if setext_underline_depth(rest).is_some() {
                 return None;
             }
@@ -1278,25 +1322,9 @@ fn paragraph_open_after(
         }
     }
     match content_line_kind(content, column, options) {
-        ContentLineKind::Paragraph => Some(quote_depth(content)),
+        ContentLineKind::Paragraph(paragraph) => Some(paragraph),
         _ => None,
     }
-}
-
-/// How many block quotes the innermost content of `content` sits in.
-fn quote_depth(content: &str) -> usize {
-    let mut depth = 0;
-    let mut rest = content;
-    while let Some(after) =
-        trim_up_to_three_spaces(rest).and_then(|trimmed| trimmed.strip_prefix('>'))
-    {
-        rest = after.strip_prefix(' ').unwrap_or(after);
-        depth += 1;
-        if depth > MAX_BLOCK_NESTING {
-            break;
-        }
-    }
-    depth
 }
 
 /// Whether a block quote's lazy line starts a block instead of continuing the
@@ -1751,7 +1779,7 @@ fn parse_list(
                 // The table's body rows continue it.
                 let table = OpenBlock {
                     depth: 0,
-                    in_list: false,
+                    item_column: None,
                     end: OpenBlockEnd::Blank,
                 };
                 (None, Some(table))
@@ -1768,7 +1796,10 @@ fn parse_list(
             };
             content.push_line(&lines[cursor], &stripped, from);
             lazy_flags.push(lazy);
-            update_list_item_fence(&stripped, &mut open_fence);
+            // A lazy line is paragraph text, which opens no fence.
+            if !lazy {
+                update_list_item_fence(&stripped, &mut open_fence);
+            }
             last_content_line = Some(stripped.into_owned());
             item_end = cursor;
             cursor += 1;
@@ -1905,7 +1936,12 @@ fn content_line_state(
     }
     if let Some(block) = open_block {
         let (rest, reached) = strip_quote_markers(line, block.depth);
-        if reached == block.depth {
+        let left_item = block.depth == 0
+            && block.item_column.is_some_and(|item_column| {
+                let indent = line.len() - trim_ascii_start(line).len();
+                advance_columns(column, &line[..indent]) < item_column
+            });
+        if reached == block.depth && !left_item {
             return (None, (!block.end.ends_with(rest)).then_some(block));
         }
     }
@@ -1915,10 +1951,10 @@ fn content_line_state(
     }
     let block = match content_line_kind(line, column, options) {
         ContentLineKind::Open(block)
-            if in_quote && (block.in_list || block.end == OpenBlockEnd::Blank) =>
+            if in_quote && (block.item_column.is_some() || block.end == OpenBlockEnd::Blank) =>
         {
             let html = options.constructs.html_block
-                && !block.in_list
+                && block.item_column.is_none()
                 && line_starts_html_block(strip_quote_markers(line, block.depth).0);
             html.then_some(block)
         }
@@ -8842,7 +8878,7 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
             );
             let mut text = DerivedText::default();
             // The same unescaping as `table_cell_text`, keeping each copied run's
-            // source: a dropped backslash leaves a gap in the map.
+            // source: the `|` read from `\|` maps to both of its bytes.
             let bytes = content.as_bytes();
             let mut copied = 0;
             let mut cursor = 0;
@@ -8851,7 +8887,12 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
                     let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
                     if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
                         text.append(line, &content[copied..pipe - 1], 0);
-                        copied = pipe;
+                        text.append_replacing(
+                            "|",
+                            line.source_start(offset + pipe - 1),
+                            line.source_end(offset + pipe + 1),
+                        );
+                        copied = pipe + 1;
                     }
                     cursor = pipe;
                 } else {
@@ -8950,6 +8991,10 @@ fn table_can_start_source(
     // A header row indented four columns or more is a paragraph's
     // continuation text, as markdown-it and micromark read it.
     if table_indent_line(header, indented_code).is_none() {
+        return false;
+    }
+    // A delimiter row of dashes alone is a setext underline, which wins.
+    if setext_underline_depth(delimiter).is_some() {
         return false;
     }
     let Some(delimiter) = table_indent_line(delimiter, indented_code) else {

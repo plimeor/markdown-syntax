@@ -755,6 +755,26 @@ fn table_cells_carry_spans() {
 }
 
 #[test]
+fn an_unescaped_cell_pipe_spans_its_escape() {
+    let spans = |source: &str| -> Vec<(usize, usize)> {
+        let document = parse(source).document;
+        let Some(Block::Table(table)) = document.children.first() else {
+            panic!("{source:?}");
+        };
+        table.rows[0].cells[0]
+            .children
+            .iter()
+            .map(|inline| {
+                let span = inline.meta().span.expect("parsed span");
+                (span.start, span.end)
+            })
+            .collect()
+    };
+    assert_eq!(spans("| \\|a |\n|-|"), [(2, 5)]);
+    assert_eq!(spans("| `a`\\|`b` |\n|-|"), [(2, 5), (5, 7), (7, 10)]);
+}
+
+#[test]
 fn emphasis_on_a_block_quote_continuation_line_covers_its_delimiters() {
     assert_eq!(nth_span("> a\n> *b*", "Emphasis", 0), (6, 9));
 }

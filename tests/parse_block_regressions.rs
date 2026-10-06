@@ -1479,6 +1479,26 @@ mod footnotes_and_directives {
             "{blocks:?}"
         );
     }
+
+    #[test]
+    fn a_fence_left_open_in_a_nested_directive_ends_with_it() {
+        let output = SyntaxOptions::default()
+            .parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        let blocks = output.document.children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(after.children.len(), 1, "{blocks:?}");
+        assert!(
+            matches!(
+                outer.children.as_slice(),
+                [Block::ContainerDirective(inner), Block::ContainerDirective(inner2)]
+                    if inner.name == "inner" && inner2.name == "inner2"
+            ),
+            "{blocks:?}"
+        );
+    }
 }
 
 mod gfm_tables {
@@ -1498,6 +1518,14 @@ mod gfm_tables {
             );
         }
         assert!(matches!(blocks("a\n|---").as_slice(), [Block::Table(_)]));
+        // The paragraph's earlier lines join the heading too.
+        for source in ["a\n|b\n---", "a\n| b |\n---"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Heading(heading)] if heading.children.len() == 3),
+                "{source:?}: {blocks:?}"
+            );
+        }
     }
 
     #[test]
@@ -1527,6 +1555,71 @@ mod gfm_tables {
         assert!(
             matches!(list.children[0].children.as_slice(), [Block::Paragraph(_)]),
             "{blocks:?}"
+        );
+    }
+}
+
+mod list_items_in_containers {
+    use markdown_syntax::{Block, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    #[test]
+    fn a_quoted_line_short_of_the_item_is_lazy_for_its_paragraph() {
+        // The list marker ends the item's paragraph and the quote's content,
+        // as on any lazy line, so the next line is outside the quote.
+        for source in ["> - a\n> 2.\nz", "> - > a\n>   2.\nz"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(
+                    blocks.as_slice(),
+                    [Block::BlockQuote(_), Block::Paragraph(_)]
+                ),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        // A setext-like line short of the item continues its paragraph.
+        let blocks = blocks("> 1. a\n> ===\nb");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::List(list)] = quote.children.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(paragraph)] if paragraph.children.len() == 5),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_fence_like_line_opens_no_fence_in_an_item() {
+        let blocks = blocks("1.   a\n    ```\n\nb");
+        assert!(
+            matches!(blocks.as_slice(), [Block::List(_), Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_block_open_in_a_nested_item_ends_with_the_item() {
+        // The sibling item ends the fence, so the blank line loosens the list.
+        let loose = blocks("- - ```\n  - a\n\n- b");
+        let [Block::List(list)] = loose.as_slice() else {
+            panic!("{loose:?}");
+        };
+        assert!(!list.tight, "{loose:?}");
+        // A line below the nested item's content continues the outer item,
+        // and the line after it is lazy.
+        let lazy = blocks("- a\n  - ```\n  b\nc");
+        let [Block::List(list)] = lazy.as_slice() else {
+            panic!("{lazy:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(_), Block::List(_), Block::Paragraph(paragraph)] if paragraph.children.len() == 3),
+            "{lazy:?}"
         );
     }
 }

@@ -305,6 +305,14 @@ impl DerivedText {
         self.map.truncate(len);
     }
 
+    /// Appends `text`, read from the whole source range `source_start..
+    /// source_end`, which it replaces.
+    pub(super) fn append_replacing(&mut self, text: &str, source_start: usize, source_end: usize) {
+        self.map
+            .push(self.text.len(), text.len(), source_start, source_end);
+        self.text.push_str(text);
+    }
+
     /// Appends text the parser adds that the source does not hold.
     pub(super) fn push_synthetic(&mut self, text: &str) {
         let at = end_of(self.map.segments(), self.text.len());
