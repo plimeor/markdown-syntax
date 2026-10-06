@@ -124,16 +124,6 @@ impl<'a> Line<'a> {
     }
 }
 
-/// A list item marker a line opens with, as the serializer's line checks and
-/// the table start read it.
-#[derive(Clone, Copy, Debug)]
-struct ListMarkerInfo<'a> {
-    ordered: bool,
-    start: Option<u64>,
-    /// The line after the marker and the spaces and tabs that follow it.
-    content: &'a str,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HtmlBlockKind {
     RawTag,
@@ -185,6 +175,18 @@ impl SyntaxOptions {
 
 fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, SyntaxConfigError> {
     options.validate()?;
+    Ok(parse_with_definitions(input, options, &[]))
+}
+
+/// Parses `input` as if it also held a definition of each label in `known`,
+/// sorted and deduplicated identifiers: the serializer reads its own output
+/// back this way, as the document it was written from resolves its
+/// references. Options are not validated.
+pub(crate) fn parse_with_definitions(
+    input: &str,
+    options: &SyntaxOptions,
+    known: &[String],
+) -> ParseOutput {
     let mut diagnostics = Vec::new();
     // A leading byte order mark is not content; parsing starts after it while
     // spans keep counting from the start of `input`.
@@ -196,7 +198,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
     let source = &input[start..];
     let map = SourceMap::verbatim(source.len(), start);
     let lines = collect_lines(source, &map);
-    let children = blocks::parse_document(&lines, options, &mut diagnostics);
+    let children = blocks::parse_document(&lines, options, known, &mut diagnostics);
     let mut document = Document {
         meta: NodeMeta::new(Some(Span::new(0, input.len()))),
         children,
@@ -205,10 +207,10 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         nul_replacement::replace_in_document(&mut document);
     }
 
-    Ok(ParseOutput {
+    ParseOutput {
         document,
         diagnostics,
-    })
+    }
 }
 
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
@@ -368,13 +370,6 @@ fn math_block_fence_length(input: &str) -> Option<usize> {
     Some(length)
 }
 
-/// Whether `input` opens a math block when that construct is enabled.
-pub(crate) fn line_starts_math_block(input: &str) -> bool {
-    trim_up_to_three_spaces(input)
-        .and_then(math_block_fence_length)
-        .is_some()
-}
-
 /// A math-flow closing line (already indent-stripped) is a run of `>=length`
 /// dollars and nothing else (trailing whitespace aside).
 fn math_block_fence_closes(input: &str, length: usize) -> bool {
@@ -384,12 +379,6 @@ fn math_block_fence_closes(input: &str, length: usize) -> bool {
         .take_while(|byte| **byte == b'$')
         .count();
     count >= length && is_blank(&input[count..])
-}
-
-/// Whether `trimmed` (indented at most three columns) is an ATX heading line.
-fn is_atx_heading_line(trimmed: &str) -> bool {
-    let depth = trimmed.bytes().take_while(|byte| *byte == b'#').count();
-    (1..=6).contains(&depth) && matches!(trimmed.as_bytes().get(depth), None | Some(b' ' | b'\t'))
 }
 
 /// Whether a block quote whose first line is `line` reads as an alert.
@@ -420,13 +409,6 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
             Some(title.into())
         },
     ))
-}
-
-/// Whether `line` opens description details: `:` or `~`, indented at most
-/// two columns, before a space, a tab, or the line's end.
-fn description_marker(line: &str) -> bool {
-    let (columns, bytes) = leading_indent(line);
-    columns <= 2 && is_description_marker(&line[bytes..])
 }
 
 /// Whether `text` starts with a description details marker.
@@ -714,16 +696,6 @@ fn html_block_start(input: &str) -> Option<HtmlBlockKind> {
     } else {
         None
     }
-}
-
-pub(crate) fn line_starts_html_block(input: &str) -> bool {
-    trim_up_to_three_spaces(input)
-        .and_then(html_block_start)
-        .is_some()
-}
-
-fn line_starts_html_container(input: &str) -> bool {
-    parse_html_container_opening_line(Line::detached(input), "details").is_some()
 }
 
 fn raw_html_tag_start(input: &str) -> bool {
@@ -4714,6 +4686,15 @@ fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
     cursor - index
 }
 
+/// Whether a run of `_` that the `marker_len` bytes of `input` from `index`
+/// are can open and can close emphasis, as the parser reads it.
+pub(crate) fn underscore_run_flanks(input: &str, index: usize, marker_len: usize) -> (bool, bool) {
+    (
+        can_open_underscore(input, index, marker_len),
+        can_close_underscore(input, index, marker_len),
+    )
+}
+
 fn can_open_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
     flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
@@ -5458,31 +5439,27 @@ fn trim_closing_hashes(input: &str) -> &str {
     }
 }
 
-fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
-    let trimmed = trim_up_to_three_spaces(input)?;
+/// Whether `input` opens with a list item marker, up to three spaces in.
+fn opens_list_item(input: &str) -> bool {
+    let Some(trimmed) = trim_up_to_three_spaces(input) else {
+        return false;
+    };
     let bytes = trimmed.as_bytes();
-    let (ordered, start, width) = match bytes.first()? {
-        b'-' | b'*' | b'+' => (false, None, 1),
-        byte if byte.is_ascii_digit() => {
+    let width = match bytes.first() {
+        Some(b'-' | b'*' | b'+') => 1,
+        Some(byte) if byte.is_ascii_digit() => {
             let digits = bytes
                 .iter()
                 .take_while(|byte| byte.is_ascii_digit())
                 .count();
             if digits > 9 || !matches!(bytes.get(digits), Some(b'.' | b')')) {
-                return None;
+                return false;
             }
-            (true, Some(trimmed[..digits].parse().ok()?), digits + 1)
+            digits + 1
         }
-        _ => return None,
+        _ => return false,
     };
-    if !is_list_padding_byte(bytes.get(width).copied()) {
-        return None;
-    }
-    Some(ListMarkerInfo {
-        ordered,
-        start,
-        content: trim_ascii_start(&trimmed[width..]),
-    })
+    is_list_padding_byte(bytes.get(width).copied())
 }
 
 /// The offset of `slice` inside `text` when it is a borrowed sub-slice of it.
@@ -5582,17 +5559,6 @@ fn table_delimiter_alignment(cell: &str) -> Option<TableAlignment> {
         (false, true) => TableAlignment::Right,
         (false, false) => TableAlignment::None,
     })
-}
-
-/// Normalizes a table line's leading indentation: when indented code is enabled
-/// a four-space indent would start a code block, so up to three leading spaces
-/// are trimmed and four or more disqualifies the line.
-fn table_indent_line(input: &str, indented_code: bool) -> Option<&str> {
-    if indented_code {
-        trim_up_to_three_spaces(input)
-    } else {
-        Some(input)
-    }
 }
 
 /// The cell-delimiter pipes of a table row, in order: every `|` that is not
@@ -5951,76 +5917,6 @@ fn table_cell_text(source: &str) -> (String, Vec<usize>) {
     (cell, escaped_pipes)
 }
 
-/// Whether `line`, read as a paragraph's continuation line after `previous`,
-/// would end the paragraph or make it a setext heading, a table header, or a
-/// description term under the maximal default dialect.
-pub(crate) fn continuation_line_breaks_paragraph(previous: &str, line: &str) -> bool {
-    // Each construct read here opens, after at most three columns, with one of
-    // these bytes; the most frequent line, text, opens with none of them.
-    let opens_with_marker = trim_up_to_three_spaces(line)
-        .and_then(|trimmed| trimmed.bytes().next())
-        .is_some_and(|byte| {
-            byte.is_ascii_digit()
-                || matches!(
-                    byte,
-                    b'#' | b'>'
-                        | b'`'
-                        | b'~'
-                        | b'-'
-                        | b'*'
-                        | b'+'
-                        | b'_'
-                        | b'='
-                        | b'|'
-                        | b':'
-                        | b'<'
-                        | b'$'
-                        | b'['
-                )
-        });
-    if !opens_with_marker {
-        return false;
-    }
-    likely_block_start(line, &SyntaxOptions::default())
-        || setext_underline_depth(line).is_some()
-        || gfm_table_can_start_source(previous, line)
-        || description_marker(line)
-}
-
-pub(crate) fn gfm_table_can_start_source(header: &str, delimiter: &str) -> bool {
-    table_can_start_source(header, delimiter, true, false)
-}
-
-fn table_can_start_source(
-    header: &str,
-    delimiter: &str,
-    indented_code: bool,
-    spoiler: bool,
-) -> bool {
-    // A header row indented four columns or more is a paragraph's
-    // continuation text, as markdown-it and micromark read it.
-    if table_indent_line(header, indented_code).is_none() {
-        return false;
-    }
-    // A delimiter row of dashes alone is a setext underline, which wins.
-    if setext_underline_depth(delimiter).is_some() {
-        return false;
-    }
-    let Some(delimiter) = table_indent_line(delimiter, indented_code) else {
-        return false;
-    };
-    if list_marker_info(delimiter).is_some() {
-        return false;
-    }
-    if !table_has_separator(header, delimiter, spoiler) {
-        return false;
-    }
-    let Some(alignments) = parse_table_delimiter(delimiter, spoiler) else {
-        return false;
-    };
-    split_table_row(header, spoiler).len() == alignments.len()
-}
-
 fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
     // GFM makes leading/trailing pipes optional, so `parse_table_delimiter` plus
     // the header/alignment column-count check usually suffice. The one exception
@@ -6046,67 +5942,8 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
     !table_row_delimiters(input, spoiler).is_empty()
 }
 
-fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
-    // Block-structure markers (ATX, fences, thematic breaks, list markers, math
-    // fences, directives, …) only begin a block when indented at most 3 columns.
-    // At >=4 columns the line is indented code, which never interrupts a
-    // paragraph, so no marker test should fire.
-    let Some(trimmed) = trim_up_to_three_spaces(input) else {
-        return false;
-    };
-    is_atx_heading_line(trimmed)
-        || trimmed.starts_with('>')
-        || fence_start(trimmed).is_some()
-        || list_marker_can_interrupt_paragraph(input)
-        || parse_thematic_break(Line::detached(input)).is_some()
-        || (options.constructs.html_container && line_starts_html_container(input))
-        || (options.constructs.html_block && line_starts_interrupting_html_block(input))
-        || (options.constructs.math_block && math_block_fence_length(trimmed).is_some())
-        || (options.constructs.directive_container && container_directive_opens(trimmed))
-        || (options.constructs.directive_leaf && leaf_directive_opens(trimmed))
-        || (options.constructs.footnote_definition && line_starts_footnote_definition(trimmed))
-}
-
-/// Whether `trimmed` opens a container directive: three or more `:` and a
-/// valid opener. A container finds its closing fence among its own lines, so
-/// a bare fence ends no paragraph.
-fn container_directive_opens(trimmed: &str) -> bool {
-    directive_container_opener_prefix(trimmed)
-        .is_some_and(|(_, rest)| parse_directive_opener(rest).is_some())
-}
-
-/// Whether `trimmed` opens a leaf directive: `::` and a valid opener. A line
-/// with a malformed one is reported where a block starts, but does not end a
-/// paragraph it would only become text of.
-fn leaf_directive_opens(trimmed: &str) -> bool {
-    trimmed.starts_with("::")
-        && !trimmed.starts_with(":::")
-        && parse_directive_opener(&trimmed[2..]).is_some()
-}
-
 // A GFM footnote definition `[^label]:` is a block boundary: it interrupts a
 // paragraph and ends a prior footnote's lazy continuation.
-fn line_starts_footnote_definition(trimmed: &str) -> bool {
-    trimmed.starts_with("[^")
-        && find_footnote_definition_label_end(trimmed)
-            .is_some_and(|close| is_footnote_label(&trimmed[2..close]))
-}
-
-fn list_marker_can_interrupt_paragraph(input: &str) -> bool {
-    list_marker_info(input).is_some_and(|marker| {
-        // An empty list item never interrupts a paragraph (CommonMark §5.3):
-        // `foo\n*` is a single paragraph, not a paragraph plus an empty list.
-        !is_blank(marker.content) && (!marker.ordered || marker.start == Some(1))
-    })
-}
-
-pub(crate) fn line_starts_interrupting_html_block(input: &str) -> bool {
-    match trim_up_to_three_spaces(input).and_then(html_block_start) {
-        Some(HtmlBlockKind::UntilBlank) | None => false,
-        Some(_) => true,
-    }
-}
-
 /// The end of the `<…>` autolink opening at `index`.
 fn autolink_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
     let end = lookups.find(">", index)? + 1;

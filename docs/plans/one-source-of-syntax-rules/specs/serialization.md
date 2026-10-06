@@ -6,9 +6,10 @@
 Where serialization compares a reparsed document with the one it wrote, it
 SHALL compare them apart from spans, reading each `Escape` as a `Text` holding
 its char and each `CharacterReference` as a `Text` holding its value, and
-merging adjacent `Text` nodes; the reparse SHALL read the written document as
-if it also held a definition of each reference label the document uses
-without defining.
+merging adjacent `Text` nodes; a code span whose `raw` is empty or whose
+`fence_length` is 0 is written from its `value` and compares by it. The
+reparse SHALL read the written document as if it also held a definition of
+each reference label the document uses without defining.
 
 #### Scenario: Escape the serializer adds
 - **WHEN** a hand-built paragraph holding `Text("*a*")` is serialized and reparsed
@@ -30,9 +31,13 @@ reading what that parse took as syntax and which container or block each
 written line landed in. A text char
 SHALL be written raw unless that parse reads it, written raw, as part of a
 construct, a delimiter run counting whole; the exceptions are a backtick,
-which is always escaped, and the encodings that "Escape forms" requires for a
-node or block that does not read back. Emphasis and strong SHALL be written
-with `*` and `**` unless that does not read back.
+which is always escaped, the encodings that "Escape forms" requires for a
+node or block that does not read back, and a text char sharing an emphasis or
+strong delimiter run that the parse leaves literal, which is written raw when
+no escaped writing of its block reads back. Emphasis and strong SHALL be
+written with `*` and `**` unless that does not read back; a run that the
+parse does not read where it was written switches between `*` and `_` where
+the parser's flanking allows `_` there.
 
 #### Scenario: Unpaired delimiters stay raw
 - **WHEN** a hand-built paragraph holding `Text("x_y_ a*b x^2 ~5")` is serialized

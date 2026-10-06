@@ -60,6 +60,12 @@ mod serializer {
         output.document
     }
 
+    fn gfm_serialize_options() -> SerializeOptions {
+        let mut options = SerializeOptions::default();
+        options.syntax = SyntaxOptions::gfm();
+        options
+    }
+
     fn assert_single_tilde_delete_with_internal_runs_shape(document: &Document) {
         assert!(
             matches!(
@@ -316,11 +322,11 @@ mod serializer {
         let document = parse_document(input, &SyntaxOptions::gfm());
         assert_single_tilde_delete_with_internal_runs_shape(&document);
 
-        let markdown = document.to_markdown().expect("document serializes");
-        assert_eq!(
-            markdown,
-            "This ~text\\~\\~\\~\\~ is \\~\\~\\~\\~curious~.\n"
-        );
+        let markdown = document
+            .to_markdown_with(&gfm_serialize_options())
+            .expect("document serializes");
+        // A run of four tildes neither opens nor closes under GFM.
+        assert_eq!(markdown, "This ~text~~~~ is ~~~~curious~.\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
         assert_single_tilde_delete_with_internal_runs_shape(
@@ -341,7 +347,7 @@ mod serializer {
         ));
 
         let markdown = document.to_markdown().expect("document serializes");
-        assert_eq!(markdown, "a \\~\\~two/one~ b\n");
+        assert_eq!(markdown, "a ~~two/one~ b\n");
 
         let reparsed = crate::normalize::normalized_document(&parse_document(
             &markdown,
@@ -383,8 +389,15 @@ mod serializer {
             })])],
         };
 
-        let markdown = document.to_markdown().expect("document serializes");
-        assert_eq!(markdown, "~text\\~\\~\\~\\~ is \\~\\~\\~\\~curious~\n");
+        // The maximal dialect reads `~text~` as subscript.
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::Unrepresentable(_))
+        ));
+        let markdown = document
+            .to_markdown_with(&gfm_serialize_options())
+            .expect("document serializes");
+        assert_eq!(markdown, "~text~~~~ is ~~~~curious~\n");
 
         let reparsed = crate::normalize::normalized_document(&parse_document(
             &markdown,
@@ -684,81 +697,53 @@ mod serializer {
     }
 
     #[test]
-    fn footnote_labels_escape_brackets_backslashes_and_whitespace() {
-        let document = Document {
-            meta: NodeMeta::default(),
-            children: vec![
-                paragraph(vec![
-                    text("See "),
-                    Inline::FootnoteReference(FootnoteReference {
+    fn footnote_labels_read_back_only_in_their_raw_spelling() {
+        // A footnote label is read raw, so a hand-built label holding a
+        // bracket or whitespace has no spelling that reads back as itself.
+        let footnote = |label: &str| {
+            let reference = Inline::FootnoteReference(FootnoteReference {
+                meta: NodeMeta::default(),
+                label: label.into(),
+                identifier: label.into(),
+            });
+            Document {
+                meta: NodeMeta::default(),
+                children: vec![
+                    paragraph(vec![text("See "), reference]),
+                    Block::FootnoteDefinition(FootnoteDefinition {
                         meta: NodeMeta::default(),
-                        label: "a]b\\c[d".into(),
-                        identifier: "a]b\\c[d".into(),
+                        label: label.into(),
+                        identifier: label.into(),
+                        children: vec![paragraph(vec![text("note")])],
                     }),
-                    text(" and "),
-                    Inline::FootnoteReference(FootnoteReference {
-                        meta: NodeMeta::default(),
-                        label: "white space".into(),
-                        identifier: "white space".into(),
-                    }),
-                ]),
-                Block::FootnoteDefinition(FootnoteDefinition {
-                    meta: NodeMeta::default(),
-                    label: "a]b\\c[d".into(),
-                    identifier: "a]b\\c[d".into(),
-                    children: vec![paragraph(vec![text("bracket")])],
-                }),
-                Block::FootnoteDefinition(FootnoteDefinition {
-                    meta: NodeMeta::default(),
-                    label: "white space".into(),
-                    identifier: "white space".into(),
-                    children: vec![paragraph(vec![text("space")])],
-                }),
-            ],
+                ],
+            }
         };
+        for label in ["a]b\\c[d", "white space"] {
+            assert!(matches!(
+                footnote(label).to_markdown_with(&gfm_serialize_options()),
+                Err(SerializeError::Unrepresentable(_))
+            ));
+        }
 
-        let markdown = document.to_markdown().expect("document serializes");
-        assert!(markdown.contains("[^a\\]b\\\\c\\[d]"));
-        assert!(markdown.contains("[^white&#x20;space]"));
-
-        let reparsed = parse_document(&markdown, &SyntaxOptions::gfm());
-        assert_eq!(reparsed.children.len(), 3);
-        let children = match &reparsed.children[0] {
-            Block::Paragraph(Paragraph { children, .. }) => children,
-            other => panic!("unexpected first block: {other:?}"),
-        };
-        let bracket = match &reparsed.children[1] {
-            Block::FootnoteDefinition(definition) => definition,
-            other => panic!("unexpected second block: {other:?}"),
-        };
-        let space = match &reparsed.children[2] {
-            Block::FootnoteDefinition(definition) => definition,
-            other => panic!("unexpected third block: {other:?}"),
-        };
-
-        assert!(matches!(
-            &children[..],
-            [
-                Inline::Text(Text { value: before, .. }),
-                Inline::FootnoteReference(FootnoteReference {
-                    identifier: first,
-                    ..
-                }),
-                Inline::Text(Text { value: between, .. }),
-                Inline::FootnoteReference(FootnoteReference {
-                    identifier: second,
-                    ..
-                }),
-            ] if before == "See "
-                && first == "a\\]b\\\\c\\[d"
-                && between == " and "
-                && second == "white&#x20;space"
-        ));
-        // Raw-label matching keeps the escaped/entity-encoded spelling: a footnote
-        // ref and its definition fold identically (so they still link), but the
-        // identifier is the RAW source rather than the unescaped/decoded form.
-        assert_eq!(bracket.identifier, "a\\]b\\\\c\\[d");
-        assert_eq!(space.identifier, "white&#x20;space");
+        // Raw-label matching keeps the escaped/entity-encoded spelling: a
+        // footnote ref and its definition fold identically (so they still
+        // link), and the identifier is the raw source, which reads back.
+        let input = "See [^a\\]b\\\\c\\[d] and [^white&#x20;space]\n\n[^a\\]b\\\\c\\[d]: bracket\n\n[^white&#x20;space]: space\n";
+        let document = parse_document(input, &SyntaxOptions::gfm());
+        let markdown = document
+            .to_markdown_with(&gfm_serialize_options())
+            .expect("document serializes");
+        assert_eq!(markdown, input);
+        let identifiers: Vec<&str> = document
+            .children
+            .iter()
+            .filter_map(|block| match block {
+                Block::FootnoteDefinition(definition) => Some(definition.identifier.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(identifiers, ["a\\]b\\\\c\\[d", "white&#x20;space"]);
     }
 }
 
@@ -842,7 +827,7 @@ mod serializer_escape {
         };
 
         let markdown = document.to_markdown().expect("document serializes");
-        assert_eq!(markdown, "Invalid \\&unknown; &copy and &#x; stay text.\n");
+        assert_eq!(markdown, "Invalid &unknown; &copy and &#x; stay text.\n");
 
         let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
         assert_single_text(&crate::normalize::normalized_document(&reparsed), value);
@@ -983,13 +968,13 @@ mod serializer_escape {
         };
 
         let markdown = document.to_markdown().expect("document serializes");
-        assert!(markdown.contains("a&#x7C;b"));
+        assert!(markdown.contains(r"a\|b"));
         assert!(markdown.contains(r"`c\|d`"));
         assert!(markdown.contains(r"$x\|y$"));
-        assert!(markdown.contains("[link&#x7C;label](/link)"));
-        assert!(markdown.contains("![img&#x7C;alt](/img)"));
-        assert!(markdown.contains("[ref&#x7C;text][pipe\\|id]"));
-        assert!(markdown.contains(":note[label&#x7C;text]{data=\"value\\|pipe\"}"));
+        assert!(markdown.contains(r"[link\|label](/link)"));
+        assert!(markdown.contains(r"![img\|alt](/img)"));
+        assert!(markdown.contains(r"[ref\|text][pipe\|id]"));
+        assert!(markdown.contains(r#":note[label\|text]{data="value\|pipe"}"#));
 
         let reparsed = crate::normalize::normalized_document(&parse_document(
             &markdown,
@@ -1513,7 +1498,7 @@ mod literal_text {
     }
 
     #[test]
-    fn an_underscore_that_can_close_stays_inside_underscore_emphasis() {
+    fn a_text_delimiter_after_a_closing_run_is_escaped() {
         let strong = Inline::Strong(Strong {
             meta: NodeMeta::default(),
             children: vec![Text::from("(a b)_.").into()],
@@ -1524,7 +1509,7 @@ mod literal_text {
         });
         let document = paragraph_document(vec![emphasis, Text::from("*#").into()]);
         let markdown = assert_round_trips(&document, &SyntaxOptions::commonmark());
-        assert_eq!(markdown, "_**(a b)\\_.**_\\*#\n");
+        assert_eq!(markdown, "***(a b)_.***\\*#\n");
     }
 
     /// Parses `source` with `options`, then checks that the serialized output
@@ -1575,7 +1560,7 @@ mod literal_text {
     fn a_pipe_ending_a_level_two_setext_heading_does_not_start_a_table() {
         // A one-dash underline is no table delimiter row, so this is a heading.
         let markdown = assert_parsed_round_trips("a |\n-", &SyntaxOptions::default());
-        assert_eq!(markdown, "a \\|\n---\n");
+        assert_eq!(markdown, "a |\n---\n");
     }
 
     #[test]
@@ -1670,7 +1655,7 @@ mod round_trip_edges {
 
     #[test]
     fn a_continuation_line_inside_an_inline_that_would_start_a_block_is_indented() {
-        assert_eq!(assert_round_trips("=```\n    ```"), "\\=```\n    ```\n");
+        assert_eq!(assert_round_trips("=```\n    ```"), "=```\n    ```\n");
         assert_round_trips("-$$\n    $$");
         assert_eq!(assert_round_trips("(\n    <div>"), "(\n    <div>\n");
         assert_eq!(assert_round_trips("``\nfoo\nbar\n``"), "``\nfoo\nbar\n``\n");
@@ -2240,5 +2225,354 @@ mod links_as_autolinks {
         assert!(written("www.a.b").ends_with("](http://www.a.b)\n"));
         assert!(written("a://x").ends_with("](a://x)\n"));
         assert_eq!(written("[x](<http://a.b>)"), "[x](<http://a.b>)\n");
+    }
+}
+
+mod read_back_contract {
+    //! The serializer's read-back contract: what it writes reads back, under
+    //! `SerializeOptions::syntax`, as the tree it was given, and the text it
+    //! escapes is what that parse would read as syntax.
+
+    use markdown_syntax::prelude::*;
+
+    fn under(options: &SyntaxOptions) -> SerializeOptions {
+        let mut serialize = SerializeOptions::default();
+        serialize.syntax = options.clone();
+        serialize
+    }
+
+    fn paragraph_document(children: Vec<Inline>) -> Document {
+        Document {
+            meta: NodeMeta::default(),
+            children: vec![Paragraph::new(children).into()],
+        }
+    }
+
+    fn assert_reads_back(document: &Document, options: &SyntaxOptions) -> String {
+        let markdown = document
+            .to_markdown_with(&under(options))
+            .expect("document serializes");
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
+            "{markdown:?}"
+        );
+        markdown
+    }
+
+    /// Parses `source` under `options`, serializes it under the same
+    /// options, and checks the output reads back as the parsed tree.
+    fn written_under(options: &SyntaxOptions, source: &str) -> String {
+        let document = options.parse(source).document;
+        let markdown = document
+            .to_markdown_with(&under(options))
+            .unwrap_or_else(|error| panic!("{source:?}: {error:?}"));
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+            format!("{:?}", crate::normalize::normalized(&document.children)),
+            "{source:?} -> {markdown:?}"
+        );
+        markdown
+    }
+
+    fn written(source: &str) -> String {
+        written_under(&SyntaxOptions::default(), source)
+    }
+
+    #[test]
+    fn written_text_matches_the_spec() {
+        for (source, expected) in [
+            ("`x`<div", "`x`<div\n"),
+            ("a *b*::c", "a *b*::c\n"),
+            ("++a:++ b:", "++a:++ b:\n"),
+            ("# Title\n\nHello *world*.", "# Title\n\nHello *world*.\n"),
+            ("+ a", "+ a\n"),
+            ("a |\n-", "a |\n---\n"),
+            ("```\n```", "```\n```\n"),
+            ("```&#x20;a&#9;\nb\n```", "``` &#x20;a&#x9;\nb\n```\n"),
+            ("&#x20;\na", "&#x20;\na\n"),
+            ("&#x20; \na", "&#x20;\na\n"),
+            ("a\n&#x20;\nb", "a\n&#x20;\nb\n"),
+            ("y***b***", "y***b***\n"),
+            ("[^`]``", "[^`]&#96;&#96;\n"),
+            ("[o]:&#x20;", "[o]: &#x20;\n"),
+            ("-\n   <v>", "-\n   <v>\n"),
+            ("```\n```*", "```\n```*\n```\n"),
+            ("a**~**", "a**~**\n"),
+            (" ~~~\n    ~~~", " ~~~\n    ~~~\n ~~~\n"),
+            ("-\n  ---", "-\n  ---\n"),
+            ("==a\\== b==", "==a\\== b==\n"),
+            ("[o]:u\n\t$$\na$$", "[o]: u\n    $$\na$$\n"),
+        ] {
+            assert_eq!(written(source), expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn parsed_documents_read_back() {
+        for source in [
+            "- a\n  - b\n   <div>",
+            "**\t*$",
+            "(*~\n**)",
+            "($$]$=",
+            "a\\-://`",
+            "ab&#99;://x",
+            "*://*&mp;",
+            "**://**&mp;",
+            "://^&mp;",
+            "://~&mp;~",
+            "://__&mp;__",
+            "://~&mp;&p;~",
+            "www.\\[]_(",
+            "**a *b*www.x.com**",
+            "**a *b*x@y.com**",
+            "**x@y.com***x@y.com*",
+            "**\\*www.x.com**",
+            "\\\\&#33;[a](b)",
+            "b**~\n~**",
+            "a*~ **&*",
+            "t_~>___~",
+            ":\\^:^[|]",
+            "*\\$#$>$",
+            "~\\$#://$",
+            "b\\-p://",
+            ")||||||\t||",
+            "\u{c}:a",
+            "[^\u{c}]",
+            "[;\u{c}]:[",
+            "://y\u{c}c",
+            "==&#x20; \n-==",
+            "_&#x20;://_",
+            "*&#x20;http://x*",
+            "://\\~||>||",
+            ":e{}1",
+            ":e[]www.+",
+            ":e{}[^1]",
+            "]\\-a@b.c",
+            "++@b.c",
+            "\\+@b.p://",
+            ">[!NOTE]+\t*",
+            "]\n: :::e",
+            "# _*www._",
+            "+ [x]  :e",
+            "://\\::+1:",
+            ":b[",
+            "\\:p",
+            ":\\+:",
+            "\\:p://",
+            "`\\$[<a>[$>",
+            "$\\|$||\n-|-",
+            "-\t(\n  <v>",
+            "[o]:u\n\t<div>",
+            "a\n   : `",
+            "[__**)**&__](u)",
+            "==__***/***__==",
+            "*[foo`bar]* &#96;\n\n[foo`bar]: /u",
+            "-[^\\`]://\\`",
+            "++:++\\:",
+            "&#x20;://>|>\n-|-",
+            "- *  (\n    <a>",
+            "~~:~ :e~",
+            "++\\+>++",
+            ">\n>[!NOTE]:>",
+            "=```\n    ```",
+            "a\n\\<div>",
+            "a\n\\::b",
+            "_&#x20;\n=_",
+            "<!--\n\n",
+            "\"://&amp;\"",
+            "://&amp;",
+            "www.}",
+            "__**)**&__",
+            "**:__$__**",
+            "****(*+***",
+            "***_|_***",
+            "__***/***__",
+            "**#****]***_**",
+            "***_\\**#*",
+            "***b_*_b_*",
+            "__<__y_`__",
+            "_# _*#***___",
+        ] {
+            written(source);
+        }
+        for source in ["_^*^*_c__", "_# _*#***___"] {
+            written_under(&SyntaxOptions::commonmark(), source);
+        }
+        for source in [
+            "://&#x0;&mp;",
+            "**=* ++@b.c*",
+            "| <a b=\"x\\\\\\|y\"> |\n| --- |",
+        ] {
+            written_under(&SyntaxOptions::gfm(), source);
+        }
+        for source in [
+            " import -",
+            "\\{[]()}",
+            "{}&#x20;\n\\",
+            "{}&#x20; \n\\",
+            "<!--@b>",
+        ] {
+            written_under(&SyntaxOptions::mdx(), source);
+        }
+    }
+
+    #[test]
+    #[ignore = "block layout from the read-back lands with plan task 3.4"]
+    fn block_layouts_read_back() {
+        for source in ["- > a\n  >\n  b\n  ---", "- > a\n  >\n  | b |\n  | - |"] {
+            written(source);
+        }
+    }
+
+    #[test]
+    fn a_strong_after_an_emphasis_stays_strong_with_underline_enabled() {
+        let options = SyntaxOptions::default().enable(Construct::Underline);
+        assert_eq!(written_under(&options, "*a***b**"), "*a***b**\n");
+    }
+
+    #[test]
+    fn hand_built_text_is_escaped_where_the_parse_reads_syntax() {
+        let text = |value: &str| paragraph_document(vec![Text::from(value).into()]);
+        let markdown = assert_reads_back(&text("x_y_ a*b x^2 ~5"), &SyntaxOptions::default());
+        assert_eq!(markdown, "x_y_ a*b x^2 ~5\n");
+        let markdown = assert_reads_back(&text("==a=="), &SyntaxOptions::default());
+        assert_eq!(markdown, "\\=\\=a\\=\\=\n");
+        let markdown = assert_reads_back(&text("==a=="), &SyntaxOptions::commonmark());
+        assert_eq!(markdown, "==a==\n");
+        let markdown = assert_reads_back(&text("*not emphasis*"), &SyntaxOptions::default());
+        assert_eq!(markdown, "\\*not emphasis\\*\n");
+        let markdown = assert_reads_back(
+            &paragraph_document(vec![Text::from("a").into(), Text::from("b").into()]),
+            &SyntaxOptions::default(),
+        );
+        assert_eq!(markdown, "ab\n");
+    }
+
+    #[test]
+    fn brackets_are_escaped_only_where_a_definition_makes_a_reference() {
+        let bracketed = || Block::from(Paragraph::new([Text::from("[x]")]));
+        let alone = Document {
+            meta: NodeMeta::default(),
+            children: vec![bracketed()],
+        };
+        assert_eq!(alone.to_markdown().unwrap(), "[x]\n");
+        let defined = Document {
+            meta: NodeMeta::default(),
+            children: vec![
+                bracketed(),
+                Block::Definition(Definition {
+                    meta: NodeMeta::default(),
+                    label: "x".into(),
+                    identifier: "x".into(),
+                    destination: "/u".into(),
+                    destination_kind: LinkDestinationKind::Bare,
+                    title: None,
+                    title_kind: None,
+                }),
+            ],
+        };
+        assert!(defined.to_markdown().unwrap().starts_with("\\[x\\]\n"));
+    }
+
+    #[test]
+    fn a_reference_without_its_definition_is_written_as_a_reference() {
+        let reference = |kind: ReferenceKind| {
+            Inline::LinkReference(LinkReference {
+                meta: NodeMeta::default(),
+                identifier: "foo".into(),
+                label: "foo".into(),
+                kind,
+                children: vec![Text::from("foo").into()],
+            })
+        };
+        let document = paragraph_document(vec![reference(ReferenceKind::Shortcut)]);
+        assert_eq!(document.to_markdown().unwrap(), "[foo]\n");
+
+        // Read back with a definition of `foo`.
+        let defined = |inlines: Vec<Inline>| Document {
+            meta: NodeMeta::default(),
+            children: vec![
+                Paragraph::new(inlines).into(),
+                Block::Definition(Definition {
+                    meta: NodeMeta::default(),
+                    label: "foo".into(),
+                    identifier: "foo".into(),
+                    destination: "/u".into(),
+                    destination_kind: LinkDestinationKind::Bare,
+                    title: None,
+                    title_kind: None,
+                }),
+            ],
+        };
+        for after in ["(a)", ": /x"] {
+            let document = defined(vec![
+                reference(ReferenceKind::Shortcut),
+                Text::from(after).into(),
+            ]);
+            assert_reads_back(&document, &SyntaxOptions::default());
+        }
+        let image = Inline::ImageReference(ImageReference {
+            meta: NodeMeta::default(),
+            identifier: "foo".into(),
+            label: "foo".into(),
+            kind: ReferenceKind::Shortcut,
+            alt: vec![Text::from("foo").into()],
+        });
+        assert_reads_back(
+            &defined(vec![image, Text::from("(a)").into()]),
+            &SyntaxOptions::default(),
+        );
+    }
+
+    #[test]
+    fn a_space_at_an_emphasis_edge_is_a_reference() {
+        let emphasis = Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![Text::from("a ").into()],
+        });
+        let markdown = assert_reads_back(
+            &paragraph_document(vec![emphasis]),
+            &SyntaxOptions::default(),
+        );
+        assert_eq!(markdown, "*&#97;&#x20;*\n");
+    }
+
+    #[test]
+    fn a_bang_before_a_wiki_link_is_escaped() {
+        let wiki = Inline::WikiLink(WikiLink {
+            meta: NodeMeta::default(),
+            target: "x".into(),
+            label: "x".into(),
+            label_order: WikiLinkLabelOrder::AfterPipe,
+            embed: false,
+        });
+        let markdown = assert_reads_back(
+            &paragraph_document(vec![Text::from("a!").into(), wiki]),
+            &SyntaxOptions::default(),
+        );
+        assert_eq!(markdown, "a\\![[x]]\n");
+    }
+
+    #[test]
+    fn a_link_inside_a_link_is_unrepresentable() {
+        let link = |children: Vec<Inline>| {
+            Inline::Link(Link {
+                meta: NodeMeta::default(),
+                destination: "/u".into(),
+                destination_kind: LinkDestinationKind::Bare,
+                title: None,
+                title_kind: None,
+                children,
+            })
+        };
+        let document = paragraph_document(vec![link(vec![link(vec![Text::from("a").into()])])]);
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::Unrepresentable(diagnostic))
+                if diagnostic.code == DiagnosticCode::Unrepresentable
+        ));
     }
 }

@@ -1,27 +1,27 @@
 *foo bar*
 
-a * foo bar\*
+a * foo bar*
 
-a*"foo"\*
+a*"foo"*
 
 foo*bar*
 
 5*6*78
 
-\_ foo bar\_
+_ foo bar_
 
-foo_bar\_
+foo_bar_
 
 foo-*(bar)*
 
-\*foo bar \*
+*foo bar *
 
-*(_foo_)*
+*(*foo*)*
 
-\_\_foo\_\_bar
+__foo__bar
 
 foo-**(bar)**
 
 *foo**bar**baz*
 
-*foo&#x2A;&#x2A;bar*
+*foo**bar*

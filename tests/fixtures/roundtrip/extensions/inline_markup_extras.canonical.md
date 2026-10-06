@@ -6,7 +6,7 @@ H~2~O and e = mc^2^.
 
 The ||dog dies||.
 
-\|||pipe wrapped|||
+\|||pipe wrapped||\|
 
 | Text | Result |
 | --- | --- |

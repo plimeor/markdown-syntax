@@ -449,7 +449,7 @@ fn block_containers_grow_linearly_with_their_lines() {
     let prefix = "> - ".repeat(8);
     assert_linear_growth("long nested containers", 500, |n| {
         let mut input = format!("{prefix}x\n");
-        let continuation = "> ".repeat(1) + &"  ".repeat(8);
+        let continuation = format!("> {}", "  ".repeat(8));
         for line in 0..n {
             input.push_str(&format!("{continuation}line {line} *a*\n"));
         }
@@ -466,6 +466,43 @@ fn serialization_grows_linearly_with_runs() {
         let paragraph = format!("{}bc{}\n\n", "*a ".repeat(16), "c*".repeat(16));
         time_serialize(&parse(&paragraph.repeat(n)).document)
     });
+}
+
+#[test]
+fn deeply_nested_emphasis_serializes_in_time_linear_in_its_depth() {
+    // Sixteen levels of nested emphasis, a mark around further nested
+    // emphasis, and a tail that abuts the runs.
+    let paragraph = |depth: usize| {
+        format!(
+            "{}==b {}x{} c=={}~~",
+            "*a ".repeat(depth),
+            "*a ".repeat(6),
+            " a*".repeat(6),
+            " d*".repeat(depth)
+        )
+    };
+    let document = parse(&paragraph(16)).document;
+    let started = Instant::now();
+    let _ = document.to_markdown();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+
+    let best = |depth| {
+        let document = parse(&paragraph(depth)).document;
+        (0..3)
+            .map(|_| time_serialize(&document))
+            .min()
+            .expect("three runs")
+    };
+    let (four, eight, sixteen) = (best(4), best(8), best(16));
+    assert!(
+        eight <= four * 3 + Duration::from_millis(5)
+            && sixteen <= eight * 3 + Duration::from_millis(5),
+        "{four:?} at 4, {eight:?} at 8, {sixteen:?} at 16"
+    );
 }
 
 #[test]

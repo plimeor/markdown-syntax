@@ -10,8 +10,8 @@ A ^[square bracket \] inside].
 
 A ^[outer and ^[inner] literal].
 
-Text\^\[\] and Text\^\[   \] should stay literal.
+Text^[] and Text^[   ] should stay literal.
 
-Escaped: \^\[not a note\]. Text^ \[not a note\].
+Escaped: \^[not a note]. Text^ [not a note].
 
 [^1]: First regular footnote.

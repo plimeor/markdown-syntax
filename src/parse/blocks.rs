@@ -23,6 +23,7 @@ use crate::memo::BracketMemo;
 pub(super) fn parse_document(
     lines: &[Line<'_>],
     options: &SyntaxOptions,
+    known: &[String],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Block> {
     let mut parser = BlockParser::new(lines, options);
@@ -33,7 +34,7 @@ pub(super) fn parse_document(
         parser.close_top();
     }
     let document = parser.stack.pop().expect("the document stays open");
-    let mut definitions = Vec::new();
+    let mut definitions = known.to_vec();
     for child in &document.children {
         collect_definitions(&child.block, &mut definitions);
     }
@@ -1888,7 +1889,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let delimiter = cursor.nonspace_rest();
         // A delimiter row of dashes alone is a setext underline, which wins,
         // and a list marker opens a list.
-        if setext_underline_depth(delimiter).is_some() || list_marker_info(delimiter).is_some() {
+        if setext_underline_depth(delimiter).is_some() || opens_list_item(delimiter) {
             return None;
         }
         // Definitions the paragraph starts with are not its rows.

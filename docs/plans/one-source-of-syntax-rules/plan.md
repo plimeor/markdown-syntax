@@ -209,12 +209,19 @@ Specs:
   (`&#97;:smile:`). The check uses `char::is_alphanumeric`, so CJK text next
   to a colon blocks a shortcode as letters do.
 - **Delimiter choice.** Emphasis and strong are written with `*` and `**`.
-  A run that does not read back switches to `_` where the trace's flanking
-  roles for a `_` run at that position allow it, and runs that abut switch
-  together. This is because both delimiters have the same length, so a
-  switch rewrites bytes in place and never re-renders children. That removes
-  the render cycle behind the exponential case. Today's serializer picks `_`
-  in some places where `*` reads back, so that output changes.
+  A run that the parse does not read where it was written switches between
+  `*` and `_` where the parser's flanking for a `_` run at that position
+  allows it. In a group of abutting runs, one run switches per round, the
+  last one written that was not read where it was written first, and no
+  set of choices is tried twice; then the run the tree comparison blames
+  switches alone. A block that still does not read back retries the switches
+  with its text raw, since a text char can share a delimiter run that the
+  parser leaves literal (`***b_*_b_*`). Switching every abutting run together
+  keeps merged runs merged, so it cannot split `**_em_**`. Both delimiters
+  have the same length, so a switch never changes the text around it, and
+  the rounds stay bounded. That removes the render cycle behind the
+  exponential case. Today's serializer picks `_` in some places where `*`
+  reads back, so that output changes.
   - Turned down: rendering children once per choice, which is the cycle
     `RenderMemo` hides.
 - **Block layout from the trace.** The serializer first writes the default
@@ -334,9 +341,9 @@ Specs:
 - [x] 2.6 Delete `content_line_state`, `OpenParagraph`/`OpenParagraphIn`, `OpenBlock`, `lazy_flags`, `continues_verbatim`, and the lazy `\` insertion. Add the description-details and nested-container growth cases to `tests/pathological_inputs.rs`. Verified by `grep` finding none of these names, by the untrusted-input-cost "Long description details" and "Long nested containers" scenarios, and by `cargo test`.
 
 ### 3. Parser-sourced serializer
-- [ ] 3.1 Add the crate-private syntax trace: bytes read as syntax, the flanking roles of each delimiter run, and the container and block each line landed in. Verified by unit tests comparing the trace with the parsed tree over the generated inputs from `src/test_support.rs`.
-- [ ] 3.2 Escape pipeline: escape rule, escape forms, three rounds, edge encoding, fallback, and `SerializeError::Unrepresentable`. Delete the predicates, `serialize_reading_back`, `RunStyle`, `AutolinkEdges`, `RenderMemo`, the escape memos, and `src/serialize/escape_scan_tests.rs`. Verified by the serialization "Syntax rules come from the parser", "Escape forms", "Escaping keeps text literal", "Invalid documents are rejected", and Serialize options scenarios.
-- [ ] 3.3 Delimiter choice from trace roles, with abutting runs switched together. Verified by serialization "Abutting attention runs" (both scenarios), "Text delimiter after a closing run", and untrusted-input-cost "Deeply nested emphasis".
+- [x] 3.1 Add the crate-private syntax trace: bytes read as syntax, the emphasis and strong runs read where they were written, the cells a table drops, and the block a written line landed in; the flanking a `_` run would have comes from the parser's own flanking function. Verified by unit tests comparing the trace with the parsed tree over the generated inputs from `src/test_support.rs`.
+- [x] 3.2 Escape pipeline: escape rule, escape forms, three rounds, edge encoding, fallback, and `SerializeError::Unrepresentable`. Delete the predicates, `serialize_reading_back`, `RunStyle`, `AutolinkEdges`, `RenderMemo`, the escape memos, and `src/serialize/escape_scan_tests.rs`. Verified by the serialization "Syntax rules come from the parser", "Escape forms", "Escaping keeps text literal", "Invalid documents are rejected", and Serialize options scenarios.
+- [x] 3.3 Delimiter choice from the parser's flanking, switching abutting runs one at a time. Verified by serialization "Abutting attention runs" (both scenarios), "Text delimiter after a closing run", and untrusted-input-cost "Deeply nested emphasis".
 - [ ] 3.4 Block layout from the trace: the layout alternatives in Design, applied where a written line lands in the wrong container or block. Verified by:
   - serialization "Nested list before an indented block" and "Paragraph after an empty quote line in an item";
   - the retained layout scenarios "Thematic break opening a list item", "Whitespace that opens a list item's first block", "Math opening a definition's paragraph", and "Alert title and empty container directive";
