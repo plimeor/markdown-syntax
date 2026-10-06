@@ -1407,6 +1407,31 @@ fn flow_jsx_and_expression_closes_match_the_reference_scan() {
 /// a code span would hold a pipe that delimits, and a spoiler also crosses it,
 /// no split agrees with the inline parse, so the generated rows leave that
 /// out.)
+/// A cell's source with each escaped pipe unescaped, and the offset in it of
+/// each `|` read from `\|`, as `table_row_cells` reads them.
+fn table_cell_text(source: &str) -> (String, Vec<usize>) {
+    let bytes = source.as_bytes();
+    let mut cell = String::with_capacity(source.len());
+    let mut escaped_pipes = Vec::new();
+    let mut copied = 0;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\' {
+            let pipe = cursor + delimiter_byte_run_len(source, cursor, b'\\');
+            if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
+                cell.push_str(&source[copied..pipe - 1]);
+                escaped_pipes.push(cell.len());
+                copied = pipe;
+            }
+            cursor = pipe;
+        } else {
+            cursor += 1;
+        }
+    }
+    cell.push_str(&source[copied..]);
+    (cell, escaped_pipes)
+}
+
 #[test]
 fn table_row_spoilers_form_where_the_row_scan_predicts() {
     const WITHOUT_CODE: &[&str] = &["|", "||", "|||", "\\|", "\\\\|", "\\", "a", " "];
@@ -1429,9 +1454,9 @@ fn table_row_spoilers_form_where_the_row_scan_predicts() {
                     .count();
                 let (text, escaped_pipes) = table_cell_text(&row[start..end]);
                 let mut diagnostics = Vec::new();
-                let content = text.trim_start();
+                let content = text.trim_start_matches([' ', '\t']);
                 let trimmed = text.len() - content.len();
-                let content = content.trim_end();
+                let content = content.trim_end_matches([' ', '\t']);
                 let escaped_pipes = escaped_pipes
                     .into_iter()
                     .filter_map(|at| at.checked_sub(trimmed))

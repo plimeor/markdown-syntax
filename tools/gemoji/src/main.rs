@@ -86,6 +86,7 @@ fn generate(emoji: &str, license: &str, tag: &str) -> Result<String, String> {
     let _ = writeln!(
         table,
         "\n/// Every gemoji name and alias with its emoji, sorted by name.\n\
+         #[rustfmt::skip]\n\
          static SHORTCODES: [(&str, &str); {}] = [",
         shortcodes.len()
     );

@@ -2001,7 +2001,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             return None;
         }
         let alignments = parse_table_delimiter(delimiter, spoiler)?;
-        if split_table_row(header.text(), spoiler).len() != alignments.len() {
+        if table_row_cell_ranges(header.text(), spoiler).len() != alignments.len() {
             return None;
         }
         // Definitions the paragraph starts with are not its rows. They are
@@ -2049,7 +2049,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         index: usize,
     ) -> Option<Started> {
         let text = cursor.nonspace_rest();
-        if !matches!(text.as_bytes().get(1), None | Some(b' ' | b'\t')) {
+        if !is_description_marker(text) {
             return None;
         }
         // Details hold content: on the marker's line, or on an indented line
@@ -2070,7 +2070,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             let tail = self.lazy_term_tail(container + 1);
             self.close_unmatched();
             if let Some(term) = tail {
-                self.open_description_item(container, &term, index);
+                self.open_description_item(container, &term);
             }
         } else {
             let (term, before) = if self.stack[container].is_paragraph() {
@@ -2144,7 +2144,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 line.end_with_eol,
             );
             let list = self.stack.len() - 1;
-            self.open_description_item(list, &term, index);
+            self.open_description_item(list, &term);
         }
 
         let list = self.stack.len() - 1;
@@ -2212,7 +2212,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         Some(tail)
     }
 
-    fn open_description_item(&mut self, list: usize, term: &[ParagraphLine<'a>], _index: usize) {
+    fn open_description_item(&mut self, list: usize, term: &[ParagraphLine<'a>]) {
         let mut text = DerivedText::default();
         for term_line in term {
             let content = term_line.text().trim_end_matches([' ', '\t']);
@@ -2606,35 +2606,17 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
         return None;
     }
     let rest = cursor.nonspace_rest();
-    let bytes = rest.as_bytes();
-    let (ordered, start, delimiter, width) = match *bytes.first()? {
-        b'-' => (false, None, ListDelimiter::Dash, 1),
-        b'*' => (false, None, ListDelimiter::Asterisk, 1),
-        b'+' => (false, None, ListDelimiter::Plus, 1),
-        byte if byte.is_ascii_digit() => {
-            let digits = bytes
-                .iter()
-                .take_while(|byte| byte.is_ascii_digit())
-                .count();
-            if digits > 9 {
-                return None;
-            }
-            let delimiter = match bytes.get(digits)? {
-                b'.' => ListDelimiter::Period,
-                b')' => ListDelimiter::Paren,
-                _ => return None,
-            };
-            let number: u64 = rest[..digits].parse().ok()?;
-            if interrupting && number != 1 {
-                return None;
-            }
-            (true, Some(number), delimiter, digits + 1)
+    let (delimiter, width) = list_marker_head(rest)?;
+    let ordered = matches!(delimiter, ListDelimiter::Period | ListDelimiter::Paren);
+    let start = if ordered {
+        let number: u64 = rest[..width - 1].parse().ok()?;
+        if interrupting && number != 1 {
+            return None;
         }
-        _ => return None,
+        Some(number)
+    } else {
+        None
     };
-    if !matches!(bytes.get(width), None | Some(b' ' | b'\t')) {
-        return None;
-    }
     if interrupting && is_blank(&rest[width..]) {
         return None;
     }
@@ -2674,6 +2656,34 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
         delimiter,
         indent: marker_offset + padding,
     })
+}
+
+/// The delimiter and width of the list item marker `rest` opens with, when
+/// a space, a tab, or the line's end follows it.
+pub(super) fn list_marker_head(rest: &str) -> Option<(ListDelimiter, usize)> {
+    let bytes = rest.as_bytes();
+    let (delimiter, width) = match *bytes.first()? {
+        b'-' => (ListDelimiter::Dash, 1),
+        b'*' => (ListDelimiter::Asterisk, 1),
+        b'+' => (ListDelimiter::Plus, 1),
+        byte if byte.is_ascii_digit() => {
+            let digits = bytes
+                .iter()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            if digits > 9 {
+                return None;
+            }
+            let delimiter = match bytes.get(digits)? {
+                b'.' => ListDelimiter::Period,
+                b')' => ListDelimiter::Paren,
+                _ => return None,
+            };
+            (delimiter, digits + 1)
+        }
+        _ => return None,
+    };
+    matches!(bytes.get(width), None | Some(b' ' | b'\t')).then_some((delimiter, width))
 }
 
 /// The depth and content of the ATX heading `text` opens.
@@ -3042,12 +3052,8 @@ impl Finish<'_> {
                     })
                     .collect(),
             }),
-            Pending::Item { span, children, .. } | Pending::Details { span, children } => {
-                // Items and details only sit in their lists.
-                Block::BlockQuote(BlockQuote {
-                    meta: meta(span),
-                    children: self.blocks(children, diagnostics),
-                })
+            Pending::Item { .. } | Pending::Details { .. } => {
+                unreachable!("items and details only sit in their lists")
             }
             Pending::DescriptionList { span, tight, items } => {
                 Block::DescriptionList(DescriptionList {

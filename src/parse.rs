@@ -3366,10 +3366,8 @@ fn parse_inline_content(
                 text_start = index;
                 continue;
             }
-            // Only spaces and tabs the source holds, not ones a character
-            // reference wrote, end the line: a hard break or stripped.
-            let trailing_spaces =
-                trailing_space_count(&text).min(trailing_space_count(&input[..index]));
+            // The spaces and tabs ending the line: a hard break or stripped.
+            let trailing_spaces = trailing_space_count(&text);
             if is_hard_break_suffix(&text, trailing_spaces) {
                 text.truncate(text.len() - trailing_spaces);
                 flush_text(
@@ -3441,9 +3439,10 @@ fn parse_inline_content(
 
         if options.constructs.spoiler && bytes[index] == b'|' {
             // A cell's escaped pipe ends the run and is no bar before it.
-            let run_len = (index..index + delimiter_byte_run_len(input, index, b'|'))
+            let bars = delimiter_byte_run_len(input, index, b'|');
+            let run_len = (index..index + bars)
                 .position(|at| pass.state.is_escaped_pipe(base_offset + at))
-                .unwrap_or_else(|| delimiter_byte_run_len(input, index, b'|'));
+                .unwrap_or(bars);
             if run_len >= 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 // A spoiler run opens with its last two bars and closes with
@@ -5435,7 +5434,7 @@ fn next_char(input: &str, index: usize) -> Option<(usize, char)> {
 /// ASCII punctuation plus the non-ASCII Unicode `P*`/`S*` categories. Only the
 /// flanking classification needs the Unicode set; escape/label logic stays
 /// ASCII-only via `char::is_ascii_punctuation`.
-pub(crate) fn is_flanking_punctuation(value: char) -> bool {
+fn is_flanking_punctuation(value: char) -> bool {
     value.is_ascii_punctuation() || crate::unicode_punctuation::is_unicode_punctuation(value)
 }
 
@@ -5553,35 +5552,13 @@ fn trim_closing_hashes(input: &str) -> &str {
 
 /// Whether `input` opens with a list item marker, up to three spaces in.
 fn opens_list_item(input: &str) -> bool {
-    let Some(trimmed) = trim_up_to_three_spaces(input) else {
-        return false;
-    };
-    let bytes = trimmed.as_bytes();
-    let width = match bytes.first() {
-        Some(b'-' | b'*' | b'+') => 1,
-        Some(byte) if byte.is_ascii_digit() => {
-            let digits = bytes
-                .iter()
-                .take_while(|byte| byte.is_ascii_digit())
-                .count();
-            if digits > 9 || !matches!(bytes.get(digits), Some(b'.' | b')')) {
-                return false;
-            }
-            digits + 1
-        }
-        _ => return false,
-    };
-    is_list_padding_byte(bytes.get(width).copied())
+    trim_up_to_three_spaces(input).is_some_and(|rest| blocks::list_marker_head(rest).is_some())
 }
 
 /// The offset of `slice` inside `text` when it is a borrowed sub-slice of it.
 fn slice_offset_in(text: &str, slice: &str) -> Option<usize> {
     let offset = (slice.as_ptr() as usize).checked_sub(text.as_ptr() as usize)?;
     (offset + slice.len() <= text.len()).then_some(offset)
-}
-
-fn is_list_padding_byte(byte: Option<u8>) -> bool {
-    matches!(byte, None | Some(b' ' | b'\t'))
 }
 
 fn leading_indent(input: &str) -> (usize, usize) {
@@ -5637,13 +5614,15 @@ fn parse_table_delimiter(input: &str, spoiler: bool) -> Option<Vec<TableAlignmen
     {
         return None;
     }
-    let cells = split_table_row(input, spoiler);
+    let cells = table_row_cell_ranges(input, spoiler);
     if cells.is_empty() {
         return None;
     }
     let mut alignments = Vec::new();
-    for cell in cells {
-        alignments.push(table_delimiter_alignment(cell.trim_matches([' ', '\t']))?);
+    for (start, end) in cells {
+        alignments.push(table_delimiter_alignment(
+            input[start..end].trim_matches([' ', '\t']),
+        )?);
     }
     Some(alignments)
 }
@@ -5694,7 +5673,7 @@ fn table_delimiter_alignment(cell: &str) -> Option<TableAlignment> {
 /// spans are matched as the inline parser matches them, and only when the span
 /// closes before any pipe that would delimit inside it, so it lies within one
 /// cell. The pairing does not consider other inline constructs.
-pub(crate) fn table_row_delimiters(row: &str, spoiler: bool) -> Vec<usize> {
+fn table_row_delimiters(row: &str, spoiler: bool) -> Vec<usize> {
     scan_table_row(row, spoiler).0
 }
 
@@ -5916,13 +5895,6 @@ fn push_table_bar(
     bars.push(TableBar { position, escaped });
 }
 
-fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
-    table_row_cell_ranges(input, spoiler)
-        .into_iter()
-        .map(|(start, end)| table_cell_text(&input[start..end]).0)
-        .collect()
-}
-
 /// The byte ranges of `input`'s cells, between the pipes that delimit them.
 fn table_row_cell_ranges(input: &str, spoiler: bool) -> Vec<(usize, usize)> {
     let trimmed = input.trim_matches([' ', '\t']);
@@ -5959,7 +5931,8 @@ struct TableCellSource {
     span: Span,
 }
 
-/// The cells of `row`, a slice of `line.text`, as `split_table_row` splits it.
+/// The cells of `row`, a slice of `line.text`, as `table_row_cell_ranges`
+/// splits it.
 fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSource> {
     let row_offset = slice_offset_in(line.text, row).unwrap_or(0);
     table_row_cell_ranges(row, spoiler)
@@ -5975,8 +5948,10 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
             );
             let mut text = DerivedText::default();
             let mut escaped_pipes = Vec::new();
-            // The same unescaping as `table_cell_text`, keeping each copied run's
-            // source: the `|` read from `\|` maps to both of its bytes.
+            // GitHub/cmark-gfm reads an odd backslash run before `|` as a
+            // literal pipe; the run keeps its other backslashes, which the
+            // inline parser resolves as written. The `|` read from `\|` maps
+            // to both of its bytes.
             let bytes = content.as_bytes();
             let mut copied = 0;
             let mut cursor = 0;
@@ -6006,33 +5981,6 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
             }
         })
         .collect()
-}
-
-/// A cell's source with each escaped pipe unescaped, and the offset in it of
-/// each `|` read from `\\|`. GitHub/cmark-gfm treats an odd backslash run before
-/// `|` as a literal cell-content pipe; the run keeps its other backslashes so
-/// the inline parser resolves them as written.
-fn table_cell_text(source: &str) -> (String, Vec<usize>) {
-    let bytes = source.as_bytes();
-    let mut cell = String::with_capacity(source.len());
-    let mut escaped_pipes = Vec::new();
-    let mut copied = 0;
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        if bytes[cursor] == b'\\' {
-            let pipe = cursor + delimiter_byte_run_len(source, cursor, b'\\');
-            if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
-                cell.push_str(&source[copied..pipe - 1]);
-                escaped_pipes.push(cell.len());
-                copied = pipe;
-            }
-            cursor = pipe;
-        } else {
-            cursor += 1;
-        }
-    }
-    cell.push_str(&source[copied..]);
-    (cell, escaped_pipes)
 }
 
 fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
@@ -6065,7 +6013,7 @@ fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
 /// The end of the `<…>` autolink opening at `index`.
 fn autolink_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Option<usize> {
     let end = lookups.find(">", index)? + 1;
-    angle_autolink_destination(&input[index + 1..end - 1]).map(|_| end)
+    is_angle_autolink(&input[index + 1..end - 1]).then_some(end)
 }
 
 /// The end of the inline HTML (comment, processing instruction, CDATA,
@@ -6215,6 +6163,11 @@ pub(crate) fn angle_autolink_destination(uri: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Whether `<uri>` is an angle-bracket autolink.
+fn is_angle_autolink(uri: &str) -> bool {
+    is_uri_autolink(uri) || is_email_autolink(uri)
 }
 
 fn is_uri_autolink(input: &str) -> bool {

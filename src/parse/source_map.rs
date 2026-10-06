@@ -224,10 +224,15 @@ impl DerivedText {
     }
 
     /// Appends `slice`, a sub-slice of `line.text`, to the current line. An
-    /// empty string adds nothing, wherever it points.
+    /// empty string adds nothing, wherever it points; other text that is no
+    /// sub-slice is kept, read from the whole line.
     pub(super) fn append(&mut self, line: &Line<'_>, slice: &str) {
         let Some(offset) = slice_offset(line.text, slice) else {
             debug_assert!(slice.is_empty(), "a slice of the line");
+            if !slice.is_empty() {
+                let (start, end) = (line.source_start(0), line.source_end(line.text.len()));
+                self.append_replacing(slice, start, end);
+            }
             return;
         };
         line.copy_into(&mut self.map, self.text.len(), offset, offset + slice.len());

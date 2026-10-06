@@ -1032,7 +1032,8 @@ impl_from_variants!(Inline {
     Emphasis(Emphasis), Strong(Strong), Underline(Underline), Delete(Delete),
     Insert(Insert), Mark(Mark), Subscript(Subscript), Superscript(Superscript),
     Spoiler(Spoiler), Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
-    LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline), SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
+    LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
+    SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
     MdxExpression(MdxExpressionInline), MdxJsx(MdxJsxInline), TextDirective(TextDirective),
 });
