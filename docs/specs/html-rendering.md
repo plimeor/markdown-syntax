@@ -77,6 +77,7 @@ when any footnote is referenced.
 #### Scenario: Two paragraphs
 - **WHEN** `"a\n\nb"` is rendered
 - **THEN** the output is `<p>a</p>\n<p>b</p>`
+
 ### Requirement: Shortcodes render their glyph
 The renderer SHALL write a `Shortcode` as the escaped text of its
 `Shortcode::glyph()`, with no wrapper element.

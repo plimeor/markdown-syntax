@@ -339,6 +339,7 @@ underline; such a line keeps its other reading.
 #### Scenario: Table header row that looks like an empty list item
 - **WHEN** `"a\n+\n|-"` is parsed with the GFM preset
 - **THEN** the document holds a `Paragraph` and a `Table` whose header cell holds `+`
+
 ### Requirement: One pass over open blocks
 The parser SHALL read block structure in one pass over the lines with one
 stack of open blocks: each line is matched against the open containers in

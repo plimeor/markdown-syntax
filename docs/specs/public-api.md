@@ -334,6 +334,7 @@ node's children SHALL be in source order and SHALL NOT overlap.
 #### Scenario: Fixture corpus and generated inputs
 - **WHEN** every fixture input and every seeded generated input is parsed in each dialect
 - **THEN** every node, at every depth, satisfies these conditions
+
 ### Requirement: Shortcode glyph
 `Shortcode::glyph()` SHALL return the emoji that the crate's pinned gemoji
 table gives the shortcode's name, and `None` for a name the table does not

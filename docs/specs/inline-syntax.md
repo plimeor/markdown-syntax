@@ -331,6 +331,7 @@ after the `<?` closes it.
 #### Scenario: `<?>` is text
 - **WHEN** `"a<?> b"` is parsed with the CommonMark preset
 - **THEN** the paragraph holds no `Html` inline
+
 ### Requirement: Escapes and character references are nodes
 Under every option set, the parser SHALL produce an `Escape` for every
 backslash escape and a `CharacterReference` for every entity or numeric

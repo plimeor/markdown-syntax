@@ -355,6 +355,7 @@ The serializer SHALL write every backtick in a text value as `` \` ``.
 #### Scenario: Paired backticks
 - **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
 - **THEN** it returns ``"Test \\`hello world\\` here.\n"``
+
 ### Requirement: Tree comparison
 Where serialization compares a reparsed document with the one it wrote, it
 SHALL compare them apart from spans, reading each `Escape` as a `Text` holding
