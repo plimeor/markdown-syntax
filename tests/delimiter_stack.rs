@@ -330,7 +330,7 @@ fn a_link_inside_a_directive_label_inside_a_mark_keeps_links_from_nesting() {
 }
 
 #[test]
-fn an_escaped_dot_after_a_bracket_is_a_dot() {
+fn an_escaped_dot_after_a_bracket_is_an_escape() {
     let mut gfm = SyntaxOptions::gfm();
     gfm.constructs.relaxed_autolinks = false;
     assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. "\." x""#);
@@ -350,6 +350,20 @@ fn delimiters_past_the_limit_stay_in_the_output() {
     let input = String::from("___") + &"*".repeat(32) + "x" + &"*".repeat(32) + "_ b__";
     let markdown = underline.parse(&input).document.to_markdown().unwrap();
     assert_eq!(markdown.matches('_').count(), input.matches('_').count());
+}
+
+#[test]
+fn an_image_whose_label_cannot_close_yields_to_an_embed() {
+    let document = SyntaxOptions::default().parse("![[a[b]]").document;
+    let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+        panic!("expected one paragraph");
+    };
+    assert!(
+        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
+            if link.embed && link.target == "a[b"),
+        "{:?}",
+        paragraph.children
+    );
 }
 
 #[test]

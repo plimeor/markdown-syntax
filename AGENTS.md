@@ -19,7 +19,8 @@ Read `docs/overview.md` before starting work.
 - Format: `cargo fmt --check`
 - Build (default): `cargo build` — the empty-feature / zero-dep gate
 - Test: `cargo test` — parse/serialize/validate/fixtures/roundtrip + the README
-  doc-test
+  doc-test; `cargo test --features html` also runs the HTML renderer tests and
+  the commonmark.js reference cases for nested containers
 - Docs: `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
 - wasm check: `cargo build --target wasm32-unknown-unknown`
   (`rustup target add wasm32-unknown-unknown` first)

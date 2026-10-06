@@ -32,10 +32,6 @@ pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
                 parse: ParseOptions::default(),
             }
         }
-        "preserve-escapes" => SyntaxOptions {
-            constructs: Constructs::commonmark(),
-            parse: ParseOptions::default(),
-        },
         "extras" => SyntaxOptions {
             constructs: extra_constructs(),
             parse: extra_parse_options(),
@@ -437,6 +433,22 @@ fn assert_source_stable(source: &str, path: &Path, index: usize, options: &Synta
         snapshot_document_normalized(&reparsed.document),
         snapshot_document_normalized(&output.document),
         "{}#{index}: AST changed after serialize/reparse",
+        path.display()
+    );
+    let again = reparsed
+        .document
+        .to_markdown_with(&reading_back_under(options))
+        .unwrap_or_else(|error| {
+            panic!(
+                "{}#{index}: reserialize failed: {:?}",
+                path.display(),
+                error
+            )
+        });
+    assert_eq!(
+        again,
+        markdown,
+        "{}#{index}: serializing the reparsed document changed the Markdown",
         path.display()
     );
 }

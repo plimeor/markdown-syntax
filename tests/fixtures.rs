@@ -10,7 +10,7 @@ use markdown_syntax::{
 use support::fixtures::{
     assert_case_file_stable, assert_fixture, assert_parse_serialize_stable,
     assert_required_profiles, assert_semantic_input_corpus_stable, profile_options,
-    snapshot_document, snapshot_document_normalized,
+    reading_back_under, snapshot_document, snapshot_document_normalized,
 };
 
 #[test]
@@ -384,7 +384,10 @@ fn html_syntax_nodes_are_preserved() {
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<span data-x=\\\"1\\\">\""));
     assert!(snapshot_document(&output.document).contains("HtmlInline \"<!-- inline -->\""));
 
-    let markdown = output.document.to_markdown().unwrap();
+    let markdown = output
+        .document
+        .to_markdown_with(&reading_back_under(&SyntaxOptions::commonmark()))
+        .unwrap();
     let reparsed = SyntaxOptions::commonmark().parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
