@@ -661,7 +661,7 @@ pub struct Spoiler {
     pub children: Vec<Inline>,
 }
 
-/// An emoji-style shortcode: `:name:`.
+/// An emoji shortcode: `:name:`, where `name` is a gemoji name or alias.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Shortcode {
     /// Node metadata (source span).
@@ -1060,6 +1060,14 @@ impl Inline {
             Inline::TextDirective(n) => &n.label,
             _ => &[],
         }
+    }
+}
+
+impl Shortcode {
+    /// The emoji the crate's pinned gemoji table gives this shortcode's
+    /// name, or `None` for a name the table does not hold.
+    pub fn glyph(&self) -> Option<&'static str> {
+        crate::gemoji::glyph(&self.name)
     }
 }
 

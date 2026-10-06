@@ -2538,6 +2538,19 @@ mod read_back_contract {
     }
 
     #[test]
+    fn a_letter_before_a_shortcode_is_a_reference() {
+        let shortcode = Inline::Shortcode(Shortcode {
+            meta: NodeMeta::default(),
+            name: "smile".into(),
+        });
+        let markdown = assert_reads_back(
+            &paragraph_document(vec![Text::from("a").into(), shortcode]),
+            &SyntaxOptions::default(),
+        );
+        assert_eq!(markdown, "&#97;:smile:\n");
+    }
+
+    #[test]
     fn a_bang_before_a_wiki_link_is_escaped() {
         let wiki = Inline::WikiLink(WikiLink {
             meta: NodeMeta::default(),

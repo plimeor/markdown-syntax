@@ -69,8 +69,12 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             )
         }
 
-        // 13. Shortcode — emoji glyph (gemoji), text-escaped, no wrapper.
-        Inline::Shortcode(s) => escape_text(&emoji_glyph(&s.name)),
+        // 13. Shortcode — its gemoji glyph, text-escaped, no wrapper; a
+        // name gemoji does not hold stays as written.
+        Inline::Shortcode(s) => match s.glyph() {
+            Some(glyph) => escape_text(glyph),
+            None => escape_text(&format!(":{}:", s.name)),
+        },
 
         // 14. Code — `value` already code-span-normalized; text-escape only.
         Inline::Code(c) => format!("<code>{}</code>", escape_text(&c.value)),
@@ -335,27 +339,4 @@ fn image_reference_fallback(n: &crate::ast::ImageReference) -> String {
         ReferenceKind::Collapsed => format!("![{inner}][]"),
         ReferenceKind::Full => format!("![{inner}][{}]", escape_text(&n.label)),
     }
-}
-
-/// Resolve a gemoji shortcode alias to its glyph. The table covers the aliases
-/// exercised by the GFM `shortcodes` oracle; an unknown alias round-trips
-/// to its `:name:` source form (deterministic and lossless).
-fn emoji_glyph(name: &str) -> String {
-    let glyph = match name {
-        "smile" => "\u{1F604}",
-        "+1" | "thumbsup" => "\u{1F44D}",
-        "-1" | "thumbsdown" => "\u{1F44E}",
-        "clock12" => "\u{1F55B}",
-        "heart" => "\u{2764}\u{FE0F}",
-        "tada" => "\u{1F389}",
-        "rocket" => "\u{1F680}",
-        "100" => "\u{1F4AF}",
-        "x" => "\u{274C}",
-        "1234" => "\u{1F522}",
-        "1st_place_medal" => "\u{1F947}",
-        "e-mail" => "\u{1F4E7}",
-        "non-potable_water" => "\u{1F6B1}",
-        _ => return format!(":{name}:"),
-    };
-    String::from(glyph)
 }

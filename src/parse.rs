@@ -3955,18 +3955,34 @@ fn parse_inline_content(
     .0
 }
 
+/// A `:name:` shortcode at `index`: `name` is in the gemoji table, and the
+/// source chars directly outside the colons are no Unicode letter or digit,
+/// so clock times and words joined by a colon stay text.
 fn parse_shortcode(input: &str, index: usize) -> Option<(usize, String)> {
     if input[index..].starts_with("::") {
+        return None;
+    }
+    if input[..index]
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric)
+    {
         return None;
     }
 
     let mut cursor = index + 1;
     while let Some((next, char)) = next_char(input, cursor) {
         if char == ':' {
-            if cursor == index + 1 {
+            let name = &input[index + 1..cursor];
+            if crate::gemoji::glyph(name).is_none()
+                || input[next..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric)
+            {
                 return None;
             }
-            return Some((next, input[index + 1..cursor].into()));
+            return Some((next, name.into()));
         }
         if !(char.is_ascii_alphanumeric() || matches!(char, '_' | '-' | '+')) {
             return None;

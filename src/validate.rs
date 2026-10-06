@@ -258,10 +258,10 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                 validate_emphasis_container(&node.children, node.meta.span, diagnostics)
             }
             Inline::Shortcode(node) => {
-                if node.name.is_empty() {
+                if node.glyph().is_none() {
                     diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
-                        "shortcode name cannot be empty",
+                        "shortcode name must be a gemoji name",
                     ));
                 }
             }

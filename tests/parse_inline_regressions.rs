@@ -959,3 +959,77 @@ mod literal_autolink_boundaries {
         }
     }
 }
+
+mod gemoji_shortcodes {
+    //! A shortcode names an entry of the pinned gemoji table, with no letter
+    //! or digit as the source char directly outside either colon.
+
+    use markdown_syntax::prelude::*;
+
+    fn inlines(source: &str) -> Vec<Inline> {
+        let document = parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        paragraph.children.clone()
+    }
+
+    fn shortcodes(source: &str) -> Vec<String> {
+        inlines(source)
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Shortcode(node) => Some(node.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_gemoji_name_between_colons_is_a_shortcode() {
+        assert!(
+            matches!(&inlines("a :tada: b")[1], Inline::Shortcode(node) if node.name == "tada")
+        );
+        assert!(
+            matches!(&inlines("score :100: today")[1], Inline::Shortcode(node) if node.name == "100")
+        );
+    }
+
+    #[test]
+    fn a_letter_or_digit_beside_a_colon_or_an_unknown_name_is_no_shortcode() {
+        for source in [
+            "meet at 10:30:45 today",
+            "时间:10:30",
+            "a:smile:b",
+            "a :not_an_emoji_name: b",
+        ] {
+            assert_eq!(shortcodes(source), Vec::<String>::new(), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_character_reference_before_a_shortcode_leaves_it_a_shortcode() {
+        let inlines = inlines("&#97;:smile:");
+        assert!(
+            matches!(
+                inlines.as_slice(),
+                [Inline::CharacterReference(reference), Inline::Shortcode(shortcode)]
+                    if reference.value == "a" && shortcode.name == "smile"
+            ),
+            "{inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_shortcode_gives_its_glyph() {
+        let inlines = inlines(":tada:");
+        let [Inline::Shortcode(tada)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert_eq!(tada.glyph(), Some("\u{1F389}"));
+        let unknown = Shortcode {
+            meta: NodeMeta::default(),
+            name: "not_an_emoji_name".into(),
+        };
+        assert_eq!(unknown.glyph(), None);
+    }
+}

@@ -12,6 +12,25 @@ mod validation {
     use markdown_syntax::*;
 
     #[test]
+    fn a_shortcode_name_outside_gemoji_is_invalid() {
+        let document = Document {
+            meta: NodeMeta::default(),
+            children: vec![Block::Paragraph(Paragraph {
+                meta: NodeMeta::default(),
+                children: vec![Inline::Shortcode(Shortcode {
+                    meta: NodeMeta::default(),
+                    name: "not_an_emoji_name".into(),
+                })],
+            })],
+        };
+        assert!(!document.validate().is_empty());
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+    }
+
+    #[test]
     fn empty_table_is_invalid() {
         let document = Document {
             meta: NodeMeta::default(),

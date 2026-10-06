@@ -387,3 +387,13 @@ fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
         "<p><a href=\"x.png\" data-wikilink=\"true\" data-wikilink-embed=\"true\">x.png</a></p>"
     );
 }
+
+#[test]
+fn shortcodes_render_their_gemoji_glyph() {
+    let html = parse_render(
+        ":sparkles:",
+        &SyntaxOptions::default(),
+        &HtmlOptions::default(),
+    );
+    assert_eq!(html.trim_end(), "<p>\u{2728}</p>");
+}

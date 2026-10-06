@@ -6,6 +6,7 @@ extern crate alloc;
 
 mod compare;
 mod entities;
+mod gemoji;
 mod memo;
 #[cfg(test)]
 mod test_support;
