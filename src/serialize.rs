@@ -13,13 +13,19 @@ use alloc::{
 use core::ops::Deref;
 
 use crate::{
-    ast::*, diagnostic::Diagnostic, options::SyntaxOptions, parse::line_opens_alert,
+    ast::*,
+    compare::layout_normalized_blocks,
+    diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
+    options::SyntaxOptions,
+    parse::parse_with_definitions,
     validate::validate_document,
 };
 
 mod inline;
+mod layout;
 mod read_back;
 
+use layout::{Alternative, Layout, Node};
 use read_back::{write_reading_back, Extracted, Part, ReadBack};
 
 /// The newline style emitted by the serializer.
@@ -93,6 +99,8 @@ pub enum SerializeError {
 struct Cx<'o> {
     options: &'o SerializeOptions,
     read_back: ReadBack<'o>,
+    /// The layout alternatives the document's read-back called for.
+    layout: Layout,
 }
 
 impl Deref for Cx<'_> {
@@ -132,14 +140,54 @@ fn serialize_document_body(
     }
     known.sort_unstable();
     known.dedup();
-    let cx = Cx {
+    let mut cx = Cx {
         options,
         read_back: ReadBack {
             syntax: &options.syntax,
             known,
         },
+        layout: Layout::default(),
     };
-    let mut output = serialize_blocks_at_start(&document.children, &cx, true)?;
+    // The document is written with the default layout and read back; where
+    // a written block reads back as another one, a layout alternative applies
+    // there and the document is written again.
+    let ours = layout_normalized_blocks(&document.children);
+    let mut tried: Vec<layout::Choice> = Vec::new();
+    let mut last: Option<(layout::Choice, Option<usize>)> = None;
+    let mut output = loop {
+        let output = serialize_blocks_at_start(&document.children, &cx, true)?;
+        // Read as written with its final line ending.
+        let mut written = output.clone();
+        if !written.is_empty() && !ends_with_carriage_return_ending(&written) {
+            written.push('\n');
+        }
+        let reparsed = parse_with_definitions(&written, &options.syntax, &cx.read_back.known)
+            .document
+            .children;
+        let theirs = layout_normalized_blocks(&reparsed);
+        if ours == theirs {
+            break output;
+        }
+        let path = layout::divergence(&document.children, &ours, &theirs);
+        let key = layout::key(&path);
+        // An alternative that left the difference where it was is withdrawn.
+        if let Some((choice, before)) = last.take() {
+            if before == key {
+                cx.layout.remove(&choice);
+            }
+        }
+        let next = layout::candidates(&path)
+            .into_iter()
+            .find(|choice| !tried.contains(choice) && !cx.layout.holds(choice));
+        match next {
+            Some(choice) if tried.len() < LAYOUT_ROUNDS => {
+                cx.layout.add(choice);
+                tried.push(choice);
+                last = Some((choice, key));
+            }
+            _ => return Err(unrepresentable_block(layout::blamed(&path))),
+        }
+    };
     if options.line_ending == LineEnding::CrLf {
         output = lf_to_crlf(&output);
     }
@@ -150,6 +198,48 @@ fn serialize_document_body(
         output.push_str(options.line_ending.as_str());
     }
     Ok(output)
+}
+
+/// Layout alternatives a document's read-back tries at most.
+const LAYOUT_ROUNDS: usize = 32;
+
+fn unrepresentable_block(node: Option<Node<'_>>) -> SerializeError {
+    let (span, name) = match node {
+        Some(Node::Block(block)) => (block.span(), block_kind(block)),
+        Some(Node::Item(item)) => (item.meta.span, "a ListItem"),
+        None => (None, "the document"),
+    };
+    SerializeError::Unrepresentable(Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: DiagnosticCode::Unrepresentable,
+        span,
+        message: format!("{name} has no Markdown that reads back as the same tree"),
+    })
+}
+
+fn block_kind(block: &Block) -> &'static str {
+    match block {
+        Block::Paragraph(_) => "a Paragraph",
+        Block::Heading(_) => "a Heading",
+        Block::ThematicBreak(_) => "a ThematicBreak",
+        Block::BlockQuote(_) => "a BlockQuote",
+        Block::Alert(_) => "an Alert",
+        Block::List(_) => "a List",
+        Block::DescriptionList(_) => "a DescriptionList",
+        Block::CodeBlock(_) => "a CodeBlock",
+        Block::HtmlBlock(_) => "an HtmlBlock",
+        Block::HtmlContainer(_) => "an HtmlContainer",
+        Block::Definition(_) => "a Definition",
+        Block::FootnoteDefinition(_) => "a FootnoteDefinition",
+        Block::Table(_) => "a Table",
+        Block::MathBlock(_) => "a MathBlock",
+        Block::Frontmatter(_) => "a Frontmatter",
+        Block::MdxEsm(_) => "an MdxEsm",
+        Block::MdxExpression(_) => "an MdxExpression",
+        Block::MdxJsx(_) => "an MdxJsx",
+        Block::LeafDirective(_) => "a LeafDirective",
+        Block::ContainerDirective(_) => "a ContainerDirective",
+    }
 }
 
 /// Rewrites each bare `\n` as `\r\n`; existing `\r\n` and `\r` endings that
@@ -199,25 +289,18 @@ fn serialize_blocks_at_start(
     let mut outputs: Vec<(String, bool)> = Vec::with_capacity(blocks.len());
     for (index, block) in blocks.iter().enumerate().rev() {
         let at_document_start = document_start && index == 0;
-        let next_indent = outputs
+        let next = outputs
             .last()
-            .map(|(next, _): &(String, bool)| next.len() - next.trim_start_matches(' ').len());
-        let written = match (block, next_indent) {
-            (Block::List(list), Some(indent @ 1..=3)) => (
-                serialize_list_with_marker_spacing(list, options, &" ".repeat(indent), " ")?,
-                false,
-            ),
-            (Block::List(list), Some(4..)) => (
-                serialize_list_with_marker_spacing(list, options, " ", "    ")?,
-                false,
-            ),
+            .map(|(next, _): &(String, bool)| next.as_str());
+        let written = match block {
+            Block::List(list) => (serialize_list_before(block, list, options, next)?, false),
             // A paragraph or setext heading right after a definition may read
             // back only as the continuation of the paragraph the definition
             // was read from.
-            (Block::Paragraph(paragraph), _) => {
+            Block::Paragraph(paragraph) => {
                 serialize_paragraph(paragraph, options, definition_before(blocks, index))?
             }
-            (Block::Heading(heading), _) if writes_setext(heading) => {
+            Block::Heading(heading) if writes_setext(heading) => {
                 serialize_setext_heading(heading, options, definition_before(blocks, index))?
             }
             _ => (serialize_block(block, options, at_document_start)?, false),
@@ -511,14 +594,9 @@ fn serialize_definition(node: &Definition) -> String {
         node.destination_kind,
         InlineSerializeContext::block_content(),
     );
-    let mut label = if node.meta.span.is_some() {
-        escape_definition_label_source(&node.label)
-    } else {
-        escape_reference_label_with_pipe(&node.label, false)
-    };
-    if node.meta.span.is_none() && label.starts_with('^') {
-        label.insert(0, '\\');
-    }
+    // The label is matched as written, so it is written as the AST holds it;
+    // one that does not read back that way is unrepresentable.
+    let label = escape_definition_label_source(&node.label);
     let mut output = format!("[{}]: {}", label, destination);
     if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
         output.push(' ');
@@ -613,18 +691,25 @@ fn serialize_block(
         }),
         Block::BlockQuote(node) => {
             let inner = serialize_blocks_at_start(&node.children, options, false)?;
-            if inner.is_empty() {
-                Ok(">".into())
-            } else if line_opens_alert(inner.split('\n').next().unwrap_or("")) {
-                // A raw label such as a definition's `[!NOTE]` on the quote's
-                // first line would make it an alert; an empty first line
-                // keeps it a quote.
-                Ok(alloc::format!(">\n{}", prefix_lines(&inner, "> ")))
+            let mut output = if inner.is_empty() {
+                ">".into()
+            } else if options.layout.has(block, Alternative::QuoteOpensEmpty) {
+                format!(">\n{}", prefix_lines(&inner, "> "))
             } else {
-                Ok(prefix_lines(&inner, "> "))
+                prefix_lines(&inner, "> ")
+            };
+            if options.layout.has(block, Alternative::QuoteEndsEmpty) {
+                output.push_str("\n>");
             }
+            Ok(output)
         }
-        Block::Alert(node) => serialize_alert(node, options),
+        Block::Alert(node) => {
+            let mut output = serialize_alert(node, options)?;
+            if options.layout.has(block, Alternative::QuoteEndsEmpty) {
+                output.push_str("\n>");
+            }
+            Ok(output)
+        }
         Block::List(node) => serialize_list(node, options),
         Block::DescriptionList(node) => serialize_description_list(node, options),
         Block::CodeBlock(node) => serialize_code_block(node, options),
@@ -790,7 +875,36 @@ fn escape_alert_title(input: &str) -> String {
 }
 
 fn serialize_list(node: &List, options: &Cx<'_>) -> Result<String, SerializeError> {
-    serialize_list_with_marker_spacing(node, options, "", " ")
+    serialize_list_with_marker_spacing(node, options, "", " ", None)
+}
+
+/// A list written before `next`, the Markdown of the block after it. A list
+/// the read-back keeps past the next block has its markers indented past
+/// that block's indentation, and one it keeps apart from the next list takes
+/// a marker other than the one that list starts with.
+fn serialize_list_before(
+    block: &Block,
+    node: &List,
+    options: &Cx<'_>,
+    next: Option<&str>,
+) -> Result<String, SerializeError> {
+    let avoid = next
+        .filter(|_| options.layout.has(block, Alternative::ListApartFromNext))
+        .and_then(|next| {
+            let marker = next.trim_start_matches(' ');
+            let digits = marker.bytes().take_while(u8::is_ascii_digit).count();
+            marker[digits..].chars().next()
+        });
+    let indent = next
+        .filter(|_| options.layout.has(block, Alternative::ListPastNext))
+        .map(|next| next.len() - next.trim_start_matches(' ').len());
+    match indent {
+        Some(indent @ 1..=3) => {
+            serialize_list_with_marker_spacing(node, options, &" ".repeat(indent), " ", avoid)
+        }
+        Some(4..) => serialize_list_with_marker_spacing(node, options, " ", "    ", avoid),
+        _ => serialize_list_with_marker_spacing(node, options, "", " ", avoid),
+    }
 }
 
 fn serialize_list_with_marker_spacing(
@@ -798,6 +912,7 @@ fn serialize_list_with_marker_spacing(
     options: &Cx<'_>,
     marker_prefix: &str,
     marker_padding: &str,
+    avoid: Option<char>,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
     for (index, item) in node.children.iter().enumerate() {
@@ -808,7 +923,7 @@ fn serialize_list_with_marker_spacing(
                 output.push_str("\n\n");
             }
         }
-        let list_delimiter = if node.ordered {
+        let mut list_delimiter = if node.ordered {
             if options.ordered_delimiter == SerializeOptions::default().ordered_delimiter {
                 node.delimiter
             } else {
@@ -819,6 +934,30 @@ fn serialize_list_with_marker_spacing(
         } else {
             options.bullet
         };
+        let marker_char = |delimiter| {
+            if node.ordered {
+                ordered_list_marker(delimiter)
+            } else {
+                unordered_list_marker(delimiter)
+            }
+        };
+        if avoid == Some(marker_char(list_delimiter)) {
+            let others: &[ListDelimiter] = if node.ordered {
+                &[ListDelimiter::Period, ListDelimiter::Paren]
+            } else {
+                &[
+                    ListDelimiter::Dash,
+                    ListDelimiter::Asterisk,
+                    ListDelimiter::Plus,
+                ]
+            };
+            if let Some(other) = others
+                .iter()
+                .find(|other| Some(marker_char(**other)) != avoid)
+            {
+                list_delimiter = *other;
+            }
+        }
         let marker = if node.ordered {
             let start = node.start.unwrap_or(1).saturating_add(index as u64);
             let delimiter = ordered_list_marker(list_delimiter);
@@ -860,15 +999,7 @@ fn serialize_list_with_marker_spacing(
             output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
             continue;
         }
-        let first_line = inner.split('\n').next().unwrap_or("");
-        let may_break = first_line.starts_with(['-', '*', '_']);
-        if inner.starts_with([' ', '\t'])
-            || (may_break && is_thematic_break_line(&format!("{marker}{first_line}")))
-        {
-            // Content after the marker's padding would move the item's content
-            // column, so whitespace that opens the item's first block (an HTML
-            // block's indentation) starts on the line after the marker; so does
-            // a first line that would make the marker's line a thematic break.
+        if options.layout.has(item, Alternative::ItemOnNextLine) {
             // An item that starts blank has its content one column past the
             // marker, whatever padding the other items use.
             let content_indent = marker.trim_end().len() + 1;
@@ -883,26 +1014,6 @@ fn serialize_list_with_marker_spacing(
     Ok(output)
 }
 
-/// Whether `line` is a thematic break: up to three spaces, then three or more
-/// of one of `-`, `*`, `_`, with only spaces and tabs between and after them.
-fn is_thematic_break_line(line: &str) -> bool {
-    let trimmed = line.trim_start_matches(' ');
-    if line.len() - trimmed.len() > 3 {
-        return false;
-    }
-    let Some(marker) = trimmed
-        .chars()
-        .next()
-        .filter(|char| matches!(char, '-' | '*' | '_'))
-    else {
-        return false;
-    };
-    trimmed
-        .chars()
-        .all(|char| matches!(char, ' ' | '\t') || char == marker)
-        && trimmed.chars().filter(|char| *char == marker).count() >= 3
-}
-
 fn serialize_item_blocks(
     blocks: &[Block],
     options: &Cx<'_>,
@@ -912,21 +1023,14 @@ fn serialize_item_blocks(
     // indentation of the block after it.
     let mut written: Vec<String> = Vec::with_capacity(blocks.len());
     for block in blocks.iter().rev() {
-        let next_indent = written
-            .last()
-            .map(|next: &String| next.len() - next.trim_start_matches(' ').len());
-        written.push(match (block, next_indent) {
-            (Block::List(list), Some(indent @ 1..=3)) => {
-                serialize_list_with_marker_spacing(list, options, &" ".repeat(indent), " ")?
-            }
-            (Block::List(list), Some(4..)) => {
-                serialize_list_with_marker_spacing(list, options, " ", "    ")?
-            }
+        let next = written.last().map(String::as_str);
+        written.push(match block {
+            Block::List(list) => serialize_list_before(block, list, options, next)?,
             _ => serialize_block(block, options, false)?,
         });
     }
     let mut output = String::new();
-    for (index, (block, written)) in blocks.iter().zip(written.iter().rev()).enumerate() {
+    for (index, written) in written.iter().rev().enumerate() {
         if index > 0 {
             if tight {
                 output.push('\n');
@@ -935,15 +1039,6 @@ fn serialize_item_blocks(
             }
         }
         output.push_str(written);
-        if tight
-            && matches!(block, Block::BlockQuote(_) | Block::Alert(_))
-            && matches!(blocks.get(index + 1), Some(Block::Paragraph(_)))
-        {
-            // The paragraph's first line would continue the quote's or
-            // alert's paragraph lazily; an empty quote line ends that
-            // paragraph first.
-            output.push_str("\n>");
-        }
     }
     Ok(output)
 }

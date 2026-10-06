@@ -24,7 +24,17 @@ pub(crate) fn normalized_inlines(inlines: &[Inline]) -> Vec<Inline> {
 #[cfg(test)]
 pub(crate) fn normalized_blocks(blocks: &[Block]) -> Vec<Block> {
     let mut blocks = blocks.to_vec();
-    normalize_blocks(&mut blocks);
+    normalize_blocks(&mut blocks, false);
+    blocks
+}
+
+/// `blocks` normalized as [`normalized_blocks`] does, and also apart from
+/// what the serializer chooses for them: list markers, code fences, the last
+/// line ending of a code or math block, heading forms, thematic break markers,
+/// and a code span's fence and raw text.
+pub(crate) fn layout_normalized_blocks(blocks: &[Block]) -> Vec<Block> {
+    let mut blocks = blocks.to_vec();
+    normalize_blocks(&mut blocks, true);
     blocks
 }
 
@@ -32,60 +42,86 @@ fn clear(meta: &mut NodeMeta) {
     meta.span = None;
 }
 
-#[cfg(test)]
-fn normalize_blocks(blocks: &mut [Block]) {
+fn normalize_blocks(blocks: &mut [Block], layout: bool) {
+    let inlines = |inlines: &mut Vec<Inline>| {
+        normalize_inlines(inlines);
+        if layout {
+            clear_code_fences(inlines);
+        }
+    };
     for block in blocks {
         match block {
             Block::Paragraph(node) => {
                 clear(&mut node.meta);
-                normalize_inlines(&mut node.children);
+                inlines(&mut node.children);
             }
             Block::Heading(node) => {
                 clear(&mut node.meta);
-                normalize_inlines(&mut node.children);
+                inlines(&mut node.children);
+                if layout {
+                    node.kind = HeadingKind::Atx;
+                }
             }
-            Block::ThematicBreak(node) => clear(&mut node.meta),
+            Block::ThematicBreak(node) => {
+                clear(&mut node.meta);
+                if layout {
+                    node.marker = ThematicBreakMarker::Dash;
+                }
+            }
             Block::BlockQuote(node) => {
                 clear(&mut node.meta);
-                normalize_blocks(&mut node.children);
+                normalize_blocks(&mut node.children, layout);
             }
             Block::Alert(node) => {
                 clear(&mut node.meta);
-                normalize_blocks(&mut node.children);
+                normalize_blocks(&mut node.children, layout);
             }
             Block::List(node) => {
                 clear(&mut node.meta);
+                if layout {
+                    node.delimiter = ListDelimiter::Dash;
+                }
                 for item in &mut node.children {
                     clear(&mut item.meta);
-                    normalize_blocks(&mut item.children);
+                    normalize_blocks(&mut item.children, layout);
                 }
             }
             Block::DescriptionList(node) => {
                 clear(&mut node.meta);
                 for item in &mut node.children {
                     clear(&mut item.meta);
-                    normalize_inlines(&mut item.term);
+                    inlines(&mut item.term);
                     for details in &mut item.details {
                         clear(&mut details.meta);
-                        normalize_blocks(&mut details.children);
+                        normalize_blocks(&mut details.children, layout);
                     }
                 }
             }
-            Block::CodeBlock(node) => clear(&mut node.meta),
+            Block::CodeBlock(node) => {
+                clear(&mut node.meta);
+                if layout {
+                    // A code block's lines end with a line ending, which a
+                    // value may leave out.
+                    node.kind = CodeBlockKind::Indented;
+                    if node.value.ends_with('\n') {
+                        node.value.pop();
+                    }
+                }
+            }
             Block::HtmlBlock(node) => clear(&mut node.meta),
             Block::HtmlContainer(node) => {
                 clear(&mut node.meta);
                 clear(&mut node.opening.meta);
                 clear(&mut node.closing.meta);
                 match &mut node.content {
-                    HtmlContainerContent::Blocks(children) => normalize_blocks(children),
-                    HtmlContainerContent::Inlines(children) => normalize_inlines(children),
+                    HtmlContainerContent::Blocks(children) => normalize_blocks(children, layout),
+                    HtmlContainerContent::Inlines(children) => inlines(children),
                 }
             }
             Block::Definition(node) => clear(&mut node.meta),
             Block::FootnoteDefinition(node) => {
                 clear(&mut node.meta);
-                normalize_blocks(&mut node.children);
+                normalize_blocks(&mut node.children, layout);
             }
             Block::Table(node) => {
                 clear(&mut node.meta);
@@ -93,23 +129,28 @@ fn normalize_blocks(blocks: &mut [Block]) {
                     clear(&mut row.meta);
                     for cell in &mut row.cells {
                         clear(&mut cell.meta);
-                        normalize_inlines(&mut cell.children);
+                        inlines(&mut cell.children);
                     }
                 }
             }
-            Block::MathBlock(node) => clear(&mut node.meta),
+            Block::MathBlock(node) => {
+                clear(&mut node.meta);
+                if layout && node.value.ends_with('\n') {
+                    node.value.pop();
+                }
+            }
             Block::Frontmatter(node) => clear(&mut node.meta),
             Block::MdxEsm(node) => clear(&mut node.meta),
             Block::MdxExpression(node) => clear(&mut node.meta),
             Block::MdxJsx(node) => clear(&mut node.meta),
             Block::LeafDirective(node) => {
                 clear(&mut node.meta);
-                normalize_inlines(&mut node.label);
+                inlines(&mut node.label);
             }
             Block::ContainerDirective(node) => {
                 clear(&mut node.meta);
-                normalize_inlines(&mut node.label);
-                normalize_blocks(&mut node.children);
+                inlines(&mut node.label);
+                normalize_blocks(&mut node.children, layout);
             }
         }
     }
@@ -166,6 +207,45 @@ fn normalize_inlines(inlines: &mut Vec<Inline>) {
         }
     }
     *inlines = normalized;
+}
+
+/// Clears what a code span's writing chooses, so that it compares by value.
+fn clear_code_fences(inlines: &mut [Inline]) {
+    for inline in inlines {
+        match inline {
+            Inline::Code(node) => {
+                node.raw.clear();
+                node.fence_length = 0;
+            }
+            Inline::Emphasis(node) => clear_code_fences(&mut node.children),
+            Inline::Strong(node) => clear_code_fences(&mut node.children),
+            Inline::Underline(node) => clear_code_fences(&mut node.children),
+            Inline::Delete(node) => clear_code_fences(&mut node.children),
+            Inline::Insert(node) => clear_code_fences(&mut node.children),
+            Inline::Mark(node) => clear_code_fences(&mut node.children),
+            Inline::Subscript(node) => clear_code_fences(&mut node.children),
+            Inline::Superscript(node) => clear_code_fences(&mut node.children),
+            Inline::Spoiler(node) => clear_code_fences(&mut node.children),
+            Inline::InlineFootnote(node) => clear_code_fences(&mut node.children),
+            Inline::Link(node) => clear_code_fences(&mut node.children),
+            Inline::Image(node) => clear_code_fences(&mut node.alt),
+            Inline::LinkReference(node) => clear_code_fences(&mut node.children),
+            Inline::ImageReference(node) => clear_code_fences(&mut node.alt),
+            Inline::TextDirective(node) => clear_code_fences(&mut node.label),
+            Inline::Text(_)
+            | Inline::Escape(_)
+            | Inline::CharacterReference(_)
+            | Inline::SoftBreak(_)
+            | Inline::LineBreak(_)
+            | Inline::Shortcode(_)
+            | Inline::Html(_)
+            | Inline::Math(_)
+            | Inline::FootnoteReference(_)
+            | Inline::WikiLink(_)
+            | Inline::MdxExpression(_)
+            | Inline::MdxJsx(_) => {}
+        }
+    }
 }
 
 fn children(meta: &mut NodeMeta, children: &mut Vec<Inline>) -> Option<String> {

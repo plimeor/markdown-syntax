@@ -225,14 +225,18 @@ Specs:
   - Turned down: rendering children once per choice, which is the cycle
     `RenderMemo` hides.
 - **Block layout from the trace.** The serializer first writes the default
-  layout. When the trace shows a written line landed in a container or block
-  other than its own, the serializer applies one of its layout alternatives
-  there and then verifies:
-  - a blank line or empty quote line that ends the earlier block;
+  layout. It then parses the whole output and compares it with the document
+  apart from what the serializer chooses (list markers, code fences, heading
+  forms). Where a written line landed in a container or block other than its
+  own, the serializer applies one of its layout alternatives to a node on the
+  way to that difference and then verifies, withdrawing an alternative that
+  leaves the difference where it was:
+  - an empty quote line that ends a quote's last paragraph;
   - an empty first quote line;
   - an item's first block moved to the line after its marker;
   - a paragraph continuation line indented;
-  - a nested list's markers indented past the block after it.
+  - a nested list's markers indented past the block after it;
+  - a list marker other than the next list's, so adjacent lists stay apart.
 
   Examples are a paragraph read as a lazy line of a quote and an HTML block
   read into a nested item. The trace decides when an alternative applies, so
@@ -344,7 +348,7 @@ Specs:
 - [x] 3.1 Add the crate-private syntax trace: bytes read as syntax, the emphasis and strong runs read where they were written, the cells a table drops, and the block a written line landed in; the flanking a `_` run would have comes from the parser's own flanking function. Verified by unit tests comparing the trace with the parsed tree over the generated inputs from `src/test_support.rs`.
 - [x] 3.2 Escape pipeline: escape rule, escape forms, three rounds, edge encoding, fallback, and `SerializeError::Unrepresentable`. Delete the predicates, `serialize_reading_back`, `RunStyle`, `AutolinkEdges`, `RenderMemo`, the escape memos, and `src/serialize/escape_scan_tests.rs`. Verified by the serialization "Syntax rules come from the parser", "Escape forms", "Escaping keeps text literal", "Invalid documents are rejected", and Serialize options scenarios.
 - [x] 3.3 Delimiter choice from the parser's flanking, switching abutting runs one at a time. Verified by serialization "Abutting attention runs" (both scenarios), "Text delimiter after a closing run", and untrusted-input-cost "Deeply nested emphasis".
-- [ ] 3.4 Block layout from the trace: the layout alternatives in Design, applied where a written line lands in the wrong container or block. Verified by:
+- [x] 3.4 Block layout from the trace: the layout alternatives in Design, applied where a written line lands in the wrong container or block. Verified by:
   - serialization "Nested list before an indented block" and "Paragraph after an empty quote line in an item";
   - the retained layout scenarios "Thematic break opening a list item", "Whitespace that opens a list item's first block", "Math opening a definition's paragraph", and "Alert title and empty container directive";
   - the round-trip fixtures.

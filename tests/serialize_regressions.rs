@@ -112,7 +112,8 @@ mod serializer {
         let overridden = document
             .to_markdown_with(&options)
             .expect("document serializes with options");
-        assert_eq!(overridden, "+ a\n\n+ b\n\n+ c\n");
+        // The override yields where two adjacent lists would read as one.
+        assert_eq!(overridden, "+ a\n\n- b\n\n+ c\n");
     }
 
     #[test]
@@ -651,48 +652,44 @@ mod serializer {
     }
 
     #[test]
-    fn definition_labels_escape_brackets_backslashes_and_newlines() {
-        let document = Document {
+    fn definition_labels_read_back_only_in_their_raw_spelling() {
+        let definition = |label: &str, identifier: &str| Document {
             meta: NodeMeta::default(),
-            children: vec![
-                Block::Definition(Definition {
-                    meta: NodeMeta::default(),
-                    label: "a]b\\c[d".into(),
-                    identifier: "a]b\\c[d".into(),
-                    destination: "/bracket".into(),
-                    destination_kind: LinkDestinationKind::Bare,
-                    title: None,
-                    title_kind: None,
-                }),
-                Block::Definition(Definition {
-                    meta: NodeMeta::default(),
-                    label: "line\nbreak".into(),
-                    identifier: "line break".into(),
-                    destination: "/newline".into(),
-                    destination_kind: LinkDestinationKind::Bare,
-                    title: None,
-                    title_kind: None,
-                }),
-            ],
+            children: vec![Block::Definition(Definition {
+                meta: NodeMeta::default(),
+                label: label.into(),
+                identifier: identifier.into(),
+                destination: "/u".into(),
+                destination_kind: LinkDestinationKind::Bare,
+                title: None,
+                title_kind: None,
+            })],
         };
 
-        let markdown = document.to_markdown().expect("document serializes");
-        assert!(markdown.contains("[a\\]b\\\\c\\[d]: /bracket"));
-        assert!(markdown.contains("[line&#xA;break]: /newline"));
-
         // CommonMark matches reference labels on their RAW text (no backslash
-        // unescape, no entity decode), so a label that must escape `]`/`[`/`\` to
-        // serialize re-parses to the escaped raw identifier, and the parsed
-        // reference would match it because it folds identically.
-        let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
-        match &reparsed.children[..] {
-            [Block::Definition(bracket), Block::Definition(newline)] => {
-                assert_eq!(bracket.identifier, "a\\]b\\\\c\\[d");
-                assert_eq!(bracket.destination, "/bracket");
-                assert_eq!(newline.identifier, "line&#xa;break");
-                assert_eq!(newline.destination, "/newline");
+        // unescape, no entity decode), so a label holding an unescaped bracket
+        // has no spelling that reads back as itself.
+        assert!(matches!(
+            definition("a]b\\c[d", "a]b\\c[d").to_markdown(),
+            Err(SerializeError::Unrepresentable(_))
+        ));
+
+        // A label may span lines, and its escapes stay as written.
+        for (label, identifier, written) in [
+            ("line\nbreak", "line break", "[line\nbreak]: /u\n"),
+            ("a\\]b\\\\c\\[d", "a\\]b\\\\c\\[d", "[a\\]b\\\\c\\[d]: /u\n"),
+        ] {
+            let document = definition(label, identifier);
+            let markdown = document.to_markdown().expect("document serializes");
+            assert_eq!(markdown, written);
+            let reparsed = parse_document(&markdown, &SyntaxOptions::commonmark());
+            match &reparsed.children[..] {
+                [Block::Definition(definition)] => {
+                    assert_eq!(definition.label, label);
+                    assert_eq!(definition.identifier, identifier);
+                }
+                other => panic!("unexpected document shape: {other:?}"),
             }
-            other => panic!("unexpected document shape: {other:?}"),
         }
     }
 
@@ -2305,6 +2302,7 @@ mod read_back_contract {
             ("-\n  ---", "-\n  ---\n"),
             ("==a\\== b==", "==a\\== b==\n"),
             ("[o]:u\n\t$$\na$$", "[o]: u\n    $$\na$$\n"),
+            ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
         ] {
             assert_eq!(written(source), expected, "{source:?}");
         }
@@ -2420,7 +2418,6 @@ mod read_back_contract {
     }
 
     #[test]
-    #[ignore = "block layout from the read-back lands with plan task 3.4"]
     fn block_layouts_read_back() {
         for source in ["- > a\n  >\n  b\n  ---", "- > a\n  >\n  | b |\n  | - |"] {
             written(source);
