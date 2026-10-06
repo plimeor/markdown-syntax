@@ -6,6 +6,9 @@
 //! that helper functions and test names cannot collide across the merged
 //! sources.
 
+#[path = "support/normalize.rs"]
+mod normalize;
+
 mod review_block {
     //! Regression tests for the block-level parser defects fixed in the 2026-06-18
     //! review. Each asserts the CommonMark-correct
@@ -410,6 +413,37 @@ mod parser {
             output.document.children.as_slice(),
             [Block::HtmlBlock(_)]
         ));
+    }
+
+    #[test]
+    fn tab_indented_details_in_an_item_measure_columns_from_the_item() {
+        // The item takes two of the tab's columns; the rest is indentation
+        // of at most three columns, so these are details containers.
+        for source in [
+            "- a\n\t<details>\n\n\tx\n\t</details>",
+            "- <details>\n\n  x\n  \t</details>",
+            "- a\n\t<details>\n\t<summary>\n\t\t\tExample\n\t</summary>\n\n\tb\n\t</details>\n",
+        ] {
+            let document = SyntaxOptions::default().parse(source).document;
+            let [Block::List(list)] = document.children.as_slice() else {
+                panic!("{source:?}: expected one list, got {:?}", document.children);
+            };
+            assert!(
+                list.children[0]
+                    .children
+                    .iter()
+                    .any(|block| matches!(block, Block::HtmlContainer(_))),
+                "{source:?}: {:?}",
+                list.children[0].children
+            );
+            let markdown = document.to_markdown().expect("document serializes");
+            let reparsed = SyntaxOptions::default().parse(&markdown).document;
+            assert_eq!(
+                format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+                format!("{:?}", crate::normalize::normalized(&document.children)),
+                "{source:?} -> {markdown:?}"
+            );
+        }
     }
 
     #[test]

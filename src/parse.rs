@@ -551,9 +551,9 @@ fn html_container_close_step(lines: &[Line<'_>], cursor: usize, tag: &str) -> Br
     let Some(line) = lines.get(cursor) else {
         return BracketStep::End;
     };
-    if let Some(fence) = html_container_fence_opens(line.text) {
+    if let Some(fence) = html_container_fence_opens(line) {
         let after_fence = (cursor + 1..lines.len())
-            .find(|close| html_container_fence_closes(lines[*close].text, fence))
+            .find(|close| html_container_fence_closes(&lines[*close], fence))
             .map_or(lines.len(), |close| close + 1);
         return BracketStep::Pass(after_fence);
     }
@@ -571,7 +571,7 @@ fn parse_html_container_tag_line(
     tag: &str,
     kind: HtmlContainerTag,
 ) -> Option<HtmlTag> {
-    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    let (trimmed, indent_bytes) = trim_html_container_line(&line)?;
     let (end, name) = parse_html_tag(trimmed, 0)?;
     if !name.eq_ignore_ascii_case(tag) || !is_blank(&trimmed[end..]) {
         return None;
@@ -596,7 +596,7 @@ fn parse_html_container_tag_line(
 }
 
 fn parse_html_container_opening_line(line: Line<'_>, tag: &str) -> Option<HtmlTag> {
-    let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
+    let (trimmed, indent_bytes) = trim_html_container_line(&line)?;
     let (end, name) = parse_html_tag(trimmed, 0)?;
     if !name.eq_ignore_ascii_case(tag)
         || html_tag_is_closing(trimmed, 0)
@@ -642,9 +642,11 @@ fn html_container_line_has_summary(input: &str) -> bool {
         && is_blank(&input[close_end..])
 }
 
-fn trim_html_container_line(input: &str) -> Option<(&str, usize)> {
-    let trimmed = trim_up_to_three_spaces(input)?;
-    Some((trimmed, input.len() - trimmed.len()))
+/// `line` from its first char other than a space or tab, when its
+/// indentation, from the column it starts at, is at most three columns.
+fn trim_html_container_line<'a>(line: &Line<'a>) -> Option<(&'a str, usize)> {
+    let (columns, bytes) = leading_indent_at(line.text, line.column);
+    (columns <= 3).then(|| (&line.text[bytes..], bytes))
 }
 
 fn leading_ascii_whitespace_len(input: &str) -> usize {
@@ -663,15 +665,15 @@ fn html_tag_is_self_closing(input: &str) -> bool {
     input.trim_end_matches([' ', '\t']).ends_with("/>")
 }
 
-fn html_container_fence_opens(line: &str) -> Option<HtmlContainerFence> {
-    let trimmed = trim_up_to_three_spaces(line)?;
+fn html_container_fence_opens(line: &Line<'_>) -> Option<HtmlContainerFence> {
+    let (trimmed, _) = trim_html_container_line(line)?;
     let (marker, length) = fence_start(trimmed)?;
     Some(HtmlContainerFence { marker, length })
 }
 
-fn html_container_fence_closes(line: &str, fence: HtmlContainerFence) -> bool {
-    trim_up_to_three_spaces(line)
-        .is_some_and(|trimmed| fence_close(trimmed, fence.marker, fence.length))
+fn html_container_fence_closes(line: &Line<'_>, fence: HtmlContainerFence) -> bool {
+    trim_html_container_line(line)
+        .is_some_and(|(trimmed, _)| fence_close(trimmed, fence.marker, fence.length))
 }
 
 fn html_block_start(input: &str) -> Option<HtmlBlockKind> {
@@ -5531,7 +5533,13 @@ fn is_list_padding_byte(byte: Option<u8>) -> bool {
 }
 
 fn leading_indent(input: &str) -> (usize, usize) {
-    let mut column = 0usize;
+    leading_indent_at(input, 0)
+}
+
+/// The columns and bytes of `input`'s leading spaces and tabs, its first
+/// char at source column `start`, from which tabs reach their stops.
+fn leading_indent_at(input: &str, start: usize) -> (usize, usize) {
+    let mut column = start;
     let mut bytes = 0usize;
     for byte in input.as_bytes() {
         match *byte {
@@ -5541,7 +5549,7 @@ fn leading_indent(input: &str) -> (usize, usize) {
         }
         bytes += 1;
     }
-    (column, bytes)
+    (column - start, bytes)
 }
 
 fn task_marker_checked(input: &str) -> Option<bool> {

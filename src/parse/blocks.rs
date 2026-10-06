@@ -208,6 +208,14 @@ impl<'a> Cursor<'a> {
     fn view(&self, offset: usize) -> Line<'a> {
         view(&self.line, offset)
     }
+
+    /// The line from the column reached, as a line of its own: a tab split
+    /// there spans only the columns left of it.
+    fn rest_view(&self) -> Line<'a> {
+        let mut line = view(&self.line, self.offset);
+        line.column = self.column;
+        line
+    }
 }
 
 /// `line` from byte `offset` of its text on.
@@ -881,7 +889,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
             Kind::Table(table) => {
                 let row = cursor.rest();
-                let row_line = cursor.view(cursor.offset);
+                let row_line = cursor.rest_view();
                 let mut cells = table_row_cells(&row_line, row, options.constructs.spoiler);
                 cells.truncate(table.alignments.len());
                 while cells.len() < table.alignments.len() {
@@ -1590,7 +1598,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let line = cursor.line;
         let source = cursor.view(cursor.next_nonspace);
         let (opening, summary) = details_opening(&source)?;
-        let first = cursor.view(cursor.offset);
+        let first = cursor.rest_view();
         let lookahead = self.lookahead(container, index, first, false);
         let from = index - lookahead.first;
         let Lookahead { lines, closes, .. } = lookahead;
@@ -1635,12 +1643,9 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let Kind::HtmlContainer { opening, .. } = top.kind else {
             unreachable!("an HTML container closes here");
         };
-        let closing = parse_html_container_tag_line(
-            cursor.view(cursor.offset),
-            "details",
-            HtmlContainerTag::Closing,
-        )
-        .unwrap_or_else(|| closing_details_tag(line.end_with_eol));
+        let closing =
+            parse_html_container_tag_line(cursor.rest_view(), "details", HtmlContainerTag::Closing)
+                .unwrap_or_else(|| closing_details_tag(line.end_with_eol));
         let span = Span::new(top.start, line.end_with_eol);
         let parent = self.stack.last_mut().expect("the document stays open");
         parent.children.push(Child {
@@ -1683,7 +1688,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let byte = cursor.nonspace_byte();
         let open_byte = cursor.next_nonspace - cursor.offset;
         if constructs.mdx_expression_block && byte == Some(b'{') {
-            let first = cursor.view(cursor.offset);
+            let first = cursor.rest_view();
             let lookahead = self.lookahead(container, index, first, true);
             let from = index - lookahead.first;
             let Lookahead {
@@ -1715,7 +1720,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
         }
         if constructs.mdx_jsx_block && byte == Some(b'<') {
-            let first = cursor.view(cursor.offset);
+            let first = cursor.rest_view();
             let lookahead = self.lookahead(container, index, first, true);
             let from = index - lookahead.first;
             let Lookahead {
@@ -1899,10 +1904,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 _ => true,
             };
             if !continues {
-                return (lazy && !cursor.blank).then(|| cursor.view(cursor.offset));
+                return (lazy && !cursor.blank).then(|| cursor.rest_view());
             }
         }
-        Some(cursor.view(cursor.offset))
+        Some(cursor.rest_view())
     }
 
     fn start_setext(&mut self, depth: u8, index: usize) -> Option<Started> {
