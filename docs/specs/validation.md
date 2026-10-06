@@ -23,12 +23,13 @@ diagnostic per invalid node it finds, and an empty list for a valid document.
 Validation SHALL reject: a heading depth outside 1–6; a table with no rows or
 no columns; empty inline math;
 an empty emphasis-like container; an escape of a non-punctuation character; an
-autolink containing whitespace or angle brackets; inline code whose raw text
-holds a backtick run exactly as long as its fence; an ordered list start beyond
-the parser's 9-digit marker limit; a hard line break ending inline content
-other than link text, image alt text, an inline footnote, or a text directive
-label, all of which close with a `]`; and a definition with an empty or blank
-identifier.
+angle-bracket autolink whose destination holds a space, an ASCII control
+char, or an angle bracket; inline code whose raw text holds a backtick run
+exactly as long as its fence; an ordered list start beyond the parser's
+9-digit marker limit; a hard line break ending inline content other than link
+text, image alt text, an inline footnote, or a text directive label, all of
+which close with a `]`; and a definition whose identifier is empty or holds
+only spaces, tabs, and line endings.
 
 #### Scenario: Empty emphasis
 - **WHEN** a paragraph holding an `Emphasis` with no children is validated
@@ -45,6 +46,10 @@ identifier.
 #### Scenario: Hard line break ending link text
 - **WHEN** `parse("[a\\\n](u)").document.validate()` runs
 - **THEN** it returns an empty list, and `to_markdown()` writes `[a\\\n](u)\n`
+
+#### Scenario: No-break space in an angle-bracket autolink
+- **WHEN** `parse("<http://a\u{a0}b>").document.validate()` runs
+- **THEN** it returns an empty list, and the document holds an `Autolink` to `http://a\u{a0}b`
 
 ### Requirement: Conservative scope
 Validation SHALL check only the shapes listed by this spec and SHALL NOT be

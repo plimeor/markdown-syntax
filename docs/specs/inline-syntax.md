@@ -28,6 +28,26 @@ spans, links, and emphasis.
 - **WHEN** `"[foo][bar\n\n[foo]: /u"` is parsed with the CommonMark preset
 - **THEN** the paragraph holds a shortcut `LinkReference` to `foo` followed by `Text("[bar")`
 
+#### Scenario: Rule of three counts whole delimiter runs
+- **WHEN** `"*a***b*"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds an `Emphasis` containing `a`, `Text("*")`, and an `Emphasis` containing `b`
+
+#### Scenario: Image whose resource is invalid
+- **WHEN** `"![foo](a b)\n\n[foo]: /u"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds a shortcut `ImageReference` to `foo` followed by `Text("(a b)")`
+
+#### Scenario: Underscore after Unicode punctuation
+- **WHEN** `"«_**]**_"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("«")` and an `Emphasis` containing a `Strong` containing `]`
+
+#### Scenario: Escaped backslash before a line ending
+- **WHEN** `"a\\\\\nb"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("a\\")`, a `SoftBreak`, and `Text("b")`
+
+#### Scenario: Space inside a bare destination's parentheses
+- **WHEN** `"[a](( ))"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("[a](( ))")` and no `Link`
+
 #### Scenario: CommonMark oracle cases
 - **WHEN** the inline cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
 - **THEN** the output matches the expected HTML
@@ -195,3 +215,47 @@ with a closer inside the same label.
 #### Scenario: Emphasis opener before a link
 - **WHEN** `"*[foo*](/u)"` is parsed with `parse`
 - **THEN** the paragraph holds `Text("*")` followed by a `Link` whose text is `foo*`
+
+### Requirement: Footnote labels
+The parser SHALL read `[^label]` as a footnote reference, and `[^label]:` as a
+footnote definition, only when the label is non-empty, holds no space, tab, or
+line ending, and, as a link label, holds no unescaped `[` or `]`.
+
+#### Scenario: Bracket inside a footnote label
+- **WHEN** `"^*[^[^]]"` and `"[^a[b]"` are parsed with `parse`
+- **THEN** neither paragraph holds a `FootnoteReference`, while `"[^a\\[b]"` holds one
+
+### Requirement: Reference label matching
+Two link labels SHALL match when they agree after Unicode case folding,
+trimming, and collapsing each run of spaces, tabs, and line endings to one
+space; any other whitespace char is matched as written.
+
+#### Scenario: No-break space in a label
+- **WHEN** `"[a\u{a0}b]\n\n[a b]: /u"` is parsed
+- **THEN** the paragraph holds no `LinkReference`
+
+### Requirement: Angle-bracket autolink URI
+The parser SHALL read `<scheme:rest>` as an autolink when the scheme is valid
+and the rest holds no space, ASCII control char, `<`, or `>`; any other
+whitespace char is part of the URI.
+
+#### Scenario: No-break space in an angle-bracket autolink
+- **WHEN** `"<http://a\u{a0}b>"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds an `Autolink` to `http://a\u{a0}b`
+
+### Requirement: Hard line breaks from spaces
+A line ending SHALL be a hard break when two or more spaces the source holds,
+and no tab, end the line; spaces or tabs a character reference writes are
+text, and only the source's spaces and tabs before a soft break are removed.
+
+#### Scenario: Referenced space before a line ending
+- **WHEN** `"a&#x20; \nb"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds `Text("a ")`, a `SoftBreak`, and `Text("b")`
+
+### Requirement: Processing instructions
+Raw inline HTML SHALL read `<?` as a processing instruction only when a `?>`
+after the `<?` closes it.
+
+#### Scenario: `<?>` is text
+- **WHEN** `"a<?> b"` is parsed with the CommonMark preset
+- **THEN** the paragraph holds no `Html` inline

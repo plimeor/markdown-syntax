@@ -302,6 +302,15 @@ Specs:
   - a container directive opener inside an HTML block, which the directive
     counts as nested (`:::e\n<y>\n:::e`).
 
+- [Findings accepted at archive] → The re-verify of group 19 found that its
+  quote and list column tracking (`OpenParagraphIn`, `OpenBlock.item_column`)
+  fixes 378 generated nested-container inputs and newly breaks 13, a panic in
+  `prefix_ends_with_gfm_email` on `"\u{a0}e+@"` that predates this plan, and
+  gaps in the growth and corpus tests. They were accepted for archive and are
+  tracked, with the residual classes above, in plimeor/markdown-syntax#11,
+  which replaces the container re-prediction and the serializer's copies of
+  parser rules at their root.
+
 - [Tabs after a split tab] → Once a container marker splits a tab, the later
   tabs that open the line are expanded to spaces, inside a fence or HTML
   block too: `>\t\t\tfoo` gives a code block of six spaces and `foo` where
