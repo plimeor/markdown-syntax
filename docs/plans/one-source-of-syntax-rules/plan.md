@@ -383,7 +383,7 @@ Specs:
   Update the README examples. Verified by the README doc-test in `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
 
 ### 7. Integration checks
-- [ ] 7.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
-- [ ] 7.2 `cargo test --features html --test html_conformance -- --nocapture` numbers are observed before and after the change and reported in the PR, not stored.
-- [ ] 7.3 Every parse case in #11 matches commonmark.js or is one of the divergences listed under Out of scope. Every round-trip case in #11 reads back. The seeded generators are clean.
-- [ ] 7.4 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
+- [x] 7.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
+- [x] 7.2 `cargo test --features html --test html_conformance -- --nocapture` numbers are observed before and after the change and reported in the PR, not stored.
+- [x] 7.3 Every parse case in #11 matches commonmark.js or is one of the divergences listed under Out of scope. Every round-trip case in #11 reads back. The seeded generators are clean.
+- [x] 7.4 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
