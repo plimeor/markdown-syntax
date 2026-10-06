@@ -19,8 +19,8 @@ use crate::{
     memo::{pattern_starts, PathMemo, Positions, Step},
     parse::{
         continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
-        line_starts_html_block, line_starts_interrupting_html_block, line_starts_math_block,
-        literal_autolink_extents,
+        line_opens_alert, line_starts_html_block, line_starts_interrupting_html_block,
+        line_starts_math_block, literal_autolink_extents,
     },
     validate::{is_directive_name, validate_document},
 };
@@ -276,6 +276,11 @@ fn serialize_block(
             let inner = serialize_blocks_at_start(&node.children, options, false)?;
             if inner.is_empty() {
                 Ok(">".into())
+            } else if line_opens_alert(inner.split('\n').next().unwrap_or("")) {
+                // A raw label such as a definition's `[!NOTE]` on the quote's
+                // first line would make it an alert; an empty first line
+                // keeps it a quote.
+                Ok(alloc::format!(">\n{}", prefix_lines(&inner, "> ")))
             } else {
                 Ok(prefix_lines(&inner, "> "))
             }
@@ -1113,8 +1118,25 @@ fn serialize_item_blocks(
     options: &SerializeOptions,
     tight: bool,
 ) -> Result<String, SerializeError> {
+    // Written last to first, as at the top level: a list reads the
+    // indentation of the block after it.
+    let mut written: Vec<String> = Vec::with_capacity(blocks.len());
+    for block in blocks.iter().rev() {
+        let next_indent = written
+            .last()
+            .map(|next: &String| next.len() - next.trim_start_matches(' ').len());
+        written.push(match (block, next_indent) {
+            (Block::List(list), Some(indent @ 1..=3)) => {
+                serialize_list_with_marker_spacing(list, options, &" ".repeat(indent), " ")?
+            }
+            (Block::List(list), Some(4..)) => {
+                serialize_list_with_marker_spacing(list, options, " ", "    ")?
+            }
+            _ => serialize_block(block, options, false)?,
+        });
+    }
     let mut output = String::new();
-    for (index, block) in blocks.iter().enumerate() {
+    for (index, (block, written)) in blocks.iter().zip(written.iter().rev()).enumerate() {
         if index > 0 {
             if tight {
                 output.push('\n');
@@ -1122,7 +1144,7 @@ fn serialize_item_blocks(
                 output.push_str("\n\n");
             }
         }
-        output.push_str(&serialize_block(block, options, false)?);
+        output.push_str(written);
         if tight
             && matches!(block, Block::BlockQuote(_) | Block::Alert(_))
             && matches!(blocks.get(index + 1), Some(Block::Paragraph(_)))
@@ -1834,9 +1856,13 @@ fn render_inlines(
                             .then(|| (original, &segment[segment.len() - tail..]))
                     })
                 });
+                // A text directive opens only after whitespace, so the
+                // whitespace before one stays raw too.
                 let before_literal_autolink = context.autolink_edges
                     != AutolinkEdges::EncodedBefore
-                    && inlines.get(index + 1).is_some_and(is_gfm_literal_autolink);
+                    && inlines.get(index + 1).is_some_and(|next| {
+                        is_gfm_literal_autolink(next) || matches!(next, Inline::TextDirective(_))
+                    });
                 let raw_edges = context.autolink_edges == AutolinkEdges::RawEdges;
                 let at_line_start = output_line.len(&output) == 0;
                 let opens_block_line = breaks_line_start(&output, &mut output_line, opens_line);
@@ -1854,9 +1880,12 @@ fn render_inlines(
                 // reparse — emit the trailing space/tab run literally instead.
                 let render = |lead: &str, body: &str| {
                     let head = body.trim_end_matches([' ', '\t']);
-                    // Whitespace that opens a line stays encoded: written
-                    // literally, the line would drop it.
-                    let whole_line_start = opens_block_line && lead.is_empty() && head.is_empty();
+                    // Whitespace that opens a line or a table cell stays
+                    // encoded: written literally, the line or cell would drop
+                    // it.
+                    let cell_start = context.table_cell && !opens_span && index == 0;
+                    let whole_line_start =
+                        (opens_block_line || cell_start) && lead.is_empty() && head.is_empty();
                     let (escape_body, trailing_ws) = if before_literal_autolink && !whole_line_start
                     {
                         (head, &body[head.len()..])
@@ -1982,21 +2011,25 @@ fn render_inlines(
                     rendered.push_str("&#x40;");
                 }
                 // A `:` ending the text would open a shortcode that a `:` in
-                // the literal autolink after it closes, or that a span after it
-                // names with its `++` or `_` delimiters.
+                // the literal autolink after it closes, or that a span after it,
+                // or the end of the span around it, names with its `++` or `_`
+                // delimiters.
+                let names_shortcode = written_later.contains(':')
+                    && match inlines.get(index + 1) {
+                        Some(
+                            Inline::Insert(_)
+                            | Inline::Underline(_)
+                            | Inline::Strong(_)
+                            | Inline::Emphasis(_),
+                        ) => true,
+                        Some(_) => false,
+                        None => written_later.contains('+') || written_later.contains('_'),
+                    };
                 if (inlines
                     .get(index + 1)
                     .and_then(literal_autolink_original)
                     .is_some()
-                    || (matches!(
-                        inlines.get(index + 1),
-                        Some(
-                            Inline::Insert(_)
-                                | Inline::Underline(_)
-                                | Inline::Strong(_)
-                                | Inline::Emphasis(_)
-                        )
-                    ) && written_later.contains(':')))
+                    || names_shortcode)
                     && ends_with_unescaped(&rendered, ':')
                 {
                     rendered.insert(rendered.len() - 1, '\\');
@@ -2428,11 +2461,19 @@ fn render_inlines(
                 }
             }
         }
-        if output[segment_start..].contains('`') && holds_reference(inline) {
+        if holds_unescaped_backtick(&output[segment_start..]) && holds_reference(inline) {
             raw_backtick_before = true;
         }
     }
     Ok(output)
+}
+
+/// Whether `written` holds a backtick no backslash escapes, which could open
+/// a code span.
+fn holds_unescaped_backtick(written: &str) -> bool {
+    written
+        .match_indices('`')
+        .any(|(index, _)| !ends_with_unescaped(&written[..index], '\\'))
 }
 
 /// Whether `inline` is a reference or a span holding one, whose raw label
@@ -2950,13 +2991,15 @@ fn escape_text_with_context(
             '+' if run_escaped(view, offset, b'+', &mut scan, &mut plus_run, |scan, at| {
                 text_attention_delimiter_can_start(view, at, "++", false, scan)
                     || text_doubled_delimiter_can_close(view, at, "++", scan)
+                    || text_edge_joins_delimiter(view, at, '+', scan)
             }) =>
             {
                 output.push('\\');
                 output.push(char);
             }
             '=' if text_attention_delimiter_can_start(view, offset, "==", false, &mut scan)
-                || text_doubled_delimiter_can_close(view, offset, "==", &scan) =>
+                || text_doubled_delimiter_can_close(view, offset, "==", &scan)
+                || text_edge_joins_delimiter(view, offset, '=', &scan) =>
             {
                 output.push('\\');
                 output.push(char);
@@ -2996,6 +3039,13 @@ fn text_attention_delimiter_can_start(
 
     scan.written_later(marker)
         || scan.attention_closer_follows(marker, offset + marker.len(), underscore)
+}
+
+/// Whether the `+` or `=` at `offset` opens or ends the text beside a `++` or
+/// `==` delimiter written before or after it, whose run it would lengthen.
+fn text_edge_joins_delimiter(input: &str, offset: usize, char: char, scan: &TextScan) -> bool {
+    (offset == 0 && scan.written_before.contains(char))
+        || (offset + char.len_utf8() == input.len() && scan.written_later.contains(char))
 }
 
 /// Whether the `++` or `==` at `offset` could close one written before the

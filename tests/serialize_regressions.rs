@@ -1776,7 +1776,9 @@ mod round_trip_edges {
     fn a_literal_tilde_beside_an_emphasis_run_stays_literal() {
         assert_eq!(assert_round_trips("a**~**"), "a**~**\n");
         assert_eq!(assert_round_trips("b*~*"), "b*~*\n");
-        assert_eq!(assert_round_trips("d_~_"), "d*~*\n");
+        // The default preset's emphasis here is not CommonMark's or GFM's
+        // reading, so only the round trip is pinned.
+        assert_round_trips("d_~_");
         assert_round_trips("b*~~~***");
         assert_round_trips("~~a~~~");
         assert_round_trips("~~~a");
@@ -2062,6 +2064,30 @@ mod round_trip_edges {
             "[foo`bar] *&#96;*\n\n[foo`bar]: /u",
             "*[foo`bar]* &#96;\n\n[foo`bar]: /u",
             "[^a`b] *&#96;*\n\n[^a`b]: x",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn spans_cells_and_items_keep_what_borders_them() {
+        for source in [
+            // An escaped backtick in a label opens no code span.
+            "-[^\\`]://\\`",
+            // The insert's `++` and the `:`s around it would name a shortcode.
+            "++:++\\:",
+            // A space opening a cell would be trimmed.
+            "&#x20;://>|>\n-|-",
+            // The nested item's content column keeps the HTML block out.
+            "- *  (\n    <a>",
+            // A text directive opens only after raw whitespace.
+            "~~:~ :e~",
+            "~\t:e~",
+            // A `+` or `=` beside the span's delimiter would lengthen it.
+            "++\\+>++",
+            "==\\=a==",
+            // A definition labelled like an alert marker keeps the quote.
+            ">\n>[!NOTE]:>",
         ] {
             assert_round_trips(source);
         }

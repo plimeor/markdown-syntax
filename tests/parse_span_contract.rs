@@ -546,9 +546,11 @@ fn corpus_inputs() -> Vec<(String, String)> {
     let mut inputs = Vec::new();
     for path in files {
         let name = path.display().to_string();
-        let Ok(text) = std::fs::read_to_string(Path::new(&path)) else {
+        if !name.ends_with(".cases") && !name.ends_with(".md") {
             continue;
-        };
+        }
+        let text = std::fs::read_to_string(Path::new(&path))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
         if name.ends_with(".cases") {
             let mut rest = text.as_str();
             let mut index = 0;
@@ -558,6 +560,25 @@ fn corpus_inputs() -> Vec<(String, String)> {
                 index += 1;
                 inputs.push((format!("{name} case {index}"), after[..end].to_string()));
                 rest = &after[end..];
+            }
+            // Round-trip cases name their body's length in bytes:
+            // `--- case N [profile P] bytes B`, the body, then `--- end`.
+            let mut rest = if text.starts_with("# markdown-syntax AST->HTML conformance suite") {
+                ""
+            } else {
+                text.as_str()
+            };
+            while let Some(start) = rest.find("--- case ") {
+                let header_end = start + rest[start..].find('\n').expect("case header ends");
+                let header = &rest[start..header_end];
+                let bytes: usize = header
+                    .rsplit(' ')
+                    .next()
+                    .and_then(|len| len.parse().ok())
+                    .unwrap_or_else(|| panic!("{name}: case header {header:?}"));
+                let body = &rest[header_end + 1..header_end + 1 + bytes];
+                inputs.push((format!("{name} {header}"), body.to_string()));
+                rest = &rest[header_end + 1 + bytes..];
             }
         } else if name.ends_with(".md") && !name.ends_with(".canonical.md") {
             inputs.push((name, text));

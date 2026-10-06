@@ -1551,6 +1551,11 @@ fn parse_alert_from_block_quote(
     }))
 }
 
+/// Whether a block quote whose first line is `line` reads as an alert.
+pub(crate) fn line_opens_alert(line: &str) -> bool {
+    parse_alert_marker(line).is_some()
+}
+
 fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
     let close = line.find(']')?;
     let marker = line.get(0..close + 1)?;
