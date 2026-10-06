@@ -6,6 +6,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/plimeor/markdown-syntax/compare/v0.3.0...v0.4.0) - 2026-10-06
+
+### Added
+
+- [**breaking**] rebuild block parsing and serializer escaping on one source of syntax rules ([#15](https://github.com/plimeor/markdown-syntax/pull/15))
+
+### Fixed
+
+- map spans to their source and fix CommonMark parse and round-trip defects ([#12](https://github.com/plimeor/markdown-syntax/pull/12))
+
 ### Migration
 
 This release changes the AST, the parse of block structure, and the
