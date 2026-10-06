@@ -459,6 +459,39 @@ fn block_containers_grow_linearly_with_their_lines() {
 }
 
 #[test]
+fn open_definitions_and_terms_grow_linearly() {
+    // A title left open runs to the paragraph's end; each line that could
+    // close it must not reparse the title so far.
+    for name in ["open title", "open title before pipes"] {
+        assert_linear_growth(name, 2_000, |n| {
+            let line = if name == "open title" { "\nx" } else { "\n|x" };
+            time_parse(
+                &(String::from("[a]: /u \"") + &line.repeat(n)),
+                SyntaxOptions::gfm(),
+            )
+        });
+    }
+    // An unclosed label before lines a table delimiter row could follow.
+    assert_linear_growth("open label before pipes", 2_000, |n| {
+        time_parse(
+            &(format!("[{}", "a".repeat(85)) + &"\n|x".repeat(n)),
+            SyntaxOptions::gfm(),
+        )
+    });
+    // Description markers after a long paragraph that is no term.
+    assert_linear_growth("markers after a long paragraph", 2_000, |n| {
+        time_parse(
+            &("a\n".repeat(n) + "    b\n" + &"~ x\n".repeat(n)),
+            SyntaxOptions::default(),
+        )
+    });
+    // Quoted MDX expression openers before list items.
+    assert_linear_growth("quoted expression openers", 1_000, |n| {
+        time_parse(&"> {\n- a\n".repeat(n), SyntaxOptions::mdx())
+    });
+}
+
+#[test]
 fn serialization_grows_linearly_with_runs() {
     assert_linear_growth("tilde run", 20_000, |n| {
         time_serialize(&parse(&format!("a {} b", "~".repeat(n))).document)

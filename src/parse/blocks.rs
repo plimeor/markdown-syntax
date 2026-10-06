@@ -383,6 +383,31 @@ struct ParagraphState<'a> {
     lazy_from: Option<usize>,
     /// The fewest open blocks those lines continued.
     lazy_depth: usize,
+    /// How far the lines were read as term lines: the input line index of
+    /// the first line and of the last line read, and whether all read are.
+    term_lines: Option<(usize, usize, bool)>,
+}
+
+impl ParagraphState<'_> {
+    /// Whether every line could be a description term. Lines are appended
+    /// or taken from the front, so the lines read before are not read again
+    /// while the first and last line read are still in place.
+    fn all_term_lines(&mut self) -> bool {
+        let (Some(first), Some(last)) = (self.lines.first(), self.lines.last()) else {
+            return false;
+        };
+        let (first, last) = (first.index, last.index);
+        let resume = self.term_lines.and_then(|(from, through, all)| {
+            let position = self.lines.iter().rposition(|line| line.index == through)?;
+            (from == first).then_some((position + 1, all))
+        });
+        let (next, mut all) = resume.unwrap_or((0, true));
+        if all {
+            all = self.lines[next..].iter().all(is_term_line);
+        }
+        self.term_lines = Some((first, last, all));
+        all
+    }
 }
 
 struct CodeState {
@@ -603,6 +628,27 @@ struct BlockParser<'a, 'o> {
     matched: usize,
     /// Every open block the line did not continue is closed.
     all_closed: bool,
+    /// The lookaheads of closed containers, with what their open blocks
+    /// read of a line and whether they take lazy lines. A container that
+    /// opens later under blocks that read lines alike takes one over, so
+    /// containers opening one after another do not each read the lines
+    /// ahead again.
+    retired: Vec<(Vec<ReachKey>, bool, Box<Lookahead<'a>>)>,
+}
+
+/// What `reach` reads of an open block: its kind, and the column or line it
+/// depends on.
+type ReachKey = (u8, usize);
+
+fn reach_key(kind: &Kind<'_>) -> ReachKey {
+    match kind {
+        Kind::BlockQuote { .. } => (1, 0),
+        Kind::Item { indent, .. } => (2, *indent),
+        Kind::ContainerDirective(directive) => (3, directive.fence),
+        Kind::FootnoteDefinition { .. } | Kind::Details => (4, 0),
+        Kind::HtmlContainer { close_line, .. } => (5, *close_line),
+        _ => (0, 0),
+    }
 }
 
 impl<'a, 'o> BlockParser<'a, 'o> {
@@ -625,6 +671,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             diagnostics: Vec::new(),
             matched: 1,
             all_closed: true,
+            retired: Vec::new(),
         }
     }
 
@@ -927,6 +974,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     }],
                     lazy_from: Some(0),
                     lazy_depth: matched,
+                    term_lines: None,
                 }),
                 block_start,
                 index,
@@ -1757,6 +1805,41 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             cached(&open.lookahead)
         };
         if !valid {
+            let keys: Vec<ReachKey> = self.stack[1..=frame]
+                .iter()
+                .map(|open| reach_key(&open.kind))
+                .collect();
+            let reusable =
+                self.retired
+                    .iter()
+                    .position(|(retired_keys, retired_lazy, lookahead)| {
+                        *retired_lazy == lazy
+                            && *retired_keys == keys
+                            && index >= lookahead.first
+                            && lookahead
+                                .lines
+                                .get(index - lookahead.first)
+                                .is_some_and(|line| {
+                                    core::ptr::eq(line.text, first.text)
+                                        && line.column == first.column
+                                })
+                    });
+            if let Some(position) = reusable {
+                let (_, _, lookahead) = self.retired.swap_remove(position);
+                if lazy {
+                    self.stack[frame].lazy_lookahead = Some(lookahead);
+                } else {
+                    self.stack[frame].lookahead = Some(lookahead);
+                }
+            }
+        }
+        let open = &self.stack[frame];
+        let valid = if lazy {
+            cached(&open.lazy_lookahead)
+        } else {
+            cached(&open.lookahead)
+        };
+        if !valid {
             let mut lines = alloc::vec![first];
             for next in index + 1..self.lines.len() {
                 match self.reach(frame, next, lazy) {
@@ -1892,10 +1975,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         if setext_underline_depth(delimiter).is_some() || opens_list_item(delimiter) {
             return None;
         }
-        // Definitions the paragraph starts with are not its rows.
-        self.take_paragraph_definitions();
-        let top = self.stack.last()?;
-        let Kind::Paragraph(paragraph) = &top.kind else {
+        let Kind::Paragraph(paragraph) = &self.stack.last()?.kind else {
             return None;
         };
         let header = *paragraph.lines.last()?;
@@ -1909,6 +1989,16 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
         let alignments = parse_table_delimiter(delimiter, spoiler)?;
         if split_table_row(header.text(), spoiler).len() != alignments.len() {
+            return None;
+        }
+        // Definitions the paragraph starts with are not its rows. They are
+        // taken only once the rows would form a table, so a paragraph's
+        // lines are not read again for every line that cannot start one.
+        self.take_paragraph_definitions();
+        let Kind::Paragraph(paragraph) = &self.stack.last()?.kind else {
+            return None;
+        };
+        if paragraph.lines.last().map(|line| line.index) != Some(header.index) {
             return None;
         }
         let line = cursor.line;
@@ -1973,10 +2063,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             let (term, before) = if self.stack[container].is_paragraph() {
                 // The open paragraph is the term.
                 self.take_paragraph_definitions();
-                let Kind::Paragraph(paragraph) = &self.stack[container].kind else {
+                let Kind::Paragraph(paragraph) = &mut self.stack[container].kind else {
                     return None;
                 };
-                if paragraph.lines.is_empty() || !paragraph.lines.iter().all(is_term_line) {
+                if !paragraph.all_term_lines() {
                     return None;
                 }
                 if !self.nesting_allows(container - 1) {
@@ -2129,7 +2219,24 @@ impl<'a, 'o> BlockParser<'a, 'o> {
 
     /// Closes the innermost open block.
     fn close_top(&mut self) {
-        let frame = self.stack.pop().expect("the document stays open");
+        let mut frame = self.stack.pop().expect("the document stays open");
+        if frame.lookahead.is_some() || frame.lazy_lookahead.is_some() {
+            let mut keys: Vec<ReachKey> = self.stack[1..]
+                .iter()
+                .map(|open| reach_key(&open.kind))
+                .collect();
+            keys.push(reach_key(&frame.kind));
+            for (lazy, lookahead) in [
+                (false, frame.lookahead.take()),
+                (true, frame.lazy_lookahead.take()),
+            ] {
+                if let Some(lookahead) = lookahead {
+                    self.retired
+                        .retain(|(_, retired_lazy, _)| *retired_lazy != lazy);
+                    self.retired.push((keys.clone(), lazy, lookahead));
+                }
+            }
+        }
         let fresh_item = matches!(
             self.stack.last().map(|top| &top.kind),
             Some(Kind::Item { .. })

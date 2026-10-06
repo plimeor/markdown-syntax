@@ -382,8 +382,21 @@ Specs:
 
   Update the README examples. Verified by the README doc-test in `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
 
-### 7. Integration checks
-- [x] 7.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
-- [x] 7.2 `cargo test --features html --test html_conformance -- --nocapture` numbers are observed before and after the change and reported in the PR, not stored.
-- [x] 7.3 Every parse case in #11 matches commonmark.js or is one of the divergences listed under Out of scope. Every round-trip case in #11 reads back. The seeded generators are clean.
-- [x] 7.4 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
+### 7. Verify findings
+The verify run found defects in the work above. Each task lands with a test that fails before it.
+- [x] 7.1 Parse time stays linear: a table start takes the paragraph's definitions only when a table forms; a definition title is scanned once across its lines; description details and the MDX lookahead stop rescanning the open paragraph. Verified by growth cases in `tests/pathological_inputs.rs` for each input.
+- [ ] 7.2 Lookahead lines keep the split-tab column, and the HTML container close, fence, and indented-line checks measure indentation from the line's column. Verified by the tab-indented `<details>` cases parsing as on `main` and the type-fest reduction round-tripping.
+- [ ] 7.3 An unclosed fence at the end of input without a line ending keeps its empty last line; a multi-line definition title drops continuation indentation; an alert marker line blocks indented code as a paragraph line does. Verified against commonmark.js output.
+- [ ] 7.4 The task checkbox is taken when the item's first paragraph opens, never after a definition taken from it. Verified by `- [x] a\n  ===` and `- [a]: /u\n  [x] b` matching cmark-gfm.
+- [ ] 7.5 Serialization stays linear: known labels are sorted once and read without a copy per parse; layout is verified per block, with no document-wide round cap; misplaced continuation lines are indented together; delimiter switching keeps its tried states without copying. Verified by growth cases for each input and by 33+ blocks needing a layout alternative.
+- [ ] 7.6 Read-back correctness: an item opening with a thematic break at any position, `JoinNext` between and inside items, the fallback starting from escape-only choices, idempotent output for parsed documents, the emphasis inputs the review listed, and `^://y ^` reading back without `#[ignore]`. Verified by `tests/serialize_regressions.rs` cases and a 20k-per-generator fuzz run with no failures.
+- [ ] 7.7 Inline: autolinks in a directive label do not block the enclosing link; `![[` past the bracket limit is an embed; a text directive name followed by `:` is not a directive; a scheme needs a domain char after it; the `\<punct>` autolink guard is removed. Verified by `tests/parse_inline_regressions.rs` cases.
+- [ ] 7.8 Tests: depth-growth tests assert `Ok` and can fail; "Long nested containers" times serialization; growth bounds stay at 8x; reference cases run without the `html` feature; the duplicated `#[test]`, dead profile alias, lost `![[a[b]]` case, misnamed test, and missing idempotence check in `assert_source_stable` are fixed. Verified by `cargo test` and five consecutive `cargo test --features html` runs.
+- [ ] 7.9 Cleanups: dead serializer and parser code, single-use wrappers, one tree comparison shared by `compare.rs` and the read-back, the gemoji tool emitting rustfmt-stable output, crate-private visibility of helpers whose outside callers were deleted. Verified by `cargo test` and `cargo fmt --check`.
+- [ ] 7.10 Docs: `CHANGELOG.md` lists the parse changes, the `syntax` migration step, the `SerializeError` variant, and before/after examples; spec change files match the code (bullet override, scenario titles); stale comments in `src/html/` and stale paths in `docs/specs/` and `README.md` are corrected. Verified by reading the files against the code.
+
+### 8. Integration checks
+- [ ] 8.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
+- [ ] 8.2 `cargo test --features html --test html_conformance -- --nocapture` numbers are observed before and after the change and reported in the PR, not stored.
+- [ ] 8.3 Every parse case in #11 matches commonmark.js or is one of the divergences listed under Out of scope. Every round-trip case in #11 reads back. The seeded generators are clean.
+- [ ] 8.4 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.

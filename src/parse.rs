@@ -478,16 +478,33 @@ fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usi
     let mut source = String::from(&accumulated[close + 2..]);
     let mut cursor = label_end_line;
     let mut best_without_title = None;
+    // The char that closes a title the source leaves open: a line without
+    // it cannot change the parse, so the source is parsed again only once a
+    // line holds it, which keeps a long open title linear.
+    let mut open_title: Option<char> = None;
 
     loop {
-        if let Some(resource) = parse_definition_destination_title(&source) {
-            if resource.title.is_some() {
-                return Some((definition_node(&label, resource), cursor + 1));
-            }
-            best_without_title = Some((resource, cursor + 1));
-            let next = cursor + 1;
-            if next >= lines.len() || !line_can_start_definition_title(lines[next].text) {
-                break;
+        let parses =
+            open_title.is_none_or(|closer| line_may_close_title(lines[cursor].text, closer));
+        if parses {
+            match parse_definition_destination_title(&source) {
+                Some(resource) => {
+                    if resource.title.is_some() {
+                        return Some((definition_node(&label, resource), cursor + 1));
+                    }
+                    best_without_title = Some((resource, cursor + 1));
+                    let next = cursor + 1;
+                    if next >= lines.len() || !line_can_start_definition_title(lines[next].text) {
+                        break;
+                    }
+                }
+                // A destination, or a title once it has closed, that does
+                // not parse cannot parse with more lines.
+                None if !is_blank(&source) => match open_definition_title(&source) {
+                    Some(closer) if open_title.is_none() => open_title = Some(closer),
+                    _ => break,
+                },
+                None => {}
             }
         }
         let next = cursor + 1;
@@ -5254,6 +5271,34 @@ fn parse_definition_destination_title(input: &str) -> Option<ParsedLinkResource>
         destination_kind,
         title: Some(title),
         title_kind: Some(title_kind),
+    })
+}
+
+/// The char that closes the title `source` opens after its destination, when
+/// no unescaped one follows the opener yet.
+fn open_definition_title(source: &str) -> Option<char> {
+    let (cursor, _) = skip_link_resource_space_with_info(source, 0)?;
+    let (_, _, next) =
+        parse_link_destination(&mut DirectLookups { input: source }, source, cursor)?;
+    let (cursor, had_space) = skip_link_resource_space_with_info(source, next)?;
+    if !had_space {
+        return None;
+    }
+    let closer = match source.as_bytes().get(cursor)? {
+        b'"' => '"',
+        b'\'' => '\'',
+        b'(' => ')',
+        _ => return None,
+    };
+    (!line_may_close_title(&source[cursor + 1..], closer)).then_some(closer)
+}
+
+/// Whether `line` holds an unescaped `closer`, or an unescaped `(` inside a
+/// parenthesized title, either of which settles the title. A backslash
+/// escape never spans a line ending, so each line is read alone.
+fn line_may_close_title(line: &str, closer: char) -> bool {
+    line.char_indices().any(|(index, char)| {
+        (char == closer || (closer == ')' && char == '(')) && !is_escaped_at(line, index)
     })
 }
 
