@@ -1,57 +1,19 @@
-# Serialization
+# Serialization — spec changes
 
-## Purpose
+## ADDED Requirements
 
-Turning a `Document`, parsed or hand-built, into canonical Markdown text. Owned
-by `src/serialize.rs`.
+### Requirement: Literal backticks are always escaped
+The serializer SHALL write every backtick in a text value as `` \` ``.
 
-## Requirements
+#### Scenario: Backtick run before a lone backtick
+- **WHEN** a hand-built paragraph holding ```Text("b ``a`")``` is serialized
+- **THEN** `to_markdown()` returns ``"b \\`\\`a\\`\n"`` and reparsing it yields the same text and no code span
 
-### Requirement: Canonical output
-`Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
-spelling the AST records for it, such as a list marker, a fence's char and
-length, a heading's style, or a reference's kind, or else one fixed spelling,
-independent of source details the AST does not record.
+#### Scenario: Paired backticks
+- **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
+- **THEN** it returns ``"Test \\`hello world\\` here.\n"``
 
-#### Scenario: Paragraph and heading
-- **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
-- **THEN** it returns `"# Title\n\nHello *world*.\n"`
-
-#### Scenario: Marker the AST records
-- **WHEN** `parse("+ a").document.to_markdown()` runs
-- **THEN** it returns `"+ a\n"`
-
-### Requirement: Round-trip stability
-For a parsed document, parsing the serialized Markdown SHALL yield the same AST
-apart from spans, and serializing that reparsed document SHALL yield the same
-text.
-
-#### Scenario: Round-trip fixtures
-- **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed, serialized, reparsed, and serialized again
-- **THEN** the reparsed AST matches the first and the two serialized texts are identical
-
-### Requirement: Serialize options
-`SerializeOptions` SHALL control the line ending and the trailing newline; a
-bullet marker, ordered-list delimiter, or code fence character other than its
-default SHALL replace the one the AST records, while the default keeps it.
-Options SHALL be constructed by mutating `SerializeOptions::default()`.
-
-#### Scenario: CRLF without final newline
-- **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
-- **THEN** it returns `"# Title"`
-
-#### Scenario: Bullet override
-- **WHEN** `parse("- a\n\n+ b").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
-- **THEN** both lists are written with `+`
-
-### Requirement: Invalid documents are rejected
-Serialization SHALL validate the document first and return
-`SerializeError::InvalidDocument` with the validation diagnostics when it is
-invalid, and `SerializeError::UnsupportedNode` for a node kind it cannot write.
-
-#### Scenario: Empty table
-- **WHEN** a hand-built document holding a `Table` with no rows is serialized
-- **THEN** `to_markdown()` returns `Err(SerializeError::InvalidDocument(_))`
+## MODIFIED Requirements
 
 ### Requirement: Escaping keeps text literal
 The serializer SHALL escape text so that reparsing the output yields the same
@@ -282,6 +244,34 @@ constructs.
 - **WHEN** the documents parsed with `parse` from `` "-[^\\`]://\\`" ``, `"++:++\\:"`, `"&#x20;://>|>\n-|-"`, `"- *  (\n    <a>"`, `"~~:~ :e~"`, `"++\\+>++"`, and `">\n>[!NOTE]:>"` are serialized and reparsed
 - **THEN** each reparsed document equals the parsed one, since an escaped label backtick opens no code span, a `:` the span's delimiters would make a shortcode is escaped, whitespace opening a cell is encoded, a nested list is indented past the block after it, whitespace before a text directive stays raw, a `+` beside a `++` delimiter is escaped, and a quote whose first line would read as an alert marker opens with an empty line
 
+### Requirement: Canonical output
+`Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
+spelling the AST records for it, such as a list marker, a fence's char and
+length, a heading's style, or a reference's kind, or else one fixed spelling,
+independent of source details the AST does not record.
+
+#### Scenario: Paragraph and heading
+- **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
+- **THEN** it returns `"# Title\n\nHello *world*.\n"`
+
+#### Scenario: Marker the AST records
+- **WHEN** `parse("+ a").document.to_markdown()` runs
+- **THEN** it returns `"+ a\n"`
+
+### Requirement: Serialize options
+`SerializeOptions` SHALL control the line ending and the trailing newline; a
+bullet marker, ordered-list delimiter, or code fence character other than its
+default SHALL replace the one the AST records, while the default keeps it.
+Options SHALL be constructed by mutating `SerializeOptions::default()`.
+
+#### Scenario: CRLF without final newline
+- **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
+- **THEN** it returns `"# Title"`
+
+#### Scenario: Bullet override
+- **WHEN** `parse("- a\n\n+ b").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
+- **THEN** both lists are written with `+`
+
 ### Requirement: No HTML filtering or style preservation
 The serializer SHALL write raw HTML and MDX node values as they are, without
 safety filtering, and SHALL NOT recover source spelling that the AST does not
@@ -290,14 +280,3 @@ record.
 #### Scenario: Raw HTML passes through
 - **WHEN** `parse("<script>alert(1)</script>").document.to_markdown()` runs
 - **THEN** the output contains `<script>alert(1)</script>`
-
-### Requirement: Literal backticks are always escaped
-The serializer SHALL write every backtick in a text value as `` \` ``.
-
-#### Scenario: Backtick run before a lone backtick
-- **WHEN** a hand-built paragraph holding ```Text("b ``a`")``` is serialized
-- **THEN** `to_markdown()` returns ``"b \\`\\`a\\`\n"`` and reparsing it yields the same text and no code span
-
-#### Scenario: Paired backticks
-- **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
-- **THEN** it returns ``"Test \\`hello world\\` here.\n"``

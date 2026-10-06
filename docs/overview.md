@@ -1,5 +1,5 @@
 # Project overview
-Updated 2026-10-05
+Updated 2026-10-06
 
 ## What this is
 
@@ -26,14 +26,15 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-Releasing the delimiter-stack inline parser and CommonMark input handling
-(leading BOM, NUL) as a SemVer-breaking version.
+Releasing the delimiter-stack inline parser, CommonMark input handling (leading
+BOM, NUL), and source-mapped spans as a SemVer-breaking version.
 
 ## Next
 
-- Inline spans on lines that carry leading whitespace inside their block are
-  offset by the stripped whitespace; spans need mapping back to source
-  coordinates.
+- `parse` panics on `"\u{a0}e+@"`; fix it before the release.
+- Rebuild block parsing on one stack of open blocks, take the serializer's
+  escapes and delimiter choices from the parser, and fold autolinks into
+  `Link` (plimeor/markdown-syntax#11).
 
 ## Non-goals
 

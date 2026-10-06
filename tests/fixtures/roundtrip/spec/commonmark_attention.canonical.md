@@ -18,7 +18,7 @@ foo-*(bar)*
 
 *(_foo_)*
 
-\__foo\__bar
+\_\_foo\_\_bar
 
 foo-**(bar)**
 

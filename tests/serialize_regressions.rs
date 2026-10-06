@@ -810,7 +810,9 @@ mod serializer_escape {
 
     #[test]
     fn ordinary_punctuation_text_does_not_reparse_as_character_escapes() {
-        let value = "a+b = c, #tag, wow!, a | b, a < b, C++ and x^2 ~ y & z, one ` tick";
+        // A backtick is always escaped, like `[`, `]`, and `\`, so it is not
+        // ordinary punctuation here.
+        let value = "a+b = c, #tag, wow!, a | b, a < b, C++ and x^2 ~ y & z";
         let document = Document {
             meta: NodeMeta::default(),
             children: vec![paragraph(vec![text(value)])],
@@ -978,7 +980,7 @@ mod serializer_escape {
         let markdown = document.to_markdown().expect("document serializes");
         assert!(markdown.contains("a&#x7C;b"));
         assert!(markdown.contains(r"`c\|d`"));
-        assert!(markdown.contains(r"$`x\|y`$"));
+        assert!(markdown.contains(r"$x\|y$"));
         assert!(markdown.contains("[link&#x7C;label](/link)"));
         assert!(markdown.contains("![img&#x7C;alt](/img)"));
         assert!(markdown.contains("[ref&#x7C;text][pipe\\|id]"));
@@ -998,7 +1000,8 @@ mod serializer_escape {
                 ));
                 assert!(matches!(
                     &table.rows[1].cells[2].children[..],
-                    [Inline::Math(MathInline { value, .. })] if value == "x|y"
+                    [Inline::Math(MathInline { value, kind: MathInlineKind::Dollar { dollars: 1 }, .. })]
+                        if value == "x|y"
                 ));
                 assert!(matches!(
                     &table.rows[1].cells[3].children[..],
@@ -1421,8 +1424,8 @@ mod review_serialize {
 
         let markdown = document.to_markdown().expect("document serializes");
         // `* ***` would escape the list as a top-level thematic break, so the item
-        // body is rewritten to a dash break that stays inside the list.
-        assert_eq!(markdown, "* ---\n");
+        // starts on the line after its marker, keeping the break's marker.
+        assert_eq!(markdown, "*\n  ***\n");
 
         let reparsed = parse(&markdown, &SyntaxOptions::commonmark());
         assert!(matches!(
@@ -1431,7 +1434,13 @@ mod review_serialize {
                 if matches!(
                     children.as_slice(),
                     [ListItem { children, .. }]
-                        if matches!(children.as_slice(), [Block::ThematicBreak(_)])
+                        if matches!(
+                            children.as_slice(),
+                            [Block::ThematicBreak(ThematicBreak {
+                                marker: ThematicBreakMarker::Asterisk,
+                                ..
+                            })]
+                        )
                 )
         ));
     }
@@ -1469,5 +1478,645 @@ mod review_serialize {
         // rewritten into a thematic break.
         assert!(!markdown.contains("---"));
         assert!(markdown.contains('*'));
+    }
+}
+
+mod literal_text {
+    //! Text that the serializer must keep literal when it sits beside
+    //! delimiters and references written by other nodes.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph_document(children: Vec<Inline>) -> Document {
+        Document {
+            meta: NodeMeta::default(),
+            children: vec![Paragraph::new(children).into()],
+        }
+    }
+
+    /// Serializes `document`, reparses the output with `options`, and checks
+    /// that the reparsed blocks equal the original ones apart from spans.
+    fn assert_round_trips(document: &Document, options: &SyntaxOptions) -> String {
+        let markdown = document.to_markdown().expect("document serializes");
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            without_spans(&format!("{:?}", reparsed.children)),
+            without_spans(&format!("{:?}", document.children)),
+            "{markdown:?}"
+        );
+        markdown
+    }
+
+    /// `debug` with every `Some(Span { .. })` written as `None`.
+    fn without_spans(debug: &str) -> String {
+        let mut out = String::new();
+        let mut rest = debug;
+        while let Some(start) = rest.find("Some(Span { ") {
+            out.push_str(&rest[..start]);
+            out.push_str("None");
+            let end = rest[start..].find("})").expect("span ends") + start + 2;
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn an_underscore_that_can_close_stays_inside_underscore_emphasis() {
+        let strong = Inline::Strong(Strong {
+            meta: NodeMeta::default(),
+            children: vec![Text::from("(a b)_.").into()],
+        });
+        let emphasis = Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            children: vec![strong],
+        });
+        let document = paragraph_document(vec![emphasis, Text::from("*#").into()]);
+        let markdown = assert_round_trips(&document, &SyntaxOptions::commonmark());
+        assert_eq!(markdown, "_**(a b)\\_.**_\\*#\n");
+    }
+
+    /// Parses `source` with `options`, then checks that the serialized output
+    /// reparses to the same blocks.
+    fn assert_parsed_round_trips(source: &str, options: &SyntaxOptions) -> String {
+        assert_round_trips(&options.parse(source).document, options)
+    }
+
+    #[test]
+    fn a_parenthesis_after_a_shortcut_reference_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("[foo]\\(a)\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("[foo]\\(a)\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn a_parenthesis_after_a_shortcut_image_reference_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("![foo]\\(a)\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("![foo]\\(a)\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn a_colon_after_a_shortcut_reference_that_starts_a_paragraph_stays_text() {
+        let markdown =
+            assert_parsed_round_trips("[foo]\\: /x\n\n[foo]: /u", &SyntaxOptions::commonmark());
+        assert!(markdown.starts_with("[foo]\\: /x\n"), "{markdown:?}");
+    }
+
+    #[test]
+    fn every_backtick_in_text_is_escaped() {
+        let document = paragraph_document(vec![Text::from("b ``a`").into()]);
+        let markdown = assert_round_trips(&document, &SyntaxOptions::default());
+        assert_eq!(markdown, "b \\`\\`a\\`\n");
+    }
+
+    #[test]
+    fn paired_backticks_in_text_are_both_escaped() {
+        let markdown = SyntaxOptions::default()
+            .parse("Test \\`hello world` here.")
+            .document
+            .to_markdown()
+            .expect("document serializes");
+        assert_eq!(markdown, "Test \\`hello world\\` here.\n");
+    }
+
+    #[test]
+    fn a_pipe_ending_a_level_two_setext_heading_does_not_start_a_table() {
+        // A one-dash underline is no table delimiter row, so this is a heading.
+        let markdown = assert_parsed_round_trips("a |\n-", &SyntaxOptions::default());
+        assert_eq!(markdown, "a \\|\n---\n");
+    }
+
+    #[test]
+    fn an_empty_fenced_code_block_writes_no_content_line() {
+        let markdown = assert_parsed_round_trips("```\n```", &SyntaxOptions::default());
+        assert_eq!(markdown, "```\n```\n");
+    }
+
+    #[test]
+    fn whitespace_at_the_ends_of_an_info_string_is_written_as_references() {
+        let markdown =
+            assert_parsed_round_trips("```&#x20;a&#9;\nb\n```", &SyntaxOptions::default());
+        assert_eq!(markdown, "``` &#x20;a&#x9;\nb\n```\n");
+    }
+
+    #[test]
+    fn text_after_a_literal_autolink_does_not_extend_it() {
+        for source in ["://&amp;", "www.}", "a.b@c.d&#x5f;"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+    }
+
+    #[test]
+    fn a_paragraph_that_opens_with_a_soft_break_keeps_it() {
+        let markdown = assert_parsed_round_trips("&#x20;\na", &SyntaxOptions::default());
+        assert_eq!(markdown, "&#x20;\na\n");
+    }
+
+    #[test]
+    fn a_continuation_line_that_would_open_a_block_stays_text() {
+        for source in ["a\n\\<div>", "a\n\\<!-- b", "a\n\\::b"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+    }
+
+    #[test]
+    fn an_html_block_value_is_written_verbatim() {
+        assert_parsed_round_trips("<!--\n\n", &SyntaxOptions::default());
+        assert_parsed_round_trips("<div>\n  a  \n</div>", &SyntaxOptions::default());
+    }
+
+    #[test]
+    fn indented_code_keeps_a_carriage_return_ending_its_last_line() {
+        for source in ["\ta\r\tb", "    a\r\n    b\r\n\r\nc", "    a\r    b\r\rc"] {
+            assert_parsed_round_trips(source, &SyntaxOptions::default());
+        }
+        let mut crlf = SerializeOptions::default();
+        crlf.line_ending = LineEnding::CrLf;
+        let document = SyntaxOptions::default()
+            .parse("```\r\na\r\n```\r\nb")
+            .document;
+        let markdown = document
+            .to_markdown_with(&crlf)
+            .expect("document serializes");
+        assert_eq!(markdown, "```\r\na\r\n```\r\n\r\nb\r\n");
+    }
+}
+
+mod round_trip_edges {
+    //! Parsed documents whose serialized output must reparse to the same
+    //! tree under the dialect that parsed them.
+
+    use markdown_syntax::prelude::*;
+
+    /// `debug` with every `Some(Span { .. })` written as `None`.
+    fn without_spans(debug: &str) -> String {
+        let mut out = String::new();
+        let mut rest = debug;
+        while let Some(start) = rest.find("Some(Span { ") {
+            out.push_str(&rest[..start]);
+            out.push_str("None");
+            let end = rest[start..].find("})").expect("span ends") + start + 2;
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Checks the round trip of `source` under the CommonMark preset and the
+    /// default dialect, and returns the default dialect's output.
+    fn assert_round_trips(source: &str) -> String {
+        let mut markdown = String::new();
+        for options in [SyntaxOptions::commonmark(), SyntaxOptions::default()] {
+            let document = options.parse(source).document;
+            markdown = document.to_markdown().expect("document serializes");
+            let reparsed = options.parse(&markdown).document;
+            assert_eq!(
+                without_spans(&format!("{:?}", reparsed.children)),
+                without_spans(&format!("{:?}", document.children)),
+                "{source:?} -> {markdown:?}"
+            );
+        }
+        markdown
+    }
+
+    #[test]
+    fn a_break_that_opens_a_line_or_a_span_is_written_after_a_reference() {
+        assert_eq!(assert_round_trips("&#x20; \na"), "&#x20;\na\n");
+        assert_eq!(assert_round_trips("a\n&#x20;\nb"), "a\n&#x20;\nb\n");
+        assert_round_trips("++&#x20;\nd++");
+        assert_round_trips("_&#x20;\n=_");
+        assert_eq!(assert_round_trips("[\nfoo](u)"), "[\nfoo](u)\n");
+    }
+
+    #[test]
+    fn a_continuation_line_inside_an_inline_that_would_start_a_block_is_indented() {
+        assert_eq!(assert_round_trips("=```\n    ```"), "\\=```\n    ```\n");
+        assert_round_trips("-$$\n    $$");
+        assert_eq!(assert_round_trips("(\n    <div>"), "(\n    <div>\n");
+        assert_eq!(assert_round_trips("``\nfoo\nbar\n``"), "``\nfoo\nbar\n``\n");
+    }
+
+    #[test]
+    fn delimiter_runs_in_text_are_escaped_whole() {
+        for source in [
+            "**\t*$",
+            "+*(**\0",
+            "__***-*",
+            "(*~\n**)",
+            "**:\n**:",
+            "($$]$=",
+            "[\\||>||)||",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn emphasis_delimiters_suit_their_neighbours() {
+        assert_eq!(assert_round_trips("***y*b"), "\\*\\**y*b\n");
+        assert_eq!(assert_round_trips("y***b***"), "y***b***\n");
+    }
+
+    #[test]
+    fn a_literal_autolink_does_not_run_on_into_what_follows() {
+        for source in ["&#x20;://y", "://\\:://y", "://\\::p:", "://\t["] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_bare_destination_writes_a_space_as_a_reference() {
+        assert_eq!(assert_round_trips("[o]:&#x20;"), "[o]: &#x20;\n");
+    }
+
+    #[test]
+    fn whitespace_that_opens_a_list_items_first_block_starts_on_the_next_line() {
+        assert_eq!(assert_round_trips("-\n   <v>"), "-\n   <v>\n");
+        assert_round_trips("*\t<a>");
+    }
+
+    #[test]
+    fn raw_html_alone_on_a_paragraphs_first_line_keeps_a_trailing_reference() {
+        assert_eq!(assert_round_trips("<a>&#x20;\n;"), "<a>&#x20;\n;\n");
+    }
+
+    #[test]
+    fn a_fence_grows_only_past_lines_that_would_close_it() {
+        assert_eq!(assert_round_trips("```\n```*"), "```\n```*\n```\n");
+        assert_eq!(assert_round_trips("````\n```\n````"), "````\n```\n````\n");
+    }
+
+    #[test]
+    fn text_that_would_open_an_extension_construct_stays_text() {
+        for source in [
+            ":b[",
+            "\\:p",
+            "( \\:a",
+            "$\\<!--\n-->",
+            "`\\$[<a>[$>",
+            "\\:p://",
+            ":b\\:",
+            ":\\+:",
+            "[[\\&mp;]]",
+            "[^:](\\)",
+            "a\\://",
+            "^:// ^",
+            "||://\t||",
+            "&#x20; :b",
+            "==)\\==^==",
+            "||*\\||:||",
+            "://y \\\n|",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_literal_tilde_beside_an_emphasis_run_stays_literal() {
+        assert_eq!(assert_round_trips("a**~**"), "a**~**\n");
+        assert_eq!(assert_round_trips("b*~*"), "b*~*\n");
+        // The default preset's emphasis here is not CommonMark's or GFM's
+        // reading, so only the round trip is pinned.
+        assert_round_trips("d_~_");
+        assert_round_trips("b*~~~***");
+        assert_round_trips("~~a~~~");
+        assert_round_trips("~~~a");
+    }
+
+    #[test]
+    fn a_pipe_that_raw_html_an_autolink_or_math_writes_in_a_cell_is_escaped() {
+        for source in ["://\\||[\n-|-", "|<!--\\|-->\n--", "$\\|$||\n-|-"] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn container_and_list_edges_round_trip() {
+        for source in [
+            "-\t(\n  <v>",
+            "*\t<a>\n  <v>",
+            "- >**\n`",
+            "1. >)\n~",
+            "-\n  ---",
+            "><!--\n>```",
+            "`\n|`\n-",
+            " ~~~\n    ~~~",
+            "---\n \n\n---",
+            "*c*__&__",
+        ] {
+            assert_round_trips(source);
+        }
+        assert_eq!(assert_round_trips(" ~~~\n    ~~~"), " ~~~\n    ~~~\n ~~~\n");
+    }
+
+    #[test]
+    fn raw_html_after_a_definition_continues_its_paragraph() {
+        for source in [
+            "[o]:u\n\t<div>",
+            "[o]:u\n<a>\n-",
+            "<a>&#x20;\n[\n-",
+            "[o]: u\n<a>",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_line_that_would_open_description_details_stays_text() {
+        for source in ["a\n   : `", "~\n: ]", "``\n   ~\t``", "[\n~ _\n    ~~~"] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn nested_attention_runs_pick_delimiters_that_reparse_to_them() {
+        for source in [
+            "__**)**&__",
+            "**:__$__**",
+            "****(*+***",
+            "***_|_***",
+            "__***/***__",
+            "**#****]***_**",
+            "***_\\**#*",
+            "**__\u{0}___**",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn text_around_a_literal_autolink_does_not_move_its_end() {
+        for source in [
+            "a\\-://`",
+            "ab&#99;://x",
+            "*://*&mp;",
+            "**://**&mp;",
+            "://^&mp;",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn text_after_a_reference_or_before_a_wikilink_keeps_its_parse() {
+        assert_eq!(assert_round_trips("[^`]``"), "[^`]&#96;&#96;\n");
+        assert_eq!(assert_round_trips("![[$[]]a$>"), "\\![[$\\[]]a$>\n");
+        for source in ["[a`]``\n\n[a`]: x", "[^`]: x\n\n[^`]``", "://`\\`"] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_tilde_beside_an_attention_run_keeps_the_runs_bonus() {
+        for source in [
+            "b**~\n~**",
+            "b_~~_~",
+            "~\nb*~***",
+            "a__~>__~",
+            "~~目*~***",
+            "a*~ **&*",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn text_before_a_construct_escapes_the_delimiters_it_writes() {
+        for source in [
+            ":\\^:^[|]",
+            "|\\<!--[^-->]",
+            "*\\$#$>$",
+            "~\\$#://$",
+            "b\\-p://",
+            ")||||||\t||",
+            "**(__)__$**",
+            "*{_~_目*",
+            "`\\:++:++",
+            "|\\$*`$`",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn whitespace_other_than_spaces_and_tabs_round_trips() {
+        for source in [
+            "\u{c}",
+            "a\u{c}",
+            "\u{c}:a",
+            "[^\u{c}]",
+            "://y\u{c}c",
+            "1. \u{c}",
+            "==&#x20; \n-==",
+            "[;\u{c}]:[",
+            "[\u{c}]:\u{a0}",
+            "d$![[\\$]]",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn spaces_and_text_beside_a_literal_autolink_keep_its_end() {
+        for source in [
+            "^://y ^",
+            "://~ #~",
+            "_&#x20;://_",
+            "||://y\t||",
+            "==&#x20;://<==",
+            "^http://x ^",
+            "*&#x20;http://x*",
+            "://\\~||>||",
+            "://\\)||#||",
+            "[foo]:`\n[foo]^://y\t^",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn constructs_after_a_directive_email_or_alert_keep_their_parse() {
+        for source in [
+            "++@b.c",
+            ">[!NOTE]\u{c}",
+            ">[!NOTE]+\t*",
+            ":e\\{",
+            ":e{}1",
+            ":e[]www.+",
+            ":e{}a@b.c",
+            ":e{}[^1]",
+            "]\\-a@b.c",
+            "~\\+a@b.c",
+            "\\+@b.p://",
+            "1++1://u 1++",
+            "^://. ^",
+            "]\n: :::e",
+            "[^1]:| &#x20;\n:",
+            ":::t\n```\n:::e",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    /// `assert_round_trips` under `options` alone.
+    fn assert_round_trips_under(options: &SyntaxOptions, source: &str) {
+        let document = options.parse(source).document;
+        let markdown = document.to_markdown().expect("document serializes");
+        let reparsed = options.parse(&markdown).document;
+        assert_eq!(
+            without_spans(&format!("{:?}", reparsed.children)),
+            without_spans(&format!("{:?}", document.children)),
+            "{source:?} -> {markdown:?}"
+        );
+    }
+
+    #[test]
+    fn a_paragraph_opening_with_an_esm_keyword_stays_a_paragraph_under_mdx() {
+        for source in [" import -", " export x", " import *\n-"] {
+            assert_round_trips_under(&SyntaxOptions::mdx(), source);
+        }
+    }
+
+    #[test]
+    fn mdx_and_gfm_content_reads_back_under_its_preset() {
+        for source in [
+            "<!--@b>",
+            "\\{[]()}",
+            "\u{a0}&#x20;<p/>",
+            "{}&#x20;\n\\",
+            "{}&#x20; \n\\",
+        ] {
+            assert_round_trips_under(&SyntaxOptions::mdx(), source);
+        }
+        for source in ["**=* ++@b.c*", "~&#x20;://~"] {
+            assert_round_trips_under(&SyntaxOptions::gfm(), source);
+        }
+    }
+
+    #[test]
+    fn delimiters_around_autolinks_tasks_and_alerts_keep_their_parse() {
+        for source in [
+            "_`*www._",
+            "# _*www._",
+            "**://\\***[^1]",
+            "^[www.[ ]",
+            "1. >[!NOTE]\n~[^1]",
+            "+ [x]  :e",
+            "- [ ] &#x20;",
+            "***:*:**",
+            "++*++_@b.c",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn run_delimiter_choices_reparse_beside_and_inside_other_inlines() {
+        for source in [
+            "y*x***a_ b**",
+            "*a***b**",
+            "**__a__~~**b",
+            "[__**)**&__](u)",
+            "![__**)**&__](u)",
+            "==__***/***__==",
+            "*******b_*_c~_y",
+            "__**a*********___",
+            "y__**__**y****___",
+        ] {
+            assert_round_trips(source);
+        }
+        // `__` reads back as underline once that construct is enabled.
+        assert_round_trips_under(
+            &SyntaxOptions::default().enable(Construct::Underline),
+            "*a***b**",
+        );
+    }
+
+    #[test]
+    fn a_doubled_delimiter_that_could_close_its_span_is_escaped() {
+        assert_eq!(assert_round_trips("==a\\== b=="), "==a\\== b==\n");
+        assert_eq!(assert_round_trips("++a\\++ b++"), "++a\\+\\+ b++\n");
+    }
+
+    #[test]
+    fn math_opening_a_definitions_paragraph_stays_inline() {
+        assert_eq!(
+            assert_round_trips("[o]:u\n\t$$\na$$"),
+            "[o]: u\n    $$\na$$\n"
+        );
+    }
+
+    #[test]
+    fn a_cell_pipe_after_an_escaped_backslash_is_escaped() {
+        for source in [
+            "| <a b=\"x\\\\\\|y\"> |\n| --- |",
+            "| x |\n| --- |\n| $a\\\\\\|b$ |",
+            "| <http://x\\\\\\|y> |\n|-|",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_raw_label_backtick_reaches_text_inside_and_after_spans() {
+        for source in [
+            "[foo`bar] *&#96;*\n\n[foo`bar]: /u",
+            "*[foo`bar]* &#96;\n\n[foo`bar]: /u",
+            "[^a`b] *&#96;*\n\n[^a`b]: x",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn spans_cells_and_items_keep_what_borders_them() {
+        for source in [
+            // An escaped backtick in a label opens no code span.
+            "-[^\\`]://\\`",
+            // The insert's `++` and the `:`s around it would name a shortcode.
+            "++:++\\:",
+            // A space opening a cell would be trimmed.
+            "&#x20;://>|>\n-|-",
+            // The nested item's content column keeps the HTML block out.
+            "- *  (\n    <a>",
+            // A text directive opens only after raw whitespace.
+            "~~:~ :e~",
+            "~\t:e~",
+            // A `+` or `=` beside the span's delimiter would lengthen it.
+            "++\\+>++",
+            "==\\=a==",
+            // A definition labelled like an alert marker keeps the quote.
+            ">\n>[!NOTE]:>",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn adjacent_strongs_split_wherever_their_inlines_are_written() {
+        // Without a read-back, the plain rendering itself keeps them apart.
+        for source in [
+            "| h |\n| - |\n| **a**__b__ |",
+            "::d[**a**__b__]",
+            "Term **a**__b__\n: def",
+            "Term\n: **a**__b__",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn prose_beside_spans_keeps_its_plain_spelling() {
+        for source in [
+            "**Note:** use snake_case: here",
+            "*Warning:* set MY_VAR: 1",
+            "a +\nb + c",
+            "a =\nb = c",
+            "if a == b\nthen c== d",
+            "**See [docs] and `cfg`** then use \\` quote\n\n[docs]: /u",
+        ] {
+            assert_eq!(assert_round_trips(source), format!("{source}\n"));
+        }
     }
 }

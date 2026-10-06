@@ -359,3 +359,119 @@ fn an_image_whose_label_cannot_close_yields_to_a_wikilink() {
         paragraph.children
     );
 }
+
+#[test]
+fn the_rule_of_three_counts_whole_delimiter_runs() {
+    let commonmark = SyntaxOptions::commonmark();
+    assert_eq!(
+        parsed(&commonmark, "*a***b*"),
+        r#"Emphasis["a"]"*"Emphasis["b"]"#
+    );
+    assert_eq!(
+        parsed(&commonmark, "***a*a*a"),
+        r#""*"Emphasis[Emphasis["a"]"a"]"a""#
+    );
+}
+
+#[test]
+fn an_image_whose_resource_is_invalid_falls_back_to_a_shortcut_reference() {
+    let document = SyntaxOptions::commonmark()
+        .parse("![foo](a b)\n\n[foo]: /u")
+        .document;
+    let Some(Block::Paragraph(paragraph)) = document.children.first() else {
+        panic!("expected a paragraph");
+    };
+    assert!(
+        matches!(paragraph.children.as_slice(), [Inline::ImageReference(image), Inline::Text(rest)]
+            if image.kind == ReferenceKind::Shortcut && image.identifier == "foo" && rest.value == "(a b)"),
+        "{:?}",
+        paragraph.children
+    );
+}
+
+#[test]
+fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
+    let commonmark = SyntaxOptions::commonmark();
+    for source in ["\u{ab}_**]**_", "\u{20ac}_**]**_", "\0_**]**_"] {
+        let shape = parsed(&commonmark, source);
+        assert!(
+            shape.ends_with(r#"Emphasis[Strong["]"]]"#),
+            "{source:?}: {shape}"
+        );
+    }
+}
+
+#[test]
+fn an_escaped_backslash_before_a_line_ending_is_no_hard_break() {
+    assert_eq!(
+        parsed(&SyntaxOptions::commonmark(), "a\\\\\nb"),
+        r#""a\\"/"b""#
+    );
+}
+
+#[test]
+fn a_bare_destination_ends_at_a_space_inside_parentheses() {
+    let commonmark = SyntaxOptions::commonmark();
+    assert_eq!(parsed(&commonmark, "[a](( ))"), r#""[a](( ))""#);
+    let blocks = commonmark.parse("[o]:(a b)\n\n[o]").document.children;
+    assert!(
+        !blocks
+            .iter()
+            .any(|block| matches!(block, Block::Definition(_))),
+        "{blocks:?}"
+    );
+}
+
+#[test]
+fn a_footnote_label_holds_no_unescaped_bracket() {
+    let options = SyntaxOptions::default();
+    for source in ["^*[^[^]]", "[^a[b]", "[^a[b]: x\n\n[^a[b]"] {
+        let debug = format!("{:?}", options.parse(source).document.children);
+        assert!(!debug.contains("FootnoteReference"), "{source:?}: {debug}");
+        assert!(!debug.contains("FootnoteDefinition"), "{source:?}: {debug}");
+    }
+    let debug = format!("{:?}", options.parse("[^a\\[b]").document.children);
+    assert!(debug.contains("FootnoteReference"), "{debug}");
+}
+
+#[test]
+fn an_angle_autolink_holds_whitespace_other_than_a_space() {
+    let document = SyntaxOptions::commonmark()
+        .parse("<http://a\u{a0}b>")
+        .document;
+    let debug = format!("{:?}", document.children);
+    assert!(
+        debug.contains("destination: \"http://a\\u{a0}b\""),
+        "{debug}"
+    );
+    assert!(document.validate().is_empty());
+    assert_eq!(document.to_markdown().unwrap(), "<http://a\u{a0}b>\n");
+}
+
+#[test]
+fn a_referenced_space_makes_no_hard_break() {
+    let blocks = SyntaxOptions::commonmark()
+        .parse("a&#x20; \nb")
+        .document
+        .children;
+    let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+        panic!("{blocks:?}");
+    };
+    assert!(
+        matches!(
+            paragraph.children.as_slice(),
+            [Inline::Text(text), Inline::SoftBreak(_), Inline::Text(_)] if text.value == "a "
+        ),
+        "{blocks:?}"
+    );
+}
+
+#[test]
+fn a_processing_instruction_closes_after_its_opener() {
+    let blocks = SyntaxOptions::commonmark()
+        .parse("a<?> b")
+        .document
+        .children;
+    let debug = format!("{blocks:?}");
+    assert!(!debug.contains("Html"), "{debug}");
+}

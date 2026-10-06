@@ -505,7 +505,7 @@ mod reference {
             // character; Unicode whitespace (e.g. U+00A0) is ordinary. A backslash
             // before a space is NOT an escape (only ASCII punctuation is escapable),
             // so `\ ` still terminates the destination → `[a](\ b)` is not a link.
-            if (char == ' ' || char.is_ascii_control()) && depth == 0 {
+            if char == ' ' || char.is_ascii_control() {
                 break;
             }
             if char == '(' && !is_escaped_at(input, cursor) {
@@ -1308,7 +1308,8 @@ fn literal_autolink_scans_match_the_reference_scan() {
 fn html_container_closes_match_the_reference_scan() {
     let mut rng = Rng(17);
     for input in generated_inputs(700, 40, 17) {
-        let lines = collect_lines(&input, 0);
+        let map = SourceMap::verbatim(input.len(), 0);
+        let lines = collect_lines(&input, &map);
         let starts: Vec<usize> = (0..=lines.len()).collect();
         for order in query_orders(&starts, &mut rng) {
             let mut closes = BracketMemo::default();
@@ -1367,7 +1368,8 @@ fn flow_inputs() -> Vec<String> {
 fn flow_jsx_and_expression_closes_match_the_reference_scan() {
     let mut rng = Rng(19);
     for input in flow_inputs() {
-        let lines = collect_lines(&input, 0);
+        let map = SourceMap::verbatim(input.len(), 0);
+        let lines = collect_lines(&input, &map);
         let starts: Vec<usize> = (0..lines.len()).collect();
         for order in query_orders(&starts, &mut rng) {
             let mut flow = MdxFlowScan::default();
@@ -1427,7 +1429,9 @@ fn table_row_spoilers_form_where_the_row_scan_predicts() {
                     .count();
                 let text = table_cell_text(&row[start..end]);
                 let mut diagnostics = Vec::new();
-                let formed = parse_inlines(text.trim(), 0, &options, &[], &mut diagnostics)
+                let content = text.trim();
+                let map = SourceMap::verbatim(content.len(), 0);
+                let formed = parse_inlines(content, &map, &options, Some(&[]), &mut diagnostics)
                     .iter()
                     .filter(|inline| matches!(inline, Inline::Spoiler(_)))
                     .count();

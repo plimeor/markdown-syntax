@@ -137,6 +137,14 @@ span to 1-based line and column positions.
 - **WHEN** a `Heading` is built with `Heading::new(1, [Text::from("Title")])`
 - **THEN** its `span()` is `None`
 
+#### Scenario: Empty table cell
+- **WHEN** `parse("| a | |\n|-|-|")` runs
+- **THEN** the second header cell's span is the empty range at byte 6, just before the pipe that closes it
+
+#### Scenario: Missing table cell
+- **WHEN** `parse("| a | b |\n|-|-|\n| c")` runs
+- **THEN** the body row's second cell has no children and its span is the empty range at the end of the row, byte 19
+
 ### Requirement: Top-level spans tile the source
 The spans of a parsed document's top-level blocks SHALL be in source order,
 non-overlapping, on UTF-8 character boundaries, within the input, and separated
@@ -192,11 +200,9 @@ stay in the coordinates of the original input.
 ### Requirement: Emphasis-like spans cover their delimiters
 The span of a parsed emphasis-like container (`Emphasis`, `Strong`,
 `Underline`, `Delete`, `Insert`, `Mark`, `Spoiler`, `Subscript`, or
-`Superscript`) in a block whose lines carry no leading whitespace after their container
-markers SHALL
-run from the first character of the delimiters that open it to the last
-character of the delimiters that close it, and SHALL lie within the span of the
-node that contains it.
+`Superscript`) SHALL run from the first character of the delimiters that open
+it to the last character of the delimiters that close it, and SHALL lie within
+the span of the node that contains it.
 
 #### Scenario: Strong inside emphasis
 - **WHEN** `parse("***a***")` runs
@@ -209,3 +215,98 @@ node that contains it.
 #### Scenario: Leftover opening delimiter
 - **WHEN** `parse("**a*")` runs
 - **THEN** the paragraph holds `Text("*")` spanning bytes 0..1 and an `Emphasis` spanning bytes 1..4
+
+#### Scenario: Emphasis on a block quote continuation line
+- **WHEN** `parse("> a\n> *b*")` runs
+- **THEN** the block quote's paragraph holds an `Emphasis` spanning bytes 6..9
+
+### Requirement: Spans map stripped lines back to the source
+A parsed node's span SHALL end after the source byte where its last character
+was read, and SHALL start at the source byte where its first character was
+read, or for a block, where its first line starts after the markers and
+indentation of the containers around it. This SHALL hold wherever the parser
+removes indentation, container markers, or table-cell padding before reading a
+line, joins lines whose source line ending is `\r\n`, or reads `\|` in a table
+cell as `|`, which maps to both of its bytes; a space the parser produces by
+splitting a tab SHALL map to that tab.
+
+#### Scenario: Leading whitespace on a paragraph line
+- **WHEN** `parse("  a *b*")` runs
+- **THEN** the paragraph holds `Text("a ")` spanning bytes 2..4 and an `Emphasis` spanning bytes 4..7
+
+#### Scenario: Block quote continuation line
+- **WHEN** `parse("> a\n> b *c*")` runs
+- **THEN** the block quote's paragraph spans bytes 2..11 and holds `Text("b ")` spanning bytes 6..8 and an `Emphasis` spanning bytes 8..11
+
+#### Scenario: List item continuation line
+- **WHEN** `parse("- a\n  b *c*")` runs
+- **THEN** the item's paragraph spans bytes 2..11 and holds an `Emphasis` spanning bytes 8..11
+
+#### Scenario: Later block inside a block quote
+- **WHEN** `parse("> a\n>\n> b")` runs
+- **THEN** the block quote's second paragraph spans bytes 8..9
+
+#### Scenario: Nested list item after multi-byte text
+- **WHEN** `parse("- 项目\n  - 嵌套 [[library/工作/买菜]]\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 20..45
+
+#### Scenario: Nested block quote
+- **WHEN** `parse("> 外层\n> > 内层 [[A]]\n")` runs
+- **THEN** the inner block quote's `WikiLink` spans bytes 20..25
+
+#### Scenario: Alert body
+- **WHEN** `parse("> [!NOTE]\n> 见 [[A]]\n")` runs
+- **THEN** the alert's `WikiLink` spans bytes 16..21
+
+#### Scenario: Footnote definition continuation line
+- **WHEN** `parse("正文[^1]\n\n[^1]: 见 [[A]]\n    续 [[B]]\n")` runs
+- **THEN** the footnote definition's second `WikiLink` spans bytes 36..41
+
+#### Scenario: Inside an HTML container
+- **WHEN** `parse("<details>\n<summary>更多</summary>\n\n- 项目\n  - [[A]]\n\n</details>\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 50..55
+
+#### Scenario: Inside a container directive
+- **WHEN** `parse(":::note\n- 项目\n  - [[A]]\n:::\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 21..26
+
+#### Scenario: Tab-indented nested list
+- **WHEN** `parse("- 项目\n\t- 嵌套 [[A]]\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 19..24
+
+#### Scenario: CRLF nested list
+- **WHEN** `parse("- 项目\r\n  - 嵌套 [[A]]\r\n")` runs
+- **THEN** the nested item's `WikiLink` spans bytes 21..26
+
+#### Scenario: CRLF soft break
+- **WHEN** `parse("a\r\nb")` runs
+- **THEN** the paragraph holds a `SoftBreak` spanning bytes 1..3 and `Text("b")` spanning bytes 3..4
+
+#### Scenario: Table cell content
+- **WHEN** `parse("| a *b* |\n|-|")` runs
+- **THEN** the header cell spans bytes 2..7 and holds `Text("a ")` spanning bytes 2..4 and an `Emphasis` spanning bytes 4..7
+
+#### Scenario: Escaped pipe in a table cell
+- **WHEN** `parse("| a\\|b |\n|-|")` runs
+- **THEN** the header cell holds `Text("a|b")` spanning bytes 2..6
+
+#### Scenario: Escaped pipe opening a table cell
+- **WHEN** `parse("| \\|a |\n|-|")` runs
+- **THEN** the header cell holds `Text("|a")` spanning bytes 2..5
+
+#### Scenario: Split tab
+- **WHEN** `parse(">\t\tfoo")` runs
+- **THEN** the block quote holds an indented code block with value `"  foo\n"` spanning bytes 1..6
+
+#### Scenario: Container span regression cases
+- **WHEN** `inline_spans_address_source_inside_containers` in `tests/parse_span_contract.rs` parses each of its 31 cases (lists, task lists, block quotes, alerts, tables, footnote definitions, HTML containers, container directives, frontmatter, CRLF, and tabs)
+- **THEN** every `WikiLink`, `Link`, `Image`, and `#`-holding `Text` it collects spans exactly the literal it occupies in the input
+
+### Requirement: Spans nest
+Every parsed node's span SHALL lie on UTF-8 character boundaries within the
+input and within the span of the node that contains it, and the spans of a
+node's children SHALL be in source order and SHALL NOT overlap.
+
+#### Scenario: Fixture corpus and generated inputs
+- **WHEN** every fixture input and every seeded generated input is parsed in each dialect
+- **THEN** every node, at every depth, satisfies these conditions

@@ -81,7 +81,11 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
         Block::Definition(definition) => {
-            if definition.identifier.trim().is_empty() {
+            if definition
+                .identifier
+                .trim_matches([' ', '\t', '\n', '\r'])
+                .is_empty()
+            {
                 diagnostics.push(Diagnostic::invalid(
                     definition.meta.span,
                     "definition identifier cannot be empty",
@@ -360,18 +364,18 @@ fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
 fn validate_autolink(autolink: &Autolink, diagnostics: &mut Vec<Diagnostic>) {
     // GFM literal autolinks carry a synthesized destination that MAY contain
     // `>` (the renderer percent-encodes it). Only angle-bracket autolinks
-    // forbid whitespace, `<`, and `>` in the destination.
+    // forbid a space, an ASCII control char, `<`, and `>` in the destination.
     if matches!(autolink.kind, AutolinkKind::GfmLiteral { .. }) {
         return;
     }
     if autolink
         .destination
         .chars()
-        .any(|char| char.is_whitespace() || char == '<' || char == '>')
+        .any(|char| matches!(char, ' ' | '<' | '>') || char.is_ascii_control())
     {
         diagnostics.push(Diagnostic::invalid(
             autolink.meta.span,
-            "autolink destination cannot contain whitespace, `<`, or `>`",
+            "autolink destination cannot contain a space, a control char, `<`, or `>`",
         ));
     }
 }

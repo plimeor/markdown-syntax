@@ -12,14 +12,6 @@ use crate::test_support::{boundaries, generated_inputs, query_orders, Rng};
 mod reference {
     use super::super::*;
 
-    pub(super) fn text_code_span_can_start(input: &str, offset: usize) -> bool {
-        let marker_len = same_char_run_len(input, offset, '`');
-        if marker_len == 0 || text_char_at_edge(input, offset, marker_len) {
-            return true;
-        }
-        find_same_char_run(input, offset + marker_len, '`', marker_len).is_some()
-    }
-
     pub(super) fn text_attention_delimiter_can_start(
         input: &str,
         offset: usize,
@@ -82,12 +74,13 @@ mod reference {
         find_same_char_run(input, after_open, '$', marker_len).is_some()
     }
 
-    pub(super) fn text_tilde_can_start(input: &str, offset: usize) -> bool {
-        if input[offset..].starts_with("~~") {
-            return text_attention_delimiter_can_start(input, offset, "~~", false)
-                || text_simple_delimiter_can_start(input, offset, '~');
-        }
-        text_simple_delimiter_can_start(input, offset, '~')
+    pub(super) fn tilde_run_can_pair(input: &str, offset: usize) -> bool {
+        let end = offset
+            + input[offset..]
+                .bytes()
+                .take_while(|byte| *byte == b'~')
+                .count();
+        input[end..].contains('~')
     }
 
     pub(super) fn text_caret_can_start(input: &str, offset: usize) -> bool {
@@ -147,7 +140,7 @@ fn for_each_scan(seed: u64, mut check: impl FnMut(&str, &mut TextScan, usize)) {
     for input in generated_inputs(700, 40, seed) {
         let positions = boundaries(&input);
         for order in query_orders(&positions, &mut rng) {
-            let mut scan = TextScan::new(&input);
+            let mut scan = TextScan::new(&input, DelimiterChars::default());
             for offset in order {
                 if offset < input.len() {
                     check(&input, &mut scan, offset);
@@ -181,11 +174,6 @@ fn run_and_lookahead_checks_match_the_reference_scan() {
     for_each_scan(22, |input, scan, offset| {
         let char = input[offset..].chars().next().expect("offset below len");
         match char {
-            '`' => assert_eq!(
-                text_code_span_can_start(input, offset, scan),
-                reference::text_code_span_can_start(input, offset),
-                "{input:?} at {offset}"
-            ),
             '$' => assert_eq!(
                 text_math_can_start(input, offset, scan),
                 reference::text_math_can_start(input, offset),
@@ -202,8 +190,8 @@ fn run_and_lookahead_checks_match_the_reference_scan() {
                 "{input:?} at {offset}"
             ),
             '~' => assert_eq!(
-                text_tilde_can_start(input, offset, scan),
-                reference::text_tilde_can_start(input, offset),
+                tilde_run_can_pair(offset, scan),
+                reference::tilde_run_can_pair(input, offset),
                 "{input:?} at {offset}"
             ),
             '^' => assert_eq!(

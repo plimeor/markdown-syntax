@@ -18,9 +18,12 @@ use crate::{
     validate::is_directive_name,
 };
 
-mod nul;
+mod nul_replacement;
 #[cfg(test)]
 mod scan_tests;
+mod source_map;
+
+use source_map::{DerivedText, Segment, SourceMap};
 
 /// The result of a tolerant parse: the document plus any diagnostics gathered
 /// along the way (empty on a clean parse).
@@ -52,6 +55,10 @@ struct ParsedLinkResource {
 const REFERENCE_LABEL_MAX_CHARS: usize = 999;
 const WIKILINK_MAX_BYTES: usize = 999;
 
+/// One line of the text a block parser reads. `start`, `end`, and
+/// `end_with_eol` are positions in the original input; offsets into `text`
+/// translate to the input through `source_start` / `source_end`, since a
+/// container's lines are derived from its source lines with prefixes removed.
 #[derive(Clone, Copy, Debug)]
 struct Line<'a> {
     text: &'a str,
@@ -64,6 +71,75 @@ struct Line<'a> {
     /// paragraph (CommonMark §5.2 laziness). Block constructs that must not be
     /// started by a lazy line (e.g. a setext underline) consult this flag.
     lazy: bool,
+    /// The source-map segments covering `text` and `eol`, in the coordinates of
+    /// the string the line was split from, where `text` starts at `text_offset`.
+    segments: &'a [Segment],
+    text_offset: usize,
+    /// The source column `text` starts at, from which its tabs reach their
+    /// tab stops (every four columns).
+    column: usize,
+}
+
+impl<'a> Line<'a> {
+    /// A line checked for its shape alone, whose positions are not used.
+    fn detached(text: &'a str) -> Self {
+        Line {
+            text,
+            eol: "",
+            start: 0,
+            end: text.len(),
+            end_with_eol: text.len(),
+            lazy: false,
+            segments: &[],
+            text_offset: 0,
+            column: 0,
+        }
+    }
+
+    /// The source column after `self.text[..offset]`.
+    fn column_at(&self, offset: usize) -> usize {
+        advance_columns(self.column, &self.text[..offset])
+    }
+
+    /// The columns of the whitespace that starts the line, from its column.
+    fn indent_columns(&self) -> usize {
+        let leading = self.text.len() - trim_ascii_start(self.text).len();
+        self.column_at(leading) - self.column
+    }
+
+    /// The input position where a node starting at byte `offset` of `text`
+    /// starts.
+    fn source_start(&self, offset: usize) -> usize {
+        source_map::start_of(self.segments, self.text_offset + offset)
+    }
+
+    /// The input position where a node ending at byte `offset` of `text` ends.
+    fn source_end(&self, offset: usize) -> usize {
+        source_map::end_of(self.segments, self.text_offset + offset)
+    }
+
+    /// The input range of this line's ending.
+    fn eol_source(&self) -> (usize, usize) {
+        (self.end, self.end_with_eol)
+    }
+
+    /// Records in `map`, from text position `at`, what `text[from..to]` was
+    /// read from.
+    fn copy_into(&self, map: &mut SourceMap, at: usize, from: usize, to: usize) {
+        map.copy(
+            at,
+            self.segments,
+            self.text_offset + from,
+            self.text_offset + to,
+        );
+    }
+
+    /// The source map of `slice`, a sub-slice of `text`, for an inline parse.
+    fn slice_map(&self, slice: &str) -> SourceMap {
+        let mut derived = DerivedText::default();
+        derived.append(self, slice, 0);
+        derived.into_map()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -75,11 +151,12 @@ struct ListMarkerInfo<'a> {
     marker_len: usize,
     content_indent: usize,
     content: &'a str,
+    /// The source column the marker's line starts at.
+    column: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct DescriptionMarker<'a> {
-    content_offset: usize,
     content: &'a str,
 }
 
@@ -88,8 +165,7 @@ struct DescriptionTerm {
     marker_index: usize,
     term_end: usize,
     blank_after_term: bool,
-    source: String,
-    source_offset: usize,
+    source: DerivedText,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -152,13 +228,15 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         0
     };
     let source = &input[start..];
-    let definitions = collect_definitions(source, start, options);
-    let children = parse_blocks(
-        source,
-        start,
+    // Both passes read the same lines.
+    let map = SourceMap::verbatim(source.len(), start);
+    let lines = collect_lines(source, &map);
+    let definitions = collect_definitions(source, &lines, options);
+    let children = parse_blocks_from_lines(
+        &lines,
         true,
         options,
-        &definitions,
+        Some(&definitions),
         &mut diagnostics,
         0,
     );
@@ -167,7 +245,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
         children,
     };
     if source.contains('\0') {
-        nul::replace_in_document(&mut document);
+        nul_replacement::replace_in_document(&mut document);
     }
 
     Ok(ParseOutput {
@@ -178,7 +256,7 @@ fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, Sy
 
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
 /// between the two call this; node values are rewritten after parsing by
-/// `nul::replace_in_document`, so spans stay in source coordinates.
+/// `nul_replacement::replace_in_document`, so spans stay in source coordinates.
 fn source_char(char: char) -> char {
     if char == '\0' {
         '\u{FFFD}'
@@ -193,31 +271,34 @@ fn source_char(char: char) -> char {
 /// and the native stack it uses stay bounded.
 const MAX_BLOCK_NESTING: usize = 32;
 
-fn parse_blocks(
-    input: &str,
-    base_offset: usize,
-    allow_frontmatter: bool,
+/// Parses the blocks of a container's derived content.
+/// The column `text` reaches from column `column`, with tab stops every four.
+fn advance_columns(column: usize, text: &str) -> usize {
+    text.chars().fold(column, |column, char| {
+        if char == '\t' {
+            column + 4 - column % 4
+        } else {
+            column + 1
+        }
+    })
+}
+
+fn parse_derived_blocks(
+    content: &DerivedText,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
-    let lines = collect_lines(input, base_offset);
-    parse_blocks_from_lines(
-        &lines,
-        allow_frontmatter,
-        options,
-        definitions,
-        diagnostics,
-        depth,
-    )
+    let lines = content.lines();
+    parse_blocks_from_lines(&lines, false, options, definitions, diagnostics, depth)
 }
 
 fn parse_blocks_from_lines(
     lines: &[Line<'_>],
     allow_frontmatter: bool,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -233,13 +314,28 @@ fn parse_blocks_from_lines(
 
     while index < lines.len() {
         let line = lines[index];
-        if line.text.trim().is_empty() {
+        if is_blank(line.text) {
             index += 1;
             continue;
         }
         let after_definition_unbroken = index > 0
-            && !lines[index - 1].text.trim().is_empty()
+            && !is_blank(lines[index - 1].text)
             && matches!(blocks.last(), Some(Block::Definition(_)));
+        // A table that ended the paragraph before it starts here, though its
+        // header row would otherwise open a block that cannot interrupt one.
+        if index > 0
+            && !is_blank(lines[index - 1].text)
+            && matches!(blocks.last(), Some(Block::Paragraph(_)))
+            && !likely_block_start(line.text, options)
+        {
+            if let Some((block, next)) =
+                parse_table(lines, index, options, definitions, diagnostics)
+            {
+                blocks.push(block);
+                index = next;
+                continue;
+            }
+        }
 
         if allow_frontmatter && index == 0 {
             if let Some((block, next)) = parse_frontmatter(lines, index, options) {
@@ -293,9 +389,12 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = nest_containers
-            .then(|| parse_list(lines, index, options, definitions, diagnostics, depth))
-            .flatten()
+        // A list right after a definition starts only where it could
+        // interrupt the paragraph the definition was read from.
+        if let Some((block, next)) = (nest_containers
+            && (!after_definition_unbroken || list_marker_can_interrupt_paragraph(line.text)))
+        .then(|| parse_list(lines, index, options, definitions, diagnostics, depth))
+        .flatten()
         {
             blocks.push(block);
             index = next;
@@ -346,7 +445,14 @@ fn parse_blocks_from_lines(
             continue;
         }
 
-        if let Some((block, next)) = parse_html_block(lines, index, options) {
+        // A line right after a definition continues the paragraph the
+        // definition was read from, so only an HTML block that can interrupt
+        // a paragraph starts there.
+        if let Some((block, next)) = (!after_definition_unbroken
+            || line_starts_interrupting_html_block(line.text))
+        .then(|| parse_html_block(lines, index, options))
+        .flatten()
+        {
             blocks.push(block);
             index = next;
             continue;
@@ -397,66 +503,97 @@ fn parse_blocks_from_lines(
     blocks
 }
 
-fn collect_lines(input: &str, base_offset: usize) -> Vec<Line<'_>> {
+/// Splits `input` into lines, with positions translated through `map`, the
+/// source map of `input`.
+fn collect_lines<'a>(input: &'a str, map: &'a SourceMap) -> Vec<Line<'a>> {
     let bytes = input.as_bytes();
     let mut lines = Vec::new();
+    let mut segments = LineSegments {
+        segments: map.segments(),
+        first: 0,
+    };
     let mut start = 0;
     let mut index = 0;
 
     while index < bytes.len() {
-        match bytes[index] {
-            b'\n' => {
-                let end = index;
-                lines.push(Line {
-                    text: &input[start..end],
-                    eol: &input[index..index + 1],
-                    start: base_offset + start,
-                    end: base_offset + end,
-                    end_with_eol: base_offset + index + 1,
-                    lazy: false,
-                });
+        let eol_end = match bytes[index] {
+            b'\n' => index + 1,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => index + 2,
+            b'\r' => index + 1,
+            _ => {
                 index += 1;
-                start = index;
+                continue;
             }
-            b'\r' => {
-                let end = index;
-                let eol_end = if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
-                    index + 2
-                } else {
-                    index + 1
-                };
-                lines.push(Line {
-                    text: &input[start..end],
-                    eol: &input[index..eol_end],
-                    start: base_offset + start,
-                    end: base_offset + end,
-                    end_with_eol: base_offset + eol_end,
-                    lazy: false,
-                });
-                index = eol_end;
-                start = index;
-            }
-            _ => index += 1,
-        }
+        };
+        lines.push(segments.line(input, start, index, eol_end));
+        index = eol_end;
+        start = index;
     }
 
     if start < bytes.len() || input.is_empty() {
-        lines.push(Line {
-            text: &input[start..],
-            eol: "",
-            start: base_offset + start,
-            end: base_offset + bytes.len(),
-            end_with_eol: base_offset + bytes.len(),
-            lazy: false,
-        });
+        lines.push(segments.line(input, start, bytes.len(), bytes.len()));
     }
 
     lines
 }
 
-fn collect_definitions(input: &str, base_offset: usize, options: &SyntaxOptions) -> Vec<String> {
+/// Hands each line of a split string the segments that cover it, moving
+/// forward through the map once.
+struct LineSegments<'a> {
+    segments: &'a [Segment],
+    first: usize,
+}
+
+impl<'a> LineSegments<'a> {
+    fn line(&mut self, input: &'a str, start: usize, end: usize, eol_end: usize) -> Line<'a> {
+        let segments = self.segments;
+        while self.first + 1 < segments.len() && segments[self.first].text_end() <= start {
+            self.first += 1;
+        }
+        let mut last = self.first;
+        while last + 1 < segments.len() && segments[last + 1].text_start() < eol_end {
+            last += 1;
+        }
+        let covering = if segments.is_empty() {
+            segments
+        } else {
+            &segments[self.first..=last]
+        };
+        let source_start = source_map::start_of(covering, start);
+        let source_end = if end == start {
+            source_start
+        } else {
+            source_map::end_of(covering, end)
+        };
+        let source_end_with_eol = if eol_end == end {
+            source_end
+        } else {
+            source_map::end_of(covering, eol_end)
+        };
+        Line {
+            text: &input[start..end],
+            eol: &input[end..eol_end],
+            start: source_start,
+            end: source_end,
+            end_with_eol: source_end_with_eol,
+            lazy: false,
+            segments: covering,
+            text_offset: start,
+            column: 0,
+        }
+    }
+}
+
+/// The identifiers of the definitions in `input`, split into `lines`, read
+/// from its block structure alone: `None` for the definitions leaves inline
+/// content unparsed.
+fn collect_definitions(input: &str, lines: &[Line<'_>], options: &SyntaxOptions) -> Vec<String> {
+    // A definition's label is followed right away by its colon.
+    if !input.contains("]:") {
+        return Vec::new();
+    }
     let mut diagnostics = Vec::new();
-    let blocks = parse_blocks(input, base_offset, true, options, &[], &mut diagnostics, 0);
+    let blocks = parse_blocks_from_lines(lines, true, options, None, &mut diagnostics, 0);
     let mut definitions = Vec::new();
     collect_definition_refs_from_blocks(&blocks, &mut definitions);
     // Sorted and deduplicated so `definition_exists` can binary-search.
@@ -548,7 +685,7 @@ fn parse_container_directive(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -559,8 +696,6 @@ fn parse_container_directive(
     let Some((fence_len, opener_rest)) = directive_container_opener_prefix(trimmed) else {
         return None;
     };
-    let opener_base = lines[index].start + (lines[index].text.len() - trimmed.len()) + fence_len;
-
     let Some((name, label_source, attributes, _consumed)) = parse_directive_opener(opener_rest)
     else {
         diagnostics.push(Diagnostic::new(
@@ -571,37 +706,34 @@ fn parse_container_directive(
         ));
         return None;
     };
-    let label_base = opener_base + name.len() + 1;
+    let parse_label = |source: &str, diagnostics: &mut Vec<Diagnostic>| {
+        let map = lines[index].slice_map(source);
+        parse_inlines(source, &map, options, definitions, diagnostics)
+    };
 
-    let mut content = String::new();
+    let mut content = DerivedText::default();
     let mut cursor = index + 1;
     let mut nested_fences = Vec::new();
+    let mut code_fence = None;
     while cursor < lines.len() {
         let line = lines[cursor].text;
         let trimmed = trim_up_to_three_spaces(line);
         if let Some(trimmed) = trimmed {
             if let Some(nested_len) = nested_fences.last().copied() {
                 if directive_container_closing_fence(trimmed, nested_len).is_some() {
+                    // A fence the nested directive left open ends with it.
                     nested_fences.pop();
-                    push_line(&mut content, line);
+                    code_fence = None;
+                    content.push_line(&lines[cursor], line, 0);
                     cursor += 1;
                     continue;
                 }
             } else if directive_container_closing_fence(trimmed, fence_len).is_some() {
                 let label = label_source
-                    .map(|source| {
-                        parse_inlines(source, label_base, options, definitions, diagnostics)
-                    })
+                    .map(|source| parse_label(source, diagnostics))
                     .unwrap_or_default();
-                let children = parse_blocks(
-                    &content,
-                    lines[index + 1].start,
-                    false,
-                    options,
-                    definitions,
-                    diagnostics,
-                    depth + 1,
-                );
+                let children =
+                    parse_derived_blocks(&content, options, definitions, diagnostics, depth + 1);
                 return Some((
                     Block::ContainerDirective(ContainerDirective {
                         meta: NodeMeta::new(Some(Span::new(
@@ -617,14 +749,24 @@ fn parse_container_directive(
                 ));
             }
 
-            if let Some((nested_len, nested_rest)) = directive_container_opener_prefix(trimmed) {
+            // A line inside a fenced code block is code, not a nested
+            // directive's opener.
+            if let Some((marker, length)) = code_fence {
+                if fence_close(trimmed, marker, length) {
+                    code_fence = None;
+                }
+            } else if let Some(fence) = fence_start(trimmed) {
+                code_fence = Some(fence);
+            } else if let Some((nested_len, nested_rest)) =
+                directive_container_opener_prefix(trimmed)
+            {
                 if parse_directive_opener(nested_rest).is_some() {
                     nested_fences.push(nested_len);
                 }
             }
         }
 
-        push_line(&mut content, line);
+        content.push_line(&lines[cursor], line, 0);
         cursor += 1;
     }
 
@@ -642,21 +784,10 @@ fn parse_container_directive(
             ))),
             name,
             label: label_source
-                .map(|source| parse_inlines(source, label_base, options, definitions, diagnostics))
+                .map(|source| parse_label(source, diagnostics))
                 .unwrap_or_default(),
             attributes,
-            children: parse_blocks(
-                &content,
-                lines
-                    .get(index + 1)
-                    .map(|line| line.start)
-                    .unwrap_or(lines[index].end),
-                false,
-                options,
-                definitions,
-                diagnostics,
-                depth + 1,
-            ),
+            children: parse_derived_blocks(&content, options, definitions, diagnostics, depth + 1),
         }),
         lines.len(),
     ))
@@ -681,7 +812,7 @@ fn directive_container_closing_fence(input: &str, min_len: usize) -> Option<usiz
         .iter()
         .take_while(|byte| **byte == b':')
         .count();
-    if fence_len >= min_len && input[fence_len..].trim().is_empty() {
+    if fence_len >= min_len && is_blank(&input[fence_len..]) {
         Some(fence_len)
     } else {
         None
@@ -703,7 +834,7 @@ fn parse_math_block(
     // line, exactly like a fenced code block.
     let opener = trim_up_to_three_spaces(lines[index].text)?;
     let fence_length = math_block_fence_length(opener)?;
-    let opening_indent = leading_indent_columns(lines[index].text);
+    let opening_indent = lines[index].indent_columns();
 
     let mut value = String::new();
     let mut content_lines = 0usize;
@@ -729,7 +860,12 @@ fn parse_math_block(
             // yielding another line.
             ensure_line_separator(&mut value);
         }
-        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        let stripped = strip_leading_indent_columns_split(
+            lines[cursor].text,
+            opening_indent,
+            lines[cursor].column,
+        )
+        .0;
         value.push_str(&stripped);
         value.push_str(lines[cursor].eol);
         content_lines += 1;
@@ -738,6 +874,7 @@ fn parse_math_block(
 
     // EOF closes the block (an unclosed opener runs to end of document); an
     // immediate EOF after the opener yields an empty math block.
+    end_last_line(&mut value);
     Some((
         Block::MathBlock(MathBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -764,6 +901,13 @@ fn math_block_fence_length(input: &str) -> Option<usize> {
     Some(length)
 }
 
+/// Whether `input` opens a math block when that construct is enabled.
+pub(crate) fn line_starts_math_block(input: &str) -> bool {
+    trim_up_to_three_spaces(input)
+        .and_then(math_block_fence_length)
+        .is_some()
+}
+
 /// A math-flow closing line (already indent-stripped) is a run of `>=length`
 /// dollars and nothing else (trailing whitespace aside).
 fn math_block_fence_closes(input: &str, length: usize) -> bool {
@@ -772,7 +916,7 @@ fn math_block_fence_closes(input: &str, length: usize) -> bool {
         .iter()
         .take_while(|byte| **byte == b'$')
         .count();
-    count >= length && input[count..].trim().is_empty()
+    count >= length && is_blank(&input[count..])
 }
 
 fn parse_fenced_code(
@@ -784,11 +928,8 @@ fn parse_fenced_code(
     let (marker, length) = fence_start(line)?;
     // CommonMark: up to N columns of indentation (N = the opening fence's
     // indent, 0–3) are removed from each content line.
-    let opening_indent = leading_indent_columns(lines[index].text);
-    let info = line[length..].trim();
-    if marker == FenceMarker::Backtick && info.contains('`') {
-        return None;
-    }
+    let opening_indent = lines[index].indent_columns();
+    let info = line[length..].trim_matches([' ', '\t']);
     let info = if info.is_empty() {
         None
     } else {
@@ -825,12 +966,18 @@ fn parse_fenced_code(
             // yielding another line.
             ensure_line_separator(&mut value);
         }
-        let stripped = strip_leading_indent_columns(lines[cursor].text, opening_indent);
+        let stripped = strip_leading_indent_columns_split(
+            lines[cursor].text,
+            opening_indent,
+            lines[cursor].column,
+        )
+        .0;
         value.push_str(&stripped);
         value.push_str(lines[cursor].eol);
         content_lines += 1;
         cursor += 1;
     }
+    end_last_line(&mut value);
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -861,14 +1008,35 @@ fn container_closed_after_unclosed_fence(
     options: &SyntaxOptions,
 ) -> bool {
     !lines[last_content_index].eol.is_empty()
-        && (cursor >= lines.len() || lines[cursor].text.trim().is_empty())
+        && (cursor >= lines.len() || is_blank(lines[cursor].text))
         && content_has_unclosed_fenced_code(content, options)
 }
 
 fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> bool {
-    let lines = collect_lines(content, 0);
+    let map = SourceMap::verbatim(content.len(), 0);
+    let lines = collect_lines(content, &map);
     let mut open_fence = None;
+    // An HTML block that only its end condition closes holds fence-like lines
+    // as its own text.
+    let mut open_html: Option<OpenBlockEnd> = None;
     for line in lines {
+        if let Some(end) = open_html {
+            if end.ends_with(line.text) {
+                open_html = None;
+            }
+            continue;
+        }
+        if open_fence.is_none() && options.constructs.html_block {
+            let end = match trim_up_to_three_spaces(line.text).and_then(html_block_start) {
+                Some(HtmlBlockKind::RawTag) => Some(OpenBlockEnd::RawHtml),
+                Some(HtmlBlockKind::Until(end)) => Some(OpenBlockEnd::HtmlUntil(end)),
+                _ => None,
+            };
+            if let Some(end) = end {
+                open_html = (!end.ends_with(line.text)).then_some(end);
+                continue;
+            }
+        }
         let Some(trimmed) = fence_line(line.text, options) else {
             continue;
         };
@@ -876,55 +1044,174 @@ fn content_has_unclosed_fenced_code(content: &str, options: &SyntaxOptions) -> b
             if fence_close(trimmed, marker, length) {
                 open_fence = None;
             } else {
-                open_fence = Some((
-                    marker,
-                    length,
-                    has_nonblank_content || !trimmed.trim().is_empty(),
-                ));
+                open_fence = Some((marker, length, has_nonblank_content || !is_blank(trimmed)));
             }
             continue;
         }
-        let Some((marker, length)) = fence_start(trimmed) else {
-            continue;
-        };
-        let info = trimmed[length..].trim();
-        if marker != FenceMarker::Backtick || !info.contains('`') {
+        if let Some((marker, length)) = fence_start(trimmed) {
             open_fence = Some((marker, length, false));
         }
     }
     open_fence.is_some_and(|(_, _, has_nonblank_content)| !has_nonblank_content)
 }
 
-/// Recursively determines whether the innermost block reachable through this
-/// (already marker-stripped) block-quote content line is an OPEN paragraph —
-/// the only block kind that a following lazy continuation line may extend.
+/// What the innermost block reachable through a container content line is,
+/// as far as a following line needs to know.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContentLineKind {
+    /// Nothing after the container markers.
+    Empty,
+    /// Paragraph text, which a following lazy line may continue.
+    Paragraph(OpenParagraphIn),
+    /// A block that ends with its line (a thematic break or ATX heading), or
+    /// indented code, which the next line's own indentation continues or ends.
+    Closed,
+    /// A block that the following non-blank lines continue: a fence, an HTML
+    /// block, or another block start.
+    Open(OpenBlock),
+}
+
+/// A block that a container content line opened and that the following lines
+/// continue until its end, read at the number of block quotes it sits in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OpenBlock {
+    /// How many nested block quotes the block sits in.
+    depth: usize,
+    /// The column the content of the innermost list item passed on the way
+    /// to the block starts at: a line indented less has left that item, and
+    /// the block with it.
+    item_column: Option<usize>,
+    end: OpenBlockEnd,
+}
+
+/// What ends an [`OpenBlock`] besides a blank line.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenBlockEnd {
+    /// A closing code fence.
+    Fence(FenceMarker, usize),
+    /// A closing math fence of at least this many dollars.
+    Math(usize),
+    /// A line holding a raw-text closing tag (HTML block type 1).
+    RawHtml,
+    /// A line holding this text (HTML block types 2–5).
+    HtmlUntil(&'static str),
+    /// A blank line only: HTML block types 6 and 7, and any other block.
+    Blank,
+}
+
+impl OpenBlockEnd {
+    /// The end of the block that `trimmed` opens, `None` when the line also
+    /// ends it.
+    fn of_opening_line(trimmed: &str, options: &SyntaxOptions) -> Option<Self> {
+        if let Some((marker, length)) = fence_start(trimmed) {
+            return Some(Self::Fence(marker, length));
+        }
+        if options.constructs.math_block {
+            if let Some(length) = math_block_fence_length(trimmed) {
+                return Some(Self::Math(length));
+            }
+        }
+        let html = options
+            .constructs
+            .html_block
+            .then(|| html_block_start(trimmed));
+        let end = match html.flatten() {
+            Some(HtmlBlockKind::RawTag) => Self::RawHtml,
+            Some(HtmlBlockKind::Until(end)) => Self::HtmlUntil(end),
+            _ => Self::Blank,
+        };
+        (!end.ends_with(trimmed)).then_some(end)
+    }
+
+    /// Whether the content line `rest`, read at the block's quote depth, ends
+    /// the block (and belongs to it).
+    fn ends_with(self, rest: &str) -> bool {
+        match self {
+            Self::Fence(marker, length) => trim_up_to_three_spaces(rest)
+                .is_some_and(|trimmed| fence_close(trimmed, marker, length)),
+            Self::Math(length) => trim_up_to_three_spaces(rest)
+                .is_some_and(|trimmed| math_block_fence_closes(trimmed, length)),
+            Self::RawHtml => ["script", "pre", "style", "textarea"]
+                .iter()
+                .any(|tag| line_contains_raw_closing_tag(rest, tag)),
+            Self::HtmlUntil(end) => rest.contains(end),
+            Self::Blank => false,
+        }
+    }
+}
+
+/// Classifies the innermost block reachable through this (already
+/// marker-stripped) container content line, read as if no paragraph were
+/// open before it.
 ///
-/// Nested quote markers are stripped one level at a time so that, e.g.,
-/// `> > a` reports that the deepest content `a` is an open paragraph (this is
+/// Nested quote and list markers are stripped one level at a time so that,
+/// e.g., `> > a` reports that the deepest content `a` is a paragraph (this is
 /// what lets a lazy line continue a paragraph buried inside several quotes).
-/// Indented code, blank lines, HTML blocks, and every other block start are
-/// reported as NOT-an-open-paragraph.
-fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) -> bool {
-    // Nested `>` and list markers are peeled one per iteration. Past
+fn content_line_kind(content: &str, column: usize, options: &SyntaxOptions) -> ContentLineKind {
+    if is_blank(content) {
+        return ContentLineKind::Empty;
+    }
+    // Nested `>` and list markers are peeled one per iteration, keeping the
+    // source column of what is left so its tabs reach their stops. Past
     // `MAX_BLOCK_NESTING` of them no container opens (see
     // `parse_blocks_from_lines`), so what remains is paragraph text.
     let mut source = Cow::Borrowed(content);
     let mut offset = 0;
+    let mut column = column;
+    let mut depth = 0;
+    let mut item_column = None;
+    let mut item: Option<(usize, usize)> = None;
     for _ in 0..=MAX_BLOCK_NESTING {
-        let Some(trimmed) = trim_up_to_three_spaces(&source[offset..]) else {
+        let here = &source[offset..];
+        let indent = here.len() - trim_ascii_start(here).len();
+        let trimmed_column = advance_columns(column, &here[..indent]);
+        if trimmed_column - column > 3 {
             // >= 4 columns of indentation: indented code, never a paragraph.
-            return false;
-        };
-        if trimmed.is_empty() {
-            return false;
+            return ContentLineKind::Closed;
         }
-        let rest = if let Some(rest) = trimmed.strip_prefix('>') {
-            Cow::Borrowed(rest.strip_prefix(' ').unwrap_or(rest))
-        } else if let Some(marker) = list_marker_info(trimmed) {
-            list_marker_first_content(trimmed, marker)
+        let trimmed = &here[indent..];
+        if trimmed.is_empty() {
+            return ContentLineKind::Empty;
+        }
+        let (rest, rest_column) = if let Some(rest) = trimmed.strip_prefix('>') {
+            depth += 1;
+            let rest_column = trimmed_column + 1;
+            match rest.strip_prefix(' ') {
+                Some(rest) => (Cow::Borrowed(rest), rest_column + 1),
+                None => (Cow::Borrowed(rest), rest_column),
+            }
+        } else if let Some(marker) = list_marker_info_at(trimmed, trimmed_column) {
+            let marker_end_column = trimmed_column + marker.marker_len;
+            let (rest, rest_column) = match list_marker_first_content(trimmed, marker) {
+                (Cow::Borrowed(rest), from) => (
+                    Cow::Borrowed(rest),
+                    advance_columns(trimmed_column, &trimmed[..from]),
+                ),
+                // A tab split after the marker: its rest starts one column on.
+                (Cow::Owned(rest), _) => (Cow::Owned(rest), marker_end_column + 1),
+            };
+            item.get_or_insert((rest_column, depth));
+            item_column = Some(rest_column);
+            (rest, rest_column)
+        } else if parse_thematic_break(Line::detached(trimmed)).is_some()
+            || is_atx_heading_line(trimmed)
+        {
+            return ContentLineKind::Closed;
+        } else if lazy_line_opens_block(trimmed, options) {
+            // A line read with its markers opens what it opens; the GH-19
+            // fence-like rule is for lazy lines only.
+            return match OpenBlockEnd::of_opening_line(trimmed, options) {
+                Some(end) => ContentLineKind::Open(OpenBlock {
+                    depth,
+                    item_column,
+                    end,
+                }),
+                None => ContentLineKind::Closed,
+            };
         } else {
-            return !lazy_line_starts_block(trimmed, options);
+            return ContentLineKind::Paragraph(OpenParagraphIn::new(depth, item));
         };
+        column = rest_column;
         match rest {
             // A borrowed rest is a suffix of `source`; continue from it in place.
             Cow::Borrowed(rest) => offset = source.len() - rest.len(),
@@ -934,29 +1221,144 @@ fn block_quote_content_paragraph_open(content: &str, options: &SyntaxOptions) ->
             }
         }
     }
-    true
+    ContentLineKind::Paragraph(OpenParagraphIn::new(depth, item))
 }
 
-/// Whether a line starts a block for the purpose of LAZY-continuation
-/// suppression. Identical to [`likely_block_start`] except that *every* HTML
-/// block start — including the type-7 "complete tag" form that cannot interrupt
-/// a paragraph with a marker present — blocks lazy continuation. A bare `<a>`
-/// after `> a` must close the quote, not be absorbed as paragraph text.
+/// Whether `trimmed` (indented at most three columns) is an ATX heading line.
+fn is_atx_heading_line(trimmed: &str) -> bool {
+    let depth = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&depth) && matches!(trimmed.as_bytes().get(depth), None | Some(b' ' | b'\t'))
+}
+
+/// The open paragraph of a container's content, if any.
+type OpenParagraph = Option<OpenParagraphIn>;
+
+/// The containers a paragraph of a container's content sits in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenParagraphIn {
+    /// The block quotes before any list item.
+    depth: usize,
+    /// The column the content of the first list item starts at, and the
+    /// block quotes inside that item.
+    item: Option<(usize, usize)>,
+}
+
+impl OpenParagraphIn {
+    /// From the block quotes a content line peeled, and the content column
+    /// of its first list item with the quotes peeled before it.
+    fn new(depth: usize, item: Option<(usize, usize)>) -> Self {
+        match item {
+            Some((column, before)) => Self {
+                depth: before,
+                item: Some((column, depth - before)),
+            },
+            None => Self { depth, item: None },
+        }
+    }
+}
+
+/// `content` with up to `depth` leading block quote markers removed, and how
+/// many it removed.
+fn strip_quote_markers(content: &str, depth: usize) -> (&str, usize) {
+    let mut rest = content;
+    for stripped in 0..depth {
+        match trim_up_to_three_spaces(rest).and_then(|trimmed| trimmed.strip_prefix('>')) {
+            Some(after) => rest = after.strip_prefix(' ').unwrap_or(after),
+            None => return (rest, stripped),
+        }
+    }
+    (rest, depth)
+}
+
+/// The paragraph open after a container content line, given the one open
+/// before it. A lazy line is paragraph continuation by construction. A line
+/// that reaches the open paragraph's quote level ends it with a setext
+/// underline and continues it when it cannot interrupt a paragraph (by the
+/// rules `parse_paragraph` applies); a line that stops short of that level can
+/// only continue it as a lazy line. Any other line is read afresh.
+fn paragraph_open_after(
+    open: OpenParagraph,
+    content: &str,
+    column: usize,
+    lazy: bool,
+    options: &SyntaxOptions,
+) -> OpenParagraph {
+    if lazy {
+        return open;
+    }
+    if is_blank(content) {
+        return None;
+    }
+    if let Some(paragraph) = open {
+        let (mut rest, reached) = strip_quote_markers(content, paragraph.depth);
+        if reached == paragraph.depth && is_blank(rest) {
+            // A blank line at the paragraph's level ends it.
+            return None;
+        }
+        // A line short of the list item the paragraph sits in, or of a block
+        // quote inside that item, continues it only as a lazy line.
+        let mut reaches = reached == paragraph.depth;
+        if let (true, Some((item_column, inner))) = (reaches, paragraph.item) {
+            let rest_column = advance_columns(column, &content[..content.len() - rest.len()]);
+            let indent = rest.len() - trim_ascii_start(rest).len();
+            reaches = advance_columns(rest_column, &rest[..indent]) >= item_column;
+            if reaches && inner > 0 {
+                let (inner_rest, inner_reached) = strip_quote_markers(&rest[indent..], inner);
+                reaches = inner_reached == inner;
+                if reaches {
+                    rest = inner_rest;
+                }
+            }
+        }
+        if reaches {
+            if setext_underline_depth(rest).is_some() {
+                return None;
+            }
+            if !likely_block_start(rest, options) {
+                return open;
+            }
+        } else if !is_blank(rest) && !lazy_line_starts_block(rest, options) {
+            return open;
+        }
+    }
+    match content_line_kind(content, column, options) {
+        ContentLineKind::Paragraph(paragraph) => Some(paragraph),
+        _ => None,
+    }
+}
+
+/// Whether a block quote's lazy line starts a block instead of continuing the
+/// quote's paragraph: [`lazy_line_opens_block`], and also a line that almost
+/// opens a fenced code block — any fence-char run after up to three spaces of
+/// indent — ends the paragraph instead of continuing it (GH-19): `> x\n``\n`
+/// closes the quote rather than joining `` ` `` onto the paragraph.
 fn lazy_line_starts_block(input: &str, options: &SyntaxOptions) -> bool {
-    likely_block_start(input, options)
-        || (options.constructs.html_block && line_starts_html_block(input))
-        // A lazy line that almost opens a fenced code block — any fence-char
-        // run after up to three spaces of indent — ends the paragraph instead
-        // of continuing it (GH-19): `> x\n``\n` closes the quote rather than
-        // joining `` ` `` onto the paragraph.
+    lazy_line_opens_block(input, options)
         || trim_up_to_three_spaces(input).is_some_and(|t| t.starts_with('`') || t.starts_with('~'))
+}
+
+/// Whether a container's lazy line opens a block of the container the line is
+/// in, ending the paragraph instead of continuing it. Identical to
+/// [`likely_block_start`] except for two kinds of line that cannot interrupt a
+/// paragraph but do end a lazy one, since the block they open belongs to the
+/// enclosing container rather than to the paragraph's:
+/// - *every* HTML block start, including the type-7 "complete tag" form: a bare
+///   `<a>` after `> a` or `- a` closes the container, as cmark-gfm and
+///   micromark read it;
+/// - *every* list marker, including an empty item and an ordered one not
+///   starting at 1: `> a\n- ` and `> a\n2. b` close the quote and open a list,
+///   as cmark, commonmark.js, markdown-it, and micromark all read them.
+fn lazy_line_opens_block(input: &str, options: &SyntaxOptions) -> bool {
+    likely_block_start(input, options)
+        || list_marker_info(input).is_some()
+        || (options.constructs.html_block && line_starts_html_block(input))
 }
 
 fn parse_block_quote(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -964,37 +1366,47 @@ fn parse_block_quote(
         return None;
     }
 
-    let mut content = String::new();
+    let mut content = DerivedText::default();
     // Lazy provenance per collected content line, parallel to the `\n`-joined
     // `content`. Re-split (`collect_lines`) lines map 1:1 to these flags, so the
     // child parser can suppress lazy-only constructs (e.g. setext underlines).
     let mut lazy_flags: Vec<bool> = Vec::new();
     let mut cursor = index;
-    let mut paragraph_open = false;
+    let mut paragraph_open: OpenParagraph = None;
+    let mut open_block: Option<OpenBlock> = None;
     let mut in_table = false;
     let mut last_content_line: Option<String> = None;
-    let mut content_base_offset = None;
     while cursor < lines.len() {
         let raw = lines[cursor].text;
         let trimmed_opt = trim_up_to_three_spaces(raw);
         let marked = trimmed_opt.is_some_and(|trimmed| trimmed.starts_with('>'));
         let quote_rest_owned: String;
-        if let Some(trimmed) = trimmed_opt {
-            if trimmed.is_empty() {
-                break;
-            }
+        // A blank line ends the quote however far it is indented.
+        if is_blank(raw) {
+            break;
         }
-        let (line, line_start) = if marked {
+        // The line's content and the byte of `raw` it is read from.
+        let (line, from) = if marked {
             let trimmed = trimmed_opt.expect("marked implies a trimmed line");
-            let trimmed_start = lines[cursor].start + (raw.len() - trimmed.len());
-            let mut rest_start = 1;
-            let mut rest = &trimmed[rest_start..];
+            let mut from = raw.len() - trimmed.len() + 1;
+            let mut rest = &trimmed[1..];
             if rest.starts_with(' ') {
-                rest_start += 1;
+                from += 1;
                 rest = &rest[1..];
+                if let Cow::Owned(expanded) =
+                    expand_leading_whitespace(rest, lines[cursor].column_at(from))
+                {
+                    if !continues_verbatim(open_block, &expanded) {
+                        quote_rest_owned = expanded;
+                        rest = &quote_rest_owned;
+                    }
+                }
             } else if rest.starts_with('\t') {
-                let marker_end_column = leading_indent_columns(raw) + 1;
-                match strip_leading_indent_columns_from(rest, 1, marker_end_column) {
+                let marker_end_column = lines[cursor].column_at(from);
+                let (stripped, split) =
+                    strip_leading_indent_columns_split(rest, 1, marker_end_column);
+                from += split;
+                match stripped {
                     Cow::Borrowed(stripped) => rest = stripped,
                     Cow::Owned(stripped) => {
                         quote_rest_owned = stripped;
@@ -1002,21 +1414,22 @@ fn parse_block_quote(
                     }
                 }
             }
-            (rest, trimmed_start + rest_start)
+            (rest, from)
         } else if in_table {
             // An open GFM table absorbs unmarked rows (lazy table body); a
             // non-row unmarked line ends the quote.
             break;
-        } else if paragraph_open && !lazy_line_starts_block(raw, options) {
+        } else if paragraph_open.is_some() && !lazy_line_starts_block(raw, options) {
             // Lazy paragraph continuation: a marker-less line that continues an
             // open paragraph (possibly nested). The RAW line is used verbatim —
             // its indentation (even >= 4 columns) is paragraph text, not code.
-            (raw, lines[cursor].start)
+            (raw, 0)
         } else {
             break;
         };
 
         let mut escaped_lazy = String::new();
+        let mut inserted_escape = None;
         let line = if !marked
             && last_content_line.as_deref().is_some_and(|previous| {
                 table_can_start_source(
@@ -1029,6 +1442,7 @@ fn parse_block_quote(
             escaped_lazy.push_str(line);
             if let Some(offset) = escaped_lazy.find('-') {
                 escaped_lazy.insert(offset, '\\');
+                inserted_escape = Some(offset);
             }
             &escaped_lazy
         } else {
@@ -1044,46 +1458,51 @@ fn parse_block_quote(
             )
         });
         if marked && starts_table {
-            paragraph_open = false;
+            paragraph_open = None;
+            open_block = None;
             in_table = true;
         } else if marked && in_table && block_quote_table_body_row(line, options) {
-            paragraph_open = false;
+            paragraph_open = None;
         } else {
             in_table = false;
             // Track the innermost open paragraph across nested quote markers so a
-            // following lazy line can reach a paragraph buried in nested quotes.
-            paragraph_open = block_quote_content_paragraph_open(line, options);
+            // following lazy line can reach a paragraph buried in nested quotes,
+            // and the fence or HTML block that its lines continue instead.
+            let column = source_map::derived_column(&lines[cursor], line, from);
+            (paragraph_open, open_block) = content_line_state(
+                paragraph_open,
+                open_block,
+                line,
+                column,
+                !marked,
+                true,
+                options,
+            );
         }
         last_content_line = Some(line.into());
-        if content_base_offset.is_none() {
-            content_base_offset = Some(line_start);
+        match inserted_escape {
+            // Only a lazy line, read whole from `raw`, gets an escape inserted.
+            Some(offset) => content.push_line_with_insertion(&lines[cursor], offset, "\\"),
+            None => content.push_line(&lines[cursor], line, from),
         }
-        push_line(&mut content, line);
         lazy_flags.push(!marked);
         cursor += 1;
     }
 
     let span = Span::new(lines[index].start, lines[cursor - 1].end_with_eol);
-    let child_base_offset = content_base_offset.unwrap_or(lines[index].start);
-    if !lines[cursor - 1].eol.is_empty() && !ends_with_line_ending(&content) {
-        content.push_str(lines[cursor - 1].eol);
+    if !lines[cursor - 1].eol.is_empty() && !ends_with_line_ending(&content.text) {
+        content.push_pending_eol();
     }
-    if container_closed_after_unclosed_fence(lines, cursor, cursor - 1, &content, options) {
-        content.push('\n');
+    if container_closed_after_unclosed_fence(lines, cursor, cursor - 1, &content.text, options) {
+        content.push_synthetic("\n");
     }
-    if let Some(alert) = parse_alert_from_block_quote(
-        &content,
-        child_base_offset,
-        span,
-        options,
-        definitions,
-        diagnostics,
-        depth,
-    ) {
+    if let Some(alert) =
+        parse_alert_from_block_quote(&content, span, options, definitions, diagnostics, depth)
+    {
         return Some((alert, cursor));
     }
 
-    let mut child_lines = collect_lines(&content, child_base_offset);
+    let mut child_lines = content.lines();
     for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
         child.lazy = lazy;
     }
@@ -1105,32 +1524,24 @@ fn parse_block_quote(
 }
 
 fn parse_alert_from_block_quote(
-    content: &str,
-    base_offset: usize,
+    content: &DerivedText,
     span: Span,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<Block> {
     if !options.constructs.gfm_alert {
         return None;
     }
-    let (first_line, rest) = content.split_once('\n').unwrap_or((content, ""));
+    let first_line = content.text.split('\n').next().unwrap_or_default();
     let (kind, title) = parse_alert_marker(first_line)?;
-    let rest_base_offset = base_offset + first_line.len() + usize::from(!rest.is_empty());
-    let children = if rest.is_empty() {
-        Vec::new()
-    } else {
-        parse_blocks(
-            rest,
-            rest_base_offset,
-            false,
-            options,
-            definitions,
-            diagnostics,
-            depth + 1,
-        )
+    let lines = content.lines();
+    let children = match lines.get(1..) {
+        Some(rest) if !rest.is_empty() => {
+            parse_blocks_from_lines(rest, false, options, definitions, diagnostics, depth + 1)
+        }
+        _ => Vec::new(),
     };
     Some(Block::Alert(Alert {
         meta: NodeMeta::new(Some(span)),
@@ -1138,6 +1549,11 @@ fn parse_alert_from_block_quote(
         title,
         children,
     }))
+}
+
+/// Whether a block quote whose first line is `line` reads as an alert.
+pub(crate) fn line_opens_alert(line: &str) -> bool {
+    parse_alert_marker(line).is_some()
 }
 
 fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
@@ -1154,7 +1570,7 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
         "caution" => AlertKind::Caution,
         _ => return None,
     };
-    let title = line[close + 1..].trim();
+    let title = line[close + 1..].trim_matches([' ', '\t']);
     Some((
         kind,
         if title.is_empty() {
@@ -1167,7 +1583,7 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
 
 fn block_quote_table_body_row(line: &str, options: &SyntaxOptions) -> bool {
     table_indent_line(line, options.constructs.indented_code).is_some_and(|row| {
-        !row.trim().is_empty() && contains_unescaped_pipe(row, options.constructs.spoiler)
+        !is_blank(row) && contains_unescaped_pipe(row, options.constructs.spoiler)
     })
 }
 
@@ -1175,14 +1591,17 @@ fn parse_list(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
-    let first_marker = list_marker_info(lines[index].text)?;
+    let first_marker = list_marker_info_at(lines[index].text, lines[index].column)?;
     let mut items = Vec::new();
     let mut cursor = index;
     let mut tight = true;
+    // Whether the previous item ended at a blank line: an item that follows it
+    // is separated from it by that blank, which loosens the list.
+    let mut blank_before_item = false;
 
     while cursor < lines.len() {
         // A thematic break (`* * *`, `---`, …) outranks a list marker at the same
@@ -1192,23 +1611,27 @@ fn parse_list(
         if parse_thematic_break(lines[cursor]).is_some() {
             break;
         }
-        let Some(marker) = list_marker_info(lines[cursor].text) else {
+        let Some(marker) = list_marker_info_at(lines[cursor].text, lines[cursor].column) else {
             break;
         };
         if !same_list_marker(first_marker, marker) {
             break;
         }
+        if blank_before_item {
+            tight = false;
+        }
+        blank_before_item = false;
 
         let item_start = cursor;
         let mut item_end = cursor;
         let mut item_tight = true;
-        // Byte offsets within `content` at which an item-internal blank line
-        // sits. After the item's children are parsed, a blank loosens the item
-        // only when it falls in the GAP between two consecutive top-level
-        // children (a direct separator); a blank absorbed inside a nested
-        // container's span does not (per-list tightness).
+        // Input positions at which an item-internal blank line sits. After the
+        // item's children are parsed, a blank loosens the item only when it
+        // falls in the GAP between two consecutive top-level children (a direct
+        // separator); a blank absorbed inside a nested container's span does
+        // not (per-list tightness).
         let mut item_blank_offsets: Vec<usize> = Vec::new();
-        let mut content = String::new();
+        let mut content = DerivedText::default();
         // Lazy provenance per collected content line (parallel to the `\n`-joined
         // `content`, mapped 1:1 by the re-split `collect_lines`). A line is lazy
         // when it reached the item only as a paragraph continuation while
@@ -1217,30 +1640,39 @@ fn parse_list(
         // of `d`'s paragraph, not a sublist — CommonMark "too few spaces").
         let mut lazy_flags: Vec<bool> = Vec::new();
         let mut open_fence = None;
-        let first_content = list_marker_first_content(lines[cursor].text, marker);
+        let (first_content, first_from) = list_marker_first_content(lines[cursor].text, marker);
+        let first_content = align_leading_tabs(first_content, &lines[cursor], first_from);
         let mut last_content_line: Option<String> = Some(first_content.as_ref().into());
-        let mut paragraph_open = list_item_paragraph_stays_open(None, &first_content, options);
+        let (mut paragraph_open, mut open_block) = content_line_state(
+            None,
+            None,
+            &first_content,
+            source_map::derived_column(&lines[cursor], &first_content, first_from),
+            false,
+            false,
+            options,
+        );
         // CommonMark §5.2: a list item can begin with at most one blank line.
         // When the marker has no content the item starts blank, and the first
         // following blank line ends it — later indented content cannot join
         // (`-\n\n  foo` → empty item + separate paragraph).
-        let mut item_started_blank = first_content.trim().is_empty();
-        push_line(&mut content, &first_content);
+        let mut item_started_blank = is_blank(&first_content);
+        content.push_line(&lines[cursor], &first_content, first_from);
         lazy_flags.push(false);
         update_list_item_fence(&first_content, &mut open_fence);
         cursor += 1;
 
         while cursor < lines.len() {
-            if lines[cursor].text.trim().is_empty() {
+            if is_blank(lines[cursor].text) {
                 // Blank/whitespace lines inside an open fenced code block are
                 // verbatim code content, not item-ending blanks: keep them.
                 if open_fence.is_some() {
-                    let stripped = strip_list_continuation(
-                        lines[cursor].text,
+                    let (stripped, from) = strip_list_continuation(
+                        &lines[cursor],
                         marker.content_indent,
                         first_marker.indent,
                     );
-                    push_line(&mut content, &stripped);
+                    content.push_line(&lines[cursor], &stripped, from);
                     lazy_flags.push(false);
                     update_list_item_fence(&stripped, &mut open_fence);
                     item_end = cursor;
@@ -1255,17 +1687,12 @@ fn parse_list(
                         first_marker,
                         marker.content_indent,
                     )
-                    || leading_indent_columns(lines[next].text) < marker.content_indent
+                    || lines[next].indent_columns() < marker.content_indent
                 {
-                    if next < lines.len()
-                        && sibling_list_marker_at_line(
-                            lines[next].text,
-                            first_marker,
-                            marker.content_indent,
-                        )
-                    {
-                        item_tight = false;
-                    }
+                    // A blank line inside a fence the item's content left open
+                    // is the fence's, which loosens no list (cmark).
+                    blank_before_item = !open_block
+                        .is_some_and(|block| matches!(block.end, OpenBlockEnd::Fence(..)));
                     cursor = next;
                     break;
                 }
@@ -1276,9 +1703,11 @@ fn parse_list(
                 // *directly* contain the blank-separated blocks). Track the blank
                 // line's offset within the collected content so the structural
                 // check can tell a direct-child separator from a nested one.
-                item_blank_offsets.push(content.len() + usize::from(!content.is_empty()));
-                paragraph_open = false;
-                push_line(&mut content, "");
+                item_blank_offsets.push(lines[cursor].start);
+                paragraph_open = None;
+                open_block = None;
+                let blank = &lines[cursor].text[lines[cursor].text.len()..];
+                content.push_line(&lines[cursor], blank, lines[cursor].text.len());
                 lazy_flags.push(false);
                 item_end = cursor;
                 cursor += 1;
@@ -1287,7 +1716,15 @@ fn parse_list(
 
             item_started_blank = false;
 
-            if sibling_list_marker_at_line(lines[cursor].text, first_marker, marker.content_indent)
+            // A line that reached this list as a lazy continuation of an
+            // enclosing container's paragraph starts no block here either.
+            let lazy_from_outside = lines[cursor].lazy && paragraph_open.is_some();
+            if !lazy_from_outside
+                && sibling_list_marker_at_line(
+                    lines[cursor].text,
+                    first_marker,
+                    marker.content_indent,
+                )
             {
                 break;
             }
@@ -1296,15 +1733,18 @@ fn parse_list(
             // (CommonMark §5.3: changing the marker starts a new list). It is not
             // a same-list sibling, so it would otherwise be absorbed as lazy
             // paragraph text — break the item instead so a new list can start.
-            if leading_indent_columns(lines[cursor].text) < marker.content_indent
+            if !lazy_from_outside
+                && lines[cursor].indent_columns() < marker.content_indent
                 && !same_list_marker_line(lines[cursor].text, first_marker)
                 && list_marker_info(lines[cursor].text).is_some()
             {
                 break;
             }
 
-            if leading_indent_columns(lines[cursor].text) < marker.content_indent {
-                if likely_block_start(lines[cursor].text, options) || !paragraph_open {
+            // A dedented line continues the item only as a lazy paragraph line,
+            // under the same rule a block quote applies to its lazy lines.
+            if !lazy_from_outside && lines[cursor].indent_columns() < marker.content_indent {
+                if lazy_line_opens_block(lines[cursor].text, options) || paragraph_open.is_none() {
                     break;
                 }
             }
@@ -1314,13 +1754,24 @@ fn parse_list(
             // paragraph was open). Mark it lazy so the re-parse keeps it as
             // paragraph text rather than letting a stripped `- e`/`> q`/`# h`
             // begin a fresh block inside the item.
-            let lazy = paragraph_open
-                && leading_indent_columns(lines[cursor].text) < marker.content_indent;
-            let stripped = strip_list_continuation(
-                lines[cursor].text,
-                marker.content_indent,
-                first_marker.indent,
-            );
+            // A line that reached this list as a lazy line of an enclosing
+            // container stays lazy inside it.
+            let lazy = lines[cursor].lazy
+                || (paragraph_open.is_some()
+                    && lines[cursor].indent_columns() < marker.content_indent);
+            let (stripped, from) =
+                strip_list_continuation(&lines[cursor], marker.content_indent, first_marker.indent);
+            let stripped = match align_leading_tabs(stripped, &lines[cursor], from) {
+                Cow::Owned(expanded) if continues_verbatim(open_block, &expanded) => {
+                    strip_list_continuation(
+                        &lines[cursor],
+                        marker.content_indent,
+                        first_marker.indent,
+                    )
+                    .0
+                }
+                aligned => aligned,
+            };
             let starts_table = last_content_line.as_deref().is_some_and(|previous| {
                 table_can_start_source(
                     previous,
@@ -1329,27 +1780,43 @@ fn parse_list(
                     options.constructs.spoiler,
                 )
             });
-            paragraph_open = if starts_table {
-                false
+            (paragraph_open, open_block) = if starts_table {
+                // The table's body rows continue it.
+                let table = OpenBlock {
+                    depth: 0,
+                    item_column: None,
+                    end: OpenBlockEnd::Blank,
+                };
+                (None, Some(table))
             } else {
-                list_item_paragraph_stays_open(Some(paragraph_open), &stripped, options)
+                content_line_state(
+                    paragraph_open,
+                    open_block,
+                    &stripped,
+                    source_map::derived_column(&lines[cursor], &stripped, from),
+                    lazy,
+                    false,
+                    options,
+                )
             };
-            push_line(&mut content, &stripped);
+            content.push_line(&lines[cursor], &stripped, from);
             lazy_flags.push(lazy);
-            update_list_item_fence(&stripped, &mut open_fence);
+            // A lazy line is paragraph text, which opens no fence.
+            if !lazy {
+                update_list_item_fence(&stripped, &mut open_fence);
+            }
             last_content_line = Some(stripped.into_owned());
             item_end = cursor;
             cursor += 1;
         }
 
-        let child_base = lines[item_start].start + marker.content_indent;
-        if !lines[item_end].eol.is_empty() && !ends_with_line_ending(&content) {
-            content.push_str(lines[item_end].eol);
+        if !lines[item_end].eol.is_empty() && !ends_with_line_ending(&content.text) {
+            content.push_pending_eol();
         }
-        if container_closed_after_unclosed_fence(lines, cursor, item_end, &content, options) {
-            content.push('\n');
+        if container_closed_after_unclosed_fence(lines, cursor, item_end, &content.text, options) {
+            content.push_synthetic("\n");
         }
-        let mut child_lines = collect_lines(&content, child_base);
+        let mut child_lines = content.lines();
         for (child, &lazy) in child_lines.iter_mut().zip(lazy_flags.iter()) {
             child.lazy = lazy;
         }
@@ -1367,9 +1834,7 @@ fn parse_list(
             None
         };
 
-        if item_tight
-            && blank_separates_top_level_blocks(&item_blank_offsets, &children, child_base)
-        {
+        if item_tight && blank_separates_top_level_blocks(&item_blank_offsets, &children) {
             item_tight = false;
         }
         tight = tight && item_tight;
@@ -1408,23 +1873,17 @@ fn parse_list(
 /// counts blank lines between blocks the item *directly* contains, and per-list
 /// tightness keeps a sublist's internal blank from propagating outward.
 ///
-/// Blank offsets and child spans share the `child_base` content origin (both
-/// were produced from the same stripped item content), so the comparison is in
-/// one coordinate space.
-fn blank_separates_top_level_blocks(
-    blank_offsets: &[usize],
-    children: &[Block],
-    child_base: usize,
-) -> bool {
+/// Blank offsets and child spans are both input positions.
+fn blank_separates_top_level_blocks(blank_offsets: &[usize], children: &[Block]) -> bool {
     if blank_offsets.is_empty() || children.len() < 2 {
         return false;
     }
     let Some(&first_blank) = blank_offsets.iter().min() else {
         return false;
     };
-    children.iter().any(|child| {
-        block_span(child).is_some_and(|span| span.start.saturating_sub(child_base) > first_blank)
-    })
+    children
+        .iter()
+        .any(|child| block_span(child).is_some_and(|span| span.start > first_blank))
 }
 
 fn block_span(block: &Block) -> Option<Span> {
@@ -1453,25 +1912,68 @@ fn block_span(block: &Block) -> Option<Span> {
     meta.span
 }
 
-fn list_item_paragraph_stays_open(
-    previous_open: Option<bool>,
+/// The open paragraph and the open block after a container's content line
+/// `line`. A block that an earlier line opened goes on until its end, a line
+/// that stops short of its block quote level, or a blank line when nothing
+/// but a blank line ends it; after any other line, the line is read afresh. A
+/// block quote (`in_quote`) skips blocks reached through a list marker and
+/// blocks other than HTML that end only at a blank line, since the item's
+/// indentation can end them on lines this does not read as theirs.
+fn content_line_state(
+    paragraph_open: OpenParagraph,
+    open_block: Option<OpenBlock>,
     line: &str,
+    column: usize,
+    lazy: bool,
+    in_quote: bool,
     options: &SyntaxOptions,
-) -> bool {
-    if line.trim().is_empty() {
-        return false;
+) -> (OpenParagraph, Option<OpenBlock>) {
+    if is_blank(line) {
+        // A blank line at its quote level belongs to a block with a closer.
+        let verbatim = open_block.filter(|block| {
+            block.end != OpenBlockEnd::Blank
+                && strip_quote_markers(line, block.depth).1 == block.depth
+        });
+        return (None, verbatim);
     }
-    if previous_open == Some(false) {
-        return false;
+    if lazy {
+        return (paragraph_open, open_block);
     }
-    block_quote_content_paragraph_open(line, options)
+    if let Some(block) = open_block {
+        let (rest, reached) = strip_quote_markers(line, block.depth);
+        let left_item = block.depth == 0
+            && block.item_column.is_some_and(|item_column| {
+                let indent = line.len() - trim_ascii_start(line).len();
+                advance_columns(column, &line[..indent]) < item_column
+            });
+        if reached == block.depth && !left_item {
+            return (None, (!block.end.ends_with(rest)).then_some(block));
+        }
+    }
+    let open = paragraph_open_after(paragraph_open, line, column, false, options);
+    if open.is_some() {
+        return (open, None);
+    }
+    let block = match content_line_kind(line, column, options) {
+        ContentLineKind::Open(block)
+            if in_quote && (block.item_column.is_some() || block.end == OpenBlockEnd::Blank) =>
+        {
+            let html = options.constructs.html_block
+                && block.item_column.is_none()
+                && line_starts_html_block(strip_quote_markers(line, block.depth).0);
+            html.then_some(block)
+        }
+        ContentLineKind::Open(block) => Some(block),
+        _ => None,
+    };
+    (None, block)
 }
 
 fn parse_description_list(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -1541,8 +2043,8 @@ fn parse_description_list(
         items.push(DescriptionItem {
             meta: NodeMeta::new(Some(Span::new(item_start, item_end))),
             term: parse_inlines(
-                &term.source,
-                term.source_offset,
+                &term.source.text,
+                term.source.map(),
                 options,
                 definitions,
                 diagnostics,
@@ -1581,19 +2083,19 @@ fn parse_description_details(
     index: usize,
     marker: DescriptionMarker<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(DescriptionDetails, usize, bool)> {
-    let mut content = String::new();
-    push_line(&mut content, marker.content);
+    let mut content = DerivedText::default();
+    content.push_line(&lines[index], marker.content, 0);
     let mut cursor = index + 1;
     let mut end = lines[index].end_with_eol;
     let mut tight = true;
     let mut paragraph_open = paragraph_stays_open(marker.content, options);
 
     while cursor < lines.len() {
-        if lines[cursor].text.trim().is_empty() {
+        if is_blank(lines[cursor].text) {
             let next = next_nonblank_line(lines, cursor + 1);
             // A blank that merely separates this definition from a following
             // `:`/`~` marker (another definition of the SAME term) is
@@ -1613,7 +2115,8 @@ fn parse_description_details(
             if strip_indent_continuation(lines[next].text).is_none() {
                 break;
             }
-            push_line(&mut content, "");
+            let blank = &lines[cursor].text[lines[cursor].text.len()..];
+            content.push_line(&lines[cursor], blank, 0);
             paragraph_open = false;
             tight = false;
             end = lines[cursor].end_with_eol;
@@ -1636,27 +2139,19 @@ fn parse_description_details(
             break;
         };
         paragraph_open = paragraph_stays_open(continuation, options);
-        push_line(&mut content, continuation);
+        content.push_line(&lines[cursor], continuation, 0);
         end = lines[cursor].end_with_eol;
         cursor += 1;
     }
 
-    if content.trim().is_empty() {
+    if is_blank(&content.text) {
         return None;
     }
 
     Some((
         DescriptionDetails {
             meta: NodeMeta::new(Some(Span::new(lines[index].start, end))),
-            children: parse_blocks(
-                &content,
-                lines[index].start + marker.content_offset,
-                false,
-                options,
-                definitions,
-                diagnostics,
-                depth + 1,
-            ),
+            children: parse_derived_blocks(&content, options, definitions, diagnostics, depth + 1),
         },
         cursor,
         tight,
@@ -1671,21 +2166,22 @@ fn description_term(
     if term_index >= lines.len() || !is_description_term_line(lines[term_index].text, options) {
         return None;
     }
-    let mut source = String::new();
+    let mut source = DerivedText::default();
     let mut term_end = term_index;
     let mut cursor = term_index;
     while cursor < lines.len() && is_description_term_line(lines[cursor].text, options) {
-        if !source.is_empty() {
-            source.push('\n');
-        }
-        source.push_str(trim_ascii_start(lines[cursor].text).trim_end());
+        source.push_line(
+            &lines[cursor],
+            trim_ascii_start(lines[cursor].text).trim_end_matches([' ', '\t']),
+            0,
+        );
         term_end = cursor;
         cursor += 1;
     }
 
     let mut marker_index = cursor;
     let mut blank_after_term = false;
-    while marker_index < lines.len() && lines[marker_index].text.trim().is_empty() {
+    while marker_index < lines.len() && is_blank(lines[marker_index].text) {
         blank_after_term = true;
         marker_index += 1;
     }
@@ -1695,14 +2191,13 @@ fn description_term(
             term_end,
             blank_after_term,
             source,
-            source_offset: lines[term_index].start + leading_trim_bytes(lines[term_index].text),
         },
     )
 }
 
 fn is_description_term_line(line: &str, options: &SyntaxOptions) -> bool {
     leading_indent_columns(line) <= 3
-        && !line.trim().is_empty()
+        && !is_blank(line)
         && description_marker(line).is_none()
         && !likely_block_start(line, options)
 }
@@ -1728,7 +2223,6 @@ fn description_marker(line: &str) -> Option<DescriptionMarker<'_>> {
         content_offset += 1;
     }
     Some(DescriptionMarker {
-        content_offset,
         content: &line[content_offset..],
     })
 }
@@ -1737,7 +2231,7 @@ fn description_marker(line: &str) -> Option<DescriptionMarker<'_>> {
 /// detail) keeps absorbing the next line as long as it is non-blank and does
 /// not itself begin a new block.
 fn paragraph_stays_open(line: &str, options: &SyntaxOptions) -> bool {
-    !line.trim().is_empty() && !likely_block_start(line, options)
+    !is_blank(line) && !likely_block_start(line, options)
 }
 
 /// Strips one level of indent-continuation (four spaces or a tab) from a line.
@@ -1750,7 +2244,7 @@ fn strip_indent_continuation(input: &str) -> Option<&str> {
 fn parse_atx_heading(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<Block> {
     let text = trim_up_to_three_spaces(line.text)?;
     let depth = text
@@ -1770,16 +2264,14 @@ fn parse_atx_heading(
         return None;
     }
     let after_opening = &text[depth..];
-    let content_start_in_text = depth + leading_trim_bytes(after_opening);
-    let content = trim_closing_hashes(after_opening.trim_start());
-    let content_start = line.start + (line.text.len() - text.len()) + content_start_in_text;
+    let content = trim_closing_hashes(trim_ascii_start(after_opening));
     Some(Block::Heading(Heading {
         meta: NodeMeta::new(Some(Span::new(line.start, line.end))),
         depth: depth as u8,
         kind: HeadingKind::Atx,
         children: parse_inlines(
             content,
-            content_start,
+            &line.slice_map(content),
             options,
             definitions,
             &mut Vec::new(),
@@ -1788,7 +2280,7 @@ fn parse_atx_heading(
 }
 
 fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
-    let text = trim_up_to_three_spaces(line.text)?.trim();
+    let text = trim_up_to_three_spaces(line.text)?;
     let mut marker = None;
     let mut count = 0;
     for char in text.chars() {
@@ -1847,7 +2339,7 @@ fn parse_definition(
             return None;
         }
         let next = label_end_line + 1;
-        if next >= lines.len() || lines[next].text.trim().is_empty() {
+        if next >= lines.len() || is_blank(lines[next].text) {
             return None;
         }
         // The unclosed label behaves like an open paragraph: a continuation line
@@ -1898,7 +2390,7 @@ fn parse_definition(
             best_without_title = Some((resource, cursor + 1));
             let next = cursor + 1;
             if next >= lines.len()
-                || lines[next].text.trim().is_empty()
+                || is_blank(lines[next].text)
                 || !line_can_start_definition_title(lines[next].text)
             {
                 break;
@@ -1906,7 +2398,7 @@ fn parse_definition(
         }
 
         let next = cursor + 1;
-        if next >= lines.len() || lines[next].text.trim().is_empty() {
+        if next >= lines.len() || is_blank(lines[next].text) {
             break;
         }
         // A continuation line that itself begins a block-level construct (or a
@@ -1957,7 +2449,7 @@ fn parse_footnote_definition(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Option<(Block, usize)> {
@@ -1965,7 +2457,8 @@ fn parse_footnote_definition(
         return None;
     }
     let line = lines[index];
-    let text = line.text.trim();
+    // Trailing spaces stay for the content, where they may make a hard break.
+    let text = trim_ascii_start(line.text);
     if !text.starts_with("[^") {
         return None;
     }
@@ -1974,20 +2467,21 @@ fn parse_footnote_definition(
     if !is_footnote_label(label) {
         return None;
     }
-    let rest = text[close + 2..].trim();
-    let mut content = String::new();
-    push_line(&mut content, rest);
+    let rest = trim_ascii_start(&text[close + 2..]);
+    let mut content = DerivedText::default();
+    content.push_line(&line, rest, 0);
     let mut cursor = index + 1;
     let mut end = line.end_with_eol;
     let mut paragraph_open = paragraph_stays_open(rest, options);
 
     while cursor < lines.len() {
-        if lines[cursor].text.trim().is_empty() {
+        if is_blank(lines[cursor].text) {
             let next = next_nonblank_line(lines, cursor + 1);
             if next >= lines.len() || !is_footnote_continuation(lines[next].text) {
                 break;
             }
-            push_line(&mut content, "");
+            let blank = &lines[cursor].text[lines[cursor].text.len()..];
+            content.push_line(&lines[cursor], blank, 0);
             paragraph_open = false;
             end = lines[cursor].end_with_eol;
             cursor += 1;
@@ -2003,7 +2497,7 @@ fn parse_footnote_definition(
             break;
         };
         paragraph_open = paragraph_stays_open(continuation, options);
-        push_line(&mut content, continuation);
+        content.push_line(&lines[cursor], continuation, 0);
         end = lines[cursor].end_with_eol;
         cursor += 1;
     }
@@ -2013,15 +2507,7 @@ fn parse_footnote_definition(
             meta: NodeMeta::new(Some(Span::new(line.start, end))),
             label: label.into(),
             identifier: normalize_label(label),
-            children: parse_blocks(
-                &content,
-                line.end.saturating_sub(rest.len()),
-                false,
-                options,
-                definitions,
-                diagnostics,
-                depth + 1,
-            ),
+            children: parse_derived_blocks(&content, options, definitions, diagnostics, depth + 1),
         }),
         cursor,
     ))
@@ -2034,17 +2520,16 @@ fn is_footnote_continuation(input: &str) -> bool {
 fn parse_leaf_directive(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     if !options.constructs.directive_leaf {
         return None;
     }
-    let trimmed = line.text.trim_start();
+    let trimmed = trim_ascii_start(line.text);
     if trimmed.starts_with(":::") || !trimmed.starts_with("::") {
         return None;
     }
-    let opener_base = line.start + (line.text.len() - trimmed.len()) + 2;
     let Some((name, label_source, attributes, _)) = parse_directive_opener(&trimmed[2..]) else {
         diagnostics.push(Diagnostic::new(
             DiagnosticSeverity::Error,
@@ -2058,7 +2543,7 @@ fn parse_leaf_directive(
         .map(|source| {
             parse_inlines(
                 source,
-                opener_base + name.len() + 1,
+                &line.slice_map(source),
                 options,
                 definitions,
                 diagnostics,
@@ -2077,7 +2562,7 @@ fn parse_html_container(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
     container_closes: &mut BracketMemo,
@@ -2136,7 +2621,7 @@ fn parse_details_container_children(
     lines: &[Line<'_>],
     leading_summary: Option<Block>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     depth: usize,
 ) -> Vec<Block> {
@@ -2154,7 +2639,7 @@ fn parse_details_container_children(
         return children;
     }
 
-    let Some(summary_index) = lines.iter().position(|line| !line.text.trim().is_empty()) else {
+    let Some(summary_index) = lines.iter().position(|line| !is_blank(line.text)) else {
         return children;
     };
 
@@ -2180,14 +2665,15 @@ fn parse_summary_container(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
     let line = lines[index];
     let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
     parse_summary_container_source(
+        &line,
         trimmed,
-        line.start + indent_bytes,
+        indent_bytes,
         options,
         definitions,
         diagnostics,
@@ -2198,7 +2684,7 @@ fn parse_summary_container(
 fn parse_details_container_opening_line(
     line: Line<'_>,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(HtmlTag, Option<Block>)> {
     let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
@@ -2210,14 +2696,14 @@ fn parse_details_container_opening_line(
         return None;
     }
 
-    let tag_start = line.start + indent_bytes;
     let rest_start = open_end + leading_ascii_whitespace_len(&trimmed[open_end..]);
     let summary = if trimmed[rest_start..].is_empty() {
         None
     } else {
         Some(parse_summary_container_source(
+            &line,
             &trimmed[rest_start..],
-            tag_start + rest_start,
+            indent_bytes + rest_start,
             options,
             definitions,
             diagnostics,
@@ -2226,7 +2712,10 @@ fn parse_details_container_opening_line(
 
     Some((
         HtmlTag {
-            meta: NodeMeta::new(Some(Span::new(tag_start, tag_start + open_end))),
+            meta: NodeMeta::new(Some(Span::new(
+                line.source_start(indent_bytes),
+                line.source_end(indent_bytes + open_end),
+            ))),
             name: "details".into(),
             raw: trimmed[..open_end].into(),
         },
@@ -2234,11 +2723,14 @@ fn parse_details_container_opening_line(
     ))
 }
 
+/// A `<summary>…</summary>` element in `source`, the text of `line` from byte
+/// `offset` on.
 fn parse_summary_container_source(
+    line: &Line<'_>,
     source: &str,
-    base_offset: usize,
+    offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Block> {
     let (open_end, open_name) = parse_html_tag(source, 0)?;
@@ -2255,33 +2747,35 @@ fn parse_summary_container_source(
     let (close_end, close_name) = parse_html_tag(source, close_start)?;
     if !close_name.eq_ignore_ascii_case("summary")
         || !html_tag_is_closing(source, close_start)
-        || !source[close_end..].trim().is_empty()
+        || !is_blank(&source[close_end..])
     {
         return None;
     }
 
     let content = &source[open_end..close_start];
-    let content_base = base_offset + open_end;
+    let span = |start: usize, end: usize| {
+        Span::new(
+            line.source_start(offset + start),
+            line.source_end(offset + end),
+        )
+    };
     let opening = HtmlTag {
-        meta: NodeMeta::new(Some(Span::new(base_offset, base_offset + open_end))),
+        meta: NodeMeta::new(Some(span(0, open_end))),
         name: "summary".into(),
         raw: source[..open_end].into(),
     };
     let closing = HtmlTag {
-        meta: NodeMeta::new(Some(Span::new(
-            base_offset + close_start,
-            base_offset + close_end,
-        ))),
+        meta: NodeMeta::new(Some(span(close_start, close_end))),
         name: "summary".into(),
         raw: source[close_start..close_end].into(),
     };
 
     Some(Block::HtmlContainer(HtmlContainer {
-        meta: NodeMeta::new(Some(Span::new(base_offset, base_offset + source.len()))),
+        meta: NodeMeta::new(Some(span(0, source.len()))),
         opening,
         content: HtmlContainerContent::Inlines(parse_inlines(
             content,
-            content_base,
+            &line.slice_map(content),
             options,
             definitions,
             diagnostics,
@@ -2319,7 +2813,7 @@ fn parse_html_container_tag_line(
 ) -> Option<HtmlTag> {
     let (trimmed, indent_bytes) = trim_html_container_line(line.text)?;
     let (end, name) = parse_html_tag(trimmed, 0)?;
-    if !name.eq_ignore_ascii_case(tag) || !trimmed[end..].trim().is_empty() {
+    if !name.eq_ignore_ascii_case(tag) || !is_blank(&trimmed[end..]) {
         return None;
     }
 
@@ -2331,9 +2825,11 @@ fn parse_html_container_tag_line(
         return None;
     }
 
-    let start = line.start + indent_bytes;
     Some(HtmlTag {
-        meta: NodeMeta::new(Some(Span::new(start, start + end))),
+        meta: NodeMeta::new(Some(Span::new(
+            line.source_start(indent_bytes),
+            line.source_end(indent_bytes + end),
+        ))),
         name: tag.into(),
         raw: trimmed[..end].into(),
     })
@@ -2355,9 +2851,11 @@ fn parse_html_container_opening_line(line: Line<'_>, tag: &str) -> Option<HtmlTa
         return None;
     }
 
-    let start = line.start + indent_bytes;
     Some(HtmlTag {
-        meta: NodeMeta::new(Some(Span::new(start, start + end))),
+        meta: NodeMeta::new(Some(Span::new(
+            line.source_start(indent_bytes),
+            line.source_end(indent_bytes + end),
+        ))),
         name: tag.into(),
         raw: trimmed[..end].into(),
     })
@@ -2381,7 +2879,7 @@ fn html_container_line_has_summary(input: &str) -> bool {
     };
     close_name.eq_ignore_ascii_case("summary")
         && html_tag_is_closing(input, close_start)
-        && input[close_end..].trim().is_empty()
+        && is_blank(&input[close_end..])
 }
 
 fn trim_html_container_line(input: &str) -> Option<(&str, usize)> {
@@ -2402,7 +2900,7 @@ fn html_tag_is_closing(input: &str, index: usize) -> bool {
 }
 
 fn html_tag_is_self_closing(input: &str) -> bool {
-    input.trim_end().ends_with("/>")
+    input.trim_end_matches([' ', '\t']).ends_with("/>")
 }
 
 fn html_container_fence_opens(line: &str) -> Option<HtmlContainerFence> {
@@ -2447,7 +2945,7 @@ fn parse_html_block(
             }
         }
         HtmlBlockKind::BlockTag => {
-            while cursor < lines.len() && !lines[cursor].text.trim().is_empty() {
+            while cursor < lines.len() && !is_blank(lines[cursor].text) {
                 push_line(&mut value, lines[cursor].text);
                 cursor += 1;
             }
@@ -2463,7 +2961,7 @@ fn parse_html_block(
             }
         }
         HtmlBlockKind::UntilBlank => {
-            while cursor < lines.len() && !lines[cursor].text.trim().is_empty() {
+            while cursor < lines.len() && !is_blank(lines[cursor].text) {
                 push_line(&mut value, lines[cursor].text);
                 cursor += 1;
             }
@@ -2482,7 +2980,7 @@ fn parse_html_block(
 }
 
 fn html_block_start(input: &str) -> Option<HtmlBlockKind> {
-    let trimmed = input.trim_end();
+    let trimmed = input.trim_end_matches([' ', '\t']);
     if !trimmed.starts_with('<') {
         return None;
     }
@@ -2510,8 +3008,7 @@ fn html_block_start(input: &str) -> Option<HtmlBlockKind> {
     let Some((end, _tag_name)) = parse_html_tag(trimmed, 0) else {
         return None;
     };
-    let rest = trimmed[end..].trim();
-    if rest.is_empty() {
+    if is_blank(&trimmed[end..]) {
         Some(HtmlBlockKind::UntilBlank)
     } else {
         None
@@ -2525,15 +3022,7 @@ pub(crate) fn line_starts_html_block(input: &str) -> bool {
 }
 
 fn line_starts_html_container(input: &str) -> bool {
-    let line = Line {
-        text: input,
-        eol: "",
-        start: 0,
-        end: input.len(),
-        end_with_eol: input.len(),
-        lazy: false,
-    };
-    parse_html_container_opening_line(line, "details").is_some()
+    parse_html_container_opening_line(Line::detached(input), "details").is_some()
 }
 
 fn raw_html_tag_start(input: &str) -> bool {
@@ -2731,7 +3220,7 @@ fn parse_mdx_flow(
     }
 
     let line = lines[index];
-    let trimmed = line.text.trim_start();
+    let trimmed = trim_ascii_start(line.text);
     if options.constructs.mdx_expression_block && trimmed.starts_with('{') {
         let open_byte = line.text.len() - trimmed.len();
         if let Some((close_line, close_byte)) = flow.expression_close(lines, index, open_byte) {
@@ -2748,7 +3237,7 @@ fn parse_mdx_flow(
         diagnostics.push(Diagnostic::new(
             DiagnosticSeverity::Error,
             DiagnosticCode::InvalidMdx,
-            Span::new(line.start + open_byte, lines.last()?.end_with_eol),
+            Span::new(line.source_start(open_byte), lines.last()?.end_with_eol),
             "MDX expression block is missing a closing brace",
         ));
     }
@@ -2770,7 +3259,7 @@ fn parse_mdx_flow(
                         diagnostics.push(Diagnostic::new(
                             DiagnosticSeverity::Error,
                             DiagnosticCode::InvalidMdx,
-                            Span::new(line.start + start_byte, lines.last()?.end_with_eol),
+                            Span::new(line.source_start(start_byte), lines.last()?.end_with_eol),
                             "MDX JSX block is missing a closing tag",
                         ));
                     }
@@ -3409,7 +3898,7 @@ fn parse_indented_code(
             ensure_line_separator(&mut value);
             value.push_str(text);
             value.push_str(lines[cursor].eol);
-            if !text.trim().is_empty() {
+            if !is_blank(text) {
                 content_end = cursor;
                 content_end_len = value.len();
             }
@@ -3417,7 +3906,7 @@ fn parse_indented_code(
             continue;
         }
 
-        if !lines[cursor].text.trim().is_empty() {
+        if !is_blank(lines[cursor].text) {
             break;
         }
         ensure_line_separator(&mut value);
@@ -3426,6 +3915,7 @@ fn parse_indented_code(
     }
     // Drop trailing blank lines accumulated past the last real content line.
     value.truncate(content_end_len);
+    end_last_line(&mut value);
     Some((
         Block::CodeBlock(CodeBlock {
             meta: NodeMeta::new(Some(Span::new(
@@ -3466,40 +3956,46 @@ fn parse_table(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Block, usize)> {
-    if !options.constructs.gfm_table || index + 1 >= lines.len() {
+    // A lazy line continues only a paragraph, so it is no delimiter row.
+    if !options.constructs.gfm_table || index + 1 >= lines.len() || lines[index + 1].lazy {
         return None;
     }
     let delimiter = table_indent_line(lines[index + 1].text, options.constructs.indented_code)?;
     if list_marker_info(delimiter).is_some() {
         return None;
     }
+    // A delimiter row of dashes alone is a setext underline, which wins.
+    if setext_underline_depth(lines[index + 1].text).is_some() {
+        return None;
+    }
     if !table_has_separator(lines[index].text, delimiter, options.constructs.spoiler) {
         return None;
     }
     let alignments = parse_table_delimiter(delimiter, options.constructs.spoiler)?;
-    let headers = split_table_row(lines[index].text, options.constructs.spoiler);
+    let headers = table_row_cells(&lines[index], lines[index].text, options.constructs.spoiler);
     if headers.len() != alignments.len() {
         return None;
     }
 
+    let parse_cell = |cell: &TableCellSource, diagnostics: &mut Vec<Diagnostic>| TableCell {
+        meta: NodeMeta::new(Some(cell.span)),
+        children: parse_inlines(
+            &cell.text.text,
+            cell.text.map(),
+            options,
+            definitions,
+            diagnostics,
+        ),
+    };
     let mut rows = Vec::new();
     rows.push(TableRow {
         meta: NodeMeta::new(Some(Span::new(lines[index].start, lines[index].end))),
         cells: headers
             .iter()
-            .map(|cell| TableCell {
-                meta: NodeMeta::default(),
-                children: parse_inlines(
-                    cell.trim(),
-                    lines[index].start,
-                    options,
-                    definitions,
-                    diagnostics,
-                ),
-            })
+            .map(|cell| parse_cell(cell, diagnostics))
             .collect(),
     });
 
@@ -3512,27 +4008,20 @@ fn parse_table(
         // Once a table is open, every non-blank line that isn't a real block
         // start is a body row (GFM); pipeless lines (incl. setext underlines)
         // become a single padded cell.
-        if row.trim().is_empty() || table_body_line_ends_table(lines[cursor].text, options) {
+        if is_blank(row) || table_body_line_ends_table(lines[cursor].text, options) {
             break;
         }
-        let cells = split_table_row(row, options.constructs.spoiler);
+        let cells = table_row_cells(&lines[cursor], row, options.constructs.spoiler);
+        // A cell missing from a short row sits, empty, at the row's end.
+        let missing = TableCellSource {
+            text: DerivedText::default(),
+            span: Span::new(lines[cursor].end, lines[cursor].end),
+        };
         rows.push(TableRow {
             meta: NodeMeta::new(Some(Span::new(lines[cursor].start, lines[cursor].end))),
-            cells: alignments
-                .iter()
-                .enumerate()
-                .map(|(cell_index, _)| {
-                    let value = cells.get(cell_index).map(String::as_str).unwrap_or("");
-                    TableCell {
-                        meta: NodeMeta::default(),
-                        children: parse_inlines(
-                            value.trim(),
-                            lines[cursor].start,
-                            options,
-                            definitions,
-                            diagnostics,
-                        ),
-                    }
+            cells: (0..alignments.len())
+                .map(|cell_index| {
+                    parse_cell(cells.get(cell_index).unwrap_or(&missing), diagnostics)
                 })
                 .collect(),
         });
@@ -3556,9 +4045,9 @@ fn parse_setext_heading(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<(Block, usize)> {
-    if index + 1 >= lines.len() || lines[index].text.trim().is_empty() {
+    if index + 1 >= lines.len() || is_blank(lines[index].text) {
         return None;
     }
 
@@ -3579,12 +4068,14 @@ fn parse_setext_heading(
             setext_underline_depth(lines[underline_index].text)
         };
         if let Some(depth) = underline_depth {
-            let mut value = String::new();
+            let mut value = DerivedText::default();
             for line in &lines[index..underline_index] {
                 // Trim leading indentation only: a fully `.trim()`ed content line
                 // would discard the trailing spaces that form a hard line break.
-                push_line(&mut value, trim_ascii_start(line.text));
+                value.push_line(line, trim_ascii_start(line.text), 0);
             }
+            // CommonMark strips the final whitespace of a heading's content.
+            value.trim_final_whitespace();
             return Some((
                 Block::Heading(Heading {
                     meta: NodeMeta::new(Some(Span::new(
@@ -3594,8 +4085,8 @@ fn parse_setext_heading(
                     depth,
                     kind: HeadingKind::Setext,
                     children: parse_inlines(
-                        &value,
-                        lines[index].start,
+                        &value.text,
+                        value.map(),
                         options,
                         definitions,
                         &mut Vec::new(),
@@ -3608,7 +4099,7 @@ fn parse_setext_heading(
         // Not an underline: it must be a valid paragraph-continuation line for
         // the run to remain a setext heading.
         let line = lines[underline_index].text;
-        if line.trim().is_empty()
+        if is_blank(line)
             || table_can_start(lines, underline_index, options)
             || likely_block_start(line, options)
         {
@@ -3622,7 +4113,7 @@ fn parse_setext_heading(
 }
 
 fn setext_underline_depth(input: &str) -> Option<u8> {
-    let underline = trim_up_to_three_spaces(input)?.trim();
+    let underline = trim_up_to_three_spaces(input)?.trim_matches([' ', '\t']);
     match underline {
         text if !text.is_empty() && text.chars().all(|char| char == '=') => Some(1),
         text if !text.is_empty() && text.chars().all(|char| char == '-') => Some(2),
@@ -3634,14 +4125,14 @@ fn parse_paragraph(
     lines: &[Line<'_>],
     index: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Block, usize) {
-    let mut value = String::new();
+    let mut value = DerivedText::default();
     let start = lines[index].start;
     let mut cursor = index;
     while cursor < lines.len() {
-        if lines[cursor].text.trim().is_empty() {
+        if is_blank(lines[cursor].text) {
             break;
         }
         // A lazy continuation line is paragraph text by construction (it reached
@@ -3655,18 +4146,17 @@ fn parse_paragraph(
                 break;
             }
         }
-        if !value.is_empty() {
-            value.push('\n');
-        }
-        value.push_str(trim_ascii_start(lines[cursor].text));
+        value.push_line(&lines[cursor], trim_ascii_start(lines[cursor].text), 0);
         cursor += 1;
     }
+    // CommonMark strips the final whitespace of a paragraph's content.
+    value.trim_final_whitespace();
 
     let end = lines[cursor - 1].end;
     (
         Block::Paragraph(Paragraph {
             meta: NodeMeta::new(Some(Span::new(start, end))),
-            children: parse_inlines(&value, start, options, definitions, diagnostics),
+            children: parse_inlines(&value.text, value.map(), options, definitions, diagnostics),
         }),
         cursor,
     )
@@ -3691,6 +4181,10 @@ struct DelimMarker {
     marker: u8,
     /// Remaining unmatched delimiter characters in this run.
     length: usize,
+    /// The run's length as scanned. CommonMark's rule of three, and the
+    /// `openers_bottom` key that caches its verdicts, read this rather than
+    /// what is left after earlier pairings.
+    run_length: usize,
     can_open: bool,
     can_close: bool,
     /// The `~` subscript / `^` superscript roles of a run.
@@ -3909,7 +4403,8 @@ struct DelimRoles {
     recloses: usize,
 }
 
-/// Pushes a literal text node for `value` starting at absolute `start`.
+/// Pushes a literal text node for `value` starting at `start` of the block-level
+/// inline input.
 fn push_text(nodes: &mut Vec<Inline>, start: usize, value: &str) {
     nodes.push(Inline::Text(Text {
         meta: NodeMeta::new(Some(Span::new(start, start + value.len()))),
@@ -3926,7 +4421,7 @@ fn close_bracket(
     base_offset: usize,
     close: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
@@ -3972,7 +4467,6 @@ fn close_bracket(
             input,
             opener.position + 2,
             close,
-            true,
             definitions,
         );
         if let Some((end, target)) = target {
@@ -4002,7 +4496,6 @@ fn close_bracket(
             input,
             opener.position + 1,
             close,
-            false,
             definitions,
         );
         if let Some((end, target)) = target {
@@ -4086,6 +4579,7 @@ fn push_delimiter(
         node_index,
         marker,
         length,
+        run_length: length,
         can_open: roles.can_open,
         can_close: roles.can_close,
         single_open: roles.single_open,
@@ -4125,9 +4619,9 @@ fn emphasis_roles(
     let (mut can_open, mut can_close) = if marker == b'_' {
         (
             flanking.left
-                && (!flanking.right || flanking.previous.is_some_and(|c| c.is_ascii_punctuation())),
+                && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation)),
             flanking.right
-                && (!flanking.left || flanking.next.is_some_and(|c| c.is_ascii_punctuation())),
+                && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation)),
         )
     } else {
         (flanking.left, flanking.right)
@@ -4687,7 +5181,7 @@ fn merge_adjacent_text(nodes: &mut Vec<Inline>) {
 }
 
 /// Index into `openers_bottom` for a nested closer's (marker, both-flags,
-/// length%3) key.
+/// length % 3) key.
 fn openers_bottom_key(closer: &DelimMarker) -> usize {
     let marker = match closer.marker {
         b'_' => 1,
@@ -4697,7 +5191,14 @@ fn openers_bottom_key(closer: &DelimMarker) -> usize {
         _ => 0,
     };
     let both = usize::from(closer.can_open && closer.can_close);
-    let modulo = closer.length % 3;
+    // The key holds what `emphasis_delimiters_match` reads of the closer: the
+    // whole run's length for the rule of three on `*` / `_`, and what is left
+    // of the run for the other marks.
+    let length = match closer.marker {
+        b'*' | b'_' => closer.run_length,
+        _ => closer.length,
+    };
+    let modulo = length % 3;
     ((marker * 2) + both) * 3 + modulo
 }
 
@@ -4711,13 +5212,15 @@ fn emphasis_delimiters_match(opener: &DelimMarker, closer: &DelimMarker) -> bool
         b'+' | b'=' => opener.length >= 2 && closer.length >= 2,
         _ => {
             // Rule of three: if either delimiter can both open and close, the
-            // sum of the two run lengths must not be a multiple of three, unless
-            // both lengths are themselves multiples of three.
+            // sum of the lengths of the runs containing them must not be a
+            // multiple of three, unless both are themselves multiples of three.
+            // CommonMark counts whole runs, not what earlier pairings left.
             let opener_both = opener.can_open && opener.can_close;
             let closer_both = closer.can_open && closer.can_close;
             if opener_both || closer_both {
-                let sum = opener.length + closer.length;
-                if sum % 3 == 0 && !(opener.length % 3 == 0 && closer.length % 3 == 0) {
+                let (opener_run, closer_run) = (opener.run_length, closer.run_length);
+                let sum = opener_run + closer_run;
+                if sum % 3 == 0 && !(opener_run % 3 == 0 && closer_run % 3 == 0) {
                     return false;
                 }
             }
@@ -4852,26 +5355,25 @@ enum LinkTarget {
 
 /// Matches what follows the `]` at `close` of a link or image whose label is
 /// `input[label_start..close]`: an inline `(…)` resource, a full or collapsed
-/// reference, or a shortcut reference to a defined label. An image whose `(…)`
-/// is not a valid resource is no image; a link falls back to the reference
-/// forms. Returns the end of the construct and its target.
+/// reference, or a shortcut reference to a defined label. A `(…)` that is not a
+/// valid resource leaves the reference forms to try, for images and links
+/// alike. Returns the end of the construct and its target.
 fn match_link_target(
     scan: &mut InlineScan,
     input: &str,
     label_start: usize,
     close: usize,
-    image: bool,
-    definitions: &[String],
+    definitions: Option<&[String]>,
 ) -> Option<(usize, LinkTarget)> {
     let label = &input[label_start..close];
     let after = close + 1;
     if input.as_bytes().get(after) == Some(&b'(') {
         match parse_link_resource(&mut scan.lookups, input, after) {
             Some((end, resource)) => return Some((end, LinkTarget::Resource(resource))),
-            // A present-but-invalid `(...)` resource is not an inline link,
-            // but CommonMark still resolves `[label]` as a shortcut reference
-            // and leaves the invalid `(...)` as literal text (links 568).
-            None if image => return None,
+            // A present-but-invalid `(...)` resource is not an inline link or
+            // image, but CommonMark still resolves `[label]` as a shortcut
+            // reference and leaves the invalid `(...)` as literal text (links
+            // 568).
             None => {}
         }
     }
@@ -5325,21 +5827,31 @@ impl<'a> InlineScan<'a> {
     }
 }
 
+/// Parses the inline content `input`, whose source map is `map`. The inline
+/// parser works in `input`'s coordinates; the spans it produces, on nodes and
+/// on the diagnostics it pushes, are translated to the input afterwards.
 fn parse_inlines(
     input: &str,
-    base_offset: usize,
+    map: &SourceMap,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
-    parse_inlines_with_context(
+    // Definitions are collected from the block structure alone.
+    if definitions.is_none() {
+        return Vec::new();
+    }
+    let first_diagnostic = diagnostics.len();
+    let mut nodes = parse_inlines_with_context(
         input,
-        base_offset,
+        0,
         options,
         definitions,
         diagnostics,
         &mut InlineState::default(),
-    )
+    );
+    source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
+    nodes
 }
 
 /// The deepest inline nesting the parser builds. Directive labels parse their
@@ -5350,7 +5862,7 @@ const MAX_INLINE_NESTING: usize = 32;
 
 /// State shared by every inline parse nested under one block-level inline
 /// parse. All nested inputs are slices of that one input, addressed by their
-/// absolute start offset.
+/// start offset in it; `parse_inlines` maps the result to the original input.
 #[derive(Default)]
 struct InlineState {
     /// How many inline parses enclose the current one.
@@ -5368,7 +5880,7 @@ fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -5391,7 +5903,7 @@ fn parse_inline_content(
     input: &str,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -5413,6 +5925,15 @@ fn parse_inline_content(
         state,
         scan: InlineScan::new(input),
     };
+    // A literal autolink holds `://`, `www.`, or an email's `@`; content
+    // without any of them is not scanned for one at each position.
+    let literal_autolinks = (options.constructs.gfm_autolink_literal
+        || options.constructs.relaxed_autolinks)
+        && (bytes.contains(&b'@')
+            || input.contains("://")
+            || bytes
+                .windows(4)
+                .any(|window| window.eq_ignore_ascii_case(b"www.")));
 
     while index < bytes.len() {
         if bytes[index] == b'\\' {
@@ -5467,7 +5988,13 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'\n' {
-            if text.ends_with('\\') {
+            // Only a literal backslash, not one an escape or a reference wrote,
+            // makes the line ending a hard break.
+            if index > 0
+                && bytes[index - 1] == b'\\'
+                && !is_escaped_at(input, index - 1)
+                && text.ends_with('\\')
+            {
                 text.pop();
                 flush_text(
                     &mut nodes,
@@ -5486,7 +6013,10 @@ fn parse_inline_content(
                 text_start = index;
                 continue;
             }
-            let trailing_spaces = trailing_space_count(&text);
+            // Only spaces and tabs the source holds, not ones a character
+            // reference wrote, end the line: a hard break or stripped.
+            let trailing_spaces =
+                trailing_space_count(&text).min(trailing_space_count(&input[..index]));
             if is_hard_break_suffix(&text, trailing_spaces) {
                 text.truncate(text.len() - trailing_spaces);
                 flush_text(
@@ -5613,7 +6143,7 @@ fn parse_inline_content(
             // literal autolink before recording the `_` as an emphasis
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
-            if options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks {
+            if literal_autolinks {
                 if let Some((end, destination)) = parse_literal_autolink(
                     input,
                     index,
@@ -5923,7 +6453,7 @@ fn parse_inline_content(
 
         // A bare URL is an autolink even inside an open bracket; if the bracket
         // forms a link, `demote_links` turns it back into text.
-        if options.constructs.gfm_autolink_literal || options.constructs.relaxed_autolinks {
+        if literal_autolinks {
             if let Some((end, destination)) = parse_literal_autolink(
                 input,
                 index,
@@ -6344,7 +6874,7 @@ fn parse_text_directive(
     index: usize,
     base_offset: usize,
     options: &SyntaxOptions,
-    definitions: &[String],
+    definitions: Option<&[String]>,
     diagnostics: &mut Vec<Diagnostic>,
     pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
@@ -6547,24 +7077,23 @@ fn parse_attributes(input: &str) -> Vec<DirectiveAttribute> {
             break;
         }
         cursor = skip_spaces(input, next);
-        if input.as_bytes().get(cursor) == Some(&b'=') {
+        let value = if input.as_bytes().get(cursor) == Some(&b'=') {
             cursor = skip_spaces(input, cursor + 1);
             if let Some((value, next)) = parse_attribute_value(input, cursor) {
-                attributes.push(DirectiveAttribute {
-                    name: name.into(),
-                    value: Some(value),
-                });
                 cursor = next;
+                Some(value)
             } else {
-                attributes.push(DirectiveAttribute {
-                    name: name.into(),
-                    value: Some(String::new()),
-                });
+                Some(String::new())
             }
         } else {
+            None
+        };
+        // A token that is no attribute name is skipped, as a malformed value
+        // is read leniently: the document keeps only attributes it can write.
+        if crate::validate::is_attribute_name(name) {
             attributes.push(DirectiveAttribute {
                 name: name.into(),
-                value: None,
+                value,
             });
         }
     }
@@ -6772,13 +7301,12 @@ fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
 
 fn can_open_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.left
-        && (!flanking.right || flanking.previous.is_some_and(|c| c.is_ascii_punctuation()))
+    flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
 }
 
 fn can_close_underscore(input: &str, index: usize, marker_len: usize) -> bool {
     let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.right && (!flanking.left || flanking.next.is_some_and(|c| c.is_ascii_punctuation()))
+    flanking.right && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation))
 }
 
 #[derive(Clone, Copy)]
@@ -7095,7 +7623,7 @@ fn parse_link_destination(
         // character; Unicode whitespace (e.g. U+00A0) is ordinary. A backslash
         // before a space is NOT an escape (only ASCII punctuation is escapable),
         // so `\ ` still terminates the destination → `[a](\ b)` is not a link.
-        if (char == ' ' || source_char(char).is_ascii_control()) && depth == 0 {
+        if char == ' ' || source_char(char).is_ascii_control() {
             break;
         }
         if char == '(' && !is_escaped_at(input, cursor) {
@@ -7161,13 +7689,14 @@ fn contains_blank_line(input: &str) -> bool {
     // blank line (a blank line bounded by content on both sides) is rejected. The
     // empty first/last line entries that a leading/trailing newline produces are
     // boundary artifacts, not blank lines in the title content.
-    let lines = collect_lines(input, 0);
+    let map = SourceMap::verbatim(input.len(), 0);
+    let lines = collect_lines(input, &map);
     let interior = lines.len().saturating_sub(1);
     lines
         .iter()
         .take(interior)
         .skip(1)
-        .any(|line| line.text.trim().is_empty())
+        .any(|line| is_blank(line.text))
 }
 
 fn skip_link_resource_space(input: &str, index: usize) -> Option<usize> {
@@ -7320,7 +7849,7 @@ fn parse_definition_destination_title(input: &str) -> Option<ParsedLinkResource>
 }
 
 fn line_can_start_definition_title(input: &str) -> bool {
-    let trimmed = input.trim_start();
+    let trimmed = trim_ascii_start(input);
     matches!(trimmed.as_bytes().first(), Some(b'"' | b'\'' | b'('))
 }
 
@@ -7373,6 +7902,21 @@ fn push_line(output: &mut String, line: &str) {
     output.push_str(line);
 }
 
+/// Ends a code or math block's last line when the input ended without a line
+/// ending: every line of such a block's value ends with one. The added ending
+/// repeats the value's first line ending, `\n` when it has none.
+fn end_last_line(value: &mut String) {
+    if value.is_empty() || ends_with_line_ending(value) {
+        return;
+    }
+    let ending = match value.find(['\r', '\n']) {
+        Some(index) if value[index..].starts_with("\r\n") => "\r\n",
+        Some(index) if value[index..].starts_with('\r') => "\r",
+        _ => "\n",
+    };
+    value.push_str(ending);
+}
+
 fn ensure_line_separator(output: &mut String) {
     if !output.is_empty() && !ends_with_line_ending(output) {
         output.push('\n');
@@ -7401,14 +7945,15 @@ fn next_char(input: &str, index: usize) -> Option<(usize, char)> {
 /// ASCII punctuation plus the non-ASCII Unicode `P*`/`S*` categories. Only the
 /// flanking classification needs the Unicode set; escape/label logic stays
 /// ASCII-only via `char::is_ascii_punctuation`.
-fn is_flanking_punctuation(value: char) -> bool {
+pub(crate) fn is_flanking_punctuation(value: char) -> bool {
     value.is_ascii_punctuation() || crate::unicode_punctuation::is_unicode_punctuation(value)
 }
 
 /// Fold a reference label to its matching identifier. Per CommonMark, two
 /// labels match when their RAW source (no backslash unescape, no entity decode)
-/// agrees after collapsing internal whitespace to a single space, trimming, and
-/// Unicode case-folding (`to_uppercase()` then `to_lowercase()`). So `[foo\!]`
+/// agrees after collapsing internal spaces, tabs, and line endings to a single
+/// space, trimming, and Unicode case-folding (`to_uppercase()` then
+/// `to_lowercase()`). So `[foo\!]`
 /// does NOT match `[foo!]`, and `[&copy;]` does NOT match `[©]`.
 ///
 /// The serializer's `normalize_reference_label` delegates here so the
@@ -7422,19 +7967,21 @@ pub(crate) fn normalize_label(label: &str) -> String {
         // full casefold that matters for label matching.
         .replace('ẞ', "ss")
         .replace('\0', "\u{FFFD}")
-        .split_whitespace()
+        .split([' ', '\t', '\n', '\r'])
+        .filter(|word| !word.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
         .to_uppercase()
         .to_lowercase()
 }
 
-fn definition_exists(definitions: &[String], label: &str) -> bool {
+fn definition_exists(definitions: Option<&[String]>, label: &str) -> bool {
     if label.is_empty() || !reference_label_is_within_limit(label) {
         return false;
     }
 
-    definitions.binary_search(&normalize_label(label)).is_ok()
+    definitions
+        .is_some_and(|definitions| definitions.binary_search(&normalize_label(label)).is_ok())
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
@@ -7450,6 +7997,8 @@ fn trim_up_to_three_spaces(input: &str) -> Option<&str> {
     }
 }
 
+/// The marker and length of the code fence that `input` opens: three or more
+/// backticks or tildes, where a backtick fence's info string holds no backtick.
 fn fence_start(input: &str) -> Option<(FenceMarker, usize)> {
     let marker = match input.as_bytes().first()? {
         b'`' => FenceMarker::Backtick,
@@ -7465,11 +8014,8 @@ fn fence_start(input: &str) -> Option<(FenceMarker, usize)> {
         .iter()
         .take_while(|item| **item == byte)
         .count();
-    if length >= 3 {
-        Some((marker, length))
-    } else {
-        None
-    }
+    let opens = length >= 3 && (byte == b'~' || !input[length..].contains('`'));
+    opens.then_some((marker, length))
 }
 
 fn fence_close(input: &str, marker: FenceMarker, length: usize) -> bool {
@@ -7482,11 +8028,11 @@ fn fence_close(input: &str, marker: FenceMarker, length: usize) -> bool {
         .iter()
         .take_while(|item| **item == byte)
         .count();
-    count >= length && input[count..].trim().is_empty()
+    count >= length && is_blank(&input[count..])
 }
 
 fn trim_closing_hashes(input: &str) -> &str {
-    let input = input.trim_end();
+    let input = input.trim_end_matches([' ', '\t']);
     let hash_start = input.trim_end_matches('#').len();
     if hash_start == input.len() {
         return input;
@@ -7497,13 +8043,18 @@ fn trim_closing_hashes(input: &str) -> &str {
 
     let before = &input[..hash_start];
     if before.ends_with(' ') || before.ends_with('\t') {
-        before.trim_end()
+        before.trim_end_matches([' ', '\t'])
     } else {
         input
     }
 }
 
 fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
+    list_marker_info_at(input, 0)
+}
+
+/// `list_marker_info` for a line that starts at source column `column`.
+fn list_marker_info_at(input: &str, column: usize) -> Option<ListMarkerInfo<'_>> {
     let trimmed = trim_up_to_three_spaces(input)?;
     let indent = input.len() - trimmed.len();
     let bytes = trimmed.as_bytes();
@@ -7514,7 +8065,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 b'*' => ListDelimiter::Asterisk,
                 _ => ListDelimiter::Plus,
             };
-            let (content_offset, content_indent) = list_content_offset(trimmed, 1, indent);
+            let (content_offset, content_indent) = list_content_offset(trimmed, 1, indent, column);
             Some(ListMarkerInfo {
                 ordered: false,
                 start: None,
@@ -7523,6 +8074,7 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 marker_len: 1,
                 content_indent,
                 content: &trimmed[content_offset..],
+                column,
             })
         }
         byte if byte.is_ascii_digit() => {
@@ -7543,7 +8095,8 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
             }
             let start = trimmed[..end].parse().ok()?;
             let marker_len = end + 1;
-            let (content_offset, content_indent) = list_content_offset(trimmed, marker_len, indent);
+            let (content_offset, content_indent) =
+                list_content_offset(trimmed, marker_len, indent, column);
             Some(ListMarkerInfo {
                 ordered: true,
                 start: Some(start),
@@ -7552,13 +8105,22 @@ fn list_marker_info(input: &str) -> Option<ListMarkerInfo<'_>> {
                 marker_len,
                 content_indent,
                 content: &trimmed[content_offset..],
+                column,
             })
         }
         _ => None,
     }
 }
 
-fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize, usize) {
+/// The byte the content after a list marker starts at, and the item's content
+/// indent in columns from the line's start; tabs reach their stops from the
+/// line's source column `base`.
+fn list_content_offset(
+    input: &str,
+    marker_len: usize,
+    indent: usize,
+    base: usize,
+) -> (usize, usize) {
     let bytes = input.as_bytes();
     if bytes.get(marker_len).is_none() {
         return (marker_len, indent + marker_len + 1);
@@ -7569,7 +8131,7 @@ fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize,
     while let Some(byte) = bytes.get(cursor) {
         match *byte {
             b' ' => column += 1,
-            b'\t' => column += 4 - (column % 4),
+            b'\t' => column += 4 - ((base + column) % 4),
             _ => break,
         }
         cursor += 1;
@@ -7589,16 +8151,36 @@ fn list_content_offset(input: &str, marker_len: usize, indent: usize) -> (usize,
     }
 }
 
-fn list_marker_first_content<'a>(input: &'a str, marker: ListMarkerInfo<'a>) -> Cow<'a, str> {
+/// The content after a list marker on its line, and the byte of `input` it is
+/// read from (see `strip_leading_indent_columns_split`).
+fn list_marker_first_content<'a>(
+    input: &'a str,
+    marker: ListMarkerInfo<'a>,
+) -> (Cow<'a, str>, usize) {
+    let borrowed = || {
+        let from = slice_offset_in(input, marker.content).unwrap_or(input.len());
+        (Cow::Borrowed(marker.content), from)
+    };
     let Some(trimmed) = trim_up_to_three_spaces(input) else {
-        return Cow::Borrowed(marker.content);
+        return borrowed();
     };
     let after_marker = &trimmed[marker.marker_len..];
     if after_marker.starts_with('\t') {
-        strip_leading_indent_columns_from(after_marker, 1, marker.indent + marker.marker_len)
+        let (content, split) = strip_leading_indent_columns_split(
+            after_marker,
+            1,
+            marker.column + marker.indent + marker.marker_len,
+        );
+        (content, input.len() - after_marker.len() + split)
     } else {
-        Cow::Borrowed(marker.content)
+        borrowed()
     }
+}
+
+/// The offset of `slice` inside `text` when it is a borrowed sub-slice of it.
+fn slice_offset_in(text: &str, slice: &str) -> Option<usize> {
+    let offset = (slice.as_ptr() as usize).checked_sub(text.as_ptr() as usize)?;
+    (offset + slice.len() <= text.len()).then_some(offset)
 }
 
 fn is_list_padding_byte(byte: Option<u8>) -> bool {
@@ -7637,7 +8219,7 @@ fn same_list_marker_line(input: &str, first_marker: ListMarkerInfo<'_>) -> bool 
 }
 
 fn next_nonblank_line(lines: &[Line<'_>], mut index: usize) -> usize {
-    while index < lines.len() && lines[index].text.trim().is_empty() {
+    while index < lines.len() && is_blank(lines[index].text) {
         index += 1;
     }
     index
@@ -7661,28 +8243,67 @@ fn leading_indent_columns(input: &str) -> usize {
     leading_indent(input).0
 }
 
-/// Removes up to `max_columns` columns of leading whitespace, stopping at the
-/// first non-space/tab byte (tabs advance to the next 4-column tab stop). A tab
-/// that straddles the column budget is PARTIALLY consumed: the columns beyond the
-/// budget are re-emitted as spaces (CommonMark tab-expansion of indentation), so
-/// the result may be an owned `String`. Whitespace already at/over the budget
-/// (and any literal tab whose start sits at the budget) is returned verbatim.
-fn strip_leading_indent_columns(input: &str, max_columns: usize) -> Cow<'_, str> {
-    strip_leading_indent_columns_from(input, max_columns, 0)
+/// `input`, which starts at `start_column`, with each tab of its leading
+/// whitespace that starts within its first four columns written as the spaces
+/// it spans there. Those columns decide indentation; a tab past them is
+/// content, such as an indented code block's, and stays a tab.
+fn expand_leading_whitespace(input: &str, start_column: usize) -> Cow<'_, str> {
+    let leading = input.len() - trim_ascii_start(input).len();
+    if !input[..leading].contains('\t') {
+        return Cow::Borrowed(input);
+    }
+    let mut column = start_column;
+    let mut expanded = String::with_capacity(input.len() + 3 * leading);
+    let mut kept = leading;
+    for (index, byte) in input[..leading].bytes().enumerate() {
+        if column - start_column >= 4 {
+            kept = index;
+            break;
+        }
+        let width = if byte == b'\t' { 4 - column % 4 } else { 1 };
+        expanded.extend(core::iter::repeat_n(' ', width));
+        column += width;
+    }
+    expanded.push_str(&input[kept..]);
+    Cow::Owned(expanded)
 }
 
-fn strip_leading_indent_columns_from(
+/// A container's content line read from byte `from` of `line`, with the tabs
+/// of its leading whitespace written as the spaces they span at their source
+/// column (see `expand_leading_whitespace`).
+fn align_leading_tabs<'a>(derived: Cow<'a, str>, line: &Line<'_>, from: usize) -> Cow<'a, str> {
+    match derived {
+        Cow::Borrowed(text) if text.starts_with([' ', '\t']) => {
+            expand_leading_whitespace(text, line.column_at(from))
+        }
+        derived => derived,
+    }
+}
+
+/// Whether the content line `line` continues, without ending, a block opened
+/// directly in the container, whose lines keep their tabs as written.
+fn continues_verbatim(open_block: Option<OpenBlock>, line: &str) -> bool {
+    open_block.is_some_and(|block| block.depth == 0 && !block.end.ends_with(line))
+}
+
+/// Removes up to `max_columns` columns of the leading whitespace of `input`,
+/// which starts at source column `start_column` (tabs advance to the next
+/// four-column stop). A tab that straddles the budget is partly consumed: its
+/// columns past the budget, and the whitespace after it, are written as spaces.
+/// Also returns the byte of `input` the result starts from: a borrowed result
+/// is `input` from there on, and an owned one expands the whitespace there.
+fn strip_leading_indent_columns_split(
     input: &str,
     max_columns: usize,
     start_column: usize,
-) -> Cow<'_, str> {
+) -> (Cow<'_, str>, usize) {
     let mut column = start_column;
     let target_column = start_column + max_columns;
     for (index, byte) in input.as_bytes().iter().enumerate() {
         let next = match *byte {
             b' ' => column + 1,
             b'\t' => column + (4 - (column % 4)),
-            _ => return Cow::Borrowed(&input[index..]),
+            _ => return (Cow::Borrowed(&input[index..]), index),
         };
         if next > target_column {
             // A tab whose expansion crosses the budget (its start still inside the
@@ -7714,27 +8335,38 @@ fn strip_leading_indent_columns_from(
                     }
                 }
                 owned.push_str(&input[rest_index..]);
-                return Cow::Owned(owned);
+                return (Cow::Owned(owned), index);
             }
-            return Cow::Borrowed(&input[index..]);
+            return (Cow::Borrowed(&input[index..]), index);
         }
         column = next;
     }
-    Cow::Borrowed("")
+    (Cow::Borrowed(&input[input.len()..]), input.len())
 }
 
-fn strip_list_continuation(input: &str, content_indent: usize, list_indent: usize) -> Cow<'_, str> {
-    let (indent_columns, indent_bytes) = leading_indent(input);
+/// A list item's continuation line with its indentation removed, and the byte
+/// of `input` it is read from (see `strip_leading_indent_columns_split`).
+fn strip_list_continuation<'a>(
+    line: &Line<'a>,
+    content_indent: usize,
+    list_indent: usize,
+) -> (Cow<'a, str>, usize) {
+    let input = line.text;
+    let indent_bytes = input.len() - trim_ascii_start(input).len();
+    let indent_columns = line.indent_columns();
     if indent_columns >= content_indent {
         // Remove exactly `content_indent` columns. A tab straddling that budget
         // is split: the columns past the budget survive as spaces (CommonMark
         // tab expansion of list-item indentation), so a `\t`-only line inside a
         // 2-column item keeps the residual two spaces instead of vanishing.
-        strip_leading_indent_columns(input, content_indent)
+        let (stripped, from) =
+            strip_leading_indent_columns_split(input, content_indent, line.column);
+        (stripped, from)
     } else if indent_columns > list_indent {
-        Cow::Borrowed(&input[indent_bytes..])
+        (Cow::Borrowed(&input[indent_bytes..]), indent_bytes)
     } else {
-        Cow::Borrowed(trim_ascii_start(input))
+        let trimmed = trim_ascii_start(input);
+        (Cow::Borrowed(trimmed), input.len() - trimmed.len())
     }
 }
 
@@ -7869,6 +8501,11 @@ fn update_list_item_fence(line: &str, open_fence: &mut Option<(FenceMarker, usiz
     }
 }
 
+/// Whether `text` holds only spaces and tabs, as a blank line does.
+fn is_blank(text: &str) -> bool {
+    text.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+}
+
 fn trim_ascii_start(input: &str) -> &str {
     input.trim_start_matches(|char| matches!(char, ' ' | '\t'))
 }
@@ -7878,13 +8515,22 @@ fn leading_trim_bytes(input: &str) -> usize {
 }
 
 fn parse_table_delimiter(input: &str, spoiler: bool) -> Option<Vec<TableAlignment>> {
+    // Every cell trims to colons around dashes, so a row with any other char
+    // is no delimiter row, whatever its cells.
+    if !input.contains('-')
+        || !input
+            .chars()
+            .all(|char| matches!(char, '|' | '-' | ':' | ' ' | '\t'))
+    {
+        return None;
+    }
     let cells = split_table_row(input, spoiler);
     if cells.is_empty() {
         return None;
     }
     let mut alignments = Vec::new();
     for cell in cells {
-        alignments.push(table_delimiter_alignment(cell.trim())?);
+        alignments.push(table_delimiter_alignment(cell.trim_matches([' ', '\t']))?);
     }
     Some(alignments)
 }
@@ -8181,15 +8827,24 @@ fn push_table_bar(
 }
 
 fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
-    let trimmed = input.trim();
+    table_row_cell_ranges(input, spoiler)
+        .into_iter()
+        .map(|(start, end)| table_cell_text(&input[start..end]))
+        .collect()
+}
+
+/// The byte ranges of `input`'s cells, between the pipes that delimit them.
+fn table_row_cell_ranges(input: &str, spoiler: bool) -> Vec<(usize, usize)> {
+    let trimmed = input.trim_matches([' ', '\t']);
+    let offset = leading_trim_bytes(input);
     let delimiters = table_row_delimiters(trimmed, spoiler);
     let mut cells = Vec::new();
     let mut start = 0;
     for &pipe in &delimiters {
-        cells.push(table_cell_text(&trimmed[start..pipe]));
+        cells.push((offset + start, offset + pipe));
         start = pipe + 1;
     }
-    cells.push(table_cell_text(&trimmed[start..]));
+    cells.push((offset + start, offset + trimmed.len()));
 
     // A delimiter at the very start or end (only whitespace after it) is a
     // border, not the edge of an empty cell.
@@ -8198,11 +8853,61 @@ fn split_table_row(input: &str, spoiler: bool) -> Vec<String> {
     }
     if delimiters
         .last()
-        .is_some_and(|&pipe| trimmed[pipe + 1..].trim().is_empty())
+        .is_some_and(|&pipe| is_blank(&trimmed[pipe + 1..]))
     {
         cells.pop();
     }
     cells
+}
+
+/// One table cell's inline input (whitespace trimmed, escaped pipes read as
+/// `|`), its source map, and its span.
+struct TableCellSource {
+    text: DerivedText,
+    span: Span,
+}
+
+/// The cells of `row`, a slice of `line.text`, as `split_table_row` splits it.
+fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSource> {
+    let row_offset = slice_offset_in(line.text, row).unwrap_or(0);
+    table_row_cell_ranges(row, spoiler)
+        .into_iter()
+        .map(|(start, end)| {
+            let raw = &row[start..end];
+            let leading = leading_trim_bytes(raw);
+            let content = raw.trim_matches([' ', '\t']);
+            let offset = row_offset + start + leading;
+            let span = Span::new(
+                line.source_start(offset),
+                line.source_end(offset + content.len()),
+            );
+            let mut text = DerivedText::default();
+            // The same unescaping as `table_cell_text`, keeping each copied run's
+            // source: the `|` read from `\|` maps to both of its bytes.
+            let bytes = content.as_bytes();
+            let mut copied = 0;
+            let mut cursor = 0;
+            while cursor < bytes.len() {
+                if bytes[cursor] == b'\\' {
+                    let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
+                    if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
+                        text.append(line, &content[copied..pipe - 1], 0);
+                        text.append_replacing(
+                            "|",
+                            line.source_start(offset + pipe - 1),
+                            line.source_end(offset + pipe + 1),
+                        );
+                        copied = pipe + 1;
+                    }
+                    cursor = pipe;
+                } else {
+                    cursor += 1;
+                }
+            }
+            text.append(line, &content[copied..], 0);
+            TableCellSource { text, span }
+        })
+        .collect()
 }
 
 /// A cell's source with each escaped pipe unescaped. GitHub/cmark-gfm treats an
@@ -8230,7 +8935,8 @@ fn table_cell_text(source: &str) -> String {
 }
 
 fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) -> bool {
-    if !options.constructs.gfm_table || index + 1 >= lines.len() {
+    // A lazy line continues only a paragraph, so it is no delimiter row.
+    if !options.constructs.gfm_table || index + 1 >= lines.len() || lines[index + 1].lazy {
         return false;
     }
     table_can_start_source(
@@ -8239,6 +8945,42 @@ fn table_can_start(lines: &[Line<'_>], index: usize, options: &SyntaxOptions) ->
         options.constructs.indented_code,
         options.constructs.spoiler,
     )
+}
+
+/// Whether `line`, read as a paragraph's continuation line after `previous`,
+/// would end the paragraph or make it a setext heading, a table header, or a
+/// description term under the maximal default dialect.
+pub(crate) fn continuation_line_breaks_paragraph(previous: &str, line: &str) -> bool {
+    // Each construct read here opens, after at most three columns, with one of
+    // these bytes; the most frequent line, text, opens with none of them.
+    let opens_with_marker = trim_up_to_three_spaces(line)
+        .and_then(|trimmed| trimmed.bytes().next())
+        .is_some_and(|byte| {
+            byte.is_ascii_digit()
+                || matches!(
+                    byte,
+                    b'#' | b'>'
+                        | b'`'
+                        | b'~'
+                        | b'-'
+                        | b'*'
+                        | b'+'
+                        | b'_'
+                        | b'='
+                        | b'|'
+                        | b':'
+                        | b'<'
+                        | b'$'
+                        | b'['
+                )
+        });
+    if !opens_with_marker {
+        return false;
+    }
+    likely_block_start(line, &SyntaxOptions::default())
+        || setext_underline_depth(line).is_some()
+        || gfm_table_can_start_source(previous, line)
+        || description_marker(line).is_some()
 }
 
 pub(crate) fn gfm_table_can_start_source(header: &str, delimiter: &str) -> bool {
@@ -8251,6 +8993,15 @@ fn table_can_start_source(
     indented_code: bool,
     spoiler: bool,
 ) -> bool {
+    // A header row indented four columns or more is a paragraph's
+    // continuation text, as markdown-it and micromark read it.
+    if table_indent_line(header, indented_code).is_none() {
+        return false;
+    }
+    // A delimiter row of dashes alone is a setext underline, which wins.
+    if setext_underline_depth(delimiter).is_some() {
+        return false;
+    }
     let Some(delimiter) = table_indent_line(delimiter, indented_code) else {
         return false;
     };
@@ -8299,26 +9050,34 @@ fn likely_block_start(input: &str, options: &SyntaxOptions) -> bool {
     let Some(trimmed) = trim_up_to_three_spaces(input) else {
         return false;
     };
-    trimmed.starts_with('#')
+    is_atx_heading_line(trimmed)
         || trimmed.starts_with('>')
-        || trimmed.starts_with("```")
-        || trimmed.starts_with("~~~")
+        || fence_start(trimmed).is_some()
         || list_marker_can_interrupt_paragraph(input)
-        || parse_thematic_break(Line {
-            text: input,
-            eol: "",
-            start: 0,
-            end: input.len(),
-            end_with_eol: input.len(),
-            lazy: false,
-        })
-        .is_some()
+        || parse_thematic_break(Line::detached(input)).is_some()
         || (options.constructs.html_container && line_starts_html_container(input))
         || (options.constructs.html_block && line_starts_interrupting_html_block(input))
         || (options.constructs.math_block && math_block_fence_length(trimmed).is_some())
-        || (options.constructs.directive_container && trimmed.starts_with(":::"))
-        || (options.constructs.directive_leaf && trimmed.starts_with("::"))
+        || (options.constructs.directive_container && container_directive_opens(trimmed))
+        || (options.constructs.directive_leaf && leaf_directive_opens(trimmed))
         || (options.constructs.footnote_definition && line_starts_footnote_definition(trimmed))
+}
+
+/// Whether `trimmed` opens a container directive: three or more `:` and a
+/// valid opener. A container finds its closing fence among its own lines, so
+/// a bare fence ends no paragraph.
+fn container_directive_opens(trimmed: &str) -> bool {
+    directive_container_opener_prefix(trimmed)
+        .is_some_and(|(_, rest)| parse_directive_opener(rest).is_some())
+}
+
+/// Whether `trimmed` opens a leaf directive: `::` and a valid opener. A line
+/// with a malformed one is reported where a block starts, but does not end a
+/// paragraph it would only become text of.
+fn leaf_directive_opens(trimmed: &str) -> bool {
+    trimmed.starts_with("::")
+        && !trimmed.starts_with(":::")
+        && parse_directive_opener(&trimmed[2..]).is_some()
 }
 
 // A GFM footnote definition `[^label]:` is a block boundary: it interrupts a
@@ -8333,7 +9092,7 @@ fn list_marker_can_interrupt_paragraph(input: &str) -> bool {
     list_marker_info(input).is_some_and(|marker| {
         // An empty list item never interrupts a paragraph (CommonMark §5.3):
         // `foo\n*` is a single paragraph, not a paragraph plus an empty list.
-        !marker.content.trim().is_empty() && (!marker.ordered || marker.start == Some(1))
+        !is_blank(marker.content) && (!marker.ordered || marker.start == Some(1))
     })
 }
 
@@ -8348,7 +9107,7 @@ fn table_body_line_ends_table(line: &str, options: &SyntaxOptions) -> bool {
         || (options.constructs.html_block && line_starts_html_block(line))
 }
 
-fn line_starts_interrupting_html_block(input: &str) -> bool {
+pub(crate) fn line_starts_interrupting_html_block(input: &str) -> bool {
     match trim_up_to_three_spaces(input).and_then(html_block_start) {
         Some(HtmlBlockKind::UntilBlank) | None => false,
         Some(_) => true,
@@ -8368,8 +9127,9 @@ fn html_inline_end(lookups: &mut impl Lookups, input: &str, index: usize) -> Opt
     if rest.starts_with("<!--") {
         return Some(lookups.find("-->", index)? + 3);
     }
+    // The `?>` closing a processing instruction follows its `<?`.
     if rest.starts_with("<?") {
-        return Some(lookups.find("?>", index)? + 2);
+        return Some(lookups.find("?>", index + 2)? + 2);
     }
     if rest.starts_with("<![CDATA[") {
         return Some(lookups.find("]]>", index)? + 3);
@@ -8526,7 +9286,7 @@ fn is_uri_autolink(input: &str) -> bool {
     input[colon + 1..]
         .chars()
         .map(source_char)
-        .all(|char| !matches!(char, '<' | '>') && !char.is_control() && !char.is_whitespace())
+        .all(|char| !matches!(char, '<' | '>' | ' ') && !char.is_ascii_control())
 }
 
 fn is_email_autolink(input: &str) -> bool {
@@ -8556,6 +9316,16 @@ fn is_email_autolink(input: &str) -> bool {
 // returned destination is the synthesized href (a `http://`/`mailto:` prefix
 // may be prepended); the caller keeps `input[index..end]` as the visible
 // original.
+/// The lengths of the literal autolink that starts `input` under GFM autolinks
+/// and under GFM plus relaxed autolinks, for the serializer to check that text
+/// it writes after an autolink leaves the URL as it was.
+pub(crate) fn literal_autolink_extents(input: &str) -> [Option<usize>; 2] {
+    [false, true].map(|relaxed| {
+        parse_literal_autolink(input, 0, true, relaxed, &mut LiteralAutolinkScan::default())
+            .map(|(end, _)| end)
+    })
+}
+
 fn parse_literal_autolink(
     input: &str,
     index: usize,
@@ -9398,10 +10168,15 @@ fn is_email_domain(input: &str, min_labels: usize) -> bool {
     label_count >= min_labels
 }
 
+/// A footnote label: no space, tab, or line ending and, as in a link label,
+/// no unescaped bracket.
 fn is_footnote_label(label: &str) -> bool {
     !label.is_empty()
         && reference_label_is_within_limit(label)
-        && !label.chars().any(char::is_whitespace)
+        && !label.contains([' ', '\t', '\n', '\r'])
+        && !label
+            .match_indices(['[', ']'])
+            .any(|(index, _)| !is_escaped_at(label, index))
 }
 
 fn find_footnote_definition_label_end(input: &str) -> Option<usize> {

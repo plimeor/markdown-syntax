@@ -837,3 +837,789 @@ mod parser {
         );
     }
 }
+
+mod lazy_lines_and_final_whitespace {
+    //! A lazy line that opens a list ends the container it would otherwise
+    //! continue, and a paragraph or setext heading drops the final whitespace
+    //! of its content, as CommonMark specifies.
+
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::LineBreak(_) => "<br>".into(),
+                Inline::SoftBreak(_) => "/".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_empty_list_item_on_a_lazy_line_ends_the_block_quote() {
+        for source in ["> a\n- ", "> a\n-", "> a\n1. "] {
+            let blocks = blocks(source);
+            let [Block::BlockQuote(quote), Block::List(list)] = blocks.as_slice() else {
+                panic!("{source:?}: expected a block quote and a list, got {blocks:?}");
+            };
+            let [Block::Paragraph(paragraph)] = quote.children.as_slice() else {
+                panic!("{source:?}: expected one paragraph in the quote");
+            };
+            assert_eq!(texts(&paragraph.children), ["a"], "{source:?}");
+            assert!(
+                matches!(list.children.as_slice(), [item] if item.children.is_empty()),
+                "{source:?}: {list:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordered_item_not_starting_at_one_on_a_lazy_line_ends_the_block_quote() {
+        let blocks = blocks("> > a\n2. b");
+        let [Block::BlockQuote(_), Block::List(list)] = blocks.as_slice() else {
+            panic!("expected a block quote and a list, got {blocks:?}");
+        };
+        assert!(list.ordered);
+        assert_eq!(list.start, Some(2));
+    }
+
+    #[test]
+    fn a_lazy_list_marker_does_not_join_a_list_inside_the_quote() {
+        let blocks = blocks("> - a\n- ");
+        let [Block::BlockQuote(quote), Block::List(outer)] = blocks.as_slice() else {
+            panic!("expected a block quote and a list, got {blocks:?}");
+        };
+        assert!(
+            matches!(quote.children.as_slice(), [Block::List(inner)] if inner.children.len() == 1)
+        );
+        assert_eq!(outer.children.len(), 1);
+    }
+
+    #[test]
+    fn a_paragraph_drops_the_final_whitespace_of_its_content() {
+        for (source, expected) in [
+            ("foo  ", vec!["foo"]),
+            ("foo \t\n", vec!["foo"]),
+            ("aaa     \nbbb     ", vec!["aaa", "<br>", "bbb"]),
+            ("> a  ", vec!["a"]),
+        ] {
+            let blocks = blocks(source);
+            let paragraph = match blocks.as_slice() {
+                [Block::Paragraph(paragraph)] => paragraph,
+                [Block::BlockQuote(quote)] => match quote.children.as_slice() {
+                    [Block::Paragraph(paragraph)] => paragraph,
+                    other => panic!("{source:?}: {other:?}"),
+                },
+                other => panic!("{source:?}: {other:?}"),
+            };
+            assert_eq!(texts(&paragraph.children), expected, "{source:?}");
+        }
+        let blocks = blocks("foo  ");
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(paragraph.children[0].span().map(|span| span.end), Some(3));
+    }
+
+    #[test]
+    fn a_setext_heading_drops_the_final_whitespace_of_its_content() {
+        for source in ["Foo  \n-----", "Foo\t\n==="] {
+            let blocks = blocks(source);
+            let [Block::Heading(heading)] = blocks.as_slice() else {
+                panic!("{source:?}: expected a heading, got {blocks:?}");
+            };
+            assert_eq!(texts(&heading.children), ["Foo"], "{source:?}");
+        }
+    }
+}
+
+mod container_laziness {
+    //! Lazy paragraph continuation inside lists and block quotes, as cmark,
+    //! commonmark.js, and micromark read it, and the blank lines and blank
+    //! item separators that end containers or loosen lists.
+
+    use markdown_syntax::{Block, Inline, ListItem, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::SoftBreak(_) => "/".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn only_item(block: &Block) -> &ListItem {
+        match block {
+            Block::List(list) if list.children.len() == 1 => &list.children[0],
+            other => panic!("expected a one-item list, got {other:?}"),
+        }
+    }
+
+    fn paragraph_texts(block: &Block) -> Vec<String> {
+        match block {
+            Block::Paragraph(paragraph) => texts(&paragraph.children),
+            other => panic!("expected a paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_lazy_line_continues_a_paragraph_in_an_item_that_started_blank() {
+        let blocks = blocks("- \n  a\nb");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(list).children[0]),
+            ["a", "/", "b"]
+        );
+
+        let blocks = self::blocks("* \n  1. a\na");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let inner = only_item(&only_item(list).children[0]);
+        assert_eq!(paragraph_texts(&inner.children[0]), ["a", "/", "a"]);
+    }
+
+    #[test]
+    fn a_lazy_line_continues_a_paragraph_after_a_thematic_break_in_an_item() {
+        let blocks = blocks("2. ---\n   > b c\nb c");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let item = only_item(list);
+        let [Block::ThematicBreak(_), Block::BlockQuote(quote)] = item.children.as_slice() else {
+            panic!("expected a break and a quote, got {:?}", item.children);
+        };
+        assert_eq!(paragraph_texts(&quote.children[0]), ["b c", "/", "b c"]);
+    }
+
+    #[test]
+    fn an_empty_item_marker_that_cannot_interrupt_continues_the_paragraph() {
+        let blocks = blocks("- a\n    * \nb c");
+        let [list] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(list).children[0]),
+            ["a", "/", "*", "/", "b c"]
+        );
+    }
+
+    #[test]
+    fn a_lazy_line_of_a_block_quote_stays_lazy_inside_its_list() {
+        let blocks = blocks("> - a\n    - ");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        assert_eq!(
+            paragraph_texts(&only_item(&quote.children[0]).children[0]),
+            ["a", "/", "-"]
+        );
+    }
+
+    #[test]
+    fn a_line_short_of_the_paragraphs_quote_level_continues_it_only_lazily() {
+        let blocks = blocks("> > a\n> 1. ");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        assert!(
+            matches!(
+                quote.children.as_slice(),
+                [Block::BlockQuote(_), Block::List(_)]
+            ),
+            "{:?}",
+            quote.children
+        );
+
+        let blocks = self::blocks("> > a\n> > 1. ");
+        let [Block::BlockQuote(outer)] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::BlockQuote(inner)] = outer.children.as_slice() else {
+            panic!("expected a nested quote, got {:?}", outer.children);
+        };
+        assert_eq!(paragraph_texts(&inner.children[0]), ["a", "/", "1."]);
+    }
+
+    #[test]
+    fn a_blank_line_indented_four_columns_ends_a_block_quote() {
+        let blocks = blocks("> a\n    \n> b");
+        assert!(
+            matches!(
+                blocks.as_slice(),
+                [Block::BlockQuote(_), Block::BlockQuote(_)]
+            ),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_blank_line_between_an_empty_item_and_the_next_loosens_the_list() {
+        let blocks = blocks("* \n\n  * b c");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert_eq!(list.children.len(), 2);
+        assert!(!list.tight);
+    }
+
+    #[test]
+    fn a_blank_line_before_a_thematic_break_leaves_the_list_tight() {
+        let blocks = blocks("- a\n\n- ---");
+        let [Block::List(list), Block::ThematicBreak(_)] = blocks.as_slice() else {
+            panic!("expected a list and a break, got {blocks:?}");
+        };
+        assert!(list.tight);
+    }
+
+    #[test]
+    fn a_complete_html_tag_on_a_lazy_line_ends_a_list_item() {
+        // cmark-gfm and micromark start a type-7 HTML block here; upstream cmark
+        // and commonmark.js keep the tag in the paragraph.
+        let blocks = blocks("- a\n<a>");
+        assert!(
+            matches!(blocks.as_slice(), [Block::List(_), Block::HtmlBlock(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    fn quote_children(block: &Block) -> &[Block] {
+        match block {
+            Block::BlockQuote(quote) => &quote.children,
+            other => panic!("expected a block quote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_line_after_an_unclosed_fence_in_a_block_quote_is_not_lazy() {
+        for source in ["> ```\n> x\na", "> > ```\n> > x\na", "> ```\n> \n> x\na"] {
+            let blocks = blocks(source);
+            let [quote, paragraph] = blocks.as_slice() else {
+                panic!("{source:?}: expected a quote and a paragraph, got {blocks:?}");
+            };
+            assert!(
+                !format!("{quote:?}").contains("\"a"),
+                "{source:?}: {quote:?}"
+            );
+            assert_eq!(paragraph_texts(paragraph), ["a"], "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_after_an_html_or_math_block_in_a_block_quote_is_not_lazy() {
+        let math = SyntaxOptions::default()
+            .parse("> $$\n> x\na")
+            .document
+            .children;
+        for blocks in [blocks("> <div>\n> x\na"), blocks("> <!--\n> x\na"), math] {
+            let [quote, paragraph] = blocks.as_slice() else {
+                panic!("expected a quote and a paragraph, got {blocks:?}");
+            };
+            assert_eq!(quote_children(quote).len(), 1, "{quote:?}");
+            assert_eq!(paragraph_texts(paragraph), ["a"]);
+        }
+    }
+
+    #[test]
+    fn a_quoted_paragraph_opening_with_backticks_takes_lazy_lines() {
+        // The fence-like rule ends a quote at a lazy line, not at a quoted one.
+        let blocks = blocks("> ``a\nb");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [paragraph] = quote_children(quote) else {
+            panic!("expected one paragraph, got {quote:?}");
+        };
+        assert_eq!(
+            paragraph_texts(paragraph).last().map(String::as_str),
+            Some("b")
+        );
+    }
+
+    #[test]
+    fn a_blank_line_inside_a_nested_items_open_fence_leaves_the_list_tight() {
+        let blocks = blocks("2. a\n   1. ```\n\n2. b");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        assert!(list.tight, "{list:?}");
+    }
+
+    #[test]
+    fn a_closed_fence_leaves_the_next_paragraph_open_to_lazy_lines() {
+        let blocks = blocks("> ```\n> x\n> ```\n> y\na");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::CodeBlock(_), paragraph] = quote_children(quote) else {
+            panic!("expected code and a paragraph, got {quote:?}");
+        };
+        assert_eq!(paragraph_texts(paragraph), ["y", "/", "a"]);
+    }
+
+    #[test]
+    fn a_fence_inside_a_quoted_list_item_does_not_hold_the_quote_open() {
+        let blocks = blocks("> - ```\n> x\na");
+        let [quote] = blocks.as_slice() else {
+            panic!("expected one quote, got {blocks:?}");
+        };
+        let [Block::List(_), paragraph] = quote_children(quote) else {
+            panic!("expected a list and a paragraph, got {quote:?}");
+        };
+        assert_eq!(paragraph_texts(paragraph), ["x", "/", "a"]);
+    }
+}
+
+mod paragraph_interruption {
+    //! Only a line that opens the block it looks like interrupts a paragraph.
+
+    use markdown_syntax::{Block, CodeBlock, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    #[test]
+    fn a_hash_run_that_is_not_a_heading_continues_the_paragraph() {
+        for source in ["a\n#)", "a\n#b", "a\n#######"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_list_that_cannot_interrupt_a_paragraph_continues_a_definitions_paragraph() {
+        for source in ["[foo]: /url\n2) a", "[foo]: /url\n-"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(
+                    blocks.as_slice(),
+                    [Block::Definition(_), Block::Paragraph(_)]
+                ),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        let blocks = blocks("[foo]: /url\n- a");
+        assert!(
+            matches!(blocks.as_slice(), [Block::Definition(_), Block::List(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_backtick_run_with_a_backtick_in_its_info_continues_the_paragraph() {
+        let blocks = blocks("a\n``` `` ```\n```b`");
+        assert!(
+            matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_directive_line_continues_the_paragraph() {
+        for source in ["a\n::", "a\n::1bad", "a\n:::", "a\n::: x"] {
+            let blocks = SyntaxOptions::default().parse(source).document.children;
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_container_ends_its_last_line_with_a_line_feed() {
+        let blocks = blocks("- ```\n  ~\r");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("expected one list, got {blocks:?}");
+        };
+        let [Block::CodeBlock(CodeBlock { value, .. })] = list.children[0].children.as_slice()
+        else {
+            panic!("expected one code block, got {list:?}");
+        };
+        assert_eq!(value, "~\n");
+    }
+
+    #[test]
+    fn a_complete_tag_after_a_definition_continues_its_paragraph() {
+        let tag = blocks("[o]: u\n<a>");
+        assert!(
+            matches!(tag.as_slice(), [Block::Definition(_), Block::Paragraph(_)]),
+            "{tag:?}"
+        );
+        let div = blocks("[o]: u\n<div>");
+        assert!(
+            matches!(div.as_slice(), [Block::Definition(_), Block::HtmlBlock(_)]),
+            "{div:?}"
+        );
+    }
+
+    #[test]
+    fn a_header_row_indented_four_columns_starts_no_table() {
+        let blocks = SyntaxOptions::default()
+            .parse("a\n    |b\n----")
+            .document
+            .children;
+        assert!(
+            matches!(blocks.as_slice(), [Block::Heading(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_directive_attribute_without_a_valid_name_is_dropped() {
+        let document = SyntaxOptions::default().parse(":b{<} :c{a <=1 d}").document;
+        let markdown = document.to_markdown().expect("document serializes");
+        assert_eq!(markdown, ":b :c{a d}\n");
+    }
+
+    #[test]
+    fn a_tab_after_a_top_level_containers_marker_spans_its_source_columns() {
+        // `> ` ends at column 2, so the tab reaches column 4: two columns, a
+        // paragraph's indentation, not an indented code block.
+        let quote = blocks("> \tcode");
+        let [Block::BlockQuote(inner)] = quote.as_slice() else {
+            panic!("expected one quote, got {quote:?}");
+        };
+        assert!(
+            matches!(inner.children.as_slice(), [Block::Paragraph(_)]),
+            "{inner:?}"
+        );
+        let list = blocks("- item\n\n  \tcode");
+        let [Block::List(list)] = list.as_slice() else {
+            panic!("expected one list, got {list:?}");
+        };
+        assert!(
+            matches!(
+                list.children[0].children.as_slice(),
+                [Block::Paragraph(_), Block::Paragraph(_)]
+            ),
+            "{list:?}"
+        );
+        // A tab past the indentation an indented code block takes stays a
+        // tab of its value, and so does one inside a fence.
+        let code = blocks("- a\n\n      \tb");
+        let [Block::List(code)] = code.as_slice() else {
+            panic!("expected one list, got {code:?}");
+        };
+        assert!(
+            matches!(code.children[0].children.as_slice(),
+                [Block::Paragraph(_), Block::CodeBlock(CodeBlock { value, .. })] if value == "\tb\n"),
+            "{code:?}"
+        );
+        let fence = blocks("> ```\n> \tb\n> ```");
+        assert!(
+            format!("{fence:?}").contains("value: \"\\tb\\n\""),
+            "{fence:?}"
+        );
+    }
+
+    #[test]
+    fn a_tab_inside_nested_containers_spans_its_source_columns() {
+        // Each tab reaches its stop from its column in the source line, not from
+        // the start of the content a container read it in.
+        let shape = |source: &str| format!("{:?}", blocks(source));
+        // `> > ` ends at column 4: the tab spans four columns, code.
+        assert!(
+            shape("> > \ta").contains("CodeBlock"),
+            "{}",
+            shape("> > \ta")
+        );
+        // `* - ` ends at column 4: one space and a four-column tab, code.
+        assert!(
+            shape("* - \tb c").contains("CodeBlock"),
+            "{}",
+            shape("* - \tb c")
+        );
+        // `>1. \t` holds code, so the next line is not its lazy continuation.
+        let lazy = blocks(">1. \ta\n    \t1. ===");
+        assert!(
+            matches!(lazy.as_slice(), [Block::BlockQuote(_), Block::CodeBlock(_)]),
+            "{lazy:?}"
+        );
+    }
+
+    #[test]
+    fn indented_code_keeps_the_first_line_ending_for_its_last_line() {
+        for (source, value) in [("\ta\r\tb", "a\rb\r"), ("    a\r\n    b", "a\r\nb\r\n")] {
+            let blocks = blocks(source);
+            let [Block::CodeBlock(CodeBlock { value: actual, .. })] = blocks.as_slice() else {
+                panic!("{source:?}: expected one code block, got {blocks:?}");
+            };
+            assert_eq!(actual, value, "{source:?}");
+        }
+    }
+}
+
+mod unicode_whitespace {
+    //! Block structure reads only spaces and tabs as whitespace: a line holding
+    //! another whitespace char, such as a no-break space or a form feed, is
+    //! neither blank nor indented, and such a char ends no marker or fence.
+
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    fn blocks(source: &str, options: &SyntaxOptions) -> Vec<Block> {
+        options.parse(source).document.children
+    }
+
+    #[test]
+    fn a_line_with_other_whitespace_is_text() {
+        let commonmark = SyntaxOptions::commonmark();
+        for source in [
+            "***\u{a0}",
+            "\u{a0}***",
+            "a\n---\u{a0}",
+            "a\n===\u{3000}",
+            "a\n\u{a0}\nb",
+            "a\n\u{c}---",
+            "<a>\u{a0}\nx",
+        ] {
+            let blocks = blocks(source, &commonmark);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        // The dashes read as list markers, as no thematic break forms.
+        let nested = blocks("- - -\u{c}", &commonmark);
+        assert!(matches!(nested.as_slice(), [Block::List(_)]), "{nested:?}");
+        let gfm = SyntaxOptions::gfm();
+        for source in ["| a |\n| - |\u{a0}", "\u{a0}| a |\n| - |"] {
+            let blocks = blocks(source, &gfm);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_no_break_space_before_mdx_jsx_keeps_it_inline() {
+        let blocks = blocks("\u{a0} <p/>", &SyntaxOptions::mdx());
+        assert!(
+            matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_form_feed_ending_a_paragraph_stays_its_text() {
+        let blocks = blocks("a\u{c}", &SyntaxOptions::commonmark());
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(paragraph.children.as_slice(), [Inline::Text(text)] if text.value == "a\u{c}"),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn labels_collapse_only_spaces_tabs_and_line_endings() {
+        let options = SyntaxOptions::default();
+        let debug = format!("{:?}", blocks("[a\u{a0}b]\n\n[a b]: /u", &options));
+        assert!(!debug.contains("LinkReference"), "{debug}");
+        let debug = format!("{:?}", blocks("[^a\u{a0}b]\n\n[^a\u{a0}b]: x", &options));
+        assert!(debug.contains("FootnoteReference"), "{debug}");
+    }
+}
+
+mod footnotes_and_directives {
+    use markdown_syntax::{Block, Inline, SyntaxOptions};
+
+    #[test]
+    fn a_footnote_definitions_first_line_keeps_a_hard_break() {
+        let blocks = SyntaxOptions::default()
+            .parse("[^1]: a  \nb")
+            .document
+            .children;
+        let [Block::FootnoteDefinition(definition)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::Paragraph(paragraph)] = definition.children.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(
+                paragraph.children.as_slice(),
+                [Inline::Text(_), Inline::LineBreak(_), Inline::Text(_)]
+            ),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_directive_opener_inside_fenced_code_is_code() {
+        let blocks = SyntaxOptions::default()
+            .parse(":::t\n```\n:::e\n```\n:::")
+            .document
+            .children;
+        let [Block::ContainerDirective(directive)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(directive.children.as_slice(), [Block::CodeBlock(code)] if code.value == ":::e\n"),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_fence_left_open_in_a_nested_directive_ends_with_it() {
+        let output = SyntaxOptions::default()
+            .parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        let blocks = output.document.children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(after.children.len(), 1, "{blocks:?}");
+        assert!(
+            matches!(
+                outer.children.as_slice(),
+                [Block::ContainerDirective(inner), Block::ContainerDirective(inner2)]
+                    if inner.name == "inner" && inner2.name == "inner2"
+            ),
+            "{blocks:?}"
+        );
+    }
+}
+
+mod gfm_tables {
+    use markdown_syntax::{Block, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::gfm().parse(source).document.children
+    }
+
+    #[test]
+    fn a_setext_underline_wins_over_a_delimiter_row_without_pipes() {
+        for source in ["| --- |\n-- ", "|a|\n---"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Heading(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        assert!(matches!(blocks("a\n|---").as_slice(), [Block::Table(_)]));
+        // The paragraph's earlier lines join the heading too.
+        for source in ["a\n|b\n---", "a\n| b |\n---"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Heading(heading)] if heading.children.len() == 3),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_table_that_ends_a_paragraph_starts_on_its_header_row() {
+        let table = blocks("a\n+\n|-");
+        assert!(
+            matches!(table.as_slice(), [Block::Paragraph(_), Block::Table(_)]),
+            "{table:?}"
+        );
+        // Below a lazy line no table forms, so the paragraph goes on.
+        let lazy = blocks("- $\n  +\n|-");
+        let [Block::List(list)] = lazy.as_slice() else {
+            panic!("{lazy:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(_)]),
+            "{lazy:?}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_line_is_no_delimiter_row() {
+        let blocks = blocks("1. ---(\n:-:");
+        let [Block::List(list)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+}
+
+mod list_items_in_containers {
+    use markdown_syntax::{Block, SyntaxOptions};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        SyntaxOptions::commonmark().parse(source).document.children
+    }
+
+    #[test]
+    fn a_quoted_line_short_of_the_item_is_lazy_for_its_paragraph() {
+        // The list marker ends the item's paragraph and the quote's content,
+        // as on any lazy line, so the next line is outside the quote.
+        for source in ["> - a\n> 2.\nz", "> - > a\n>   2.\nz"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(
+                    blocks.as_slice(),
+                    [Block::BlockQuote(_), Block::Paragraph(_)]
+                ),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        // A setext-like line short of the item continues its paragraph.
+        let blocks = blocks("> 1. a\n> ===\nb");
+        let [Block::BlockQuote(quote)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::List(list)] = quote.children.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(paragraph)] if paragraph.children.len() == 5),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_lazy_fence_like_line_opens_no_fence_in_an_item() {
+        let blocks = blocks("1.   a\n    ```\n\nb");
+        assert!(
+            matches!(blocks.as_slice(), [Block::List(_), Block::Paragraph(_)]),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_block_open_in_a_nested_item_ends_with_the_item() {
+        // The sibling item ends the fence, so the blank line loosens the list.
+        let loose = blocks("- - ```\n  - a\n\n- b");
+        let [Block::List(list)] = loose.as_slice() else {
+            panic!("{loose:?}");
+        };
+        assert!(!list.tight, "{loose:?}");
+        // A line below the nested item's content continues the outer item,
+        // and the line after it is lazy.
+        let lazy = blocks("- a\n  - ```\n  b\nc");
+        let [Block::List(list)] = lazy.as_slice() else {
+            panic!("{lazy:?}");
+        };
+        assert!(
+            matches!(list.children[0].children.as_slice(), [Block::Paragraph(_), Block::List(_), Block::Paragraph(paragraph)] if paragraph.children.len() == 3),
+            "{lazy:?}"
+        );
+    }
+}
