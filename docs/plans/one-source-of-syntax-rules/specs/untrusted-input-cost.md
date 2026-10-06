@@ -20,7 +20,7 @@ input size, except MDX JSX tag matching, which SHALL take at most `n log n`.
 
 #### Scenario: Deeply nested emphasis
 - **WHEN** a paragraph holding 16 levels of nested emphasis, a mark around further nested emphasis, and a tail that abuts the runs is serialized
-- **THEN** it finishes within 50 ms in a release build, and doubling the nesting depth from 4 to 8 to 16 at most roughly doubles the time
+- **THEN** it finishes within 1 s in a debug build, and doubling the nesting depth from 4 to 8 to 16 at most roughly doubles the time
 
 #### Scenario: Long description details
 - **WHEN** a description list whose details hold thousands of continuation lines, `"a\n: b\n"` followed by `"c\n"` repeated, is parsed

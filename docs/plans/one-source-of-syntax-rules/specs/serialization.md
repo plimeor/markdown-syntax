@@ -2,15 +2,49 @@
 
 ## ADDED Requirements
 
+### Requirement: Tree comparison
+Where serialization compares a reparsed document with the one it wrote, it
+SHALL compare them apart from spans, reading each `Escape` as a `Text` holding
+its char and each `CharacterReference` as a `Text` holding its value, and
+merging adjacent `Text` nodes; the reparse SHALL read the written document as
+if it also held a definition of each reference label the document uses
+without defining.
+
+#### Scenario: Escape the serializer adds
+- **WHEN** a hand-built paragraph holding `Text("*a*")` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"\\*a\\*\n"`, the reparsed paragraph holds `Escape('*')`, `Text("a")`, and `Escape('*')`, which compare equal to the original, and serializing the reparsed document returns the same text
+
+#### Scenario: Reference without its definition
+- **WHEN** a hand-built paragraph holding a shortcut `LinkReference` to `foo`, in a document holding no `Definition`, is serialized
+- **THEN** `to_markdown()` returns `"[foo]\n"`
+
+#### Scenario: Split text
+- **WHEN** a hand-built paragraph holding `Text("a")` followed by `Text("b")` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"ab\n"` and the reparsed `Text("ab")` compares equal to the original
+
 ### Requirement: Syntax rules come from the parser
-The serializer SHALL decide which text chars to escape, and which delimiter
-each `Emphasis` and `Strong` takes, by parsing its own rendering under
-`SerializeOptions::syntax` and reading which positions the parse took as
-syntax; it SHALL hold no rule of its own about what the parser reads as
-syntax. A text char SHALL be written raw unless that parse reads it, written
-raw, as part of a construct, apart from a backtick, which is always escaped,
-and the other chars of a delimiter run the parse reads as syntax, which are
-escaped with it.
+The serializer SHALL decide which text chars to escape, which delimiter each
+`Emphasis` and `Strong` takes, and when a block needs a layout other than the
+default one, by parsing its own rendering under `SerializeOptions::syntax` and
+reading what that parse took as syntax and which container or block each
+written line landed in. A text char
+SHALL be written raw unless that parse reads it, written raw, as part of a
+construct, a delimiter run counting whole; the exceptions are a backtick,
+which is always escaped, and the encodings that "Escape forms" requires for a
+node or block that does not read back. Emphasis and strong SHALL be written
+with `*` and `**` unless that does not read back.
+
+#### Scenario: Unpaired delimiters stay raw
+- **WHEN** a hand-built paragraph holding `Text("x_y_ a*b x^2 ~5")` is serialized
+- **THEN** `to_markdown()` returns `"x_y_ a*b x^2 ~5\n"`
+
+#### Scenario: Brackets with and without a definition
+- **WHEN** a hand-built paragraph holding `Text("[x]")` is serialized alone, and again in a document that also holds a `Definition` of `x`
+- **THEN** the first output is `"[x]\n"` and the second writes the paragraph as `\[x\]`
+
+#### Scenario: Mark delimiters escaped whole
+- **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized
+- **THEN** `to_markdown()` returns `"\\=\\=a\\=\\=\n"`
 
 #### Scenario: Line-start check in mid-line
 - **WHEN** the documents parsed from `` "`x`<div" `` and `"a *b*::c"` with `parse` are serialized
@@ -23,6 +57,24 @@ escaped with it.
 #### Scenario: Nested list before an indented block
 - **WHEN** the document parsed from `"- a\n  - b\n   <div>"` is serialized
 - **THEN** the nested item is written as `  - b`, and reparsing the output yields the same tree
+
+### Requirement: Escape forms
+An escaped ASCII punctuation char SHALL be written with a backslash, or as a
+character reference when the parse still reads its backslash form as syntax;
+any other escaped char SHALL be written as a character reference. When a node
+does not read back, the text chars touching its delimiters, inside and
+outside, SHALL be written as character references. When a block still does
+not read back after three rounds of escaping, every ASCII punctuation char of
+its text SHALL be escaped, and when it then still does not read back,
+serialization SHALL return `SerializeError::Unrepresentable`.
+
+#### Scenario: Space at an emphasis edge
+- **WHEN** a hand-built paragraph holding an `Emphasis` around `Text("a ")` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"*&#97;&#x20;*\n"` and the reparsed paragraph compares equal to the original
+
+#### Scenario: Letter before a shortcode
+- **WHEN** a hand-built paragraph holding `Text("a")` followed by a `Shortcode` named `smile` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"&#97;:smile:\n"` and the reparsed paragraph compares equal to the original
 
 ### Requirement: Links written as autolinks
 A `Link` with no title whose one child is a `Text` equal to its destination,
@@ -82,8 +134,9 @@ independent of source details the AST does not record.
 ### Requirement: Round-trip stability
 For a document parsed with a `SyntaxOptions`, parsing the Markdown that
 `to_markdown_with` writes with `syntax` set to those options SHALL yield, under
-the same options, the same AST apart from spans, and serializing that reparsed
-document the same way SHALL yield the same text.
+the same options, a document equal to the first as "Tree comparison" defines,
+and serializing that reparsed document the same way SHALL yield the same text
+byte for byte.
 
 #### Scenario: Round-trip fixtures
 - **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed with its profile's options, serialized with `syntax` set to them, reparsed with them, and serialized again
@@ -111,16 +164,16 @@ the default keeps it. Options SHALL be constructed by mutating
 
 #### Scenario: Escapes follow the read-back dialect
 - **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized once with default options and once with `syntax = SyntaxOptions::commonmark()`
-- **THEN** the first output escapes the `==` runs and the second returns `"==a==\n"`
+- **THEN** the first output is `"\\=\\=a\\=\\=\n"` and the second is `"==a==\n"`
 
 ### Requirement: Invalid documents are rejected
 Serialization SHALL validate the document first and return
 `SerializeError::InvalidDocument` with the validation diagnostics when it is
 invalid, and `SerializeError::UnsupportedNode` for a node kind it cannot write.
 When no Markdown it can write reads back, under `SerializeOptions::syntax`, as
-the same tree apart from spans and the splitting of adjacent `Text` nodes, it
-SHALL return `SerializeError::Unrepresentable` with a diagnostic naming the
-first node that reads back differently.
+the same tree, compared as "Tree comparison" defines, it SHALL return
+`SerializeError::Unrepresentable` with a diagnostic naming the first node that
+reads back differently.
 
 #### Scenario: Empty table
 - **WHEN** a hand-built document holding a `Table` with no rows is serialized
@@ -129,10 +182,6 @@ first node that reads back differently.
 #### Scenario: Link inside a link
 - **WHEN** a hand-built paragraph holding a `Link` whose children hold another `Link` is serialized
 - **THEN** `to_markdown()` returns `Err(SerializeError::Unrepresentable(_))`
-
-#### Scenario: Adjacent text nodes
-- **WHEN** a hand-built paragraph holding `Text("a")` followed by `Text("b")` is serialized
-- **THEN** `to_markdown()` returns `"ab\n"`
 
 ### Requirement: Escaping keeps text literal
 The serializer SHALL escape text so that reparsing the output yields the same
@@ -143,9 +192,9 @@ constructs.
 - **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized and reparsed
 - **THEN** the reparsed paragraph holds the same text and no `Emphasis`
 
-#### Scenario: Underscore that can close inside underscore emphasis
-- **WHEN** a hand-built paragraph holding an `Emphasis` around a `Strong` around `Text("(a b)_.")`, followed by `Text("*#")`, is serialized and reparsed with the CommonMark preset
-- **THEN** `to_markdown()` returns `"_**(a b)\\_.**_\\*#\n"` and the reparsed paragraph equals the original apart from spans
+#### Scenario: Text delimiter after a closing run
+- **WHEN** a hand-built paragraph holding an `Emphasis` around a `Strong` around `Text("(a b)_.")`, followed by `Text("*#")`, is serialized with `syntax = SyntaxOptions::commonmark()` and reparsed with the CommonMark preset
+- **THEN** `to_markdown_with()` returns `"***(a b)_.***\\*#\n"` and the reparsed paragraph compares equal to the original
 
 #### Scenario: Parenthesis after a shortcut reference
 - **WHEN** a hand-built paragraph holding a shortcut `LinkReference` to `foo` followed by `Text("(a)")` is serialized and reparsed with a definition of `foo`
@@ -161,7 +210,7 @@ constructs.
 
 #### Scenario: Pipe ending a level-two setext heading
 - **WHEN** the document parsed from `"a |\n-"` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"a \\|\n---\n"` and the reparsed document holds the same setext `Heading` and no `Table`
+- **THEN** `to_markdown()` returns `"a |\n---\n"` and the reparsed document holds the same setext `Heading` and no `Table`
 
 #### Scenario: Empty fenced code block
 - **WHEN** ``parse("```\n```").document.to_markdown()`` runs
@@ -273,7 +322,7 @@ constructs.
 
 #### Scenario: Text after a bare text directive
 - **WHEN** the documents parsed from `":e{}1"`, `":e[]www.+"`, and `":e{}[^1]"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same `TextDirective` and what follows it, since a directive with no attributes followed by anything that could go on with its name, label, or attributes ends with an empty label, or with an empty attribute list before a `{`
+- **THEN** each reparsed paragraph holds the same `TextDirective` and what follows it
 
 #### Scenario: Email-local char before an email
 - **WHEN** the documents parsed from `"]\\-a@b.c"`, `"++@b.c"`, and `"\\+@b.p://"` with `parse` are serialized and reparsed

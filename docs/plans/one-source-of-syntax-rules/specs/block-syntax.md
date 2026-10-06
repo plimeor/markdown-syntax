@@ -12,8 +12,8 @@ footnote definitions, HTML containers, and description details SHALL all be
 containers on that stack.
 
 #### Scenario: Item indentation measured from the quote's content
-- **WHEN** `"  > - a\n> ===\nb"` is parsed with the CommonMark preset
-- **THEN** the document holds a `BlockQuote` followed by a `Paragraph` holding `Text("b")`
+- **WHEN** `"  > - a\n>   ===\nb"` is parsed with the CommonMark preset
+- **THEN** the `BlockQuote`'s list item holds a level-1 setext `Heading` holding `Text("a")`, and a `Paragraph` holding `Text("b")` follows the `BlockQuote`
 
 #### Scenario: Nested item behind an inner quote
 - **WHEN** `"> - > - a\n>   > 2.\nz"` is parsed with the CommonMark preset
@@ -49,7 +49,7 @@ containers on that stack.
 
 #### Scenario: Reference cases for nested containers
 - **WHEN** every nested-container case in `tests/parse_block_regressions.rs` › `nested_containers_match_the_reference` is parsed and rendered with the `html` feature
-- **THEN** each output matches the expected HTML recorded with it, which is commonmark.js's output where it agrees with micromark
+- **THEN** each output matches the expected HTML recorded with it, which is commonmark.js's output; a case where micromark's output differs carries a note saying so
 
 ### Requirement: Block extensions indent at most three columns
 A footnote definition, a leaf directive, a container directive opener, a math
@@ -236,10 +236,13 @@ continuation lines as a block quote's does.
 When directives are enabled, the parser SHALL recognize `::name[label]{attrs}`
 leaf directives standing alone on their line, followed by nothing but spaces
 and tabs, and `:::name` container directives, whose container closes at a
-fence of at least the opening fence's length; a container directive is a
+fence of at least the opening fence's length. A closing fence SHALL close the
+innermost open container directive it can close, and SHALL do so before any
+block inside that directive reads the line. A container directive is a
 container on the open-block stack, whose content lines are read as the
-document's lines are, so a line that looks like a directive opener inside a
-code block, HTML block, or list item is that block's content. A line with a
+document's lines are: a line that looks like a directive opener inside a
+fenced code block or HTML block is that block's content, and one inside a list
+item opens a directive in that item. A line with a
 malformed opener, or with text after a leaf directive, SHALL NOT end a
 paragraph and SHALL be read as paragraph text. An attribute without a valid
 name SHALL be dropped and reported as a warning-severity diagnostic.
@@ -272,9 +275,13 @@ name SHALL be dropped and reported as a warning-severity diagnostic.
 - **WHEN** `"a\n::1bad"` or `"a\n:::"` is parsed with `parse`
 - **THEN** the document holds one `Paragraph` holding both lines
 
+#### Scenario: Nested directives close innermost first
+- **WHEN** `":::outer\n:::inner\nx\n:::\n:::\nafter"` is parsed with `parse`
+- **THEN** the `ContainerDirective` named `outer` holds the `ContainerDirective` named `inner`, which holds a paragraph `x`, and a `Paragraph` holding `Text("after")` follows `outer`
+
 #### Scenario: Directive opener inside an HTML block
 - **WHEN** `":::e\n<y>\n:::e"` is parsed with `parse`
-- **THEN** the `ContainerDirective` named `e` holds an `HtmlBlock` whose value is `"<y>\n:::e\n"`, an `UnclosedDirectiveContainer` diagnostic is reported, and the document round-trips
+- **THEN** the `ContainerDirective` named `e` holds an `HtmlBlock` whose value is `"<y>\n:::e"`, an `UnclosedDirectiveContainer` diagnostic is reported, and the document round-trips
 
 #### Scenario: Closing-fence-like line inside a list item's fence
 - **WHEN** ``":::t\n- ```\n  :::e\n  ```\n:::\nafter"`` is parsed with `parse`

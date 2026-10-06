@@ -5,10 +5,13 @@
 ### Requirement: Escapes and character references are nodes
 Under every option set, the parser SHALL produce an `Escape` for every
 backslash escape and a `CharacterReference` for every entity or numeric
-character reference in inline content, including a `\|` in a table cell
-outside a code span, and SHALL NOT fold either into a neighbouring `Text`.
-Inside a code span, autolink, raw HTML, or another construct whose content is
-raw text, a backslash or `&` stays part of that raw text.
+character reference in inline content, including a `\|` in a table cell, and
+SHALL NOT fold either into a neighbouring `Text`. Inside a code span,
+autolink, raw HTML, or another construct whose content is raw text, a
+backslash or `&` stays part of that raw text, except that in a table cell a
+`\|` inside such a construct (a code span, inline math, raw HTML, an
+autolink, a wikilink, a directive's attributes, or MDX) is read as `|` in its
+value.
 
 #### Scenario: Escaped punctuation
 - **WHEN** `"\\*not em\\* and \\#tag"` is parsed with `parse`
@@ -21,6 +24,14 @@ raw text, a backslash or `&` stays part of that raw text.
 #### Scenario: Escaped pipe in a table cell
 - **WHEN** `"| a\\|b |\n|-|"` is parsed with the GFM preset
 - **THEN** the header cell holds `Text("a")`, `Escape('|')`, and `Text("b")`
+
+#### Scenario: Escaped pipe inside raw HTML in a table cell
+- **WHEN** `"| <a b=\"x\\|y\"> |\n|-|"` is parsed with the GFM preset
+- **THEN** the header cell holds one `Html` inline whose value is `<a b="x|y">`
+
+#### Scenario: Escaped pipe inside math in a table cell
+- **WHEN** `"$\\|$||\n-|-"` is parsed with `parse`
+- **THEN** the first header cell holds a dollar `Math` whose value is `|`
 
 #### Scenario: Backslash inside a code span
 - **WHEN** ``"`\\*`"`` is parsed with `parse`
@@ -44,8 +55,9 @@ part of that `WikiLink`, which is then marked as an embed and spans from the
 - **THEN** the paragraph holds no `WikiLink`
 
 ### Requirement: Underscore runs beside a tilde
-A `_` run SHALL open and close by the CommonMark flanking rules whatever `~`
-is next to it, under every option set.
+A `_` run SHALL get no strikethrough bonus from a neighbouring `~`: beside a
+`~` it opens and closes by the same rules that apply to it beside any other
+punctuation char, under every option set.
 
 #### Scenario: Underscores around a tilde
 - **WHEN** `"d_~_"` is parsed with `parse`
@@ -107,10 +119,10 @@ text, and only the source's spaces and tabs before a soft break are removed.
 
 ### Requirement: Shortcodes and text directives share the colon
 The parser SHALL read `:name:` as a `Shortcode` when shortcodes are enabled,
-`name` is a name in the crate's pinned gemoji table, the opening `:` does not
-directly follow a Unicode letter or digit, and the closing `:` is not directly
-followed by one; it SHALL read `:name[label]{attrs}` as a `TextDirective`
-when text directives are enabled.
+`name` is a name in the crate's pinned gemoji table, the source char before
+the opening `:` is not a Unicode letter or digit, and the source char after
+the closing `:` is not one either; it SHALL read `:name[label]{attrs}` as a
+`TextDirective` when text directives are enabled.
 
 #### Scenario: Shortcode
 - **WHEN** `"a :tada: b"` is parsed with `parse`
@@ -128,6 +140,10 @@ when text directives are enabled.
 - **WHEN** `"a:smile:b"` is parsed with `parse`
 - **THEN** the paragraph holds no `Shortcode`
 
+#### Scenario: Character reference before a shortcode
+- **WHEN** `"&#97;:smile:"` is parsed with `parse`
+- **THEN** the paragraph holds a `CharacterReference` whose value is `a`, followed by a `Shortcode` named `smile`
+
 #### Scenario: Name outside the gemoji table
 - **WHEN** `"a :not_an_emoji_name: b"` is parsed with `parse`
 - **THEN** the paragraph holds no `Shortcode`
@@ -138,10 +154,11 @@ when text directives are enabled.
 
 ### Requirement: Literal autolinks
 When GFM literal autolinks are enabled, the parser SHALL turn bare `www.`,
-`http://`, `https://`, and email addresses into `Link` nodes whose one child
-is a `Text` holding the matched source text and whose destination is that text
-with `http://` or `mailto:` prepended where the form needs it. A literal
-autolink SHALL end before the first Unicode whitespace char, `<`, or
+`http://`, `https://`, and email addresses, and when relaxed autolinks are
+enabled, bare `scheme://` URLs, into `Link` nodes whose one child is a `Text`
+holding the matched source text and whose destination is that text with
+`http://` or `mailto:` prepended where the form needs it. A literal autolink
+of either kind SHALL end before the first Unicode whitespace char, `<`, or
 non-ASCII char in CommonMark's Unicode punctuation set (the Unicode `P` and
 `S` categories), and, with wikilinks enabled, before `[[`;
 the GFM trailing-punctuation trimming then applies to what remains. Every
@@ -170,6 +187,10 @@ boundary check SHALL read whitespace as Unicode whitespace.
 #### Scenario: Non-ASCII letters in a path
 - **WHEN** `"https://zh.wikipedia.org/wiki/中文 x"` is parsed with the GFM preset
 - **THEN** the paragraph holds a `Link` to `https://zh.wikipedia.org/wiki/中文` followed by `Text(" x")`
+
+#### Scenario: Relaxed scheme before full-width punctuation
+- **WHEN** `"见 smb://host/share，然后"` is parsed with `parse`
+- **THEN** the paragraph holds `Text("见 ")`, a `Link` to `smb://host/share`, and `Text("，然后")`
 
 #### Scenario: No-break space before an email
 - **WHEN** `"\u{a0}e+@"` is parsed with `parse` and with the GFM preset

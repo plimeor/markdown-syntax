@@ -43,7 +43,7 @@ A parsed node's span SHALL end after the source byte where its last character
 was read, and SHALL start at the source byte where its first character was
 read, or for a block, where its first line starts after the markers and
 indentation of the containers around it; a task item's checkbox and the space
-after it count as part of the item's marker. This SHALL hold wherever the
+or tab after it count as part of the item's marker. This SHALL hold wherever the
 parser removes indentation, container markers, or table-cell padding before
 reading a line, or joins lines whose source line ending is `\r\n`; a space
 the parser produces by splitting a tab SHALL map to that tab.
@@ -99,6 +99,10 @@ the parser produces by splitting a tab SHALL map to that tab.
 #### Scenario: Inside a container directive
 - **WHEN** `parse(":::note\n- 项目\n  - [[A]]\n:::\n")` runs
 - **THEN** the nested item's `WikiLink` spans bytes 21..26
+
+#### Scenario: Last child of a container directive
+- **WHEN** `parse(":::note\n```\nx\n```\n:::\n")` runs
+- **THEN** the directive's fenced `CodeBlock` spans bytes 8..18, ending after its closing fence's line ending as the same block does at the top level
 
 #### Scenario: Tab-indented nested list
 - **WHEN** `parse("- 项目\n\t- 嵌套 [[A]]\n")` runs
