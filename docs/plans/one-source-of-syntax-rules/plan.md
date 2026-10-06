@@ -151,10 +151,15 @@ Specs:
   block or a fenced code block it is content.
   - Turned down: checking each directive at its own level from the outside
     in, which closes the outer directive at the inner one's fence.
-- **Task checkbox.** The checkbox is consumed when the item's first
-  paragraph opens, as part of the item's prefix. This is because GFM defines
-  it at the start of the first paragraph, and the stack then starts the
-  paragraph's line after it.
+- **Task checkbox.** The checkbox is taken from the start of the item's
+  first paragraph when that paragraph closes, and its span becomes part of
+  the item's prefix. This is because GFM defines it at the start of the first
+  paragraph, after any definitions taken from it, which is known only when the
+  paragraph closes: cmark-gfm (through comrak) and micromark both read
+  `- [a]: /u\n  [x] b` as a checked item and `- [x] a\n  ===` as a heading
+  `[x] a`.
+  - Turned down: taking it when the paragraph opens, which disagrees with
+    both on those inputs.
 - **Tree comparison.** One crate-private comparison serves round-trip
   stability, the serializer's read-back, and `Unrepresentable`. It drops
   spans, reads `Escape` and `CharacterReference` as text, and merges adjacent
@@ -387,7 +392,7 @@ The verify run found defects in the work above. Each task lands with a test that
 - [x] 7.1 Parse time stays linear: a table start takes the paragraph's definitions only when a table forms; a definition title is scanned once across its lines; description details and the MDX lookahead stop rescanning the open paragraph. Verified by growth cases in `tests/pathological_inputs.rs` for each input.
 - [x] 7.2 Lookahead lines keep the split-tab column, and the HTML container close, fence, and indented-line checks measure indentation from the line's column. Verified by the tab-indented `<details>` cases parsing as on `main` and the type-fest reduction round-tripping.
 - [x] 7.3 An unclosed fence at the end of input without a line ending keeps its empty last line; a multi-line definition title drops continuation indentation; an alert marker line blocks indented code as a paragraph line does. Verified against commonmark.js output.
-- [ ] 7.4 The task checkbox is taken when the item's first paragraph opens, never after a definition taken from it. Verified by `- [x] a\n  ===` and `- [a]: /u\n  [x] b` matching cmark-gfm.
+- [x] 7.4 The task checkbox follows cmark-gfm and micromark: taken from the first paragraph after its definitions, never from a setext heading, with the whitespace after it kept. The review's premise was refuted: both references agree with the code, so only the Design text and tests change. Verified by tests pinning `- [x] a\n  ===`, `- [a]: /u\n  [x] b`, and `- [x]   b` against comrak and micromark output.
 - [ ] 7.5 Serialization stays linear: known labels are sorted once and read without a copy per parse; layout is verified per block, with no document-wide round cap; misplaced continuation lines are indented together; delimiter switching keeps its tried states without copying. Verified by growth cases for each input and by 33+ blocks needing a layout alternative.
 - [ ] 7.6 Read-back correctness: an item opening with a thematic break at any position, `JoinNext` between and inside items, the fallback starting from escape-only choices, idempotent output for parsed documents, the emphasis inputs the review listed, and `^://y ^` reading back without `#[ignore]`. Verified by `tests/serialize_regressions.rs` cases and a 20k-per-generator fuzz run with no failures.
 - [ ] 7.7 Inline: autolinks in a directive label do not block the enclosing link; `![[` past the bracket limit is an embed; a text directive name followed by `:` is not a directive; a scheme needs a domain char after it; the `\<punct>` autolink guard is removed. Verified by `tests/parse_inline_regressions.rs` cases.

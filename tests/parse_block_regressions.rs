@@ -1886,6 +1886,29 @@ mod one_pass_over_open_blocks {
     }
 
     #[test]
+    fn the_task_checkbox_follows_cmark_gfm_and_micromark() {
+        let gfm = |source: &str| SyntaxOptions::gfm().parse(source).document.children;
+        // A setext heading is no paragraph, so `[x]` stays its text.
+        let blocks = gfm("- [x] a\n  ===");
+        let item = only_item(&blocks[0]);
+        assert_eq!(item.checked, None);
+        assert!(
+            matches!(&item.children[0], Block::Heading(heading) if heading.kind == HeadingKind::Setext)
+        );
+        // The checkbox starts the paragraph left after its definitions.
+        let blocks = gfm("- [a]: /u\n  [x] b");
+        let item = only_item(&blocks[0]);
+        assert_eq!(item.checked, Some(true));
+        assert!(matches!(
+            item.children.as_slice(),
+            [Block::Definition(_), Block::Paragraph(_)]
+        ));
+        // The whitespace after the checkbox's space stays text.
+        let blocks = gfm("- [x]   b");
+        assert_eq!(paragraph(&only_item(&blocks[0]).children[0]), ["  b"]);
+    }
+
+    #[test]
     fn a_definition_title_drops_the_indentation_of_its_lines() {
         let blocks = commonmark("[a]: /u \"x\n   y\"\n\n[a]");
         let Block::Definition(definition) = &blocks[0] else {
