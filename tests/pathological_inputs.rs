@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use markdown_syntax::{Block, Document, Inline, SyntaxOptions};
+use markdown_syntax::{parse, Block, Document, Inline, SyntaxOptions};
 
 /// Generous for an unoptimized build; every input below parses in
 /// milliseconds when parsing is linear.
@@ -392,4 +392,73 @@ fn long_nested_containers_and_tables_parse_in_bounded_time() {
 
     let escaped_pipes = String::from("| a |\n|---|\n| ") + &"x\\|".repeat(50_000) + " |\n";
     parse_bounded("cell of escaped pipes", escaped_pipes);
+}
+
+/// Asserts that the work `run` times grows about linearly: four times the
+/// input may take at most eight times as long, where a quadratic cost takes
+/// sixteen. The best of three runs counts, and a small slack absorbs noise.
+fn assert_linear_growth(name: &str, n: usize, run: impl Fn(usize) -> Duration) {
+    let best = |n| (0..3).map(|_| run(n)).min().expect("three runs");
+    let (small, large) = (best(n), best(4 * n));
+    assert!(
+        large <= small * 8 + Duration::from_millis(20),
+        "{name}: {small:?} at {n}, {large:?} at {}",
+        4 * n
+    );
+}
+
+fn time_parse(input: &str, options: SyntaxOptions) -> Duration {
+    let started = Instant::now();
+    let _ = options.parse(input);
+    started.elapsed()
+}
+
+fn time_serialize(document: &Document) -> Duration {
+    let started = Instant::now();
+    let _ = document.to_markdown();
+    started.elapsed()
+}
+
+#[test]
+fn parsing_grows_linearly_with_lines_and_diagnostics() {
+    // Each malformed opener's diagnostic runs to the end of the paragraph;
+    // translating it must not walk the lines after it.
+    for line in [" x :a{\n", "> x :a{ \n"] {
+        assert_linear_growth(line, 8_000, |n| {
+            time_parse(&line.repeat(n), SyntaxOptions::default())
+        });
+    }
+    let quote_prefix = "> ".repeat(30);
+    assert_linear_growth("long nested block quote", 500, |n| {
+        let quoted: String = (0..n)
+            .map(|line| format!("{quote_prefix}line {line} *a* [b](u)\r\n"))
+            .collect();
+        time_parse(&quoted, SyntaxOptions::default())
+    });
+}
+
+#[test]
+fn serialization_grows_linearly_with_runs() {
+    assert_linear_growth("tilde run", 20_000, |n| {
+        time_serialize(&parse(&format!("a {} b", "~".repeat(n))).document)
+    });
+    assert_linear_growth("nested emphasis paragraphs", 20, |n| {
+        let paragraph = format!("{}bc{}\n\n", "*a ".repeat(16), "c*".repeat(16));
+        time_serialize(&parse(&paragraph.repeat(n)).document)
+    });
+}
+
+#[test]
+fn nested_emphasis_that_does_not_read_back_serializes_in_bounded_time() {
+    // Choosing an emphasis delimiter renders its content in up to two
+    // contexts; nesting must not multiply that, even when every delimiter
+    // choice of the paragraph is tried.
+    let input = format!(
+        "{}==b {}x{} c=={} ://~&mp;~",
+        "*a ".repeat(16),
+        "*a ".repeat(6),
+        " a*".repeat(6),
+        " d*".repeat(16)
+    );
+    parse_bounded("nested emphasis with every delimiter choice", input);
 }

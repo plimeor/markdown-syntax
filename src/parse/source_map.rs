@@ -390,12 +390,33 @@ impl Translator<'_> {
             self.cursor += 1;
         }
         let start = start_of(&self.segments[self.cursor..], span.start);
-        let mut last = self.cursor;
-        while last + 1 < self.segments.len() && span.end > self.segments[last].text_end {
-            last += 1;
-        }
+        let last = self.end_segment(span.end);
         let end = end_of(&self.segments[self.cursor..=last], span.end);
         Span::new(start, end.max(start))
+    }
+
+    /// The first segment at or after the cursor that `end` falls within, found
+    /// by galloping: diagnostics do not nest, and many run to the input's end,
+    /// so walking every segment they cross would make the pass quadratic.
+    fn end_segment(&self, end: usize) -> usize {
+        let last = self.segments.len() - 1;
+        if end > self.segments[last].text_start {
+            return last;
+        }
+        let covers = |index: usize| end <= self.segments[index].text_end;
+        let mut low = self.cursor;
+        let mut step = 1;
+        while !covers(low) {
+            let next = (low + step).min(last);
+            if covers(next) {
+                let found =
+                    self.segments[low + 1..=next].partition_point(|segment| end > segment.text_end);
+                return low + 1 + found;
+            }
+            low = next;
+            step *= 2;
+        }
+        low
     }
 
     fn meta(&mut self, meta: &mut NodeMeta) {

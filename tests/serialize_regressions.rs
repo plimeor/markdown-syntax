@@ -2008,4 +2008,62 @@ mod round_trip_edges {
             assert_round_trips(source);
         }
     }
+
+    #[test]
+    fn run_delimiter_choices_reparse_beside_and_inside_other_inlines() {
+        for source in [
+            "y*x***a_ b**",
+            "*a***b**",
+            "**__a__~~**b",
+            "[__**)**&__](u)",
+            "![__**)**&__](u)",
+            "==__***/***__==",
+            "*******b_*_c~_y",
+            "__**a*********___",
+            "y__**__**y****___",
+        ] {
+            assert_round_trips(source);
+        }
+        // `__` reads back as underline once that construct is enabled.
+        assert_round_trips_under(
+            &SyntaxOptions::default().enable(Construct::Underline),
+            "*a***b**",
+        );
+    }
+
+    #[test]
+    fn a_doubled_delimiter_that_could_close_its_span_is_escaped() {
+        assert_eq!(assert_round_trips("==a\\== b=="), "==a\\== b==\n");
+        assert_eq!(assert_round_trips("++a\\++ b++"), "++a\\+\\+ b++\n");
+    }
+
+    #[test]
+    fn math_opening_a_definitions_paragraph_stays_inline() {
+        assert_eq!(
+            assert_round_trips("[o]:u\n\t$$\na$$"),
+            "[o]: u\n    $$\na$$\n"
+        );
+    }
+
+    #[test]
+    fn a_cell_pipe_after_an_escaped_backslash_is_escaped() {
+        for source in [
+            "| <a b=\"x\\\\\\|y\"> |\n| --- |",
+            "| x |\n| --- |\n| $a\\\\\\|b$ |",
+            "| <http://x\\\\\\|y> |\n|-|",
+        ] {
+            assert_round_trips(source);
+        }
+    }
+
+    #[test]
+    fn a_raw_label_backtick_reaches_text_inside_and_after_spans() {
+        for source in [
+            "[foo`bar] *&#96;*\n\n[foo`bar]: /u",
+            "*[foo`bar]* &#96;\n\n[foo`bar]: /u",
+            "[^a`b] *&#96;*\n\n[^a`b]: x",
+        ] {
+            assert_round_trips(source);
+        }
+    }
 }

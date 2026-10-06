@@ -190,7 +190,7 @@ fn run_and_lookahead_checks_match_the_reference_scan() {
                 "{input:?} at {offset}"
             ),
             '~' => assert_eq!(
-                tilde_run_can_pair(input, offset, scan),
+                tilde_run_can_pair(offset, scan),
                 reference::tilde_run_can_pair(input, offset),
                 "{input:?} at {offset}"
             ),

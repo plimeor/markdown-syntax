@@ -899,6 +899,13 @@ fn math_block_fence_length(input: &str) -> Option<usize> {
     Some(length)
 }
 
+/// Whether `input` opens a math block when that construct is enabled.
+pub(crate) fn line_starts_math_block(input: &str) -> bool {
+    trim_up_to_three_spaces(input)
+        .and_then(math_block_fence_length)
+        .is_some()
+}
+
 /// A math-flow closing line (already indent-stripped) is a run of `>=length`
 /// dollars and nothing else (trailing whitespace aside).
 fn math_block_fence_closes(input: &str, length: usize) -> bool {

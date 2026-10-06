@@ -6,6 +6,7 @@
 
 use alloc::{
     borrow::Cow,
+    collections::BTreeMap,
     format,
     string::{String, ToString},
     vec,
@@ -18,7 +19,8 @@ use crate::{
     memo::{pattern_starts, PathMemo, Positions, Step},
     parse::{
         continuation_line_breaks_paragraph, gfm_table_can_start_source, is_flanking_punctuation,
-        line_starts_html_block, line_starts_interrupting_html_block, literal_autolink_extents,
+        line_starts_html_block, line_starts_interrupting_html_block, line_starts_math_block,
+        literal_autolink_extents,
     },
     validate::{is_directive_name, validate_document},
 };
@@ -178,22 +180,29 @@ fn serialize_blocks_at_start(
     for (index, written) in outputs.iter().rev().enumerate() {
         if index > 0 {
             let first_line = written.split('\n').next().unwrap_or("");
-            let opens_with_html = || match &blocks[index] {
+            let first_inline = match &blocks[index] {
                 Block::Paragraph(paragraph) => paragraph.children.first(),
                 Block::Heading(heading) if heading.kind == HeadingKind::Setext => {
                     heading.children.first()
                 }
                 _ => None,
             };
+            // Raw HTML that would start an HTML block, or math that would
+            // start a math block, opens such content only as the continuation
+            // of the paragraph a definition was read from; a line that would
+            // interrupt it is indented as well.
             let continues_definition = matches!(blocks[index - 1], Block::Definition(_))
-                && matches!(opens_with_html(), Some(Inline::Html(_)))
-                && line_starts_html_block(first_line);
-            if continues_definition {
-                // Raw HTML that would start an HTML block opens such content
-                // only as the continuation of the paragraph a definition was
-                // read from; a tag that interrupts it is indented as well.
+                .then(|| match first_inline {
+                    Some(Inline::Html(_)) if line_starts_html_block(first_line) => {
+                        Some(line_starts_interrupting_html_block(first_line))
+                    }
+                    Some(Inline::Math(_)) if line_starts_math_block(first_line) => Some(true),
+                    _ => None,
+                })
+                .flatten();
+            if let Some(indented) = continues_definition {
                 output.push('\n');
-                if line_starts_interrupting_html_block(first_line) {
+                if indented {
                     output.push_str("    ");
                 }
             } else {
@@ -495,6 +504,7 @@ fn serialize_reading_back(
         let styles = [
             RunStyle::Plain,
             RunStyle::StrongUnderscore,
+            RunStyle::EdgeStrongUnderscore,
             RunStyle::InnerUnderscore,
             RunStyle::AllStar,
             RunStyle::OuterUnderscore,
@@ -537,7 +547,7 @@ fn serialize_reading_back(
 
 /// How a paragraph writes the text around a literal autolink (see
 /// `serialize_paragraph`).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 enum AutolinkEdges {
     /// A space or tab at a line's edge is a reference, one before a literal
     /// autolink is raw, and a text after one opens as written unless the URL
@@ -651,7 +661,7 @@ impl RunNeighbours {
     /// `1` for strong and `2` for emphasis.
     fn read(&mut self, inlines: &[Inline], inside: u8) {
         for (index, inline) in inlines.iter().enumerate() {
-            let (children, kind) = match inline {
+            let (children, kind): (&[Inline], u8) = match inline {
                 Inline::Text(node) => {
                     let after_run = (index == 0 && inside != 0)
                         || index
@@ -680,8 +690,20 @@ impl RunNeighbours {
                 }
                 Inline::Strong(node) => (&node.children, 1),
                 Inline::Emphasis(node) => (&node.children, 2),
-                _ => continue,
+                // A link, image, or mark opens no run, but the runs inside it
+                // choose their delimiters too.
+                Inline::Image(node) => (&node.alt, 0),
+                Inline::ImageReference(node) => (&node.alt, 0),
+                Inline::TextDirective(node) => (&node.label, 0),
+                other => match span_children(other) {
+                    Some(children) => (children, 0),
+                    None => continue,
+                },
             };
+            if kind == 0 {
+                self.read(children, 0);
+                continue;
+            }
             self.abut_runs |= inside & kind != 0
                 || inlines.get(index + 1).is_some_and(is_attention_run)
                 || children.first().is_some_and(is_attention_run)
@@ -1290,7 +1312,7 @@ fn serialize_table_row(
 }
 
 /// How strong and emphasis runs choose between `*` and `_`.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 enum RunStyle {
     /// Each run reads its neighbours: `_` where a `*` would join a run beside
     /// it, `*` otherwise.
@@ -1299,6 +1321,9 @@ enum RunStyle {
     /// As `Plain`, and a strong whose content opens or closes with a `*` run
     /// is written `__`.
     StrongUnderscore,
+    /// As `StrongUnderscore`, and so is a strong that opens or closes the run
+    /// around it.
+    EdgeStrongUnderscore,
     /// Every run is written with `*` where nothing before it would join it.
     AllStar,
     /// An emphasis with no strong or emphasis inside is written with `_`, and
@@ -1308,7 +1333,7 @@ enum RunStyle {
     OuterUnderscore,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct InlineSerializeContext {
     table_cell: bool,
     avoid_star_edges: bool,
@@ -1336,12 +1361,16 @@ struct InlineSerializeContext {
     raw_edge: Option<char>,
     /// How spaces and tabs around a literal autolink are written.
     autolink_edges: AutolinkEdges,
+    /// A reference before the inlines, at any level, wrote a backtick in its
+    /// raw label, which an escaped backtick after it could close as a code
+    /// span.
+    raw_backtick_before: bool,
 }
 
 /// A set of the chars `*`, `_`, `~`, `+`, `=`, `^`, `|`, `$`, and `:`, which
 /// delimit inline spans or shortcodes that pair across sibling inlines, and
 /// `>`, which ends raw HTML or an autolink that a `<` before it may open.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct DelimiterChars(u16);
 
 impl DelimiterChars {
@@ -1464,6 +1493,7 @@ impl InlineSerializeContext {
             opens_span: false,
             raw_edge: None,
             autolink_edges: AutolinkEdges::Plain,
+            raw_backtick_before: false,
         }
     }
 
@@ -1498,6 +1528,7 @@ impl InlineSerializeContext {
             opens_span: false,
             raw_edge: None,
             autolink_edges: AutolinkEdges::Plain,
+            raw_backtick_before: false,
         }
     }
 
@@ -1694,6 +1725,40 @@ fn serialize_inlines_with_context(
     options: &SerializeOptions,
     context: InlineSerializeContext,
 ) -> Result<String, SerializeError> {
+    render_inlines(&mut RenderMemo::default(), inlines, options, context)
+}
+
+/// Renders an emphasis has already made of its content, by the content's
+/// address and the context it was rendered in. An emphasis may render its
+/// content in two contexts to choose its delimiter; reusing the renders keeps
+/// nested emphases from doubling the work at every level, since the contexts
+/// a run can be rendered in are few.
+#[derive(Default)]
+struct RenderMemo(BTreeMap<(usize, usize, InlineSerializeContext), String>);
+
+impl RenderMemo {
+    fn render(
+        &mut self,
+        inlines: &[Inline],
+        options: &SerializeOptions,
+        context: InlineSerializeContext,
+    ) -> Result<String, SerializeError> {
+        let key = (inlines.as_ptr() as usize, inlines.len(), context);
+        if let Some(rendered) = self.0.get(&key) {
+            return Ok(rendered.clone());
+        }
+        let rendered = render_inlines(self, inlines, options, context)?;
+        self.0.insert(key, rendered.clone());
+        Ok(rendered)
+    }
+}
+
+fn render_inlines(
+    memo: &mut RenderMemo,
+    inlines: &[Inline],
+    options: &SerializeOptions,
+    context: InlineSerializeContext,
+) -> Result<String, SerializeError> {
     let opens_line = context.opens_line;
     let opens_span = context.opens_span;
     // Nested inlines follow their parent's opening delimiter.
@@ -1728,9 +1793,7 @@ fn serialize_inlines_with_context(
         (own, from)
     });
     let mut written_until = context.written_before;
-    // Whether an earlier reference wrote a backtick in its raw label, which an
-    // escaped backtick after it could close as a code span.
-    let mut raw_backtick_before = false;
+    let mut raw_backtick_before = context.raw_backtick_before;
     // Where the output of the inline before the current one starts.
     let mut segment_start = 0;
     for (index, inline) in inlines.iter().enumerate() {
@@ -1747,6 +1810,7 @@ fn serialize_inlines_with_context(
         let context = InlineSerializeContext {
             written_later,
             written_before,
+            raw_backtick_before,
             ..base_context
         };
         match inline {
@@ -1949,15 +2013,14 @@ fn serialize_inlines_with_context(
                 // the children's edges and `*`s, which escaping a `_` that can
                 // close does not change, so only the `*` choice renders them
                 // again and nesting never multiplies the work.
-                let children = serialize_inlines_with_context(
+                let children = memo.render(
                     &node.children,
                     options,
                     context.inside_underscore_emphasis().opening_span(),
                 )?;
-                let touches_underscore = children.starts_with('_')
-                    || children.ends_with('_')
-                    || children.starts_with("\\_")
-                    || children.ends_with("\\_");
+                // An escaped `_` at an edge joins no run.
+                let touches_underscore =
+                    children.starts_with('_') || ends_with_unescaped(&children, '_');
                 // An emphasis abutting a `*` already in the output (e.g. a
                 // preceding `*`-emphasis) would otherwise merge into one run, so
                 // switch this run to `_` when that does not introduce a new
@@ -1981,7 +2044,9 @@ fn serialize_inlines_with_context(
                     .any(|child| matches!(child, Inline::Strong(_) | Inline::Emphasis(_)));
                 let prefer_underscore = underscore_flanks
                     && match context.run_style {
-                        RunStyle::Plain | RunStyle::StrongUnderscore => {
+                        RunStyle::Plain
+                        | RunStyle::StrongUnderscore
+                        | RunStyle::EdgeStrongUnderscore => {
                             (context.avoid_star_edges && !touches_underscore)
                                 || abuts_star
                                 || children.starts_with('*')
@@ -1997,7 +2062,7 @@ fn serialize_inlines_with_context(
                     };
                 let delimiter = if prefer_underscore { '_' } else { '*' };
                 let children = if delimiter == '*' {
-                    serialize_inlines_with_context(
+                    memo.render(
                         &node.children,
                         options,
                         context.avoiding_star_edges().opening_span(),
@@ -2010,27 +2075,37 @@ fn serialize_inlines_with_context(
                 output.push(delimiter);
             }
             Inline::Strong(node) => {
-                let children = serialize_inlines_with_context(
+                let children = render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.avoiding_star_edges().opening_span(),
                 )?;
                 // A `**` right after a `*` that closes a span would join its
-                // run, so the strong is written with `__` there when `_` can
-                // flank and its content does not touch `_`. Abutting nested
-                // or following runs stay `**`: they split as written, and
-                // `__` reparses as `Underline` when that construct is enabled,
-                // which the serializer has no signal for.
-                let after_star = (ends_with_unescaped(&output, '*')
+                // run, so the read-back choice writes the strong with `__`
+                // there when `_` can flank and its content does not touch
+                // `_`. The plain rendering keeps `**`: `__` reparses as
+                // `Underline` when that construct is enabled, which the
+                // serializer has no signal for.
+                // So is a strong opening or closing its parent's run, which
+                // its `**` would lengthen.
+                let edge_of_run =
+                    context.inside_run() && (index == 0 || index + 1 == inlines.len());
+                let after_star = matches!(
+                    context.run_style,
+                    RunStyle::StrongUnderscore | RunStyle::EdgeStrongUnderscore
+                ) && ((ends_with_unescaped(&output, '*')
                     && context.raw_edge != Some('*'))
-                    || (context.run_style == RunStyle::StrongUnderscore
-                        && (children.starts_with('*') || children.ends_with('*')));
+                    || (edge_of_run && context.run_style == RunStyle::EdgeStrongUnderscore)
+                    || children.starts_with('*')
+                    || children.ends_with('*'));
+                // A `_` opening the next text is escaped beside the run.
                 let underscore_fits = !children.starts_with('_')
                     && !ends_with_unescaped(&children, '_')
                     && !matches!(
                         inlines.get(index + 1),
                         Some(Inline::Text(next))
-                            if next.value.chars().next().is_some_and(|char| char.is_alphanumeric() || char == '_')
+                            if next.value.chars().next().is_some_and(char::is_alphanumeric)
                     );
                 let outer_underscore = context.run_style == RunStyle::OuterUnderscore
                     && !context.inside_run()
@@ -2049,7 +2124,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Underline(node) => {
                 output.push_str("__");
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span(),
@@ -2057,7 +2133,8 @@ fn serialize_inlines_with_context(
                 output.push_str("__");
             }
             Inline::Delete(node) => {
-                let children = serialize_inlines_with_context(
+                let children = render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('~'),
@@ -2072,7 +2149,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Insert(node) => {
                 output.push_str("++");
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('+'),
@@ -2081,7 +2159,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Mark(node) => {
                 output.push_str("==");
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('='),
@@ -2090,7 +2169,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Subscript(node) => {
                 output.push('~');
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('~'),
@@ -2099,7 +2179,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Superscript(node) => {
                 output.push('^');
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('^'),
@@ -2108,7 +2189,8 @@ fn serialize_inlines_with_context(
             }
             Inline::Spoiler(node) => {
                 output.push_str("||");
-                output.push_str(&serialize_inlines_with_context(
+                output.push_str(&render_inlines(
+                    memo,
                     &node.children,
                     options,
                     context.opening_span().delimited_by('|'),
@@ -2156,11 +2238,7 @@ fn serialize_inlines_with_context(
             Inline::Link(node) => {
                 escape_trailing_bang(&mut output);
                 output.push('[');
-                output.push_str(&serialize_inlines_with_context(
-                    &node.children,
-                    options,
-                    context,
-                )?);
+                output.push_str(&render_inlines(memo, &node.children, options, context)?);
                 output.push_str("](");
                 output.push_str(&serialize_destination_kind(
                     &node.destination,
@@ -2175,9 +2253,7 @@ fn serialize_inlines_with_context(
             }
             Inline::Image(node) => {
                 output.push_str("![");
-                output.push_str(&serialize_inlines_with_context(
-                    &node.alt, options, context,
-                )?);
+                output.push_str(&render_inlines(memo, &node.alt, options, context)?);
                 output.push_str("](");
                 output.push_str(&serialize_destination_kind(
                     &node.destination,
@@ -2191,7 +2267,7 @@ fn serialize_inlines_with_context(
                 output.push(')');
             }
             Inline::LinkReference(node) => {
-                let children = serialize_inlines_with_context(&node.children, options, context)?;
+                let children = render_inlines(memo, &node.children, options, context)?;
                 let children_identifier = normalize_reference_label(&children);
                 escape_trailing_bang(&mut output);
                 push_reference_body(
@@ -2203,7 +2279,7 @@ fn serialize_inlines_with_context(
                 );
             }
             Inline::ImageReference(node) => {
-                let alt = serialize_inlines_with_context(&node.alt, options, context)?;
+                let alt = render_inlines(memo, &node.alt, options, context)?;
                 let alt_identifier = normalize_reference_label(&alt);
                 output.push('!');
                 push_reference_body(
@@ -2284,11 +2360,7 @@ fn serialize_inlines_with_context(
             }
             Inline::InlineFootnote(node) => {
                 output.push_str("^[");
-                output.push_str(&serialize_inlines_with_context(
-                    &node.children,
-                    options,
-                    context,
-                )?);
+                output.push_str(&render_inlines(memo, &node.children, options, context)?);
                 output.push(']');
             }
             Inline::WikiLink(node) => {
@@ -2356,15 +2428,21 @@ fn serialize_inlines_with_context(
                 }
             }
         }
-        if matches!(
-            inline,
-            Inline::FootnoteReference(_) | Inline::LinkReference(_) | Inline::ImageReference(_)
-        ) && output[segment_start..].contains('`')
-        {
+        if output[segment_start..].contains('`') && holds_reference(inline) {
             raw_backtick_before = true;
         }
     }
     Ok(output)
+}
+
+/// Whether `inline` is a reference or a span holding one, whose raw label
+/// the serializer writes as its source.
+fn holds_reference(inline: &Inline) -> bool {
+    match inline {
+        Inline::FootnoteReference(_) | Inline::LinkReference(_) | Inline::ImageReference(_) => true,
+        Inline::Image(node) => node.alt.iter().any(holds_reference),
+        other => span_children(other).is_some_and(|children| children.iter().any(holds_reference)),
+    }
 }
 
 fn serialize_directive_label(
@@ -2857,7 +2935,7 @@ fn escape_text_with_context(
             // A run of three opening a line would open a code fence.
             '~' if run_escaped(view, offset, b'~', &mut scan, &mut tilde_run, |scan, at| {
                 (at == 0 && context.text_opens_line && same_byte_run_len(view, at, b'~') >= 3)
-                    || tilde_run_can_pair(view, at, scan)
+                    || tilde_run_can_pair(at, scan)
             }) =>
             {
                 output.push('\\');
@@ -2871,12 +2949,15 @@ fn escape_text_with_context(
             // autolink's local part, so a run is escaped whole.
             '+' if run_escaped(view, offset, b'+', &mut scan, &mut plus_run, |scan, at| {
                 text_attention_delimiter_can_start(view, at, "++", false, scan)
+                    || text_doubled_delimiter_can_close(view, at, "++", scan)
             }) =>
             {
                 output.push('\\');
                 output.push(char);
             }
-            '=' if text_attention_delimiter_can_start(view, offset, "==", false, &mut scan) => {
+            '=' if text_attention_delimiter_can_start(view, offset, "==", false, &mut scan)
+                || text_doubled_delimiter_can_close(view, offset, "==", &scan) =>
+            {
                 output.push('\\');
                 output.push(char);
             }
@@ -2915,6 +2996,22 @@ fn text_attention_delimiter_can_start(
 
     scan.written_later(marker)
         || scan.attention_closer_follows(marker, offset + marker.len(), underscore)
+}
+
+/// Whether the `++` or `==` at `offset` could close one written before the
+/// text, such as the delimiter of the insert or mark the text sits in.
+fn text_doubled_delimiter_can_close(
+    input: &str,
+    offset: usize,
+    marker: &str,
+    scan: &TextScan,
+) -> bool {
+    input[offset..].starts_with(marker)
+        && marker
+            .chars()
+            .next()
+            .is_some_and(|char| scan.written_before.contains(char))
+        && text_delimiter_can_close(input, offset, marker.len(), false)
 }
 
 fn text_delimiter_can_open(
@@ -3145,8 +3242,8 @@ fn text_math_can_start(input: &str, offset: usize, scan: &mut TextScan) -> bool 
 /// the text's start. (A run before it in the text is escaped when it could
 /// pair with this one.) Escaping only when it could keeps a `*` or `_` run
 /// beside a literal `~` opening or closing as it did.
-fn tilde_run_can_pair(input: &str, offset: usize, scan: &mut TextScan) -> bool {
-    let end = offset + same_byte_run_len(input, offset, b'~');
+fn tilde_run_can_pair(offset: usize, scan: &mut TextScan) -> bool {
+    let end = offset + scan.run_len_from(b'~', offset);
     scan.occurs_from("~", end)
         || scan.written_later("~")
         || (offset == 0 && scan.written_before.contains('~'))
@@ -3766,9 +3863,6 @@ fn serialize_inline_math_with_context(
     }
 }
 
-/// Whether a serialized cell would split into more cells when parsed back,
-/// judged with spoilers enabled so a spoiler's bars are never taken for
-/// delimiters.
 /// `cell` with a backslash before each pipe that would delimit a cell: a pipe
 /// that raw HTML, an autolink, or another verbatim inline writes. The table
 /// drops that backslash before the cell's inline parse.
@@ -3776,11 +3870,11 @@ fn escape_cell_delimiter_pipes(cell: String) -> String {
     if !cell.contains('|') {
         return cell;
     }
-    // A pipe after a backslash never delimits, and the cell's own text writes
-    // its pipes as references, so most cells hold no other.
-    let bytes = cell.as_bytes();
-    if !(0..bytes.len())
-        .any(|index| bytes[index] == b'|' && (index == 0 || bytes[index - 1] != b'\\'))
+    // A pipe after an odd run of backslashes never delimits, and the cell's
+    // own text writes its pipes as references, so most cells hold no other.
+    if !cell
+        .match_indices('|')
+        .any(|(index, _)| !ends_with_unescaped(&cell[..index], '\\'))
     {
         return cell;
     }
