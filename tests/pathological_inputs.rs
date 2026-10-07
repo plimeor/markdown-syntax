@@ -581,6 +581,28 @@ fn block_containers_grow_linearly_with_their_lines() {
 }
 
 #[test]
+fn email_candidates_before_one_at_grow_linearly() {
+    let _serial = one_at_a_time();
+    // Every start in a long local-part run reaches the same `@`; its local
+    // part, domain, and the `+` boundary before it are read once.
+    for (name, setup) in [
+        (
+            "starts after dashes",
+            (|n| "-a".repeat(n) + "@" + &"b".repeat(n)) as fn(usize) -> String,
+        ),
+        ("starts after dots", |n| {
+            ".a".repeat(n) + "@" + &"b-".repeat(n) + "."
+        }),
+        ("starts at pluses", |n| "a+".repeat(n) + "@b"),
+        ("pluses after an email", |n| {
+            "x@y.z".to_string() + &"+a".repeat(n) + "@b"
+        }),
+    ] {
+        assert_linear_growth(name, 2_000, setup, |input| parse_input(input));
+    }
+}
+
+#[test]
 fn open_definitions_and_terms_grow_linearly() {
     let _serial = one_at_a_time();
     // A title left open runs to the paragraph's end; each line that could

@@ -21,6 +21,10 @@ input size.
 - **WHEN** any pair or triple of syntax fragments — link, image, footnote, wiki link, and directive openers and closers, literal autolinks, code, math, emphasis, strikethrough, and highlight delimiters, a backslash, a character reference, a pipe, a space, a line ending, and block quote and list markers — is repeated `n` and `2n` times, alone or after a paragraph's first word, and parsed and serialized
 - **THEN** doubling the repetitions at most roughly doubles the time of each
 
+#### Scenario: Email candidates before one `@`
+- **WHEN** a long run of local-part bytes that each could start an email, such as `"-a"` or `"a+"` repeated, is followed by one `@` and a domain, and parsed
+- **THEN** quadrupling the run at most roughly quadruples the time
+
 #### Scenario: Literal autolinks in open labels
 - **WHEN** thousands of link labels left open, each holding a literal autolink and followed by `(`, such as `"[ www.a]("` repeated, are parsed
 - **THEN** quadrupling them at most roughly quadruples the time

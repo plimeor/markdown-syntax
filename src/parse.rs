@@ -4738,7 +4738,7 @@ fn parse_literal_autolink(
         if www {
             return None;
         }
-        return parse_literal_email(input, index, &mut scan.email_local);
+        return parse_literal_email(input, index, scan);
     }
 
     // `http://` / `https://` URLs. cmark requires the char before the scheme
@@ -4781,7 +4781,7 @@ fn parse_literal_autolink(
         return Some((end, "http://"));
     }
 
-    parse_literal_email(input, index, &mut scan.email_local)
+    parse_literal_email(input, index, scan)
 }
 
 // The char immediately before a `http(s)://` literal must be non-alphabetic.
@@ -5002,6 +5002,129 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
 struct LiteralAutolinkScan {
     /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
     email_local: ByteRun,
+    /// What every start before one `@` shares: its last `:` and its domain.
+    email_at: EmailAt,
+    /// The text before a start, for the `+` boundary check.
+    email_prefix: EmailPrefix,
+}
+
+/// The facts of one `@` that every email start before it reads: the last `:`
+/// in its local-part run at or after `from`, and the domain end for the plain
+/// and the `xmpp:` form. A query starting before `from` rescans the run.
+#[derive(Default)]
+struct EmailAt {
+    at: Option<usize>,
+    from: usize,
+    last_colon: Option<usize>,
+    domain_end: [Option<Option<usize>>; 2],
+}
+
+impl EmailAt {
+    fn update(&mut self, input: &str, index: usize, at: usize) {
+        if self.at != Some(at) {
+            *self = Self {
+                at: Some(at),
+                from: usize::MAX,
+                ..Self::default()
+            };
+        }
+        if index < self.from {
+            self.last_colon = input[index..at].rfind(':').map(|offset| index + offset);
+            self.from = index;
+        }
+    }
+
+    /// The end of the domain after the `@`, trimmed and validated, or `None`.
+    fn domain_end(&mut self, input: &str, is_xmpp: bool) -> Option<usize> {
+        let at = self.at.expect("updated before use");
+        *self.domain_end[usize::from(is_xmpp)].get_or_insert_with(|| {
+            let start = at + 1;
+            let end = literal_email_domain_end(input, start, is_xmpp)?;
+            let trimmed = autolink_delim(input, start, end);
+            (trimmed > start && is_gfm_email_domain(&input[start..trimmed], is_xmpp))
+                .then_some(trimmed)
+        })
+    }
+}
+
+/// Whether the text before a position ends in a bare email, kept as a pass
+/// walks forward: the start of the text after the last whitespace, the first
+/// byte there that no local part holds, the last `@`, and after it the first
+/// byte no domain holds, the first `.`, and the first `.` opening an empty
+/// label. A query before the walked position walks again from the start.
+#[derive(Default)]
+struct EmailPrefix {
+    cursor: usize,
+    segment: usize,
+    non_local: Option<usize>,
+    at: Option<usize>,
+    domain_bad: Option<usize>,
+    domain_dot: Option<usize>,
+    domain_empty_label: Option<usize>,
+}
+
+impl EmailPrefix {
+    fn advance(&mut self, input: &str, end: usize) {
+        if end < self.cursor {
+            *self = Self::default();
+        }
+        let bytes = input.as_bytes();
+        let from = self.cursor;
+        for (offset, char) in input[from..end].char_indices() {
+            let position = from + offset;
+            if char.is_whitespace() {
+                *self = Self {
+                    segment: position + char.len_utf8(),
+                    ..Self::default()
+                };
+                continue;
+            }
+            let byte = char.is_ascii().then_some(char as u8);
+            if self.non_local.is_none() && !byte.is_some_and(is_gfm_email_local_byte) {
+                self.non_local = Some(position);
+            }
+            if char == '@' {
+                self.at = Some(position);
+                self.domain_bad = None;
+                self.domain_dot = None;
+                self.domain_empty_label = None;
+                continue;
+            }
+            let Some(at) = self.at else {
+                continue;
+            };
+            match byte {
+                Some(b'.') => {
+                    self.domain_dot.get_or_insert(position);
+                    if position == at + 1 || bytes[position - 1] == b'.' {
+                        self.domain_empty_label.get_or_insert(position);
+                    }
+                }
+                Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') => {}
+                _ => {
+                    self.domain_bad.get_or_insert(position);
+                }
+            }
+        }
+        self.cursor = end;
+    }
+
+    /// Whether the text from the last whitespace before `end` to `end` ends
+    /// in a bare email: `prefix_ends_with_gfm_email`, walked once per pass.
+    fn ends_with_email(&mut self, input: &str, end: usize) -> bool {
+        self.advance(input, end);
+        let Some(at) = self.at else {
+            return false;
+        };
+        let before = |position: Option<usize>| position.is_some_and(|position| position < end);
+        at > self.segment
+            && !self.non_local.is_some_and(|position| position < at)
+            && end > at + 1
+            && !before(self.domain_bad)
+            && before(self.domain_dot)
+            && !before(self.domain_empty_label)
+            && !matches!(input.as_bytes()[end - 1], b'.' | b'-' | b'_')
+    }
 }
 
 /// The extent of one run of bytes accepted by a fixed predicate: every start
@@ -5039,51 +5162,54 @@ fn is_email_local_or_scheme_byte(byte: u8) -> bool {
 fn parse_literal_email(
     input: &str,
     index: usize,
-    local_run: &mut ByteRun,
+    scan: &mut LiteralAutolinkScan,
 ) -> Option<(usize, &'static str)> {
-    let rest = &input[index..];
     // A valid local part holds only local-part bytes behind an optional
     // `mailto:`/`xmpp:` scheme, so the `@` must be the byte that ends that run.
-    let at_index = local_run.end(input, index, is_email_local_or_scheme_byte);
-    if input.as_bytes().get(at_index) != Some(&b'@') {
+    let at_index = scan
+        .email_local
+        .end(input, index, is_email_local_or_scheme_byte);
+    if input.as_bytes().get(at_index) != Some(&b'@') || at_index == index {
         return None;
     }
-    let at = at_index - index;
-    if at == 0 {
-        return None;
-    }
-    let local = &rest[..at];
 
     // Determine whether this `@` is preceded by an extended protocol scheme
     // (`mailto:` / `xmpp:`), which both relaxes the href synthesis and (xmpp)
     // allows `/` in the domain.
-    let (auto_mailto, is_xmpp) = classify_email_local(local);
+    let (auto_mailto, is_xmpp) = classify_email_local(&input[index..at_index]);
 
     // Left-boundary guard (autolink-1): the char before `index` must not be a
     // local-part continuation char, otherwise the true link starts earlier and
     // this position is interior. After a recognized scheme, the scheme's own
     // preceding-char rule is what matters.
-    if !email_left_boundary_ok(input, index, auto_mailto) {
+    if !email_left_boundary_ok(input, index, auto_mailto, |end| {
+        scan.email_prefix.ends_with_email(input, end)
+    }) {
         return None;
     }
 
-    if !email_local_is_valid(local, auto_mailto) {
+    // The run holds only local-part bytes and `:`, so the local part after
+    // its scheme is valid when it is not empty and holds no `:`. The facts of
+    // the `@` are shared by every start before it, so a run of starts reads
+    // them once.
+    let body_start = if auto_mailto {
+        index
+    } else if is_xmpp {
+        index + "xmpp:".len()
+    } else {
+        index + "mailto:".len()
+    };
+    scan.email_at.update(input, index, at_index);
+    if body_start >= at_index
+        || scan
+            .email_at
+            .last_colon
+            .is_some_and(|colon| colon >= body_start)
+    {
         return None;
     }
-
-    let domain_start = index + at + 1;
-    let domain_end = literal_email_domain_end(input, domain_start, is_xmpp)?;
-    let trimmed = autolink_delim(input, domain_start, domain_end);
-    if trimmed <= domain_start {
-        return None;
-    }
-
-    let domain = &input[domain_start..trimmed];
-    if !is_gfm_email_domain(domain, is_xmpp) {
-        return None;
-    }
-
-    Some((trimmed, if auto_mailto { "mailto:" } else { "" }))
+    let end = scan.email_at.domain_end(input, is_xmpp)?;
+    Some((end, if auto_mailto { "mailto:" } else { "" }))
 }
 
 // Classify the local part for the extended-protocol forms. Returns
@@ -5120,7 +5246,12 @@ fn strip_ci_prefix<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
 // also rejected (`/a@b.c` is not linked), while the extended
 // `mailto:`/`xmpp:` form permits `/` before the scheme (so
 // `…/mailto:beedrill@…` links).
-fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool {
+fn email_left_boundary_ok(
+    input: &str,
+    index: usize,
+    auto_mailto: bool,
+    prefix_ends_with_email: impl FnOnce(usize) -> bool,
+) -> bool {
     if index == 0 {
         return true;
     }
@@ -5128,10 +5259,7 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
         return true;
     };
     if previous.is_ascii_alphanumeric() {
-        if auto_mailto
-            && input[index..].starts_with('+')
-            && prefix_ends_with_gfm_email(input, index)
-        {
+        if auto_mailto && input[index..].starts_with('+') && prefix_ends_with_email(index) {
             return true;
         }
         return false;
@@ -5142,6 +5270,7 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
     true
 }
 
+#[cfg(test)]
 fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
     let start = input[..end]
         .char_indices()
@@ -5158,6 +5287,7 @@ fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
 // Validate the email local part. For the bare form, every char must be a GFM
 // email atext byte (`[A-Za-z0-9.+_-]` plus the dot-separated structure). For
 // the extended-protocol forms, the part after the scheme is validated.
+#[cfg(test)]
 fn email_local_is_valid(local: &str, auto_mailto: bool) -> bool {
     let body = if auto_mailto {
         local

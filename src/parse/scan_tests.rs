@@ -502,7 +502,9 @@ mod reference {
         // local-part continuation char, otherwise the true link starts earlier and
         // this position is interior. After a recognized scheme, the scheme's own
         // preceding-char rule is what matters.
-        if !email_left_boundary_ok(input, index, auto_mailto) {
+        if !email_left_boundary_ok(input, index, auto_mailto, |end| {
+            prefix_ends_with_gfm_email(input, end)
+        }) {
             return None;
         }
 
@@ -957,16 +959,30 @@ fn character_references_match_the_reference_scan() {
 
 #[test]
 fn literal_autolink_scans_match_the_reference_scan() {
-    for_each_scan(15, |input, scan, index| {
-        let found_email =
-            parse_literal_email(input, index, &mut scan.literal_autolinks.email_local)
-                .map(|(end, prefix)| (end, alloc::format!("{prefix}{}", &input[index..end])));
+    let check = |input: &str, scan: &mut InlineScan, index| {
+        let found_email = parse_literal_email(input, index, &mut scan.literal_autolinks)
+            .map(|(end, prefix)| (end, alloc::format!("{prefix}{}", &input[index..end])));
         assert_eq!(
             found_email,
             reference::parse_literal_email(input, index),
             "{input:?} at {index}"
         );
-    });
+    };
+    for_each_scan(15, check);
+    // Email-dense inputs: runs of local-part bytes, `@`, schemes, and `+`
+    // after an email, which the cached facts of one `@` serve.
+    const PIECES: &[&str] = &[
+        "a", "b1", ".", "-", "_", "+", "@", ":", "/", " ", "mailto:", "xmpp:", "x@y.z", "é", "..",
+    ];
+    let mut rng = Rng(0x5eed_e3a1);
+    let inputs = (0..1500)
+        .map(|_| {
+            (0..rng.below(24))
+                .map(|_| PIECES[rng.below(PIECES.len())])
+                .collect()
+        })
+        .collect();
+    check_scans(inputs, 18, check);
 }
 
 #[test]
