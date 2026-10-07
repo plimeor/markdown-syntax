@@ -756,9 +756,11 @@ pub struct InlineFootnote {
 pub struct WikiLink {
     /// Node metadata (source span). An embed's span starts at its `!`.
     pub meta: NodeMeta,
-    /// The link target (page name).
+    /// The link target (page name) as written, its backslash escapes and
+    /// character references included.
     pub target: String,
-    /// The visible label.
+    /// The visible label as written, its backslash escapes and character
+    /// references included.
     pub label: String,
     /// Whether a `!` directly before the `[[` marks the link as an embed.
     pub embed: bool,

@@ -165,11 +165,16 @@ target before the first `|` and the label after it, or both equal to the
 whole content when it holds no `|`. A `[[` whose content up to the closing
 `]]` holds an unescaped `[` or `]` SHALL open no wikilink. A `[[…]]` that
 forms a wikilink SHALL be one whether or not its content matches a defined
-link label.
+link label. The target and label SHALL hold their source as written, backslash
+escapes and character references included.
 
 #### Scenario: Target and label
 - **WHEN** `"see [[target|label]] here"` is parsed with `parse`
 - **THEN** the second inline is a `WikiLink` with target `target` and label `label`
+
+#### Scenario: Escapes stay as written
+- **WHEN** `"[[a\\$b|x &amp; y]]"` is parsed with `parse`
+- **THEN** the `WikiLink` has target `a\$b` and label `x &amp; y`
 
 #### Scenario: Extra brackets around a wikilink
 - **WHEN** `"[[[foo]]]"` is parsed with `parse`
@@ -193,6 +198,10 @@ trimming then applies to what remains. The check on the text before an email
 SHALL read whitespace as Unicode whitespace on char boundaries; a `www.`
 literal SHALL start, as on GitHub, only after one of `*_~([]` or a space,
 tab, or line ending.
+
+#### Scenario: Trailing numeric reference
+- **WHEN** `"www.a.b&#x41;"` is parsed with `parse`
+- **THEN** the paragraph holds a `Link` to `http://www.a.b&#x41` and `Text(";")`
 
 #### Scenario: Bare URL
 - **WHEN** `"see https://example.com"` is parsed with `parse`

@@ -77,11 +77,18 @@ with struct literals, or compares canonical output needs these updates.
   - A wiki link's content holds no unescaped `[` or `]`, so `[[[foo]]]` is
     `[`, a wiki link, and `]`. A wiki link still wins over a defined
     reference label.
+  - A literal autolink ending in a hex character reference such as
+    `www.a.b&#x41;` loses only its `;`, as with a decimal one and as in
+    cmark-gfm.
   - Table rows split at every unescaped `|`, including one inside a code
     span.
 - **Wiki embeds.** `WikiLink` gains `embed: bool`: `![[x]]` is an embed and
   `\![[x]]` is an escaped `!` before a plain wiki link. The HTML renderer
   marks an embed with `data-wikilink-embed="true"`.
+- **Wiki link text as written.** `WikiLink.target` and `WikiLink.label` hold
+  their source as written, backslash escapes and character references
+  included (`[[a\$b]]` has target `a\$b`), and are written back as they
+  are. The HTML renderer decodes them.
 - **Shortcodes come from gemoji.** A shortcode needs a name in the pinned
   github/gemoji v4.1.0 table and no letter or digit directly outside either
   colon, so clock times and `a:b:c` stay text. A `:word:` outside the table

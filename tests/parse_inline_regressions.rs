@@ -1063,3 +1063,71 @@ mod autolinks_inside_link_text {
         );
     }
 }
+
+mod wikilinks_as_written {
+    //! A wiki link's target and label keep their escapes and character
+    //! references as written, and are written back as they are.
+
+    use markdown_syntax::prelude::*;
+
+    fn wikilink(source: &str) -> WikiLink {
+        let document = parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        let [Inline::WikiLink(link)] = paragraph.children.as_slice() else {
+            panic!("{source:?}: {:?}", paragraph.children);
+        };
+        link.clone()
+    }
+
+    #[test]
+    fn escapes_and_references_stay_as_written() {
+        let link = wikilink("[[a\\$b]]");
+        assert_eq!(
+            (link.target.as_str(), link.label.as_str()),
+            ("a\\$b", "a\\$b")
+        );
+        let link = wikilink("[[a &amp; b|x\\]y]]");
+        assert_eq!(
+            (link.target.as_str(), link.label.as_str()),
+            ("a &amp; b", "x\\]y")
+        );
+        for source in ["[[a\\$b]]", "[[a &amp; b|x\\]y]]", "d$![[\\$]]"] {
+            assert_eq!(
+                parse(source).document.to_markdown().unwrap(),
+                format!("{source}\n")
+            );
+        }
+    }
+}
+
+mod literal_autolink_trailing_references {
+    //! A trailing `;` after a numeric character reference is trimmed alone,
+    //! as cmark-gfm trims it, whether the reference is decimal or hex.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn a_numeric_reference_keeps_its_digits_in_the_url() {
+        for (source, destination) in [
+            ("www.a.b&#x41;", "http://www.a.b&#x41"),
+            ("www.a.b&#35;", "http://www.a.b&#35"),
+            ("http://a.b/c&#x41;", "http://a.b/c&#x41"),
+        ] {
+            let document = parse(source).document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{source:?}: {document:?}");
+            };
+            assert!(
+                matches!(
+                    paragraph.children.as_slice(),
+                    [Inline::Link(link), Inline::Text(text)]
+                        if link.destination == destination && text.value == ";"
+                ),
+                "{source:?}: {:?}",
+                paragraph.children
+            );
+        }
+    }
+}

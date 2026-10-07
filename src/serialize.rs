@@ -734,10 +734,10 @@ fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(
                 out.push('!');
             }
             out.push_str("[[");
-            out.push_str(&escape_wikilink_part(&node.target));
+            out.push_str(&write_wikilink_part(&node.target, context));
             if node.target != node.label {
                 out.push_str(if context.table_cell { "\\|" } else { "|" });
-                out.push_str(&escape_wikilink_part(&node.label));
+                out.push_str(&write_wikilink_part(&node.label, context));
             }
             out.push_str("]]");
         }
@@ -934,23 +934,14 @@ fn escape_label(input: &str, escape_pipe: bool) -> String {
     }
 }
 
-fn escape_wikilink_part(input: &str) -> String {
-    let mut output = String::new();
-    for (offset, char) in input.char_indices() {
-        match char {
-            char if char.is_control() => output.push_str(&char_reference(char)),
-            '&' if crate::parse::parse_character_reference(input, offset).is_some() => {
-                output.push('\\');
-                output.push(char);
-            }
-            '\\' | '[' | ']' | '|' => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
+/// A wiki link's target or label as written; a table cell reads each `\|`
+/// as `|`, so there each `|` is written `\|`.
+fn write_wikilink_part(input: &str, context: Context) -> String {
+    if context.table_cell {
+        input.replace('|', "\\|")
+    } else {
+        input.into()
     }
-    output
 }
 
 fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -> String {

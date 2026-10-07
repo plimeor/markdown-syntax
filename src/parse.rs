@@ -2885,11 +2885,13 @@ fn parse_wikilink(
         None => (source, source),
     };
 
-    let target = unescape_string(target_source);
-    if target.is_empty() {
+    // Target and label keep their escapes and character references as
+    // written.
+    if target_source.is_empty() {
         return None;
     }
-    let label = unescape_string(label_source);
+    let target = String::from(target_source);
+    let label = String::from(label_source);
     let end = close + 2;
     Some((
         end,
@@ -4140,7 +4142,7 @@ fn unescape_ascii_punctuation(input: &str) -> String {
     unescape_selected(input, |char| char.is_ascii_punctuation())
 }
 
-fn unescape_string(input: &str) -> String {
+pub(crate) fn unescape_string(input: &str) -> String {
     unescape_selected(input, |char| char.is_ascii_punctuation() || char == '&')
 }
 
@@ -5127,8 +5129,8 @@ fn is_autolink_terminating_control(char: char) -> bool {
 
 // Port of cmark-gfm `autolink_delim`: trim trailing delimiters from the end of
 // the URL. A trailing `) ? ! . , : * _ ~ ' "` is trimmed; `)` only when there
-// are more `)` than `(` in the link; a trailing `&…;` entity run is excluded
-// whole; a lone trailing `;` is trimmed.
+// are more `)` than `(` in the link; a trailing `&` and alphanumerics ending
+// in `;` is excluded whole; any other trailing `;` is trimmed alone.
 fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
     let bytes = input.as_bytes();
     let mut opening = 0usize;
@@ -5154,57 +5156,22 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
                 end -= 1;
             }
             b';' => {
-                // A trailing hex numeric character reference `&#x…;` is excluded
-                // whole. This is the round-trip dual of the serializer, which
-                // encodes a text char that would otherwise merge into the URL as
-                // a hex entity; no autolink-oracle URL ends in `&#x…;`, so this
-                // is conformance-safe (decimal `&#…;` is left intact to match
-                // the oracle, which keeps `www.a&#35` in the URL).
-                if let Some(amp) = trailing_hex_entity_run_start(bytes, start, end) {
-                    end = amp;
+                // Walk back over alphanumerics; if they reach a `&`, exclude
+                // the whole `&…;` entity run, otherwise trim just the `;`.
+                let mut new_end = end - 1;
+                while new_end > start && bytes[new_end - 1].is_ascii_alphanumeric() {
+                    new_end -= 1;
+                }
+                if new_end > start && new_end < end - 1 && bytes[new_end - 1] == b'&' {
+                    end = new_end - 1;
                 } else {
-                    // Walk back over alphanumerics; if they reach a `&`, exclude
-                    // the whole `&…;` entity run, otherwise trim just the `;`.
-                    let mut new_end = end - 1;
-                    while new_end > start && bytes[new_end - 1].is_ascii_alphanumeric() {
-                        new_end -= 1;
-                    }
-                    if new_end > start && new_end < end - 1 && bytes[new_end - 1] == b'&' {
-                        end = new_end - 1;
-                    } else {
-                        end -= 1;
-                    }
+                    end -= 1;
                 }
             }
             _ => break,
         }
     }
     end
-}
-
-// When the URL ends with a hex numeric character reference `&#x[hex]+;`, returns
-// the offset of its leading `&`; otherwise `None`. Used only by `autolink_delim`
-// to trim the serializer's round-trip boundary marker (the serializer encodes a
-// would-merge text char as `&#xNN;`). Decimal `&#…;` is intentionally NOT
-// matched so the oracle's `www.a&#35` URLs stay intact.
-fn trailing_hex_entity_run_start(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
-    if end <= start || bytes[end - 1] != b';' {
-        return None;
-    }
-    let mut cursor = end - 1;
-    while cursor > start && bytes[cursor - 1].is_ascii_hexdigit() {
-        cursor -= 1;
-    }
-    // Require at least one hex digit, then `&#x` (case-insensitive `x`).
-    if cursor == end - 1 || cursor < start + 3 {
-        return None;
-    }
-    let x = bytes[cursor - 1];
-    if (x == b'x' || x == b'X') && bytes[cursor - 2] == b'#' && bytes[cursor - 3] == b'&' {
-        Some(cursor - 3)
-    } else {
-        None
-    }
 }
 
 // GFM bare-email literal (and the extended `mailto:`/`xmpp:` protocol forms).

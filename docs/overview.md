@@ -34,9 +34,7 @@ normative syntax in place of the dialect presets, and a render-only serializer
 
 ## Next
 
-- Spellings the AST does not record (lazy continuation lines, whitespace and
-  blank lines inside containers) and that keep some inputs from reading back;
-  they await a decision in `docs/plans/one-normative-syntax/`.
+- Nothing is queued after plimeor/markdown-syntax#14.
 
 ## Non-goals
 

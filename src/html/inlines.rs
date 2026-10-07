@@ -4,6 +4,7 @@ use alloc::format;
 use alloc::string::String;
 
 use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
+use crate::parse::unescape_string;
 
 use super::escape::{
     attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
@@ -162,7 +163,8 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
 
         // 20. WikiLink — GFM shape.
         Inline::WikiLink(w) => {
-            let href = attr_escape_gfm(&encode_href(&w.target));
+            // Target and label hold their escapes and references as written.
+            let href = attr_escape_gfm(&encode_href(&unescape_string(&w.target)));
             let embed = if w.embed {
                 " data-wikilink-embed=\"true\""
             } else {
@@ -170,7 +172,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             };
             format!(
                 "<a href=\"{href}\" data-wikilink=\"true\"{embed}>{}</a>",
-                escape_text(&w.label)
+                escape_text(&unescape_string(&w.label))
             )
         }
 

@@ -254,7 +254,7 @@ fn a_wikilink_after_a_bang_is_an_embed_and_wins_over_the_image() {
     };
     assert!(
         matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
-            if link.embed && link.target == "a]b" && link.meta.span == Some(Span::new(0, 9))),
+            if link.embed && link.target == "a\\]b" && link.meta.span == Some(Span::new(0, 9))),
         "{:?}",
         paragraph.children
     );

@@ -3,7 +3,7 @@ Document
     Text "This "
     WikiLink target="https://example.org" label="title"
     Text " and "
-    WikiLink target="Name [of] page" label="Name [of] page"
+    WikiLink target="Name \\[of\\] page" label="Name \\[of\\] page"
     Text "."
   Table
     Alignments none

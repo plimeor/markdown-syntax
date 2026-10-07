@@ -86,7 +86,9 @@ in an image's alt text.
 ### Requirement: Wiki embeds are marked
 The renderer SHALL write a `WikiLink` marked as an embed as the same anchor it
 writes for a wiki link, with a `data-wikilink-embed="true"` attribute after
-`data-wikilink="true"`, and SHALL NOT resolve what the target is.
+`data-wikilink="true"`, and SHALL NOT resolve what the target is. It SHALL
+decode the escapes and character references of a wiki link's target and label
+before writing them.
 
 #### Scenario: Image target
 - **WHEN** `"![[x.png]]"` is rendered

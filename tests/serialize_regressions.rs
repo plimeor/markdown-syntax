@@ -130,10 +130,6 @@ const NOT_READING_BACK: &[(&str, &str)] = &[
         "the quote's empty first line, which keeps `[!NOTE]` from opening an alert, is not recorded",
     ),
     (
-        "d$![[\\$]]",
-        "the escape in the wiki link's target, which keeps the `$` from closing math, is not recorded",
-    ),
-    (
         "=```\n    ```",
         "the indentation of the continuation line, which keeps its fence from closing the code span's line as a block, is not recorded",
     ),

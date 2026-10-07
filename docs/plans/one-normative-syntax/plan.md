@@ -91,6 +91,10 @@ serializer only renders.
     begins with a space or a tab, starts that content on the line after the
     bullet.
   - Tree comparison compares a code span by its value.
+  - A wiki link's target and label keep their source as written, escapes
+    and character references included, and the HTML renderer decodes them.
+  - A literal autolink trims a trailing `;` after a hex character reference
+    alone, as after a decimal one.
 - The conformance bench lists, apart from the by-design deviations, the
   known defects: cases that fail on `main` as well.
 - Decision 0007 records the one syntax and supersedes 0005. Decision 0008
@@ -283,15 +287,14 @@ Specs:
   - the value encodings, and the list-marker yield rule.
 
   Verified by the serialization scenarios "Text is written as recorded", "Container lines take their full prefix", "Heading soft breaks", "Values are encoded by rule", "Links written in their recorded form", "Canonical output", and "Serialize options".
-- [ ] 6.3 Inventory: run every fixture under `tests/fixtures/roundtrip/` through parse, render, and reparse. Settle each failure with a recorded spelling in the parser (task 4.1's rule), a fixed render rule, or a validation rule, never a search, and list each addition in this plan's What changes. Verified by `cargo test --test fixtures` and serialization "Round-trip fixtures".
+- [x] 6.3 Inventory: run every fixture under `tests/fixtures/roundtrip/` through parse, render, and reparse. Settle each failure with a recorded spelling in the parser (task 4.1's rule), a fixed render rule, or a validation rule, never a search, and list each addition in this plan's What changes. Verified by `cargo test --test fixtures` and serialization "Round-trip fixtures".
 
-  Awaiting a decision (Risks, first entry): the fixtures
-  `gfm_table_containers` and `gfm_table_edges` and the derived cases listed
-  in `tests/support/fixtures.rs` read back only with a lazy line, whitespace,
-  or a blank line the AST does not record; so do the inputs that
+  Inputs that read back only with a lazy line, whitespace, or a blank line
+  the AST does not record are accepted as not reading back (Risks, first
+  entry): the fixtures `gfm_table_containers` and `gfm_table_edges`, the
+  derived cases listed in `tests/support/fixtures.rs`, and the inputs that
   `tests/serialize_regressions.rs` and `tests/serialize_roundtrip_fuzz.rs`
-  list. An escaped char in a wiki link's target is a spelling the AST does
-  not record either.
+  list, each with its reason.
 - [x] 6.4 Seeded round trip: `tests/serialize_roundtrip_fuzz.rs` runs one syntax and lists each generated document that does not read back, with its reason. Listed documents must serialize without panicking, and a listed document that reads back fails the test. Keep every parsed input of the removed serialization scenarios in `tests/serialize_regressions.rs`, each asserting a round trip or a listed reason. Verified by serialization "Seeded round-trip generators" and `cargo test`.
 
 ### 7. Conformance bench and cost tests
