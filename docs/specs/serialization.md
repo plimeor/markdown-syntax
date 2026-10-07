@@ -309,7 +309,14 @@ The serializer SHALL write a dash thematic break as `- - -` when it opens the
 document or directly follows a paragraph line, where `---` would open
 frontmatter or underline a setext heading; and SHALL start a list item's
 content on the line after its bullet when that content is a thematic break of
-the bullet's char or begins with a space or a tab.
+the bullet's char or begins with a space or a tab. It SHALL number an
+ordered list's items from the list's start, one up per item, and write an item
+whose number would exceed 999999999, the largest a 9-digit marker holds, with
+999999999.
+
+#### Scenario: Item numbers at the marker limit
+- **WHEN** `parse("999999999. a\n1. b").document.to_markdown()` runs
+- **THEN** it returns `"999999999. a\n999999999. b\n"`, which reads back as one list starting at 999999999
 
 #### Scenario: Dash break opening the document
 - **WHEN** `parse("---").document.to_markdown()` runs

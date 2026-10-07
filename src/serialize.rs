@@ -441,8 +441,14 @@ fn write_list(
             output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
         let marker = if node.ordered {
-            let start = node.start.unwrap_or(1).saturating_add(index as u64);
-            format!("{start}{marker_char} ")
+            // Only the first number sets the start, so later items stop
+            // counting at the largest number a marker can hold.
+            let number = node
+                .start
+                .unwrap_or(1)
+                .saturating_add(index as u64)
+                .min(crate::parse::MAX_ORDERED_NUMBER);
+            format!("{number}{marker_char} ")
         } else {
             format!("{marker_char} ")
         };

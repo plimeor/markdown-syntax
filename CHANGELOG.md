@@ -154,6 +154,9 @@ with struct literals, or compares canonical output needs these updates.
     content on the line after the bullet.
   - A list marker override yields where the list before it in the same
     container is written with the same marker.
+  - An ordered list's item numbers stop at 999999999, the largest a marker
+    holds, so `999999999. a` followed by a second item reads back as one
+    list.
 - **Linear time on more inputs.** Literal autolinks inside unclosed link
   text, `www.` hosts after backslash escapes, long `~` runs in a paragraph,
   runs of escaped `$`, and multi-line definition labels parse in linear

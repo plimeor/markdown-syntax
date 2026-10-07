@@ -455,7 +455,7 @@ fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {
     let Some(start) = list.start else {
         return;
     };
-    if start > 999_999_999 {
+    if start > crate::parse::MAX_ORDERED_NUMBER {
         diagnostics.push(Diagnostic::invalid(
             list.meta.span,
             "ordered list start must be representable in at most 9 digits",

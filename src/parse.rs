@@ -27,6 +27,9 @@ mod source_map;
 
 use source_map::{DerivedText, Segment, SourceMap};
 
+/// The largest ordered-list item number: a marker holds at most 9 digits.
+pub(crate) const MAX_ORDERED_NUMBER: u64 = 999_999_999;
+
 /// The result of a tolerant parse: the document plus any diagnostics gathered
 /// along the way (empty on a clean parse).
 #[derive(Clone, Debug, Eq, PartialEq)]

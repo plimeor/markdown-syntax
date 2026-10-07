@@ -688,6 +688,9 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
         "Foo *bar baz*\n=============\n",
     ),
     ("- a\n  - ---", "- a\n  - - -\n"),
+    // Later item numbers stop at the largest a marker can hold.
+    ("999999999. a\n1. b", "999999999. a\n999999999. b\n"),
+    ("999999998) a\n1) b\n1) c", "999999998) a\n999999999) b\n999999999) c\n"),
     ("-\n   <v>", "-\n   <v>\n"),
     ("-\n  ---", "-\n  ---\n"),
     ("-\n  ---\n-\n  ---", "-\n  ---\n-\n  ---\n"),
