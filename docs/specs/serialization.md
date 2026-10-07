@@ -146,7 +146,8 @@ would read back as a different tree, it SHALL still return it.
 ### Requirement: Text is written as recorded
 The serializer SHALL write each `Text` value as it is, each `Escape` as a
 backslash and its char, and each `CharacterReference` as its reference, and
-SHALL add no escape of its own.
+SHALL add no escape of its own, apart from the backslashes a table cell's
+encoding adds before pipes.
 
 #### Scenario: Literal asterisks in hand-built text
 - **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized
@@ -159,6 +160,33 @@ SHALL add no escape of its own.
 #### Scenario: Unpaired delimiters
 - **WHEN** `parse("x_y_ a*b x^2 ~5").document.to_markdown()` runs
 - **THEN** it returns `"x_y_ a*b x^2 ~5\n"`
+
+### Requirement: Table cells encoded by one rule
+The serializer SHALL write a table cell's inline content as it writes any
+inline content and then encode it as cell source by one rule: a `\` is added
+before each `|` that no backslash or an even run of backslashes precedes, and
+nothing else changes. The row splits at none of the cell's pipes, and the cell
+reads each added `\|` as the `|` written, so its inline content reads as the
+content written. A `|` that the content already writes after an odd run of
+backslashes, as an `Escape('|')` does, is read with one backslash less, as an
+escaped `|`, which it also is outside a cell. The rule covers every inline
+alike: a `Text` holding `|` is written with `\|`.
+
+#### Scenario: Escaped pipe written once
+- **WHEN** `parse("| a\\|b |\n| - |").document.to_markdown()` runs
+- **THEN** it returns `"| a\\|b |\n| --- |\n"`
+
+#### Scenario: Pipe in hand-built text
+- **WHEN** a hand-built table whose body cell holds `Text("a|b")` under a header cell holding `Text("h")` is serialized
+- **THEN** `to_markdown()` returns `"| h |\n| --- |\n| a\\|b |\n"`, which reads back with the cell holding `Text("a")`, `Escape('|')`, and `Text("b")`
+
+#### Scenario: Pipe after an even backslash run
+- **WHEN** a hand-built table cell holds a `CodeInline` whose value is `a`, two backslashes, `|`, and `b`
+- **THEN** the cell is written as that code span with a third backslash before the `|`, and reads back with the same value
+
+#### Scenario: Pipes in destinations and titles
+- **WHEN** a hand-built table cell holds a `Link` whose text is `Text("a")`, to `b|c` with the double-quoted title `t|u`
+- **THEN** the cell is written `[a](b\|c "t\|u")`, and reads back as the same link
 
 ### Requirement: Container lines take their full prefix
 The serializer SHALL write every line inside a block quote or alert with the

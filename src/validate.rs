@@ -181,8 +181,50 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<Diagnostic>) {
         }
         for cell in &row.cells {
             validate_inlines(&cell.children, diagnostics);
+            validate_cell_values(&cell.children, diagnostics);
         }
     }
+}
+
+/// The values a table cell writes as they are. The row splits at each `|`
+/// after no backslash or an even run of them, and the cell's inline input
+/// reads an odd run before a `|` with one backslash less, so no cell source
+/// gives a value that holds a `|` after an odd backslash run.
+fn validate_cell_values(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+    for inline in inlines {
+        let unwritable = match inline {
+            Inline::Code(node) => has_odd_escaped_pipe(&node.value),
+            Inline::Math(node) => has_odd_escaped_pipe(&node.value),
+            Inline::Html(node) => has_odd_escaped_pipe(&node.value),
+            Inline::Autolink(node) => has_odd_escaped_pipe(&node.text),
+            Inline::LinkReference(node) => has_odd_escaped_pipe(&node.label),
+            Inline::ImageReference(node) => has_odd_escaped_pipe(&node.label),
+            Inline::FootnoteReference(node) => has_odd_escaped_pipe(&node.label),
+            Inline::WikiLink(node) => {
+                has_odd_escaped_pipe(&node.target) || has_odd_escaped_pipe(&node.label)
+            }
+            _ => false,
+        };
+        if unwritable {
+            diagnostics.push(Diagnostic::invalid(
+                inline.span(),
+                "a value in a table cell cannot hold a `|` after an odd run of backslashes",
+            ));
+        }
+        validate_cell_values(inline.children(), diagnostics);
+    }
+}
+
+/// Whether `value` holds a `|` right after an odd run of backslashes.
+fn has_odd_escaped_pipe(value: &str) -> bool {
+    let mut backslashes = 0usize;
+    for byte in value.bytes() {
+        if byte == b'|' && backslashes % 2 == 1 {
+            return true;
+        }
+        backslashes = if byte == b'\\' { backslashes + 1 } else { 0 };
+    }
+    false
 }
 
 fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Vec<Diagnostic>) {
