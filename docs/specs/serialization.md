@@ -76,7 +76,8 @@ constructed by mutating `SerializeOptions::default()`.
 ### Requirement: Invalid documents are rejected
 Serialization SHALL validate the document first and return
 `SerializeError::InvalidDocument` with the validation diagnostics when it is
-invalid, and `SerializeError::UnsupportedNode` for a node kind it cannot write.
+invalid. Validation is the only check that refuses a document: every valid
+document is written.
 
 #### Scenario: Empty table
 - **WHEN** a hand-built document holding a `Table` with no rows is serialized

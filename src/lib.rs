@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod compare;
+mod decode;
 mod entities;
 mod gemoji;
 mod memo;

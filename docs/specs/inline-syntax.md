@@ -139,7 +139,8 @@ whole content when it holds no `|`. A `[[` whose content up to the closing
 `]]` holds an unescaped `[` or `]` SHALL open no wikilink. A `[[…]]` that
 forms a wikilink SHALL be one whether or not its content matches a defined
 link label. The target and label SHALL hold their source as written, backslash
-escapes and character references included.
+escapes and character references included; `WikiLink::decoded_target()` and
+`WikiLink::decoded_label()` give the text they decode to.
 
 #### Scenario: Target and label
 - **WHEN** `"see [[target|label]] here"` is parsed with `parse`

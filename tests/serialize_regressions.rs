@@ -223,8 +223,7 @@ mod value_encodings {
 
         assert!(matches!(
             document.to_markdown(),
-            Err(SerializeError::UnsupportedNode(message))
-                if message.contains("inline math")
+            Err(SerializeError::InvalidDocument(_))
         ));
     }
 

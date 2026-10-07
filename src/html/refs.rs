@@ -107,7 +107,7 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::SoftBreak(_) => out.push('\n'),
             Inline::LineBreak(_) => out.push('\n'),
             Inline::Html(h) => out.push_str(&h.value),
-            Inline::WikiLink(w) => out.push_str(&crate::parse::unescape_string(&w.label)),
+            Inline::WikiLink(w) => out.push_str(&w.decoded_label()),
             Inline::Shortcode(s) => match s.glyph() {
                 Some(glyph) => out.push_str(glyph),
                 None => {

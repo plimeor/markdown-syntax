@@ -764,11 +764,14 @@ pub struct InlineFootnote {
 pub struct WikiLink {
     /// Node metadata (source span). An embed's span starts at its `!`.
     pub meta: NodeMeta,
-    /// The link target (page name) as written, its backslash escapes and
-    /// character references included.
+    /// The link target (page name) as written in the source, its backslash
+    /// escapes and character references kept; [`WikiLink::decoded_target`]
+    /// gives the text they stand for.
     pub target: String,
-    /// The visible label as written, its backslash escapes and character
-    /// references included.
+    /// The visible label as written in the source, its backslash escapes and
+    /// character references kept; [`WikiLink::decoded_label`] gives the text
+    /// they stand for. A label equal to `target` means the link is written
+    /// without a `|label` part.
     pub label: String,
     /// Whether a `!` directly before the `[[` marks the link as an embed.
     pub embed: bool,
@@ -931,7 +934,7 @@ impl CharacterReference {
     /// [`reference`](Self::reference) is not exactly one character reference.
     /// A valid document holds only references that decode.
     pub fn value(&self) -> Option<String> {
-        crate::parse::decode_character_reference(&self.reference)
+        crate::decode::decode_character_reference(&self.reference)
     }
 }
 
@@ -964,6 +967,21 @@ impl Shortcode {
     /// name, or `None` for a name the table does not hold.
     pub fn glyph(&self) -> Option<&'static str> {
         crate::gemoji::glyph(&self.name)
+    }
+}
+
+impl WikiLink {
+    /// The target with its backslash escapes and character references
+    /// decoded, as CommonMark decodes a link destination: `a \| b &amp; c`
+    /// decodes to `a | b & c`.
+    pub fn decoded_target(&self) -> String {
+        crate::decode::decode_escapes_and_references(&self.target)
+    }
+
+    /// The label with its backslash escapes and character references
+    /// decoded, as [`WikiLink::decoded_target`] decodes the target.
+    pub fn decoded_label(&self) -> String {
+        crate::decode::decode_escapes_and_references(&self.label)
     }
 }
 

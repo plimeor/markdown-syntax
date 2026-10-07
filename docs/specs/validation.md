@@ -9,7 +9,7 @@ and renderer can write faithfully. Owned by `src/validate.rs`.
 
 ### Requirement: Validate reports invalid shapes
 `Document::validate` SHALL return one error-severity `InvalidDocument`
-diagnostic per invalid node it finds, and an empty list for a valid document.
+diagnostic per invalid shape it finds, and an empty list for a valid document.
 
 #### Scenario: Parsed document
 - **WHEN** `parse("# Title\n\nHello *world*.").document.validate()` runs
@@ -20,24 +20,52 @@ diagnostic per invalid node it finds, and an empty list for a valid document.
 - **THEN** the result holds an `InvalidDocument` error
 
 ### Requirement: Shapes that cannot be written
-Validation SHALL reject: a heading depth outside 1–6; a table with no rows or
-no columns; empty inline math; an empty emphasis-like container (`Emphasis`,
-`Strong`, `Delete`, or `Mark`), or one whose content starts or ends with a
-space, a tab, a soft break, or a hard break; a `Link`, `Autolink`,
-`LinkReference`, or `WikiLink` inside the text of a `Link` or
-`LinkReference`; an `Autolink` whose text is not exactly one autolink of its
-form, so that `Autolink::destination()` returns `None`; a
-`CharacterReference` that is not exactly one character reference; two
-adjacent lists in the same container written with the same marker and both
-ordered or both unordered; an escape of a non-punctuation character; a
-shortcode whose name is not in the crate's pinned gemoji table; a directive
-whose name is not one or more runs of ASCII letters joined by single `-`
-chars; inline code whose value is empty or holds a line ending; an ordered
-list start beyond the parser's 9-digit marker limit; a hard
-line break ending inline content other than link text, image alt text, an
-inline footnote, or a text directive label, all of which close with a `]`;
-and a definition whose identifier is empty or holds only spaces, tabs, and
-line endings.
+Validation SHALL reject exactly these shapes, each visible from the node, its
+children, or its sibling blocks:
+
+- Block sequences: two adjacent `List`s that are both ordered or both
+  unordered and record the same delimiter.
+- `Heading`: a depth outside 1–6.
+- `Table`: no rows; a header row with no cells; an alignment count other than
+  the header row's width; a row whose width differs from the header row's.
+- `List`: an ordered list whose start is beyond the parser's 9-digit marker
+  limit.
+- `Definition`: an identifier that is empty or holds only spaces, tabs, and
+  line endings.
+- `FootnoteDefinition`, `FootnoteReference`, `LinkReference`, and
+  `ImageReference`: an empty identifier.
+- `HtmlContainer`: an empty opening or closing tag name, opening and closing
+  tag names that differ, or an empty opening or closing tag source.
+- `LeafDirective`, `ContainerDirective`, and `TextDirective`: a name that is
+  not one or more runs of ASCII letters joined by single `-` chars; an
+  attribute name that does not start with an ASCII letter, `_`, or `-`, or
+  holds a char other than ASCII letters, digits, `_`, `-`, and `:`.
+- Inline content of a paragraph, a heading, a table cell, an HTML container,
+  a leaf or container directive label, or an emphasis-like container: a
+  `LineBreak` as its last inline. Link text, image alt text, an inline
+  footnote, and a text directive label close with a `]` and may end with one.
+- `Emphasis`, `Strong`, `Delete`, and `Mark`: no children, or content that
+  starts or ends with a space, a tab, a `SoftBreak`, or a `LineBreak`.
+- The text of a `Link` or `LinkReference`: a `Link`, `Autolink`,
+  `LinkReference`, or `WikiLink` at any depth.
+- `Autolink`: a text that is not exactly one autolink of its form, so that
+  `Autolink::destination()` returns `None`.
+- `Escape`: a value that is not an ASCII punctuation char.
+- `CharacterReference`: a reference that is not exactly one character
+  reference.
+- `Shortcode`: a name not in the crate's pinned gemoji table.
+- `WikiLink`: an empty target.
+- `CodeInline`: an empty value, or a value holding a line ending.
+- `MathInline`: an empty value; a dollar fence of length 0; code-form math
+  whose value holds a backtick followed by `$`, which would close it early.
+
+#### Scenario: Empty inline math
+- **WHEN** a paragraph holding a `MathInline` with an empty value, in the dollar or the code form, is validated
+- **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Code-form math holding its close
+- **WHEN** a paragraph holding a code-form `MathInline` whose value is ``a`$b`` is validated and serialized
+- **THEN** the result holds an `InvalidDocument` error, and `to_markdown()` returns `Err(SerializeError::InvalidDocument(_))`
 
 #### Scenario: Empty emphasis
 - **WHEN** a paragraph holding an `Emphasis` with no children is validated
@@ -97,8 +125,24 @@ line endings.
 
 ### Requirement: Conservative scope
 Validation SHALL check only the shapes listed by this spec and SHALL NOT be
-relied on to prove every semantic invariant of a hand-built AST.
+relied on to prove every semantic invariant of a hand-built AST. A shape whose
+spelling depends on the characters around it, or that only the builder can
+know is meant literally, is not checked: the builder answers for it, and the
+serializer writes it as it is even when the output reads back differently.
+Validation does not check, among others:
+
+- `Text` whose value reads as syntax, such as `*a*` or `# a` at a line start;
+  punctuation meant literally is built as `Escape` nodes.
+- A `LineBreak` inside an ATX heading.
+- A `Frontmatter` that is not the document's first block.
+- An `Alert` title that holds a line ending.
+- A `WikiLink` target that holds an unescaped `|`, or a target or label that
+  holds an unescaped `[` or `]` or a line ending.
 
 #### Scenario: Unlisted oddity
 - **WHEN** a hand-built document has a shape this spec does not list as invalid
 - **THEN** `validate()` may return an empty list
+
+#### Scenario: Frontmatter after a paragraph
+- **WHEN** a hand-built document holding a `Paragraph` followed by a `Frontmatter` is validated
+- **THEN** it returns an empty list

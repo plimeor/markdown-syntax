@@ -129,6 +129,64 @@ mod review_validate {
         assert!(good.validate().is_empty());
     }
 
+    fn math(value: &str, kind: MathInlineKind) -> Document {
+        paragraph(vec![Inline::Math(MathInline {
+            meta: NodeMeta::default(),
+            value: value.into(),
+            kind,
+        })])
+    }
+
+    #[test]
+    fn empty_inline_math_is_invalid() {
+        // `$$` reads back as text, and `$``$` as dollar math holding "``".
+        for kind in [
+            MathInlineKind::Dollar { dollars: 1 },
+            MathInlineKind::Dollar { dollars: 2 },
+            MathInlineKind::Code,
+        ] {
+            let bad = math("", kind);
+            assert_eq!(bad.validate().len(), 1, "{kind:?}");
+            assert!(matches!(
+                bad.to_markdown(),
+                Err(SerializeError::InvalidDocument(_))
+            ));
+            assert!(math(" ", kind).validate().is_empty(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn code_math_holding_its_close_is_invalid() {
+        let bad = math("a`$b", MathInlineKind::Code);
+        let diagnostics = bad.validate();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, DiagnosticCode::InvalidDocument);
+        assert!(matches!(
+            bad.to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+
+        // A `$` or a backtick alone, or the dollar form, may hold them.
+        for good in [
+            math("a$b`c", MathInlineKind::Code),
+            math("$`a", MathInlineKind::Code),
+            math("a`$b", MathInlineKind::Dollar { dollars: 2 }),
+        ] {
+            assert!(good.validate().is_empty(), "{good:?}");
+        }
+    }
+
+    #[test]
+    fn frontmatter_after_a_paragraph_is_left_to_the_builder() {
+        let mut document = paragraph(vec![text("a")]);
+        document.children.push(Block::Frontmatter(Frontmatter {
+            meta: NodeMeta::default(),
+            kind: FrontmatterKind::Yaml,
+            value: "b: c\n".into(),
+        }));
+        assert!(document.validate().is_empty());
+    }
+
     #[test]
     fn sr6_rejects_each_emphasis_like_container_when_empty() {
         let empty_containers = [

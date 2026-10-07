@@ -14,6 +14,7 @@ use crate::test_support::{boundaries, generated_inputs, query_orders, Rng};
 #[allow(clippy::all)]
 mod reference {
     use super::super::*;
+    use crate::{decode::character_reference_value, entities::named_character_reference};
 
     pub(super) fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
         if input.as_bytes().get(open) != Some(&b'[') {
@@ -424,7 +425,7 @@ mod reference {
                 let (next, char) = next_char(input, cursor)?;
                 if char == '>' && !is_escaped_at(input, cursor) {
                     return Some((
-                        unescape_ascii_punctuation(&input[index + 1..cursor]),
+                        decode_escapes_and_references(&input[index + 1..cursor]),
                         LinkDestinationKind::Angle,
                         next,
                     ));
@@ -467,7 +468,7 @@ mod reference {
             None
         } else {
             Some((
-                unescape_ascii_punctuation(&input[index..cursor]),
+                decode_escapes_and_references(&input[index..cursor]),
                 LinkDestinationKind::Bare,
                 cursor,
             ))
