@@ -28,9 +28,9 @@ Shipped features are described in `docs/specs/`.
 
 Releasing, as one SemVer-breaking version, the delimiter-stack inline parser,
 CommonMark input handling (leading BOM, NUL), source-mapped spans, block
-parsing on one stack of open blocks, autolinks folded into `Link`, one
-normative syntax in place of the dialect presets, and a render-only serializer
-(plimeor/markdown-syntax#14).
+parsing on one stack of open blocks, one normative syntax in place of the
+dialect presets, a render-only serializer with validation as its only gate,
+and AST nodes that store each written fact once (plimeor/markdown-syntax#14).
 
 ## Next
 

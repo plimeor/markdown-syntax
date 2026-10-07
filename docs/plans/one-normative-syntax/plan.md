@@ -335,7 +335,7 @@ The design review of this branch found the issues below; each task carries the o
 - [x] 10.7 A directive opener reports why it was refused (`Refused::{Name, Unclosed, Follow}`); diagnostics are emitted by reason. Verified by the existing directive tests and a differential parse of about 575k inputs.
 - [x] 10.8 Strikethrough and autolink residue of removed configuration is deleted (`strike`, `DelimRoles`, `trim_from`). Verified by the same differential parse.
 - [x] 10.9 One crate-private decoder for escapes and character references; `WikiLink::decoded_target()` and `WikiLink::decoded_label()`. Verified by `tests/parse_inline_regressions.rs`.
-- [ ] 10.10 Docs agree with the code: literal autolink extents, constructors, fixture READMEs, and this plan's serialization spec copy.
+- [x] 10.10 Docs agree with the code: literal autolink extents, constructors, fixture READMEs, and this plan's serialization spec copy. Verified by reading `docs/specs/inline-syntax.md`, `docs/specs/public-api.md`, and the fixture READMEs.
 - [x] 10.11 CI runs every test once under `[profile.ci]` (release with debug assertions and overflow checks); the wasm32 and MSRV jobs are removed. Verified by reading `.github/workflows/ci.yml` and running its steps.
 - [x] 10.12 `SerializeOptions` list-marker and fence fields are `Option`s: `None` keeps the recorded spelling, `Some` replaces it. Verified by serialization "Serialize options".
 - [x] 10.13 Each fact is stored once: `Autolink { form, text }` with `destination()`, `CodeInline { value }`, and `CharacterReference { reference }` with `value()`. Verified by public-api and validation scenarios and unchanged conformance numbers.
