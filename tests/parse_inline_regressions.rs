@@ -1064,6 +1064,44 @@ mod autolinks_inside_link_text {
     }
 
     #[test]
+    fn link_text_holds_no_link_inside_image_alt_or_a_directive_label() {
+        // An autolink in an image's alt inside link text reads as its text; a
+        // wikilink in a directive label keeps the brackets around it from
+        // forming a link, as a wikilink outside one does.
+        for source in [
+            "[![a@b.c](i)](u)",
+            "[![<http://a.b>](i)](u)",
+            "[![a@b.c]](u)\n\n[a@b.c]: /x",
+            "[x :d[![a@b.c](i)] y](u)",
+            "[x :d[[[w]]] y](u)",
+            "[![:d[[[w]]]](i)](u)",
+        ] {
+            let document = parse(source).document;
+            assert_eq!(document.validate(), [], "{source:?}: {document:?}");
+            let written = document.to_markdown().expect(source);
+            assert_eq!(
+                markdown_syntax::__private::normalized_blocks(&parse(&written).document.children),
+                markdown_syntax::__private::normalized_blocks(&document.children),
+                "{source:?} -> {written:?}"
+            );
+        }
+        for source in ["[a [[b]] c](u)", "[x :d[[[w]]] y](u)"] {
+            let document = parse(source).document;
+            let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+                panic!("{source:?}: {document:?}");
+            };
+            assert!(
+                !paragraph
+                    .children
+                    .iter()
+                    .any(|inline| matches!(inline, Inline::Link(_))),
+                "{source:?}: {:?}",
+                paragraph.children
+            );
+        }
+    }
+
+    #[test]
     fn an_angle_bracket_autolink_in_link_text_reads_as_its_text() {
         // cmark-gfm, commonmark.js, and micromark nest the autolink's `<a>`
         // inside the link's; link text here holds no links.
@@ -1197,5 +1235,62 @@ mod literal_autolink_trailing_references {
                 paragraph.children
             );
         }
+    }
+}
+
+mod literal_autolinks_after_an_open_bracket {
+    //! As in cmark-gfm, a `www.`, `http://`, or `https://` literal does not
+    //! form after a link or image `[` that is still open; an email address
+    //! still links there, and an inline footnote's `^[` opens no link text.
+
+    use markdown_syntax::prelude::*;
+
+    fn autolinks(source: &str) -> Vec<String> {
+        fn collect(inlines: &[Inline], out: &mut Vec<String>) {
+            for inline in inlines {
+                if let Inline::Autolink(autolink) = inline {
+                    out.push(autolink.text.clone());
+                }
+                collect(inline.children(), out);
+            }
+        }
+        let document = parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{source:?}: {document:?}");
+        };
+        let mut out = Vec::new();
+        collect(&paragraph.children, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_url_after_an_open_bracket_is_text() {
+        for source in [
+            "[https://foo.com]",
+            "[a [b](c) https://x.y]",
+            "![see www.a.com",
+        ] {
+            assert_eq!(autolinks(source), [] as [&str; 0], "{source:?}");
+        }
+    }
+
+    #[test]
+    fn an_email_after_an_open_bracket_links() {
+        assert_eq!(autolinks("[a@b.com]"), ["a@b.com"]);
+        // No email starts at `www.`, as outside the bracket, so the parsed
+        // tree validates.
+        for source in ["[www.x.com_a@b.c", "www.x.com_a@b.c"] {
+            assert_eq!(autolinks(source), ["x.com_a@b.c"], "{source:?}");
+            assert_eq!(parse(source).document.validate(), [], "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_url_in_an_inline_footnote_links() {
+        assert_eq!(
+            autolinks("^[see https://example.com]"),
+            ["https://example.com"]
+        );
+        assert_eq!(autolinks("^[see [https://example.com]"), [] as [&str; 0]);
     }
 }

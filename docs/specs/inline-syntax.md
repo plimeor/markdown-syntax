@@ -27,6 +27,14 @@ spans, links, and emphasis.
 - **WHEN** `"[this <http://and.com> that](url)"` is parsed
 - **THEN** the paragraph holds a `Link` to `url` whose only child is `Text("this http://and.com that")`
 
+#### Scenario: Autolink in an image inside link text
+- **WHEN** `"[![a@b.c](i)](u)"` is parsed
+- **THEN** the paragraph holds a `Link` to `u` holding an `Image` whose alt is `Text("a@b.c")`
+
+#### Scenario: Wikilink inside a link label
+- **WHEN** `"[a [[b]] c](u)"` and `"[x :d[[[w]]] y](u)"` are parsed
+- **THEN** neither paragraph holds a `Link`: a wikilink, alone or in a text directive's label, keeps the brackets around it from forming a link, and the first paragraph holds `Text("[a ")`, a `WikiLink` with target `b`, and `Text(" c](u)")`
+
 #### Scenario: Shortcut reference before an unclosed label
 - **WHEN** `"[foo][bar\n\n[foo]: /u"` is parsed
 - **THEN** the paragraph holds a shortcut `LinkReference` to `foo` followed by `Text("[bar")`
@@ -186,13 +194,18 @@ applies to what remains. The check on the text before an email
 SHALL read whitespace as Unicode whitespace on char boundaries; a `www.`
 literal SHALL start, as on GitHub, only after one of `*_~([]` or a space,
 tab, or line ending. As in cmark-gfm, a `www.`, `http://`, or `https://`
-literal SHALL NOT form after a `[` that no `]` in the same inline content has
-closed yet; an email address, with or without a `mailto:` or `xmpp:` prefix,
-still links there.
+literal SHALL NOT form after a `[` or `![` that no `]` in the same inline
+content has closed yet; an email address, with or without a `mailto:` or
+`xmpp:` prefix, still links there. An inline footnote's `^[` opens no link
+text, so a URL in its content links.
 
 #### Scenario: URL after an open bracket
 - **WHEN** `"[https://foo.com]"` and `"[a [b](c) https://x.y]"` are parsed with `parse`
 - **THEN** neither holds an `Autolink`: each URL is text
+
+#### Scenario: URL in an inline footnote
+- **WHEN** `"^[see https://example.com]"` is parsed with `parse`
+- **THEN** the paragraph holds an `InlineFootnote` holding `Text("see ")` and a literal `Autolink` whose text is `https://example.com`
 
 #### Scenario: Bracketed IPv6 host
 - **WHEN** `"scoped https://[fe80::1ff:fe23:4567:890a%25eth2]"` is parsed with `parse`

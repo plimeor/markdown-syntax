@@ -1912,6 +1912,8 @@ fn demote_links(nodes: &mut Vec<Inline>) {
             Inline::Mark(node) => demote_links(&mut node.children),
             Inline::InlineFootnote(node) => demote_links(&mut node.children),
             Inline::TextDirective(node) => demote_links(&mut node.label),
+            Inline::Image(node) => demote_links(&mut node.alt),
+            Inline::ImageReference(node) => demote_links(&mut node.alt),
             _ => {}
         }
     }
@@ -1942,10 +1944,16 @@ impl Brackets {
         }
     }
 
-    /// Whether a `[` is open: pushed and not yet closed by a `]`, as an
-    /// opener or as text left for want of nesting room.
+    /// Whether a `[` is open: pushed and not yet closed by a `]`, as a link or
+    /// image opener or as text left for want of nesting room. An inline
+    /// footnote's `^[` opens no link text. The stack is at most the nesting
+    /// limit deep.
     fn open(&self) -> bool {
-        !self.openers.is_empty() || self.overflow > 0
+        self.overflow > 0
+            || self
+                .openers
+                .iter()
+                .any(|opener| !matches!(opener.kind, BracketKind::InlineFootnote))
     }
 
     /// Keeps every open `[` from forming a link around what follows.
@@ -3026,8 +3034,10 @@ fn is_inline_container(inline: &Inline) -> bool {
 /// autolink, which keeps open brackets from nothing, does not count.
 fn contains_link_inline(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| {
-        matches!(inline, Inline::Link(_) | Inline::LinkReference(_))
-            || contains_link_inline(inline.children())
+        matches!(
+            inline,
+            Inline::Link(_) | Inline::LinkReference(_) | Inline::WikiLink(_)
+        ) || contains_link_inline(inline.children())
     })
 }
 
@@ -4718,7 +4728,16 @@ fn parse_literal_autolink(
     urls: bool,
 ) -> Option<(usize, &'static str)> {
     let rest = &input[index..];
+    let www = rest
+        .as_bytes()
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"www."));
     if !urls {
+        // A literal starting `www.` is a URL, linked or not, as outside an
+        // open `[`: no email starts there.
+        if www {
+            return None;
+        }
         return parse_literal_email(input, index, &mut scan.email_local);
     }
 
@@ -4748,11 +4767,7 @@ fn parse_literal_autolink(
 
     // `www.` URLs (synthesize a `http://` href). cmark allows the preceding
     // char to be one of `*_~(` or whitespace (or start of input).
-    if rest
-        .as_bytes()
-        .get(..4)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"www."))
-    {
+    if www {
         if !literal_www_prefix_ok(input, index) {
             return None;
         }
