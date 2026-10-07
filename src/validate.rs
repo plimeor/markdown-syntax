@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use crate::{
     ast::{
         Block, CodeInline, ContainerDirective, DirectiveAttribute, Document, Escape, Heading,
-        HtmlContainer, HtmlContainerContent, Inline, LeafDirective, Link, LinkDestinationKind,
-        LinkForm, List, MathInlineKind, Table, TextDirective,
+        HtmlContainer, HtmlContainerContent, Inline, LeafDirective, List, MathInlineKind, Table,
+        TextDirective,
     },
     diagnostic::Diagnostic,
     span::Span,
@@ -236,9 +236,16 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                 }
             }
             Inline::Link(node) => {
-                validate_link_form(node, diagnostics);
                 validate_link_text(&node.children, diagnostics);
                 validate_inline_nodes(&node.children, diagnostics);
+            }
+            Inline::Autolink(node) => {
+                if node.destination().is_none() {
+                    diagnostics.push(Diagnostic::invalid(
+                        node.meta.span,
+                        "autolink text must be exactly one autolink of its form",
+                    ));
+                }
             }
             Inline::Image(node) => validate_inline_nodes(&node.alt, diagnostics),
             Inline::LinkReference(node) => {
@@ -262,16 +269,10 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
             }
             Inline::Escape(node) => validate_escape(node, diagnostics),
             Inline::CharacterReference(node) => {
-                if node.reference.is_empty() {
+                if node.value().is_none() {
                     diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
-                        "character reference source cannot be empty",
-                    ));
-                }
-                if node.value.is_empty() {
-                    diagnostics.push(Diagnostic::invalid(
-                        node.meta.span,
-                        "character reference value cannot be empty",
+                        "character reference must be exactly one character reference",
                     ));
                 }
             }
@@ -348,7 +349,10 @@ fn ends_with_whitespace(inlines: &[Inline]) -> bool {
 fn validate_link_text(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
     for inline in inlines {
         match inline {
-            Inline::Link(_) | Inline::LinkReference(_) | Inline::WikiLink(_) => {
+            Inline::Link(_)
+            | Inline::Autolink(_)
+            | Inline::LinkReference(_)
+            | Inline::WikiLink(_) => {
                 diagnostics.push(Diagnostic::invalid(
                     inline.span(),
                     "link text cannot hold a link",
@@ -356,59 +360,6 @@ fn validate_link_text(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
             }
             _ => validate_link_text(inline.children(), diagnostics),
         }
-    }
-}
-
-/// A link recorded as an autolink holds the one text that autolink writes
-/// for its destination, and no title.
-fn validate_link_form(link: &Link, diagnostics: &mut Vec<Diagnostic>) {
-    let fits = match link.form {
-        LinkForm::Inline => true,
-        LinkForm::AngleAutolink => autolink_text(link).is_some_and(|text| {
-            crate::parse::angle_autolink_destination(text).as_deref()
-                == Some(link.destination.as_str())
-        }),
-        LinkForm::LiteralAutolink => {
-            autolink_text(link).is_some_and(|text| literal_autolink_writes(text, &link.destination))
-        }
-    };
-    if !fits {
-        diagnostics.push(Diagnostic::invalid(
-            link.meta.span,
-            "an autolink must hold the one text that writes its destination, and no title",
-        ));
-    }
-}
-
-/// Whether a literal autolink written as `text` links to `destination`: a
-/// URL or a `mailto:` / `xmpp:` address links to itself, a `www.` domain to
-/// it after `http://`, and an email address to it after `mailto:`.
-fn literal_autolink_writes(text: &str, destination: &str) -> bool {
-    let starts_with = |prefix: &str| {
-        text.get(..prefix.len())
-            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
-    };
-    if ["http://", "https://", "mailto:", "xmpp:"]
-        .iter()
-        .any(|prefix| starts_with(prefix))
-    {
-        return destination == text;
-    }
-    if starts_with("www") {
-        return destination.strip_prefix("http://") == Some(text);
-    }
-    text.contains('@') && destination.strip_prefix("mailto:") == Some(text)
-}
-
-/// The one text an autolink holds, when it has no title.
-fn autolink_text(link: &Link) -> Option<&str> {
-    match link.children.as_slice() {
-        [Inline::Text(text)]
-            if link.title.is_none() && link.destination_kind == LinkDestinationKind::Bare =>
-        {
-            Some(&text.value)
-        }
-        _ => None,
     }
 }
 
@@ -421,34 +372,21 @@ fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+/// A code span's value is what the parser reads from one: never empty, and
+/// with its line endings read as spaces.
 fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<Diagnostic>) {
-    if code.fence_length == 0 {
-        return;
-    }
-    // A code span fence of length N is closed only by a backtick run of exactly
-    // length N. A run shorter or longer than the fence is inert, so only an
-    // exactly-matching interior run would close the raw passthrough early.
-    if raw_has_backtick_run(&code.raw, code.fence_length) {
+    if code.value.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             code.meta.span,
-            "inline code raw passthrough contains a backtick run equal to its fence length",
+            "inline code value cannot be empty",
         ));
     }
-}
-
-fn raw_has_backtick_run(input: &str, length: usize) -> bool {
-    let mut current = 0;
-    for byte in input.bytes() {
-        if byte == b'`' {
-            current += 1;
-        } else {
-            if current == length {
-                return true;
-            }
-            current = 0;
-        }
+    if code.value.contains(['\n', '\r']) {
+        diagnostics.push(Diagnostic::invalid(
+            code.meta.span,
+            "inline code value cannot hold a line ending",
+        ));
     }
-    current == length
 }
 
 fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {

@@ -91,7 +91,7 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
         match inline {
             Inline::Text(t) => out.push_str(&t.value),
             Inline::Escape(e) => out.push(e.value),
-            Inline::CharacterReference(c) => out.push_str(&c.value),
+            Inline::CharacterReference(c) => out.push_str(&c.value().unwrap_or_default()),
             Inline::Code(c) => out.push_str(&c.value),
             Inline::Math(m) => out.push_str(&m.value),
             Inline::Emphasis(n) => flatten_into(&n.children, out),
@@ -99,6 +99,7 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::Delete(n) => flatten_into(&n.children, out),
             Inline::Mark(n) => flatten_into(&n.children, out),
             Inline::Link(n) => flatten_into(&n.children, out),
+            Inline::Autolink(n) => out.push_str(&n.text),
             Inline::LinkReference(n) => flatten_into(&n.children, out),
             Inline::Image(n) => flatten_into(&n.alt, out),
             Inline::ImageReference(n) => flatten_into(&n.alt, out),

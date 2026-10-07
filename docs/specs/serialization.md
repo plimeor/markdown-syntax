@@ -11,7 +11,7 @@ by `src/serialize.rs`.
 `Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
 spelling the AST records for it, such as a list marker, a fence's char and
 length, a heading's style, a reference's kind, an emphasis or strong
-delimiter, a link's form, an escaped char, a character reference as written,
+delimiter, an autolink's form, an escaped char, a character reference as written,
 a wiki link's target and label as written, or a wiki link's embed mark, or else one fixed spelling, independent of source
 details the AST does not record.
 
@@ -100,7 +100,7 @@ Round-trip stability SHALL compare a reparsed document with the parsed one
 apart from spans, reading each `Escape` as a `Text` holding its char, each
 `CharacterReference` as a `Text` holding its value, and each `SoftBreak`
 inside a heading as a `Text` holding a space, and merging adjacent `Text`
-nodes; a code span compares by its `value`.
+nodes.
 
 #### Scenario: Escape against text
 - **WHEN** a paragraph holding `Escape('*')` and `Text("a")` is compared with one holding `Text("*a")`
@@ -170,8 +170,8 @@ The serializer SHALL write a `SoftBreak` inside a heading as one space.
 - **THEN** `to_markdown()` returns `"# a b\n"`
 
 ### Requirement: Values are encoded by rule
-The serializer SHALL write a value that a construct holds as raw text (code,
-math, an info string, a link destination, raw HTML) so that the construct
+The serializer SHALL write a value that a construct holds as raw text (a code
+block, math, an info string, a link destination, raw HTML) so that the construct
 reads back with the same value: a fence longer than any fence-like run in the
 value, whitespace at the ends of an info string or in a bare destination as
 character references, and a value's own line endings as they are.
@@ -208,6 +208,31 @@ character references, and a value's own line endings as they are.
 - **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
 - **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
 
+### Requirement: Code spans written from their value
+The serializer SHALL write a code span from its value alone: fenced by the
+shortest backtick run that the value holds no run of and that would not close
+a backtick run written before it in the same inline pass that opens no code
+span (runs inside code spans, raw HTML, math, autolinks, wiki links, text
+directives, and link and image destinations, titles, and reference labels do
+not count); and with one space added at each end when the value starts or
+ends with a backtick, or starts and ends with a space and is not all spaces.
+
+#### Scenario: Backticks in the value
+- **WHEN** a hand-built paragraph holding `CodeInline::new("a``b")` is serialized
+- **THEN** `to_markdown()` returns ``"`a``b`\n"``
+
+#### Scenario: Padding
+- **WHEN** the document parsed from ``"`` `code` ``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`` `code` ``\n"``
+
+#### Scenario: Line endings in the source
+- **WHEN** the document parsed from ``"``\nfoo\nbar\n``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`foo bar`\n"``
+
+#### Scenario: Backtick run written before the span
+- **WHEN** the document parsed from ``"`foo``bar``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`foo``bar``\n"``, whose first backtick stays text
+
 ### Requirement: Breaks and item content placed by rule
 The serializer SHALL write a dash thematic break as `- - -` when it opens the
 document or directly follows a paragraph line, where `---` would open
@@ -231,10 +256,10 @@ the bullet's char or begins with a space or a tab.
 - **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
 - **THEN** it returns `"-\n   <v>\n"`
 
-### Requirement: Links written in their recorded form
-The serializer SHALL write a `Link` in the form it records: a literal autolink
-as its text, an angle-bracket autolink as `<` and its text and `>`, and an
-inline link as `[text](destination "title")`.
+### Requirement: Links and autolinks written in their recorded form
+The serializer SHALL write a literal `Autolink` as its text, an angle-bracket
+`Autolink` as `<` and its text and `>`, and a `Link` as
+`[text](destination "title")`.
 
 #### Scenario: Literal URL
 - **WHEN** `parse("see http://a.b").document.to_markdown()` runs

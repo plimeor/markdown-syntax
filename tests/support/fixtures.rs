@@ -645,7 +645,7 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 format!(
                     "CharacterReference reference={} value={}",
                     quote(&node.reference),
-                    quote(&node.value)
+                    quote(&node.value().unwrap_or_default())
                 ),
             ),
             Inline::Emphasis(node) => {
@@ -675,33 +675,32 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
             Inline::Shortcode(node) => {
                 push(lines, indent, format!("Shortcode {}", quote(&node.name)));
             }
-            Inline::Code(node) => push(
-                lines,
-                indent,
-                format!(
-                    "Code value={} raw={} fence={}",
-                    quote(&node.value),
-                    quote(&node.raw),
-                    node.fence_length
-                ),
-            ),
+            Inline::Code(node) => push(lines, indent, format!("Code value={}", quote(&node.value))),
             Inline::Link(node) => {
                 push(
                     lines,
                     indent,
                     format!(
-                        "Link form={} destination={} title={}",
-                        match node.form {
-                            markdown_syntax::LinkForm::Inline => "inline",
-                            markdown_syntax::LinkForm::AngleAutolink => "angle",
-                            markdown_syntax::LinkForm::LiteralAutolink => "literal",
-                        },
+                        "Link destination={} title={}",
                         node.destination,
                         snapshot_title(&node.title)
                     ),
                 );
                 snapshot_inlines(&node.children, indent + 1, lines);
             }
+            Inline::Autolink(node) => push(
+                lines,
+                indent,
+                format!(
+                    "Autolink form={} text={} destination={}",
+                    match node.form {
+                        markdown_syntax::AutolinkForm::Angle => "angle",
+                        markdown_syntax::AutolinkForm::Literal => "literal",
+                    },
+                    quote(&node.text),
+                    node.destination().unwrap_or_default()
+                ),
+            ),
             Inline::Image(node) => {
                 push(
                     lines,

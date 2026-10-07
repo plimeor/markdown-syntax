@@ -1,9 +1,6 @@
-`` foo ` bar ``
-``
-foo
-bar
-``
+``foo ` bar``
+`foo bar`
 `  both  `
 `` `code` ``
-``` `` ```
-```a``b```
+` `` `
+`a``b`

@@ -1,14 +1,14 @@
 Document
   Paragraph
-    Link form=inline destination="title" title=none
+    Link destination="title" title=none
       Text "title"
   Paragraph
-    Link form=inline destination= title=""
+    Link destination= title=""
   Paragraph
     Text "[a]("
     HtmlInline "<b>"
     Text "\"c\")"
   Paragraph
-    Link form=inline destination=< title=none
+    Link destination=< title=none
   Paragraph
-    Link form=inline destination=< title=none
+    Link destination=< title=none

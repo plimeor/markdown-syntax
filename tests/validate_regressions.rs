@@ -203,7 +203,6 @@ mod review_validate {
         let link = |destination: &str, text: &str| {
             paragraph(vec![Inline::Link(Link {
                 meta: NodeMeta::default(),
-                form: LinkForm::Inline,
                 destination: destination.into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
@@ -236,45 +235,36 @@ mod review_validate {
         );
     }
 
-    // SR9 — inline code stored as a raw passthrough whose backtick run is at least
-    // as long as its fence would close the span early.
+    // SR9 — a code span holds only a value the parser can read from one; the
+    // serializer chooses its fence and padding, so any backticks in the value
+    // read back.
     #[test]
-    fn sr9_inline_code_raw_backtick_run_is_invalid() {
-        let bad = paragraph(vec![Inline::Code(CodeInline {
-            meta: NodeMeta::default(),
-            value: "a`b".into(),
-            raw: "a`b".into(),
-            fence_length: 1,
-        })]);
-        assert!(!bad.validate().is_empty());
+    fn sr9_inline_code_value_is_what_a_code_span_reads() {
+        for value in ["", "a\nb", "a\rb"] {
+            let bad = paragraph(vec![Inline::Code(CodeInline::new(value))]);
+            assert!(!bad.validate().is_empty(), "{value:?}");
+        }
 
-        // A raw run shorter than the fence is safe.
-        let shorter = paragraph(vec![Inline::Code(CodeInline {
-            meta: NodeMeta::default(),
-            value: "a`b".into(),
-            raw: "a`b".into(),
-            fence_length: 2,
-        })]);
-        assert!(shorter.validate().is_empty());
-
-        // A raw run LONGER than the fence is also inert (a fence of length N closes
-        // only on a run of exactly N) — this is the `` ` `` ` `` code-span shape.
-        let longer = paragraph(vec![Inline::Code(CodeInline {
-            meta: NodeMeta::default(),
-            value: "``".into(),
-            raw: " `` ".into(),
-            fence_length: 1,
-        })]);
-        assert!(longer.validate().is_empty());
-
-        // The value path (no raw passthrough) is always safe.
-        let value_only = paragraph(vec![Inline::Code(CodeInline {
-            meta: NodeMeta::default(),
-            value: "a`b".into(),
-            raw: String::new(),
-            fence_length: 0,
-        })]);
-        assert!(value_only.validate().is_empty());
+        for (value, written) in [
+            ("a`b", "``a`b``"),
+            ("a``b", "`a``b`"),
+            ("``", "` `` `"),
+            ("`a", "`` `a ``"),
+            (" a ", "`  a  `"),
+            (" a", "` a`"),
+            ("  ", "`  `"),
+        ] {
+            let document = paragraph(vec![Inline::Code(CodeInline::new(value))]);
+            assert!(document.validate().is_empty(), "{value:?}");
+            let markdown = document.to_markdown().expect("document serializes");
+            assert_eq!(markdown, format!("{written}\n"), "{value:?}");
+            let reparsed = parse(&markdown).document;
+            assert_eq!(
+                format!("{:?}", crate::normalize::normalized(&reparsed.children)),
+                format!("{:?}", crate::normalize::normalized(&document.children)),
+                "{value:?}"
+            );
+        }
     }
 
     // SR4 — an ordered list start beyond the parser's 9-digit marker cap round-trips
@@ -459,11 +449,7 @@ mod review_validate {
         assert!(paragraph(vec![emphasis(vec![text("a b")])])
             .validate()
             .is_empty());
-        let reference = Inline::CharacterReference(CharacterReference {
-            meta: NodeMeta::default(),
-            reference: "&#x20;".into(),
-            value: " ".into(),
-        });
+        let reference = Inline::CharacterReference(CharacterReference::new("&#x20;"));
         assert!(paragraph(vec![emphasis(vec![text("a"), reference])])
             .validate()
             .is_empty());
@@ -490,6 +476,12 @@ mod review_validate {
         });
         assert!(invalid(&paragraph(vec![reference])));
 
+        let autolink = Inline::Autolink(Autolink::new(AutolinkForm::Literal, "http://a.b"));
+        assert!(invalid(&paragraph(vec![Inline::Link(Link::new(
+            "u",
+            [autolink]
+        ))])));
+
         // A link inside image alt text is valid.
         let image = Inline::Image(Image {
             meta: NodeMeta::default(),
@@ -503,39 +495,41 @@ mod review_validate {
     }
 
     #[test]
-    fn an_autolink_form_that_does_not_fit_its_content_is_invalid() {
-        let link = |form, destination: &str, text: &str| {
-            let mut link = Link::new(destination, [Text::from(text)]);
-            link.form = form;
-            paragraph(vec![Inline::Link(link)])
-        };
-        assert!(invalid(&link(LinkForm::LiteralAutolink, "http://a.b", "x")));
-        assert!(invalid(&link(
-            LinkForm::LiteralAutolink,
-            "http://a.b",
-            "a.b"
-        )));
-        assert!(invalid(&link(
-            LinkForm::LiteralAutolink,
-            "mailto:a.b",
-            "a.b"
-        )));
-        assert!(invalid(&link(LinkForm::AngleAutolink, "http://a.b", "a b")));
-        let mut titled = Link::new("http://a.b", [Text::from("http://a.b")]);
-        titled.form = LinkForm::AngleAutolink;
-        titled.title = Some("t".into());
-        titled.title_kind = Some(LinkTitleKind::DoubleQuote);
-        assert!(invalid(&paragraph(vec![Inline::Link(titled)])));
-
-        for (form, destination, text) in [
-            (LinkForm::LiteralAutolink, "http://a.b", "http://a.b"),
-            (LinkForm::LiteralAutolink, "http://www.a.b", "www.a.b"),
-            (LinkForm::LiteralAutolink, "mailto:a@b.c", "a@b.c"),
-            (LinkForm::AngleAutolink, "mailto:a@b.c", "a@b.c"),
-            (LinkForm::AngleAutolink, "irc://a", "irc://a"),
+    fn an_autolink_whose_text_is_not_one_autolink_of_its_form_is_invalid() {
+        let autolink =
+            |form, text: &str| paragraph(vec![Inline::Autolink(Autolink::new(form, text))]);
+        for text in [
+            "x",
+            "a.b",
+            // The parser's `http://` is case-sensitive.
+            "HTTP://a.b",
+            // The parser trims trailing punctuation off a literal URL.
+            "http://a.b.",
+            "wwwx.a.b",
+            "http://a.b c",
         ] {
-            let document = link(form, destination, text);
-            assert!(document.validate().is_empty(), "{destination}");
+            assert!(invalid(&autolink(AutolinkForm::Literal, text)), "{text}");
+        }
+        for text in ["a b", "http://a.b>", ""] {
+            assert!(invalid(&autolink(AutolinkForm::Angle, text)), "{text}");
+        }
+
+        for (form, text, destination) in [
+            (AutolinkForm::Literal, "http://a.b", "http://a.b"),
+            (AutolinkForm::Literal, "www.a.b", "http://www.a.b"),
+            (AutolinkForm::Literal, "a@b.c", "mailto:a@b.c"),
+            (AutolinkForm::Literal, "mailto:a@b.c", "mailto:a@b.c"),
+            (AutolinkForm::Literal, "xmpp:a@b.c/d", "xmpp:a@b.c/d"),
+            (AutolinkForm::Angle, "a@b.c", "mailto:a@b.c"),
+            (AutolinkForm::Angle, "irc://a", "irc://a"),
+            (AutolinkForm::Angle, "HTTP://a.b.", "HTTP://a.b."),
+        ] {
+            assert_eq!(
+                Autolink::new(form, text).destination().as_deref(),
+                Some(destination)
+            );
+            let document = autolink(form, text);
+            assert!(document.validate().is_empty(), "{text}");
             let markdown = document.to_markdown().unwrap();
             assert_eq!(
                 format!(
@@ -544,6 +538,26 @@ mod review_validate {
                 ),
                 format!("{:?}", crate::normalize::normalized(&document.children)),
                 "{markdown:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_character_reference_must_be_exactly_one_reference() {
+        let reference = |text: &str| {
+            paragraph(vec![Inline::CharacterReference(CharacterReference::new(
+                text,
+            ))])
+        };
+        for text in ["", "amp", "&amp", "&amp;x", "&amp;&amp;", "&nosuch;", "&#;"] {
+            assert!(invalid(&reference(text)), "{text}");
+            assert_eq!(CharacterReference::new(text).value(), None, "{text}");
+        }
+        for (text, value) in [("&amp;", "&"), ("&#x20;", " "), ("&#0;", "\u{FFFD}")] {
+            assert!(reference(text).validate().is_empty(), "{text}");
+            assert_eq!(
+                CharacterReference::new(text).value().as_deref(),
+                Some(value)
             );
         }
     }

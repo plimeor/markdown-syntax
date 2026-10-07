@@ -105,25 +105,20 @@ fn inlines(inlines: &mut [Inline]) {
         match inline {
             Inline::Text(node) => string(&mut node.value),
             Inline::Escape(_) | Inline::SoftBreak(_) | Inline::LineBreak(_) => {}
-            Inline::CharacterReference(node) => {
-                string(&mut node.reference);
-                string(&mut node.value);
-            }
+            Inline::CharacterReference(node) => string(&mut node.reference),
             Inline::Emphasis(node) => self::inlines(&mut node.children),
             Inline::Strong(node) => self::inlines(&mut node.children),
             Inline::Delete(node) => self::inlines(&mut node.children),
             Inline::Mark(node) => self::inlines(&mut node.children),
             Inline::InlineFootnote(node) => self::inlines(&mut node.children),
             Inline::Shortcode(node) => string(&mut node.name),
-            Inline::Code(node) => {
-                string(&mut node.value);
-                string(&mut node.raw);
-            }
+            Inline::Code(node) => string(&mut node.value),
             Inline::Link(node) => {
                 string(&mut node.destination);
                 optional(&mut node.title);
                 self::inlines(&mut node.children);
             }
+            Inline::Autolink(node) => string(&mut node.text),
             Inline::Image(node) => {
                 string(&mut node.destination);
                 optional(&mut node.title);

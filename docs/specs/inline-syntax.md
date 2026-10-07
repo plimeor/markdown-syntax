@@ -114,7 +114,7 @@ non-whitespace char.
 
 #### Scenario: Email after a colon
 - **WHEN** `":noreply@example.com"` is parsed with `parse`
-- **THEN** the paragraph holds `Text(":")` and a `Link` to `mailto:noreply@example.com`, and no `TextDirective`
+- **THEN** the paragraph holds `Text(":")` and an `Autolink` to `mailto:noreply@example.com`, and no `TextDirective`
 
 #### Scenario: Domain after a colon
 - **WHEN** `":www.example.com"` is parsed with `parse`
@@ -168,9 +168,9 @@ the closing `$` is not preceded by whitespace.
 ### Requirement: Literal autolinks
 The parser SHALL turn bare `www.`, `http://`, and `https://` URLs and email
 addresses, including those written with a `mailto:` or `xmpp:` prefix, into
-`Link` nodes whose one child is a `Text` holding the matched source text and
-whose destination is that text with `http://` or `mailto:` prepended where the
-form needs it; it SHALL NOT link a bare URL with any other scheme. The extent
+literal `Autolink` nodes holding the matched source text, whose destination is
+that text with `http://` or `mailto:` prepended where the form needs it; it
+SHALL NOT link a bare URL with any other scheme. The extent
 of a literal autolink SHALL follow the GFM specification, except that it SHALL
 also end before the first Unicode whitespace char, `<`, non-ASCII char in
 CommonMark's Unicode punctuation set (the Unicode `P` and `S` categories)
@@ -182,31 +182,31 @@ tab, or line ending.
 
 #### Scenario: Trailing numeric reference
 - **WHEN** `"www.a.b&#x41;"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `http://www.a.b&#x41` and `Text(";")`
+- **THEN** the paragraph holds an `Autolink` to `http://www.a.b&#x41` and `Text(";")`
 
 #### Scenario: Bare URL
 - **WHEN** `"see https://example.com"` is parsed with `parse`
-- **THEN** the paragraph holds `Text("see ")` and a `Link` to `https://example.com` whose text is `https://example.com`
+- **THEN** the paragraph holds `Text("see ")` and an `Autolink` to `https://example.com` whose text is `https://example.com`
 
 #### Scenario: Full-width punctuation after a URL
 - **WHEN** `"见 https://example.com/page，然后 [[笔记]]"` is parsed with `parse`
-- **THEN** the paragraph holds `Text("见 ")`, a `Link` to `https://example.com/page`, `Text("，然后 ")`, and a `WikiLink` with target `笔记`
+- **THEN** the paragraph holds `Text("见 ")`, an `Autolink` to `https://example.com/page`, `Text("，然后 ")`, and a `WikiLink` with target `笔记`
 
 #### Scenario: Full stop after a `www` domain
 - **WHEN** `"www.example.com。下一句"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `http://www.example.com` followed by `Text("。下一句")`
+- **THEN** the paragraph holds an `Autolink` to `http://www.example.com` followed by `Text("。下一句")`
 
 #### Scenario: Attached wikilink
 - **WHEN** `"see https://example.com/a[[b]] end"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `https://example.com/a` followed by a `WikiLink` with target `b`
+- **THEN** the paragraph holds an `Autolink` to `https://example.com/a` followed by a `WikiLink` with target `b`
 
 #### Scenario: Enumeration comma between links
 - **WHEN** `"https://example.com/page#section、[[笔记#小节]]、"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `https://example.com/page#section`, `Text("、")`, a `WikiLink`, and `Text("、")`
+- **THEN** the paragraph holds an `Autolink` to `https://example.com/page#section`, `Text("、")`, a `WikiLink`, and `Text("、")`
 
 #### Scenario: Non-ASCII letters in a path
 - **WHEN** `"https://zh.wikipedia.org/wiki/中文 x"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `https://zh.wikipedia.org/wiki/中文` followed by `Text(" x")`
+- **THEN** the paragraph holds an `Autolink` to `https://zh.wikipedia.org/wiki/中文` followed by `Text(" x")`
 
 #### Scenario: Other schemes stay text
 - **WHEN** `"见 smb://host/share，然后 ftp://a.b"` is parsed with `parse`
@@ -214,7 +214,7 @@ tab, or line ending.
 
 #### Scenario: Prefixed email forms
 - **WHEN** `"mailto:a@b.c and xmpp:a@b.c/r"` is parsed with `parse`
-- **THEN** the paragraph holds a `Link` to `mailto:a@b.c`, `Text(" and ")`, and a `Link` to `xmpp:a@b.c/r`
+- **THEN** the paragraph holds an `Autolink` to `mailto:a@b.c`, `Text(" and ")`, and an `Autolink` to `xmpp:a@b.c/r`
 
 #### Scenario: No-break space before an email
 - **WHEN** `"\u{a0}e+@"` is parsed with `parse`
@@ -282,19 +282,19 @@ space; any other whitespace char is matched as written.
 - **THEN** the paragraph holds no `LinkReference`
 
 ### Requirement: Angle-bracket autolink URI
-The parser SHALL read `<scheme:rest>` as a `Link` whose one child is a `Text`
-holding the URI as written and whose destination is the URI, and `<email>` as
-a `Link` to `mailto:` and the address, when the scheme is valid and the rest
+The parser SHALL read `<scheme:rest>` as an angle-bracket `Autolink` holding
+the URI as written, whose destination is the URI, and `<email>` as one to
+`mailto:` and the address, when the scheme is valid and the rest
 holds no space, ASCII control char, `<`, or `>`; any other whitespace char is
 part of the URI.
 
 #### Scenario: No-break space in an angle-bracket autolink
 - **WHEN** `"<http://a\u{a0}b>"` is parsed
-- **THEN** the paragraph holds a `Link` to `http://a\u{a0}b` whose text is `http://a\u{a0}b`
+- **THEN** the paragraph holds an `Autolink` to `http://a\u{a0}b` whose text is `http://a\u{a0}b`
 
 #### Scenario: Email
 - **WHEN** `"<a@b.c>"` is parsed
-- **THEN** the paragraph holds a `Link` to `mailto:a@b.c` whose text is `a@b.c`
+- **THEN** the paragraph holds an `Autolink` to `mailto:a@b.c` whose text is `a@b.c`
 
 ### Requirement: Hard line breaks from spaces
 A line ending SHALL be a hard break when two or more spaces the source holds,

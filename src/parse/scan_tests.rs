@@ -64,7 +64,7 @@ mod reference {
         None
     }
 
-    pub(super) fn parse_code_span(input: &str, index: usize) -> Option<(usize, CodeSpanSource)> {
+    pub(super) fn parse_code_span(input: &str, index: usize) -> Option<(usize, String)> {
         let len = input[index..]
             .as_bytes()
             .iter()
@@ -72,14 +72,9 @@ mod reference {
             .count();
         let search_start = index + len;
         let close = find_code_span_close(input, search_start, len)?;
-        let raw = &input[search_start..close];
         Some((
             close + len,
-            CodeSpanSource {
-                value: normalize_code_span(raw),
-                raw: raw.into(),
-                fence_length: len,
-            },
+            normalize_code_span(&input[search_start..close]),
         ))
     }
 
@@ -668,13 +663,11 @@ fn code_span_ends_match_the_reference_scan() {
         if input.as_bytes().get(index) != Some(&b'`') {
             return;
         }
-        let fields =
-            |(end, span): (usize, CodeSpanSource)| (end, span.value, span.raw, span.fence_length);
-        let expected = reference::parse_code_span(input, index).map(fields);
-        let found = parse_code_span_with(&mut scan.lookups, input, index).map(fields);
+        let expected = reference::parse_code_span(input, index);
+        let found = parse_code_span_with(&mut scan.lookups, input, index);
         assert_eq!(found, expected, "{input:?} at {index}");
         let end = code_span_end(&mut scan.lookups, input, index);
-        assert_eq!(end, expected.map(|(end, ..)| end), "{input:?} at {index}");
+        assert_eq!(end, expected.map(|(end, _)| end), "{input:?} at {index}");
     });
 }
 
@@ -763,7 +756,8 @@ fn character_references_match_the_reference_scan() {
 fn literal_autolink_scans_match_the_reference_scan() {
     for_each_scan(15, |input, scan, index| {
         let found_email =
-            parse_literal_email(input, index, &mut scan.literal_autolinks.email_local);
+            parse_literal_email(input, index, &mut scan.literal_autolinks.email_local)
+                .map(|(end, prefix)| (end, alloc::format!("{prefix}{}", &input[index..end])));
         assert_eq!(
             found_email,
             reference::parse_literal_email(input, index),
@@ -782,6 +776,25 @@ fn literal_autolink_scans_match_the_reference_scan() {
             "{input:?} at {index}"
         );
     });
+}
+
+#[test]
+fn every_literal_autolink_the_parser_reads_has_its_destination() {
+    for input in generated_inputs(700, 40, 16) {
+        for index in boundaries(&input) {
+            let Some((end, prefix)) =
+                parse_literal_autolink(&input, index, &mut LiteralAutolinkScan::default())
+            else {
+                continue;
+            };
+            let text = &input[index..end];
+            assert_eq!(
+                literal_autolink_destination(text),
+                Some(alloc::format!("{prefix}{text}")),
+                "{input:?} at {index}"
+            );
+        }
+    }
 }
 
 #[test]

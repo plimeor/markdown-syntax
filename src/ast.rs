@@ -433,6 +433,8 @@ pub enum Inline {
     Code(CodeInline),
     /// An inline link: `[text](url)`.
     Link(Link),
+    /// An autolink: `<https://example.com>` or a bare literal URL or email.
+    Autolink(Autolink),
     /// An inline image: `![alt](url)`.
     Image(Image),
     /// A reference link: `[text][label]`.
@@ -475,15 +477,14 @@ pub struct Escape {
     pub value: char,
 }
 
-/// A character reference such as `&amp;` or `&#247;`.
+/// A character reference such as `&amp;` or `&#247;`. The reference as
+/// written is the node's one fact; [`CharacterReference::value`] decodes it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CharacterReference {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// The reference as written, including `&` and `;` (e.g. `amp` for `&amp;`).
+    /// The reference as written, including `&` and `;` (e.g. `&amp;`).
     pub reference: String,
-    /// The resolved character value (e.g. `&` for `&amp;`).
-    pub value: String,
 }
 
 /// Emphasis (typically italic): `*text*` or `_text_`.
@@ -545,29 +546,23 @@ pub struct Shortcode {
     pub name: String,
 }
 
-/// An inline code span: `` `code` ``.
+/// An inline code span: `` `code` ``. The fence and the padding spaces are
+/// not recorded: the serializer chooses them from the value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodeInline {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// The normalized code text (trimmed/collapsed per CommonMark).
+    /// The code text, normalized as CommonMark reads it: line endings as
+    /// spaces, and one space stripped from each end when both ends hold one
+    /// and the text is not all spaces.
     pub value: String,
-    /// The raw text between the backtick fences, before normalization.
-    pub raw: String,
-    /// The number of backticks in the fence.
-    pub fence_length: usize,
 }
 
-/// An inline link: `[text](destination "title")`. An autolink, `<url>` or a
-/// bare literal URL or email, is a `Link` whose one child is a `Text` holding
-/// the URL as written, with no title; [`Link::form`] records which of the
-/// three was written.
+/// An inline link: `[text](destination "title")`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// How the link was written.
-    pub form: LinkForm,
     /// The link target URL.
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
@@ -580,16 +575,29 @@ pub struct Link {
     pub children: Vec<Inline>,
 }
 
-/// How a [`Link`] was written.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum LinkForm {
-    /// `[text](destination "title")`.
-    #[default]
-    Inline,
-    /// An angle-bracket autolink: `<https://example.com>`.
-    AngleAutolink,
+/// An autolink: `<https://example.com>`, `<a@b.c>`, or a GFM literal
+/// autolink, a bare `https://…`, `www.…`, or email address. The text as
+/// written is the node's one fact; [`Autolink::destination`] derives the link
+/// target from it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Autolink {
+    /// Node metadata (source span). An angle-bracket autolink's span covers
+    /// its brackets.
+    pub meta: NodeMeta,
+    /// Which autolink syntax the text is written in.
+    pub form: AutolinkForm,
+    /// The URL or address as written, without an angle-bracket autolink's
+    /// brackets.
+    pub text: String,
+}
+
+/// How an [`Autolink`] is written.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutolinkForm {
+    /// An angle-bracket autolink: `<https://example.com>` or `<a@b.c>`.
+    Angle,
     /// A GFM literal autolink: a bare `https://…`, `www.…`, or email address.
-    LiteralAutolink,
+    Literal,
 }
 
 /// An inline image: `![alt](destination "title")`.
@@ -864,6 +872,7 @@ impl_meta_accessors!(Inline {
     Shortcode,
     Code,
     Link,
+    Autolink,
     Image,
     LinkReference,
     ImageReference,
@@ -880,7 +889,7 @@ impl_meta_accessors!(Inline {
 impl_from_variants!(Inline {
     Text(Text), Escape(Escape), CharacterReference(CharacterReference),
     Emphasis(Emphasis), Strong(Strong), Delete(Delete), Mark(Mark),
-    Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
+    Shortcode(Shortcode), Code(CodeInline), Link(Link), Autolink(Autolink), Image(Image),
     LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
     SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
@@ -904,6 +913,48 @@ impl Inline {
             Inline::InlineFootnote(n) => &n.children,
             Inline::TextDirective(n) => &n.label,
             _ => &[],
+        }
+    }
+}
+
+impl CharacterReference {
+    /// A character reference node for `reference`, written with its `&` and
+    /// `;` (e.g. `&amp;`).
+    pub fn new(reference: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            reference: reference.into(),
+        }
+    }
+
+    /// The character the reference decodes to, or `None` when
+    /// [`reference`](Self::reference) is not exactly one character reference.
+    /// A valid document holds only references that decode.
+    pub fn value(&self) -> Option<String> {
+        crate::parse::decode_character_reference(&self.reference)
+    }
+}
+
+impl Autolink {
+    /// An autolink of `form` whose text is `text`.
+    pub fn new(form: AutolinkForm, text: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            form,
+            text: text.into(),
+        }
+    }
+
+    /// The link target the text writes, or `None` when the text is not
+    /// exactly one autolink of its form. An angle-bracket URI links to itself
+    /// and an email address to it after `mailto:`; a literal `www.` domain
+    /// links to it after `http://`, a literal email address to it after
+    /// `mailto:`, and any other literal autolink to itself. A valid document
+    /// holds only autolinks with a destination.
+    pub fn destination(&self) -> Option<String> {
+        match self.form {
+            AutolinkForm::Angle => crate::parse::angle_autolink_destination(&self.text),
+            AutolinkForm::Literal => crate::parse::literal_autolink_destination(&self.text),
         }
     }
 }
@@ -977,7 +1028,6 @@ impl Link {
     {
         Self {
             meta: NodeMeta::default(),
-            form: LinkForm::Inline,
             destination: destination.into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,
@@ -988,14 +1038,11 @@ impl Link {
 }
 
 impl CodeInline {
-    /// An inline code span with a single-backtick fence.
+    /// An inline code span holding `value`.
     pub fn new(value: impl Into<String>) -> Self {
-        let value = value.into();
         Self {
             meta: NodeMeta::default(),
-            raw: value.clone(),
-            value,
-            fence_length: 1,
+            value: value.into(),
         }
     }
 }

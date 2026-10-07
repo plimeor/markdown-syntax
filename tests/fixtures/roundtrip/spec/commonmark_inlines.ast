@@ -3,7 +3,7 @@ Document
     Text "Escaped "
     Escape "*"
     Text " text with "
-    Code value="code" raw="code" fence=1
+    Code value="code"
     Text " and "
     Strong delimiter=*
       Text "strong "
@@ -20,11 +20,9 @@ Document
     Text " but foo_bar stays."
     SoftBreak
     Text "Autolink "
-    Link form=angle destination=https://example.com title=none
-      Text "https://example.com"
+    Autolink form=angle text="https://example.com" destination=https://example.com
     Text " and email "
-    Link form=angle destination=mailto:a@example.com title=none
-      Text "a@example.com"
+    Autolink form=angle text="a@example.com" destination=mailto:a@example.com
     Text "."
     SoftBreak
     Text "Backslash hard break"

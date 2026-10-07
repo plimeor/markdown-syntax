@@ -403,9 +403,9 @@ mod review_inline {
         );
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Link(autolink)]
-                if autolink.destination
-                    == "mailto:asd@012345678901234567890123456789012345678901234567890123456789012"
+            [Inline::Autolink(autolink)]
+                if autolink.destination().as_deref()
+                    == Some("mailto:asd@012345678901234567890123456789012345678901234567890123456789012")
         ));
     }
 
@@ -452,7 +452,7 @@ mod review_inline {
         let inlines = only_paragraph("www.aaa.bbb_bbb.ccc.ddd\n");
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Link(autolink)] if autolink.destination == "http://www.aaa.bbb_bbb.ccc.ddd"
+            [Inline::Autolink(autolink)] if autolink.destination().as_deref() == Some("http://www.aaa.bbb_bbb.ccc.ddd")
         ));
     }
 
@@ -461,7 +461,7 @@ mod review_inline {
         let inlines = only_paragraph("a@a_b.c\n");
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Link(autolink)] if autolink.destination == "mailto:a@a_b.c"
+            [Inline::Autolink(autolink)] if autolink.destination().as_deref() == Some("mailto:a@a_b.c")
         ));
     }
 
@@ -477,10 +477,13 @@ mod review_inline {
     #[test]
     fn hg2_literal_link_excludes_trailing_entity_run() {
         let inlines = only_paragraph("www.example.com&xxx;.\n");
-        let [Inline::Link(autolink), Inline::Text(rest)] = inlines.as_slice() else {
+        let [Inline::Autolink(autolink), Inline::Text(rest)] = inlines.as_slice() else {
             panic!("expected an autolink followed by literal text, got {inlines:?}");
         };
-        assert_eq!(autolink.destination, "http://www.example.com");
+        assert_eq!(
+            autolink.destination().as_deref(),
+            Some("http://www.example.com")
+        );
         assert_eq!(rest.value, "&xxx;.");
     }
 
@@ -489,7 +492,7 @@ mod review_inline {
         let inlines = only_paragraph("www.example.com&xxx\n");
         assert!(matches!(
             inlines.as_slice(),
-            [Inline::Link(autolink)] if autolink.destination == "http://www.example.com&xxx"
+            [Inline::Autolink(autolink)] if autolink.destination().as_deref() == Some("http://www.example.com&xxx")
         ));
     }
 
@@ -601,7 +604,9 @@ mod escapes_and_references {
             .map(|inline| match inline {
                 Inline::Text(text) => format!("{:?}", text.value),
                 Inline::Escape(escape) => format!("Escape({})", escape.value),
-                Inline::CharacterReference(reference) => format!("Ref({})", reference.value),
+                Inline::CharacterReference(reference) => {
+                    format!("Ref({})", reference.value().unwrap_or_default())
+                }
                 Inline::Code(code) => format!("Code({})", code.value),
                 Inline::Html(html) => format!("Html({})", html.value),
                 Inline::Math(math) => format!("Math({})", math.value),
@@ -732,11 +737,12 @@ mod wiki_embeds {
 }
 
 mod autolinks_as_links {
-    //! Literal and angle-bracket autolinks are `Link` nodes whose one child is
-    //! the URL as written.
+    //! Literal and angle-bracket autolinks are `Autolink` nodes holding the
+    //! URL as written, from which their destination derives.
 
     use markdown_syntax::prelude::*;
 
+    /// The destination and text of the paragraph's one link or autolink.
     fn only_link(source: &str) -> (String, String) {
         let document = parse(source).document;
         let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
@@ -746,19 +752,27 @@ mod autolinks_as_links {
             .children
             .iter()
             .filter_map(|inline| match inline {
-                Inline::Link(link) => Some(link),
+                Inline::Link(link) => {
+                    assert!(link.title.is_none());
+                    assert_eq!(link.destination_kind, LinkDestinationKind::Bare);
+                    let [Inline::Text(text)] = link.children.as_slice() else {
+                        panic!("{source:?}: {link:?}");
+                    };
+                    Some((link.destination.clone(), text.value.clone()))
+                }
+                Inline::Autolink(autolink) => Some((
+                    autolink
+                        .destination()
+                        .expect("a parsed autolink has a destination"),
+                    autolink.text.clone(),
+                )),
                 _ => None,
             })
             .collect();
         let [link] = links.as_slice() else {
             panic!("{source:?}: {paragraph:?}");
         };
-        assert!(link.title.is_none());
-        assert_eq!(link.destination_kind, LinkDestinationKind::Bare);
-        let [Inline::Text(text)] = link.children.as_slice() else {
-            panic!("{source:?}: {link:?}");
-        };
-        (link.destination.clone(), text.value.clone())
+        link.clone()
     }
 
     #[test]
@@ -813,7 +827,9 @@ mod literal_autolink_boundaries {
             .iter()
             .map(|inline| match inline {
                 Inline::Text(text) => format!("text {}", text.value),
-                Inline::Link(link) => format!("link {}", link.destination),
+                Inline::Autolink(autolink) => {
+                    format!("link {}", autolink.destination().unwrap_or_default())
+                }
                 Inline::WikiLink(wiki) => format!("wiki {}", wiki.target),
                 other => format!("{other:?}"),
             })
@@ -979,7 +995,7 @@ mod gemoji_shortcodes {
             matches!(
                 inlines.as_slice(),
                 [Inline::CharacterReference(reference), Inline::Shortcode(shortcode)]
-                    if reference.value == "a" && shortcode.name == "smile"
+                    if reference.value().as_deref() == Some("a") && shortcode.name == "smile"
             ),
             "{inlines:?}"
         );
@@ -1056,8 +1072,8 @@ mod autolinks_inside_link_text {
             panic!("{document:?}");
         };
         assert!(
-            matches!(paragraph.children.as_slice(), [Inline::Link(link), Inline::Escape(escape), Inline::Text(_)]
-                if link.destination == "http://www.a.com" && escape.value == '*'),
+            matches!(paragraph.children.as_slice(), [Inline::Autolink(link), Inline::Escape(escape), Inline::Text(_)]
+                if link.destination().as_deref() == Some("http://www.a.com") && escape.value == '*'),
             "{:?}",
             paragraph.children
         );
@@ -1122,8 +1138,8 @@ mod literal_autolink_trailing_references {
             assert!(
                 matches!(
                     paragraph.children.as_slice(),
-                    [Inline::Link(link), Inline::Text(text)]
-                        if link.destination == destination && text.value == ";"
+                    [Inline::Autolink(link), Inline::Text(text)]
+                        if link.destination().as_deref() == Some(destination) && text.value == ";"
                 ),
                 "{source:?}: {:?}",
                 paragraph.children

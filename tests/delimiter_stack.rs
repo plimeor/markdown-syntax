@@ -360,11 +360,13 @@ fn a_footnote_label_holds_no_unescaped_bracket() {
 #[test]
 fn an_angle_autolink_holds_whitespace_other_than_a_space() {
     let document = parse("<http://a\u{a0}b>").document;
-    let debug = format!("{:?}", document.children);
-    assert!(
-        debug.contains("destination: \"http://a\\u{a0}b\""),
-        "{debug}"
-    );
+    let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+        panic!("{:?}", document.children);
+    };
+    let [Inline::Autolink(autolink)] = paragraph.children.as_slice() else {
+        panic!("{paragraph:?}");
+    };
+    assert_eq!(autolink.destination().as_deref(), Some("http://a\u{a0}b"));
     assert!(document.validate().is_empty());
     assert_eq!(document.to_markdown().unwrap(), "<http://a\u{a0}b>\n");
 }
@@ -379,7 +381,7 @@ fn a_referenced_space_makes_no_hard_break() {
         matches!(
             paragraph.children.as_slice(),
             [Inline::Text(text), Inline::CharacterReference(space), Inline::SoftBreak(_), Inline::Text(_)]
-                if text.value == "a" && space.value == " "
+                if text.value == "a" && space.value().as_deref() == Some(" ")
         ),
         "{blocks:?}"
     );

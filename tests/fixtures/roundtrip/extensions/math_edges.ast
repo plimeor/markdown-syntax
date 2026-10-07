@@ -30,7 +30,7 @@ Document
     Text "."
     SoftBreak
     Text "Unclosed code math stays text: $"
-    Code value="2+2" raw="2+2" fence=1
+    Code value="2+2"
     Text "."
   Paragraph
     Text "This is block math"

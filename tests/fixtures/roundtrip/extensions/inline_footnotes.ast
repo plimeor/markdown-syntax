@@ -22,7 +22,7 @@ Document
       Text "Inline note"
     Text "."
   Paragraph
-    Code value="^[nope]" raw="^[nope]" fence=1
+    Code value="^[nope]"
     Text " and yes "
     InlineFootnote
       Text "ok"

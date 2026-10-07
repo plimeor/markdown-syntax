@@ -1842,7 +1842,6 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
     match (target, image) {
         (LinkTarget::Resource(resource), false) => Inline::Link(Link {
             meta,
-            form: LinkForm::Inline,
             destination: resource.destination,
             destination_kind: resource.destination_kind,
             title: resource.title,
@@ -1878,26 +1877,12 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
     }
 }
 
-/// An autolink written in `form`: a `Link` spanning `span` to `destination`,
-/// whose one child is the URL as written, `text`, spanning `text_span`.
-fn autolink_node(
-    form: LinkForm,
-    span: Span,
-    text_span: Span,
-    destination: String,
-    text: &str,
-) -> Inline {
-    Inline::Link(Link {
+/// An autolink written in `form` as `text`, spanning `span`.
+fn autolink_node(form: AutolinkForm, span: Span, text: &str) -> Inline {
+    Inline::Autolink(Autolink {
         meta: NodeMeta::new(Some(span)),
         form,
-        destination,
-        destination_kind: LinkDestinationKind::Bare,
-        title: None,
-        title_kind: None,
-        children: vec![Inline::Text(Text {
-            meta: NodeMeta::new(Some(text_span)),
-            value: text.into(),
-        })],
+        text: text.into(),
     })
 }
 
@@ -1907,18 +1892,10 @@ fn autolink_node(
 fn demote_links(nodes: &mut Vec<Inline>) {
     for node in nodes.iter_mut() {
         match node {
-            Inline::Link(link) => {
-                let value = link
-                    .children
-                    .iter()
-                    .map(|child| match child {
-                        Inline::Text(text) => text.value.as_str(),
-                        _ => "",
-                    })
-                    .collect::<String>();
+            Inline::Autolink(autolink) => {
                 *node = Inline::Text(Text {
-                    meta: link.meta.clone(),
-                    value,
+                    meta: autolink.meta.clone(),
+                    value: core::mem::take(&mut autolink.text),
                 });
             }
             Inline::Emphasis(node) => demote_links(&mut node.children),
@@ -2356,12 +2333,11 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'&' {
-            if let Some((end, value)) = parse_character_reference(input, index) {
+            if let Some((end, _)) = parse_character_reference(input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::CharacterReference(CharacterReference {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     reference: input[index..end].into(),
-                    value,
                 }));
                 index = end;
                 text_start = index;
@@ -2447,15 +2423,11 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'`' {
-            if let Some((end, code_span)) =
-                parse_code_span_with(&mut pass.scan.lookups, input, index)
-            {
+            if let Some((end, value)) = parse_code_span_with(&mut pass.scan.lookups, input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Code(CodeInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
-                    value: code_span.value,
-                    raw: code_span.raw,
-                    fence_length: code_span.fence_length,
+                    value,
                 }));
                 index = end;
                 text_start = index;
@@ -2508,16 +2480,13 @@ fn parse_inline_content(
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
             if literal_autolinks {
-                if let Some((end, destination)) =
+                if let Some((end, _)) =
                     parse_literal_autolink(input, index, &mut pass.scan.literal_autolinks)
                 {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    let span = Span::new(base_offset + index, base_offset + end);
                     nodes.push(autolink_node(
-                        LinkForm::LiteralAutolink,
-                        span,
-                        span,
-                        destination,
+                        AutolinkForm::Literal,
+                        Span::new(base_offset + index, base_offset + end),
                         &input[index..end],
                     ));
                     index = end;
@@ -2720,16 +2689,13 @@ fn parse_inline_content(
         // A bare URL is an autolink even inside an open bracket; if the bracket
         // forms a link, `demote_links` turns it back into text.
         if literal_autolinks {
-            if let Some((end, destination)) =
+            if let Some((end, _)) =
                 parse_literal_autolink(input, index, &mut pass.scan.literal_autolinks)
             {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                let span = Span::new(base_offset + index, base_offset + end);
                 nodes.push(autolink_node(
-                    LinkForm::LiteralAutolink,
-                    span,
-                    span,
-                    destination,
+                    AutolinkForm::Literal,
+                    Span::new(base_offset + index, base_offset + end),
                     &input[index..end],
                 ));
                 index = end;
@@ -2741,13 +2707,11 @@ fn parse_inline_content(
         if bytes[index] == b'<' {
             if let Some(end) = pass.scan.lookups.find(">", index).map(|close| close + 1) {
                 let uri = &input[index + 1..end - 1];
-                if let Some(destination) = angle_autolink_destination(uri) {
+                if is_angle_autolink(uri) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(autolink_node(
-                        LinkForm::AngleAutolink,
+                        AutolinkForm::Angle,
                         Span::new(base_offset + index, base_offset + end),
-                        Span::new(base_offset + index + 1, base_offset + end - 1),
-                        destination,
                         uri,
                     ));
                     index = end;
@@ -3025,12 +2989,8 @@ fn is_inline_container(inline: &Inline) -> bool {
 /// autolink, which keeps open brackets from nothing, does not count.
 fn contains_link_inline(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| {
-        let formed = match inline {
-            Inline::Link(link) => link.form == LinkForm::Inline,
-            Inline::LinkReference(_) => true,
-            _ => false,
-        };
-        formed || contains_link_inline(inline.children())
+        matches!(inline, Inline::Link(_) | Inline::LinkReference(_))
+            || contains_link_inline(inline.children())
     })
 }
 
@@ -3453,28 +3413,18 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
     ))
 }
 
-struct CodeSpanSource {
-    value: String,
-    raw: String,
-    fence_length: usize,
-}
-
+/// The end and the normalized value of the code span opening at `index`.
 fn parse_code_span_with(
     lookups: &mut impl Lookups,
     input: &str,
     index: usize,
-) -> Option<(usize, CodeSpanSource)> {
+) -> Option<(usize, String)> {
     let len = backtick_run_len(input, index);
     let search_start = index + len;
     let close = lookups.code_span_close(search_start, len)?;
-    let raw = &input[search_start..close];
     Some((
         close + len,
-        CodeSpanSource {
-            value: normalize_code_span(raw),
-            raw: raw.into(),
-            fence_length: len,
-        },
+        normalize_code_span(&input[search_start..close]),
     ))
 }
 
@@ -3991,6 +3941,14 @@ fn skip_link_resource_space_with_info(input: &str, mut index: usize) -> Option<(
         }
     }
     Some((index, had_space))
+}
+
+/// The character `reference` decodes to, when it is exactly one character
+/// reference.
+pub(crate) fn decode_character_reference(reference: &str) -> Option<String> {
+    parse_character_reference(reference, 0)
+        .filter(|(end, _)| *end == reference.len())
+        .map(|(_, value)| value)
 }
 
 pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
@@ -4802,18 +4760,40 @@ fn is_email_autolink(input: &str) -> bool {
     is_email_local_part(&input[..at]) && is_email_domain(&input[at + 1..], 1)
 }
 
+/// The destination of a literal autolink written as `text`, when `text` is
+/// exactly one literal autolink the inline parser can read: the text after the
+/// prefix `parse_literal_autolink` gives it.
+///
+/// Whether a literal autolink forms depends in part on what follows it:
+/// cmark-gfm's domain check counts the `.` and `_` in the punctuation trimmed
+/// off its end, `www.` at a line start links `www`, and a bracketed host's
+/// `]` is looked for anywhere after it. So `text` is read at a line start and
+/// followed by what lets the most through, `..`, a space, and a `]`: every
+/// literal autolink the parser reads has a destination, and a text the parser
+/// would trim never does.
+pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
+    let mut input = String::from(text);
+    input.push_str(".. ]");
+    let (end, prefix) = parse_literal_autolink(&input, 0, &mut LiteralAutolinkScan::default())?;
+    (end == text.len()).then(|| {
+        let mut destination = String::from(prefix);
+        destination.push_str(text);
+        destination
+    })
+}
+
 // GFM literal-autolink dispatch. Tries, in order: `http(s)://` URLs, `www.`
 // URLs, extended-protocol (`mailto:`/`xmpp:`) emails, and bare emails. Each
 // branch enforces cmark-gfm's per-scheme preceding-character guard and its
-// domain/host rules; the trailing trim is shared (`autolink_delim`). The
-// returned destination is the synthesized href (a `http://`/`mailto:` prefix
-// may be prepended); the caller keeps `input[index..end]` as the visible
-// original.
+// domain/host rules; the trailing trim is shared (`autolink_delim`). Returns
+// the end and the prefix the destination puts before `input[index..end]`, the
+// visible original: `http://` for a `www.` URL, `mailto:` for a bare email,
+// and nothing otherwise.
 fn parse_literal_autolink(
     input: &str,
     index: usize,
     scan: &mut LiteralAutolinkScan,
-) -> Option<(usize, String)> {
+) -> Option<(usize, &'static str)> {
     let rest = &input[index..];
 
     // `http://` / `https://` URLs. cmark requires the char before the scheme
@@ -4840,7 +4820,7 @@ fn parse_literal_autolink(
         if scan.suppressed_by_link_label(input, index, end) {
             return None;
         }
-        return Some((end, input[index..end].into()));
+        return Some((end, ""));
     }
 
     // `www.` URLs (synthesize a `http://` href). cmark allows the preceding
@@ -4861,9 +4841,7 @@ fn parse_literal_autolink(
         if scan.suppressed_by_link_label(input, index, end) {
             return None;
         }
-        let mut destination = String::from("http://");
-        destination.push_str(&input[index..end]);
-        return Some((end, destination));
+        return Some((end, "http://"));
     }
 
     parse_literal_email(input, index, &mut scan.email_local)
@@ -5227,7 +5205,7 @@ fn parse_literal_email(
     input: &str,
     index: usize,
     local_run: &mut ByteRun,
-) -> Option<(usize, String)> {
+) -> Option<(usize, &'static str)> {
     let rest = &input[index..];
     // A valid local part holds only local-part bytes behind an optional
     // `mailto:`/`xmpp:` scheme, so the `@` must be the byte that ends that run.
@@ -5270,12 +5248,7 @@ fn parse_literal_email(
         return None;
     }
 
-    let mut destination = String::new();
-    if auto_mailto {
-        destination.push_str("mailto:");
-    }
-    destination.push_str(&input[index..trimmed]);
-    Some((trimmed, destination))
+    Some((trimmed, if auto_mailto { "mailto:" } else { "" }))
 }
 
 // Classify the local part for the extended-protocol forms. Returns

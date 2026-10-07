@@ -35,8 +35,8 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             escape_text(e.value.encode_utf8(&mut buf))
         }
 
-        // 3. CharacterReference — `value` is the decoded scalar(s); re-escape.
-        Inline::CharacterReference(c) => escape_text(&c.value),
+        // 3. CharacterReference — the decoded scalar(s), re-escaped.
+        Inline::CharacterReference(c) => escape_text(&c.value().unwrap_or_default()),
 
         // 4. Emphasis.
         Inline::Emphasis(n) => format!("<em>{}</em>", render_inlines(&n.children, ctx)),
@@ -72,6 +72,16 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                 "<a href=\"{href}\"{title}>{}</a>",
                 render_inlines(&n.children, ctx)
             )
+        }
+
+        // 10a. Autolink — its derived destination, its text as the link text.
+        Inline::Autolink(n) => {
+            let href = encode_href(&filter_protocol(
+                &n.destination().unwrap_or_default(),
+                ctx.allow_dangerous_protocol,
+                ctx.gfm_url_denylist(),
+            ));
+            format!("<a href=\"{href}\">{}</a>", escape_text(&n.text))
         }
 
         // 11. Image.

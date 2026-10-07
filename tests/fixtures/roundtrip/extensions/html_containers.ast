@@ -4,7 +4,7 @@ Document
       Text "Install"
     Paragraph
       Text "Run "
-      Code value="cargo test" raw="cargo test" fence=1
+      Code value="cargo test"
       Text "."
     HtmlContainer tag=details open="<details>" close="</details>"
       HtmlContainer tag=summary open="<summary>" close="</summary>"

@@ -266,6 +266,35 @@ node's children SHALL be in source order and SHALL NOT overlap.
 - **WHEN** every fixture input and every seeded generated input is parsed
 - **THEN** every node, at every depth, satisfies these conditions
 
+### Requirement: Each written fact is stored once
+A node SHALL hold what its source writes once and derive the rest from it.
+`CharacterReference` SHALL hold only the reference as written, and
+`CharacterReference::value()` SHALL return the character it decodes to, or
+`None` when the reference is not exactly one character reference.
+`CodeInline` SHALL hold only its value, as the parser normalizes it.
+`Autolink` SHALL hold its form and its text as written, and
+`Autolink::destination()` SHALL return the link target that text writes: an
+angle-bracket URI itself and an angle-bracket email after `mailto:`; a literal
+`www.` domain after `http://`, a literal email without a scheme after
+`mailto:`, and any other literal autolink itself; or `None` when the text is
+not exactly one autolink of its form.
+
+#### Scenario: Character reference value
+- **WHEN** `value()` is called on the `CharacterReference` parsed from `"&amp;"`
+- **THEN** it returns `Some("&")`
+
+#### Scenario: Hand-built reference that does not decode
+- **WHEN** `value()` is called on a hand-built `CharacterReference` holding `"&amp"`
+- **THEN** it returns `None`
+
+#### Scenario: Literal autolink destination
+- **WHEN** `destination()` is called on the `Autolink` parsed from `"www.a.b"`
+- **THEN** it returns `Some("http://www.a.b")`
+
+#### Scenario: Text the parser would trim
+- **WHEN** `destination()` is called on a hand-built literal `Autolink` holding `"http://a.b."`
+- **THEN** it returns `None`
+
 ### Requirement: Shortcode glyph
 `Shortcode::glyph()` SHALL return the emoji that the crate's pinned gemoji
 table gives the shortcode's name, and `None` for a name the table does not
@@ -303,10 +332,10 @@ scheme-less and non-HTTP literal autolinks, and MDX SHALL NOT be recognized.
 ### Requirement: Recorded syntax forms
 Where one node kind has more than one Markdown spelling, a parsed node SHALL
 record the spelling its source used: `Emphasis` and `Strong` record whether
-their delimiter is `*` or `_`, and `Link` records whether it was written as an
-inline link `[text](destination)`, an angle-bracket autolink `<destination>`,
-or a literal autolink. A node built with a constructor SHALL take the default
-spelling: `*`, and an inline link.
+their delimiter is `*` or `_`, and `Autolink` records whether it was written
+in angle brackets `<destination>` or as a literal autolink. A `Link` is an
+inline link `[text](destination)`. A node built with a constructor SHALL take
+the default spelling: `*`.
 
 #### Scenario: Underscore delimiters
 - **WHEN** `parse("_a_ __b__")` runs
@@ -314,8 +343,4 @@ spelling: `*`, and an inline link.
 
 #### Scenario: Link forms
 - **WHEN** `parse("www.a.b <http://c.d> [e](f)")` runs
-- **THEN** the three `Link` nodes record the literal-autolink, angle-bracket-autolink, and inline forms, in that order
-
-#### Scenario: Constructed link
-- **WHEN** a `Link` is built with `Link::new("u", [Text::from("a")])`
-- **THEN** it records the inline form
+- **THEN** the paragraph holds a literal `Autolink`, an angle-bracket `Autolink`, and a `Link`, in that order

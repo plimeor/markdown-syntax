@@ -1,37 +1,29 @@
 Document
   Paragraph
     Text "Autolinks "
-    Link form=angle destination=irc://foo.bar:2233/baz title=none
-      Text "irc://foo.bar:2233/baz"
+    Autolink form=angle text="irc://foo.bar:2233/baz" destination=irc://foo.bar:2233/baz
     Text " and "
-    Link form=angle destination=made-up-scheme://foo,bar title=none
-      Text "made-up-scheme://foo,bar"
+    Autolink form=angle text="made-up-scheme://foo,bar" destination=made-up-scheme://foo,bar
     Text "."
     SoftBreak
     Text "Email "
-    Link form=angle destination=mailto:foo+special@Bar.baz-bar0.com title=none
-      Text "foo+special@Bar.baz-bar0.com"
+    Autolink form=angle text="foo+special@Bar.baz-bar0.com" destination=mailto:foo+special@Bar.baz-bar0.com
     Text "."
     SoftBreak
     Text "Special "
-    Link form=angle destination=mailto:foo.!#$%&'*+/=?^_`{|}~-@example.com title=none
-      Text "foo.!#$%&'*+/=?^_`{|}~-@example.com"
+    Autolink form=angle text="foo.!#$%&'*+/=?^_`{|}~-@example.com" destination=mailto:foo.!#$%&'*+/=?^_`{|}~-@example.com
     Text "."
     SoftBreak
     Text "Invalid email <"
-    Link form=literal destination=mailto:foo..bar@example.com title=none
-      Text "foo..bar@example.com"
+    Autolink form=literal text="foo..bar@example.com" destination=mailto:foo..bar@example.com
     Text "> <"
-    Link form=literal destination=mailto:foo@example-.com title=none
-      Text "foo@example-.com"
+    Autolink form=literal text="foo@example-.com" destination=mailto:foo@example-.com
     Text "> <"
-    Link form=literal destination=mailto:foo@-example.com title=none
-      Text "foo@-example.com"
+    Autolink form=literal text="foo@-example.com" destination=mailto:foo@-example.com
     Text "> <foo"
     Escape "+"
     Text "@bar.example.com>."
     SoftBreak
     Text "Invalid <m:abc> <"
-    Link form=literal destination=http://foo.bar/baz title=none
-      Text "http://foo.bar/baz"
+    Autolink form=literal text="http://foo.bar/baz" destination=http://foo.bar/baz
     Text " bim>."

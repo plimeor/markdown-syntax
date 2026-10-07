@@ -212,7 +212,7 @@ See [`HtmlOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/html/
 | Footnotes | `[^id]` references and definitions, inline `^[note]` |
 | Extensions | frontmatter (`---` / `+++`), inline and block math, wikilinks (`[[target\|title]]`, embeds `![[x]]`), `==` highlight, gemoji shortcodes (`:tada:`), `:name` / `::name` / `:::name` directives, `<details>` HTML containers |
 
-Where one node has more than one spelling, the parse records it: `Emphasis` and `Strong` record `*` or `_`, and `Link` records an inline link, an angle-bracket autolink, or a literal autolink.
+Where one node has more than one spelling, the parse records it: `Emphasis` and `Strong` record `*` or `_`, and `Autolink` records an angle-bracket or a literal autolink; `Link` is the inline `[text](destination)` form. A node stores each written fact once: an `Autolink` derives its `destination()` from its text, a `CharacterReference` decodes its `value()` from the reference, and a `CodeInline` holds only its value, its fence chosen when written.
 
 Cargo features:
 

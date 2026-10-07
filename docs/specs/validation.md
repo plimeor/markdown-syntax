@@ -23,16 +23,17 @@ diagnostic per invalid node it finds, and an empty list for a valid document.
 Validation SHALL reject: a heading depth outside 1–6; a table with no rows or
 no columns; empty inline math; an empty emphasis-like container (`Emphasis`,
 `Strong`, `Delete`, or `Mark`), or one whose content starts or ends with a
-space, a tab, a soft break, or a hard break; a `Link`, `LinkReference`, or
-`WikiLink` inside the text of a `Link` or `LinkReference`; a `Link` recorded
-as a literal or angle-bracket autolink whose content is not one `Text` that
-such an autolink writes for its destination, or that has a title; two
+space, a tab, a soft break, or a hard break; a `Link`, `Autolink`,
+`LinkReference`, or `WikiLink` inside the text of a `Link` or
+`LinkReference`; an `Autolink` whose text is not exactly one autolink of its
+form, so that `Autolink::destination()` returns `None`; a
+`CharacterReference` that is not exactly one character reference; two
 adjacent lists in the same container written with the same marker and both
 ordered or both unordered; an escape of a non-punctuation character; a
 shortcode whose name is not in the crate's pinned gemoji table; a directive
 whose name is not one or more runs of ASCII letters joined by single `-`
-chars; inline code whose raw text holds a backtick run exactly as long as its
-fence; an ordered list start beyond the parser's 9-digit marker limit; a hard
+chars; inline code whose value is empty or holds a line ending; an ordered
+list start beyond the parser's 9-digit marker limit; a hard
 line break ending inline content other than link text, image alt text, an
 inline footnote, or a text directive label, all of which close with a `]`;
 and a definition whose identifier is empty or holds only spaces, tabs, and
@@ -50,8 +51,16 @@ line endings.
 - **WHEN** a paragraph holding a `Link` whose children hold another `Link` is validated
 - **THEN** the result holds an `InvalidDocument` error
 
-#### Scenario: Autolink form that does not fit its content
-- **WHEN** a `Link` to `http://a.b` recorded as a literal autolink, whose text is `x`, is validated
+#### Scenario: Autolink text that is not one autolink
+- **WHEN** a paragraph holding a literal `Autolink` whose text is `HTTP://a.b` or `http://a.b.` is validated
+- **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Character reference that does not decode
+- **WHEN** a paragraph holding a `CharacterReference` whose reference is `&amp` is validated
+- **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Code span holding a line ending
+- **WHEN** a paragraph holding `CodeInline::new("a\nb")` is validated
 - **THEN** the result holds an `InvalidDocument` error
 
 #### Scenario: Adjacent lists with one marker
@@ -80,7 +89,7 @@ line endings.
 
 #### Scenario: No-break space in an angle-bracket autolink
 - **WHEN** `parse("<http://a\u{a0}b>").document.validate()` runs
-- **THEN** it returns an empty list, and the document holds a `Link` to `http://a\u{a0}b`
+- **THEN** it returns an empty list, and the document holds an `Autolink` to `http://a\u{a0}b`
 
 #### Scenario: Inline link whose text is an address
 - **WHEN** `Link::new("mailto:a\u{a0}b@c.d", [Text::from("a\u{a0}b@c.d")])` is validated and serialized

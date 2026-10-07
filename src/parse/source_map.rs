@@ -355,6 +355,7 @@ impl Translator<'_> {
                 Inline::LineBreak(node) => self.meta(&mut node.meta),
                 Inline::Shortcode(node) => self.meta(&mut node.meta),
                 Inline::Code(node) => self.meta(&mut node.meta),
+                Inline::Autolink(node) => self.meta(&mut node.meta),
                 Inline::Html(node) => self.meta(&mut node.meta),
                 Inline::Math(node) => self.meta(&mut node.meta),
                 Inline::FootnoteReference(node) => self.meta(&mut node.meta),

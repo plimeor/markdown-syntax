@@ -565,11 +565,16 @@ mod parser {
             .children
             .iter()
             .filter_map(|inline| match inline {
-                Inline::CharacterReference(reference) => {
-                    Some((reference.reference.as_str(), reference.value.as_str()))
-                }
+                Inline::CharacterReference(reference) => Some((
+                    reference.reference.clone(),
+                    reference.value().expect("decodes"),
+                )),
                 _ => None,
             })
+            .collect::<Vec<_>>();
+        let references = references
+            .iter()
+            .map(|(reference, value)| (reference.as_str(), value.as_str()))
             .collect::<Vec<_>>();
         assert_eq!(
             references,
@@ -647,11 +652,16 @@ mod parser {
             .children
             .iter()
             .filter_map(|inline| match inline {
-                Inline::CharacterReference(reference) => {
-                    Some((reference.reference.as_str(), reference.value.as_str()))
-                }
+                Inline::CharacterReference(reference) => Some((
+                    reference.reference.clone(),
+                    reference.value().expect("decodes"),
+                )),
                 _ => None,
             })
+            .collect::<Vec<_>>();
+        let references = references
+            .iter()
+            .map(|(reference, value)| (reference.as_str(), value.as_str()))
             .collect::<Vec<_>>();
         assert_eq!(
             references,

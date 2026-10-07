@@ -66,11 +66,11 @@ Document
     LineBreak kind=backslash
     Text "bar"
   Paragraph
-    Code value="\\[\\`" raw=" \\[\\` " fence=2
+    Code value="\\[\\`"
   CodeBlock kind=indented info=none
     Value "\\[\\]"
   Paragraph
-    Link form=inline destination=/bar* title="ti*tle"
+    Link destination=/bar* title="ti*tle"
       Text "foo"
   Definition label=bar destination=/bar* title="ti*tle"
   Paragraph

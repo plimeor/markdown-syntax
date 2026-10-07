@@ -130,10 +130,6 @@ const NOT_READING_BACK: &[(&str, &str)] = &[
         "the quote's empty first line, which keeps `[!NOTE]` from opening an alert, is not recorded",
     ),
     (
-        "=```\n    ```",
-        "the indentation of the continuation line, which keeps its fence from closing the code span's line as a block, is not recorded",
-    ),
-    (
         "(\n    <div>",
         "the indentation of the continuation line, which keeps `<div>` from opening an HTML block, is not recorded",
     ),
@@ -296,7 +292,6 @@ mod value_encodings {
             vec![
                 vec![Inline::Link(Link {
                     meta: NodeMeta::default(),
-                    form: LinkForm::Inline,
                     destination: "b|c".into(),
                     destination_kind: LinkDestinationKind::Bare,
                     title: Some("t|u".into()),
@@ -336,12 +331,7 @@ mod value_encodings {
                 ],
                 vec![
                     vec![text("a"), escape('|'), text("b")],
-                    vec![Inline::Code(CodeInline {
-                        meta: NodeMeta::default(),
-                        value: "c|d".into(),
-                        raw: String::new(),
-                        fence_length: 0,
-                    })],
+                    vec![Inline::Code(CodeInline::new("c|d"))],
                     vec![Inline::Math(MathInline {
                         meta: NodeMeta::default(),
                         value: "x|y".into(),
@@ -487,7 +477,6 @@ mod value_encodings {
             paragraph(vec![
                 Inline::Link(Link {
                     meta: NodeMeta::default(),
-                    form: LinkForm::Inline,
                     destination: "foo bar".into(),
                     destination_kind: LinkDestinationKind::Angle,
                     title: Some("paren title".into()),
@@ -1171,7 +1160,6 @@ mod parsed_inputs {
             ("++a\\++ b++", "++a\\++ b++\n"),
             ("[o]:u\n\t$$\na$$", "[o]: u\n\n$$\na$$\n"),
             ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
-            ("``\nfoo\nbar\n``", "``\nfoo\nbar\n``\n"),
             ("^://y ^", "^://y ^\n"),
             ("^://. ^", "^://. ^\n"),
             (":e!://}", ":e!://}\n"),
@@ -1197,11 +1185,13 @@ mod parsed_inputs {
         for source in ["=```\n    ```", "(\n    <div>", "- a\n\n  <!--\n- b"] {
             written(source);
         }
-        // Awaiting the same decision as `NOT_READING_BACK`: the indentation of
-        // each continuation line, which keeps `~~~` from opening a fence, is
-        // not recorded.
+        // A code span is written from its value, whose line endings are
+        // spaces, so its continuation lines cannot open a fence.
         let fenced = parse(&format!("a `{}`", "\n    ~~~".repeat(40))).document;
-        assert_reads_back_otherwise(&fenced);
+        assert_eq!(
+            assert_reads_back(&fenced),
+            format!("a `{}`\n", " ~~~".repeat(40))
+        );
         for source in [
             "-\n  ---\n-\n  ---",
             "- a\n\n-\n  ---",
@@ -1212,6 +1202,25 @@ mod parsed_inputs {
         }
         written(&"-\n  ---\n\nx\n\n".repeat(40));
         written(&"-\n  ---\n".repeat(40));
+    }
+
+    #[test]
+    fn a_parsed_code_span_is_written_from_its_value() {
+        for (source, expected) in [
+            ("``\nfoo\nbar\n``", "`foo bar`\n"),
+            ("`` a`b ``", "``a`b``\n"),
+            ("```a``b```", "`a``b`\n"),
+            ("``  a  ``", "`  a  `\n"),
+            ("`` `a ``", "`` `a ``\n"),
+            // A fence never closes a backtick run written before it.
+            ("`foo``bar``", "`foo``bar``\n"),
+            ("x` and ``y`` and ``z``", "x` and ``y`` and ``z``\n"),
+            ("\\`` `a`", "\\`` `a`\n"),
+            ("\\` `a`", "\\` `a`\n"),
+            ("$`a`$ <b c='`'> `d`", "$`a`$ <b c='`'> `d`\n"),
+        ] {
+            assert_eq!(written(source), expected, "{source:?}");
+        }
     }
 
     #[test]

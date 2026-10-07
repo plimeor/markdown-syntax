@@ -114,27 +114,21 @@ fn underscore_delimiters_are_recorded() {
 
 #[test]
 fn link_forms_are_recorded() {
-    let forms: Vec<LinkForm> = first_para("www.a.b <http://c.d> [e](f)")
-        .iter()
-        .filter_map(|inline| match inline {
-            Inline::Link(link) => Some(link.form),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        forms,
-        [
-            LinkForm::LiteralAutolink,
-            LinkForm::AngleAutolink,
-            LinkForm::Inline
-        ]
-    );
+    let inlines = first_para("www.a.b <http://c.d> [e](f)");
+    let [Inline::Autolink(literal), _, Inline::Autolink(angle), _, Inline::Link(link)] =
+        inlines.as_slice()
+    else {
+        panic!("unexpected inlines: {inlines:?}");
+    };
+    assert_eq!(literal.form, AutolinkForm::Literal);
+    assert_eq!(literal.destination().as_deref(), Some("http://www.a.b"));
+    assert_eq!(angle.form, AutolinkForm::Angle);
+    assert_eq!(angle.destination().as_deref(), Some("http://c.d"));
+    assert_eq!(link.destination, "f");
 }
 
 #[test]
 fn constructed_nodes_take_the_default_spelling() {
-    assert_eq!(Link::new("u", [Text::from("a")]).form, LinkForm::Inline);
-    assert_eq!(LinkForm::default(), LinkForm::Inline);
     assert_eq!(EmphasisDelimiter::default(), EmphasisDelimiter::Asterisk);
 }
 

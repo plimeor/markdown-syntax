@@ -1,16 +1,13 @@
 Document
   Paragraph
     Text "Visit "
-    Link form=literal destination=https://a.bc/d/e/ title=none
-      Text "https://a.bc/d/e/"
+    Autolink form=literal text="https://a.bc/d/e/" destination=https://a.bc/d/e/
     Text ")."
     SoftBreak
     Text "Pokemon "
-    Link form=literal destination=http://www.pokemon.com/Pikachu_(Electric) title=none
-      Text "http://www.pokemon.com/Pikachu_(Electric)"
+    Autolink form=literal text="http://www.pokemon.com/Pikachu_(Electric)" destination=http://www.pokemon.com/Pikachu_(Electric)
     Text ") ok"
     SoftBreak
     Text "Balanced "
-    Link form=literal destination=http://www.pokemon.com/Pikachu_((Electric)) title=none
-      Text "http://www.pokemon.com/Pikachu_((Electric))"
+    Autolink form=literal text="http://www.pokemon.com/Pikachu_((Electric))" destination=http://www.pokemon.com/Pikachu_((Electric))
     Text " ok"

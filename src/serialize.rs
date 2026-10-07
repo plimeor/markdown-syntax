@@ -646,14 +646,93 @@ impl Context {
 }
 
 fn write_inlines(inlines: &[Inline], context: Context) -> Result<String, SerializeError> {
-    let mut output = String::new();
+    let mut output = InlineOut::default();
     for inline in inlines {
         write_inline(inline, context, &mut output)?;
     }
-    Ok(output)
+    Ok(output.text)
 }
 
-fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(), SerializeError> {
+/// The Markdown written so far for the inline content of one block, cell, or
+/// label, which the parser reads in one inline pass, and the backtick runs in
+/// it that a code span's fence must not close.
+#[derive(Default)]
+struct InlineOut {
+    text: String,
+    /// `open_runs[n]`: a backtick run of length `n` that opens no code span
+    /// was written, outside every code span: a later fence of that length
+    /// would close it.
+    open_runs: Vec<bool>,
+    /// How far `text` has been read for `open_runs`.
+    scanned: usize,
+}
+
+impl InlineOut {
+    /// Reads the text written since the last code span for backtick runs. A
+    /// backslash escapes the first backtick of a run, which then opens with
+    /// the rest of the run.
+    fn scan_open_runs(&mut self) {
+        let mut escaped = false;
+        let mut run = 0;
+        let mut run_escaped = false;
+        for byte in self.text.as_bytes()[self.scanned..]
+            .iter()
+            .copied()
+            .chain(core::iter::once(b' '))
+        {
+            if byte == b'`' {
+                if run == 0 {
+                    run_escaped = escaped;
+                }
+                run += 1;
+                escaped = false;
+                continue;
+            }
+            let opening = run - usize::from(run_escaped && run > 0);
+            if opening > 0 {
+                if self.open_runs.len() <= opening {
+                    self.open_runs.resize(opening + 1, false);
+                }
+                self.open_runs[opening] = true;
+            }
+            run = 0;
+            escaped = byte == b'\\' && !escaped;
+        }
+        self.scanned = self.text.len();
+    }
+
+    fn is_open_run(&self, length: usize) -> bool {
+        self.open_runs.get(length).copied().unwrap_or(false)
+    }
+
+    /// Writes, with `write`, content that the parser reads whole from its
+    /// first char, so no backtick run in it opens a code span.
+    fn push_opaque(&mut self, write: impl FnOnce(&mut String)) {
+        self.scan_open_runs();
+        write(&mut self.text);
+        self.scanned = self.text.len();
+    }
+}
+
+impl core::ops::Deref for InlineOut {
+    type Target = String;
+
+    fn deref(&self) -> &String {
+        &self.text
+    }
+}
+
+impl core::ops::DerefMut for InlineOut {
+    fn deref_mut(&mut self) -> &mut String {
+        &mut self.text
+    }
+}
+
+fn write_inline(
+    inline: &Inline,
+    context: Context,
+    out: &mut InlineOut,
+) -> Result<(), SerializeError> {
     match inline {
         Inline::Text(node) => out.push_str(&node.value),
         Inline::Escape(node) => {
@@ -678,17 +757,9 @@ fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(
             out.push(':');
         }
         Inline::Code(node) => write_code_span(node, context, out),
-        Inline::Link(node) => match node.form {
-            LinkForm::LiteralAutolink => {
-                push_verbatim(out, &write_inlines(&node.children, context)?, context);
-            }
-            LinkForm::AngleAutolink => {
-                out.push('<');
-                push_verbatim(out, &write_inlines(&node.children, context)?, context);
-                out.push('>');
-            }
-            LinkForm::Inline => {
-                write_span(out, "[", &node.children, "](", context)?;
+        Inline::Link(node) => {
+            write_span(out, "[", &node.children, "](", context)?;
+            out.push_opaque(|out| {
                 write_resource(
                     out,
                     &node.destination,
@@ -696,40 +767,53 @@ fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(
                     node.title.as_deref().zip(node.title_kind),
                     context,
                 );
+            });
+        }
+        Inline::Autolink(node) => out.push_opaque(|out| match node.form {
+            AutolinkForm::Literal => push_verbatim(out, &node.text, context),
+            AutolinkForm::Angle => {
+                out.push('<');
+                push_verbatim(out, &node.text, context);
+                out.push('>');
             }
-        },
+        }),
         Inline::Image(node) => {
             write_span(out, "![", &node.alt, "](", context)?;
-            write_resource(
-                out,
-                &node.destination,
-                node.destination_kind,
-                node.title.as_deref().zip(node.title_kind),
-                context,
-            );
+            out.push_opaque(|out| {
+                write_resource(
+                    out,
+                    &node.destination,
+                    node.destination_kind,
+                    node.title.as_deref().zip(node.title_kind),
+                    context,
+                );
+            });
         }
         Inline::LinkReference(node) => {
             write_span(out, "[", &node.children, "]", context)?;
-            write_reference_kind(out, node.kind, &node.label, context);
+            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label, context));
         }
         Inline::ImageReference(node) => {
             write_span(out, "![", &node.alt, "]", context)?;
-            write_reference_kind(out, node.kind, &node.label, context);
+            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label, context));
         }
-        Inline::Html(node) => push_verbatim(out, &node.value, context),
+        Inline::Html(node) => out.push_opaque(|out| push_verbatim(out, &node.value, context)),
         Inline::SoftBreak(_) if context.heading => out.push(' '),
         Inline::SoftBreak(_) => out.push('\n'),
         Inline::LineBreak(node) => match node.kind {
             LineBreakKind::Backslash => out.push_str("\\\n"),
             LineBreakKind::Spaces => out.push_str("  \n"),
         },
-        Inline::Math(node) => push_verbatim(out, &write_inline_math(node)?, context),
+        Inline::Math(node) => {
+            let math = write_inline_math(node)?;
+            out.push_opaque(|out| push_verbatim(out, &math, context));
+        }
         Inline::FootnoteReference(node) => {
             out.push_str("[^");
             out.push_str(&escape_label(&node.label, context.table_cell));
             out.push(']');
         }
-        Inline::WikiLink(node) => {
+        Inline::WikiLink(node) => out.push_opaque(|out| {
             if node.embed {
                 out.push('!');
             }
@@ -740,14 +824,20 @@ fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(
                 out.push_str(&write_wikilink_part(&node.label, context));
             }
             out.push_str("]]");
-        }
+        }),
         Inline::TextDirective(node) => {
-            out.push(':');
-            out.push_str(&node.name);
-            if !node.label.is_empty() {
-                write_span(out, "[", &node.label, "]", context)?;
-            }
-            out.push_str(&write_attributes(&node.attributes, context));
+            // The label is read in an inline pass of its own.
+            let label = if node.label.is_empty() {
+                String::new()
+            } else {
+                format!("[{}]", write_inlines(&node.label, context)?)
+            };
+            out.push_opaque(|out| {
+                out.push(':');
+                out.push_str(&node.name);
+                out.push_str(&label);
+                out.push_str(&write_attributes(&node.attributes, context));
+            });
         }
     }
     Ok(())
@@ -762,7 +852,7 @@ fn emphasis_delimiter(delimiter: EmphasisDelimiter) -> &'static str {
 
 /// Writes `open`, `children`, and `close`.
 fn write_span(
-    out: &mut String,
+    out: &mut InlineOut,
     open: &str,
     children: &[Inline],
     close: &str,
@@ -805,31 +895,58 @@ fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str, cont
     }
 }
 
-fn write_code_span(node: &CodeInline, context: Context, out: &mut String) {
-    if node.fence_length > 0 && !node.raw.is_empty() {
-        let fence = "`".repeat(node.fence_length);
-        out.push_str(&fence);
-        push_verbatim(out, &node.raw, context);
-        out.push_str(&fence);
-    } else if node.value.is_empty() {
-        out.push_str("`` ``");
+/// Writes a code span from its value: fenced by the shortest backtick run
+/// that neither the value holds nor a run written before it in the same
+/// inline content opens, and padded with a space at each end when the value
+/// would otherwise lose an end to the fence or to the space stripping.
+fn write_code_span(node: &CodeInline, context: Context, out: &mut InlineOut) {
+    let value = if context.table_cell {
+        escape_pipes(&node.value)
     } else {
-        let value = if context.table_cell {
-            escape_pipes(&node.value)
-        } else {
-            node.value.clone()
-        };
-        let fence = "`".repeat(longest_char_streak(&value, '`') + 1);
-        out.push_str(&fence);
-        if code_span_needs_padding(&value) {
-            out.push(' ');
-            out.push_str(&value);
-            out.push(' ');
-        } else {
-            out.push_str(&value);
-        }
-        out.push_str(&fence);
+        node.value.clone()
+    };
+    out.scan_open_runs();
+    let held = backtick_runs(&value);
+    // An escaped backtick written just before joins the opening fence into
+    // one longer run, which an earlier open run of that length would take as
+    // its close.
+    let before = out.len() - out.trim_end_matches('`').len();
+    let length = (1..)
+        .find(|length| {
+            !held.get(*length).copied().unwrap_or(false)
+                && !out.is_open_run(*length)
+                && (before == 0 || !out.is_open_run(before + *length))
+        })
+        .unwrap_or(1);
+    let fence = "`".repeat(length);
+    out.push_str(&fence);
+    if code_span_needs_padding(&value) {
+        out.push(' ');
+        out.push_str(&value);
+        out.push(' ');
+    } else {
+        out.push_str(&value);
     }
+    out.push_str(&fence);
+    // The span's own runs are matched; what follows is read afresh.
+    out.scanned = out.text.len();
+}
+
+/// `runs[n]`: whether `value` holds a maximal run of `n` backticks.
+fn backtick_runs(value: &str) -> Vec<bool> {
+    // A value of `len` bytes holds runs of at most `len` backticks.
+    let mut runs = alloc::vec![false; value.len() + 1];
+    let mut run = 0;
+    for byte in value.bytes() {
+        if byte == b'`' {
+            run += 1;
+        } else {
+            runs[run] = true;
+            run = 0;
+        }
+    }
+    runs[run] = true;
+    runs
 }
 
 fn code_span_needs_padding(input: &str) -> bool {
@@ -1171,20 +1288,6 @@ fn block_math_fence(input: &str) -> String {
         }
     }
     "$".repeat(length)
-}
-
-fn longest_char_streak(input: &str, needle: char) -> usize {
-    let mut longest = 0;
-    let mut current = 0;
-    for char in input.chars() {
-        if char == needle {
-            current += 1;
-            longest = longest.max(current);
-        } else {
-            current = 0;
-        }
-    }
-    longest
 }
 
 fn directive_fence(inner: &str) -> String {

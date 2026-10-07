@@ -1,8 +1,8 @@
 //! The tree comparison round-trip checks use. Two trees are the same when
 //! they differ only in spans, in text one holds as an `Escape` or a
 //! `CharacterReference` and the other as plain text, in a heading's soft
-//! break that one holds where the other holds a space, in a code span's
-//! fence and raw text, and in where adjacent `Text` nodes split. The matches are exhaustive so a new node kind cannot
+//! break that one holds where the other holds a space, and in where adjacent
+//! `Text` nodes split. The matches are exhaustive so a new node kind cannot
 //! skip the normalization.
 
 use alloc::string::String;
@@ -109,7 +109,10 @@ fn normalize_inlines(inlines: &mut Vec<Inline>, heading: bool) {
         let text = match &mut inline {
             Inline::Text(node) => Some(core::mem::take(&mut node.value)),
             Inline::Escape(node) => Some(String::from(node.value)),
-            Inline::CharacterReference(node) => Some(core::mem::take(&mut node.value)),
+            Inline::CharacterReference(node) => Some(
+                node.value()
+                    .unwrap_or_else(|| core::mem::take(&mut node.reference)),
+            ),
             Inline::SoftBreak(_) if heading => Some(String::from(" ")),
             Inline::SoftBreak(node) => {
                 clear(&mut node.meta);
@@ -130,13 +133,8 @@ fn normalize_inlines(inlines: &mut Vec<Inline>, heading: bool) {
             Inline::ImageReference(node) => children(&mut node.meta, &mut node.alt, heading),
             Inline::TextDirective(node) => children(&mut node.meta, &mut node.label, heading),
             Inline::Shortcode(node) => leaf(&mut node.meta),
-            // A code span compares by its value: its fence and raw text are
-            // written from it when absent.
-            Inline::Code(node) => {
-                node.raw.clear();
-                node.fence_length = 0;
-                leaf(&mut node.meta)
-            }
+            Inline::Code(node) => leaf(&mut node.meta),
+            Inline::Autolink(node) => leaf(&mut node.meta),
             Inline::Html(node) => leaf(&mut node.meta),
             Inline::Math(node) => leaf(&mut node.meta),
             Inline::FootnoteReference(node) => leaf(&mut node.meta),
@@ -185,11 +183,7 @@ mod tests {
                 value: '*',
             }),
             text("a"),
-            Inline::CharacterReference(CharacterReference {
-                meta: NodeMeta::default(),
-                reference: "#42;".into(),
-                value: "*".into(),
-            }),
+            Inline::CharacterReference(CharacterReference::new("&#42;")),
         ];
         assert_eq!(normalized_inlines(&escaped), vec![text("*a*")]);
     }
