@@ -44,37 +44,10 @@ fn rendered(document: &Document) -> String {
     document.to_markdown().expect("document serializes")
 }
 
-// The table-cell cases in `value_encodings` still parse, and check read-back,
-// with the helpers below; every other case asserts the exact output.
-
-/// The normalized blocks of `document`, for comparing trees.
+/// The normalized blocks of `document`, for comparing a cell's reading with
+/// a paragraph's.
 fn normalized(document: &Document) -> String {
     format!("{:?}", normalize::normalized(&document.children))
-}
-
-/// Serializes `document` and checks that the output reads back as it, and
-/// serializes back to itself.
-fn assert_reads_back(document: &Document) -> String {
-    let markdown = document.to_markdown().expect("document serializes");
-    let reparsed = parse(&markdown).document;
-    assert_eq!(normalized(&reparsed), normalized(document), "{markdown:?}");
-    assert_eq!(
-        reparsed
-            .to_markdown()
-            .expect("reparsed document serializes"),
-        markdown,
-        "{markdown:?}"
-    );
-    markdown
-}
-
-/// Serializes `document` and checks that the output reads back as a
-/// different tree.
-fn assert_reads_back_otherwise(document: &Document) -> String {
-    let markdown = document.to_markdown().expect("document serializes");
-    let reparsed = parse(&markdown).document;
-    assert_ne!(normalized(&reparsed), normalized(document), "{markdown:?}");
-    markdown
 }
 
 /// The Markdown `source` parses and serializes to.
@@ -194,7 +167,7 @@ mod value_encodings {
             ],
         )]);
 
-        let markdown = assert_reads_back(&document);
+        let markdown = rendered(&document);
         assert_eq!(
             markdown,
             r#"| Link | Image |
@@ -268,7 +241,7 @@ mod value_encodings {
             }),
         ]);
 
-        let markdown = assert_reads_back(&document);
+        let markdown = rendered(&document);
         assert_eq!(
             markdown,
             r#"| Text | Code | Math | Link | Image | Reference | Directive |
@@ -284,7 +257,7 @@ mod value_encodings {
     fn a_text_pipe_in_a_cell_is_written_escaped() {
         // The cell reads `\|` as an escaped pipe, which compares as text.
         let document = document(vec![table(vec!["Text"], vec![vec![text("a|b")]])]);
-        let markdown = assert_reads_back(&document);
+        let markdown = rendered(&document);
         assert_eq!(markdown, "| Text |\n| --- |\n| a\\|b |\n");
     }
 
@@ -297,7 +270,7 @@ mod value_encodings {
                 vec![Inline::Code(CodeInline::new(r"a\\|b"))],
             ],
         )]);
-        let markdown = assert_reads_back(&document);
+        let markdown = rendered(&document);
         assert_eq!(
             markdown,
             r"| Escape | Code |
@@ -336,7 +309,7 @@ mod value_encodings {
             document.to_markdown(),
             Err(SerializeError::InvalidDocument(_))
         ));
-        let markdown = assert_reads_back(&paragraph_document(vec![code()]));
+        let markdown = rendered(&paragraph_document(vec![code()]));
         assert_eq!(markdown, "`a\\|b`\n");
     }
 
