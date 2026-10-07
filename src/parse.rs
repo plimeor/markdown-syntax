@@ -382,35 +382,58 @@ fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
     }
 }
 
+/// The label of a definition starting paragraph line `index`, followed by
+/// `:`: the text of the lines up to the one the label closes on, joined by
+/// `\n`, the offset of the label's `]` in it, and that line.
+///
+/// A label may span lines (CommonMark §4.7), up to its length limit. The
+/// walk to its `]` (`find_reference_label_end`) goes on from where the lines
+/// before left it, so that a long label is walked once.
+fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, usize)> {
+    let text = trim_ascii_start(lines[index].text);
+    if !text.starts_with('[') {
+        return None;
+    }
+    let mut accumulated = String::from(text);
+    let mut label_end_line = index;
+    let mut cursor = 1;
+    loop {
+        let bytes = accumulated.as_bytes();
+        // The walk has run out of text: it goes on at the `\n` the next line
+        // is joined with. A `\` that ended the text escapes that `\n`, and
+        // both step to the next line's start.
+        if cursor >= bytes.len() {
+            let next = label_end_line + 1;
+            if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
+                return None;
+            }
+            accumulated.push('\n');
+            accumulated.push_str(lines[next].text);
+            label_end_line = next;
+            continue;
+        }
+        match reference_label_step(&accumulated, cursor) {
+            Step::Next(next) => cursor = next,
+            Step::Done(Some(close)) if reference_label_is_within_limit(&accumulated[1..close]) => {
+                // A closed label not followed by `:` is not a definition.
+                if bytes.get(close + 1) != Some(&b':') {
+                    return None;
+                }
+                return Some((accumulated, close, label_end_line));
+            }
+            // An unescaped `[`, or a label over the length limit: no line
+            // after it makes a definition.
+            Step::Done(_) => return None,
+        }
+    }
+}
+
 /// The link reference definition that starts paragraph line `index`, and
 /// the line after it. The lines are a paragraph's, each from where the
 /// containers around it leave it; the definition's span is left to the
 /// caller.
 fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usize)> {
-    let text = trim_ascii_start(lines[index].text);
-    if !text.starts_with('[') {
-        return None;
-    }
-
-    // A label may span lines (CommonMark §4.7), up to its length limit.
-    let mut accumulated = String::from(text);
-    let mut label_end_line = index;
-    let close = loop {
-        if let Some(close) = find_reference_label_end(&accumulated, 0) {
-            if accumulated.as_bytes().get(close + 1) == Some(&b':') {
-                break close;
-            }
-            // A closed label not followed by `:` is not a definition.
-            return None;
-        }
-        let next = label_end_line + 1;
-        if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
-            return None;
-        }
-        accumulated.push('\n');
-        accumulated.push_str(lines[next].text);
-        label_end_line = next;
-    };
+    let (accumulated, close, label_end_line) = definition_label(lines, index)?;
     let label = String::from(&accumulated[1..close]);
     if normalize_label(&label).is_empty() {
         return None;
@@ -1990,6 +2013,8 @@ trait Lookups {
     fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize>;
     /// The first unescaped `<` or `>`, or line break, at or after `from`.
     fn angle_destination_stop(&mut self, from: usize) -> Option<usize>;
+    /// The first `$` not right after a `\` at or after `from`.
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize>;
 }
 
 struct DirectLookups<'a> {
@@ -2008,10 +2033,14 @@ impl Lookups for DirectLookups<'_> {
     fn angle_destination_stop(&mut self, from: usize) -> Option<usize> {
         (from..self.input.len()).find(|index| is_angle_destination_stop(self.input, *index))
     }
+
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize> {
+        (from..self.input.len()).find(|index| is_unescaped_dollar(self.input, *index))
+    }
 }
 
 /// The patterns `InlineLookups::find` keeps position tables for.
-const CACHED_PATTERNS: [&str; 7] = [">", "-->", "?>", "]]>", "\"", "'", "`$"];
+const CACHED_PATTERNS: [&str; 8] = [">", "-->", "?>", "]]>", "\"", "'", "`$", "$$"];
 
 /// `Lookups` over one inline input, each answered from a table built on first
 /// use.
@@ -2020,6 +2049,7 @@ struct InlineLookups<'a> {
     patterns: [Positions; CACHED_PATTERNS.len()],
     backtick_runs: Option<BTreeMap<usize, Vec<usize>>>,
     angle_destination_stops: Positions,
+    unescaped_dollars: Positions,
 }
 
 impl<'a> InlineLookups<'a> {
@@ -2029,6 +2059,7 @@ impl<'a> InlineLookups<'a> {
             patterns: Default::default(),
             backtick_runs: None,
             angle_destination_stops: Positions::default(),
+            unescaped_dollars: Positions::default(),
         }
     }
 }
@@ -2061,6 +2092,15 @@ impl Lookups for InlineLookups<'_> {
                 .collect()
         })
     }
+
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize> {
+        let input = self.input;
+        self.unescaped_dollars.first_at_or_after(from, || {
+            (0..input.len())
+                .filter(|index| is_unescaped_dollar(input, *index))
+                .collect()
+        })
+    }
 }
 
 /// Start offsets of every maximal backtick run, grouped by run length.
@@ -2084,6 +2124,13 @@ fn backtick_run_len(input: &str, index: usize) -> usize {
         .iter()
         .take_while(|byte| **byte == b'`')
         .count()
+}
+
+/// A `$` that single-dollar math reads as a delimiter: one right after a `\`
+/// is content, whether or not that `\` is itself escaped.
+fn is_unescaped_dollar(input: &str, index: usize) -> bool {
+    let bytes = input.as_bytes();
+    bytes[index] == b'$' && (index == 0 || bytes[index - 1] != b'\\')
 }
 
 fn is_angle_destination_stop(input: &str, index: usize) -> bool {
@@ -2439,7 +2486,7 @@ fn parse_inline_content(
             }
         }
 
-        if bytes[index] == b'*' && delimiter_byte_run_start(input, index, b'*') == index {
+        if bytes[index] == b'*' && starts_delimiter_run(input, index, b'*') {
             let run_len = delimiter_byte_run_len(input, index, b'*');
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
             push_delimiter(
@@ -2457,7 +2504,7 @@ fn parse_inline_content(
 
         // Core `_` emphasis/strong is resolved by the delimiter stack, just like
         // `*`.
-        if bytes[index] == b'_' && delimiter_byte_run_start(input, index, b'_') == index {
+        if bytes[index] == b'_' && starts_delimiter_run(input, index, b'_') {
             // A leading `_` can begin a GFM email local part (`_a@b.c`); try the
             // literal autolink before recording the `_` as an emphasis
             // delimiter, otherwise the `_` would be consumed and the email would
@@ -2529,9 +2576,11 @@ fn parse_inline_content(
         }
 
         // A run of exactly two `~` may open or close GFM strikethrough.
-        if bytes[index] == b'~' {
+        // The run is measured only from its start, so the bytes of a longer
+        // run, which go on as text one at a time, are not measured again.
+        if bytes[index] == b'~' && starts_delimiter_run(input, index, b'~') {
             let run_len = delimiter_byte_run_len(input, index, b'~');
-            if delimiter_byte_run_start(input, index, b'~') == index && run_len == 2 {
+            if run_len == 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 push_delimiter(
                     &mut nodes,
@@ -2905,6 +2954,9 @@ fn is_hard_break_suffix(input: &str, trailing: usize) -> bool {
             .all(|byte| *byte == b' ')
 }
 
+/// The walk `InlineScan::reference_label_end` and `definition_label` take in
+/// steps, run once from the start; the scan tests hold them to it.
+#[cfg(test)]
 fn find_reference_label_end(input: &str, open: usize) -> Option<usize> {
     // A reference/definition link label does not nest: it ends at the first
     // unescaped `]`, and an unescaped interior `[` disqualifies it.
@@ -3473,13 +3525,11 @@ fn can_close_delimited(input: &str, index: usize, marker_len: usize) -> bool {
     delimiter_flanking(input, index, marker_len).right
 }
 
-fn delimiter_byte_run_start(input: &str, index: usize, marker: u8) -> usize {
-    let bytes = input.as_bytes();
-    let mut start = index;
-    while start > 0 && bytes[start - 1] == marker && !is_escaped_at(input, start - 1) {
-        start -= 1;
-    }
-    start
+/// Whether a run of `marker` bytes starts at `index`: the byte before it is
+/// not an unescaped `marker`. Only the one byte is looked at, so asking at
+/// every byte of a long run stays linear.
+fn starts_delimiter_run(input: &str, index: usize, marker: u8) -> bool {
+    index == 0 || input.as_bytes()[index - 1] != marker || is_escaped_at(input, index - 1)
 }
 
 fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
@@ -3585,7 +3635,7 @@ fn parse_math_inline(
     }
 
     let content_start = index + open_dollars;
-    let close = scan_to_closing_dollar(input, content_start, open_dollars)?;
+    let close = scan_to_closing_dollar(lookups, input, content_start, open_dollars)?;
     let content_end = close - open_dollars;
     // The span requires `endpos - startpos >= fence_length * 2 + 1`, i.e. at
     // least one content byte between the open and close fences.
@@ -3606,47 +3656,31 @@ fn parse_math_inline(
 /// Scans for the closing dollar run. `start` is the first content byte
 /// (just past the opening run); returns the byte offset just past a matching
 /// closing run of exactly `open_dollars` `$`.
-fn scan_to_closing_dollar(input: &str, start: usize, open_dollars: usize) -> Option<usize> {
+fn scan_to_closing_dollar(
+    lookups: &mut impl Lookups,
+    input: &str,
+    start: usize,
+    open_dollars: usize,
+) -> Option<usize> {
     let bytes = input.as_bytes();
-    // A space immediately after a single opening `$` forbids the open.
-    if open_dollars == 1 && bytes.get(start).is_some_and(|byte| is_math_space(*byte)) {
-        return None;
+    if open_dollars == 1 {
+        // A space immediately after a single opening `$` forbids the open.
+        if bytes.get(start).is_some_and(|byte| is_math_space(*byte)) {
+            return None;
+        }
+        // An escaped `\$` is content, not a delimiter (the backslash stays in
+        // the content verbatim); the first other `$` closes, unless a space
+        // comes before it or an ASCII digit after it. The lookup keeps a run
+        // of `\$` from being walked again from each `$` that opens before it.
+        let close = lookups.unescaped_dollar(start)?;
+        if is_math_space(bytes[close - 1]) || bytes.get(close + 1).is_some_and(u8::is_ascii_digit) {
+            return None;
+        }
+        return Some(close + 1);
     }
-
-    let mut cursor = start;
-    loop {
-        while cursor < bytes.len() && bytes[cursor] != b'$' {
-            cursor += 1;
-        }
-        if cursor >= bytes.len() {
-            return None;
-        }
-        // `cursor` now points at the first `$` of a potential closing run; the
-        // char just before it gates the single-`$` flanking and escape rules.
-        let prev = bytes[cursor - 1];
-        if open_dollars == 1 && is_math_space(prev) {
-            return None;
-        }
-        if open_dollars == 1 && prev == b'\\' {
-            // An escaped `\$` is content, not a delimiter: skip this one `$` and
-            // keep scanning (the backslash stays in the content verbatim).
-            cursor += 1;
-            continue;
-        }
-        let run = bytes[cursor..]
-            .iter()
-            .take(open_dollars)
-            .take_while(|byte| **byte == b'$')
-            .count();
-        // The single-`$` close cannot be followed by an ASCII digit.
-        if open_dollars == 1 && bytes.get(cursor + run).is_some_and(u8::is_ascii_digit) {
-            return None;
-        }
-        if run == open_dollars {
-            return Some(cursor + run);
-        }
-        cursor += run;
-    }
+    // The display form closes at the first `$$`, even the first two `$` of a
+    // longer run.
+    lookups.find("$$", start).map(|close| close + 2)
 }
 
 /// Math whitespace: ASCII tab, line feed, carriage return, and space.
@@ -4689,7 +4723,9 @@ fn parse_literal_autolink(
         if !literal_www_prefix_ok(input, index) {
             return None;
         }
-        check_domain(rest, false)?;
+        if !check_domain(rest, false) {
+            return None;
+        }
         let end = autolink_url_end(input, index);
         if end <= index || (end <= index + 3 && !literal_starts_line(input, index)) {
             return None;
@@ -4804,11 +4840,9 @@ fn http_literal_host_ok(host: &str) -> bool {
         return bracketed_ipv6_host_end(host).is_some();
     }
     match host.chars().next() {
-        Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => {
-            check_domain(host, true).is_some()
-        }
+        Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => check_domain(host, true),
         Some(char) if !char.is_ascii() && is_valid_hostchar(source_char(char)) => {
-            check_domain(host, true).is_some()
+            check_domain(host, true)
         }
         _ => false,
     }
@@ -4825,21 +4859,22 @@ fn is_valid_hostchar(char: char) -> bool {
     !char.is_whitespace() && !crate::unicode_punctuation::is_unicode_punctuation(char)
 }
 
-// Port of cmark-gfm `check_domain`. Scans the leading host of `data` (up to the
-// first non-host char) and returns its byte length, or `None` when invalid.
+// Port of cmark-gfm `check_domain`: whether `data` starts with a valid host.
 // Rejects a `_` in either of the last two `.`-separated host segments (unless
 // the host has >10 segments — a DoS guard). When `allow_short` is false a dot
 // is required (the `www.` rule). The URL extent past the host is determined by
-// `autolink_url_end`, so the precise length here only gates validity.
+// `autolink_url_end`, so only the verdict matters here.
 //
 // cmark walks bytes with `is_valid_hostchar` decoding each char; this walks
 // chars directly (UTF-8 safe) over the host prefix, which yields the same
-// dot/underscore-segment verdict. A `\` escapes the following char.
-fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
+// dot/underscore-segment verdict. A `\` escapes the following char, so a host
+// can run on over escaped spaces through later `www.` candidates; the walk
+// stops at the eleventh dot, which settles the verdict, so that the walks
+// from all the candidates of a pass stay linear in total.
+fn check_domain(data: &str, allow_short: bool) -> bool {
     let mut np = 0usize;
     let mut uscore1 = 0usize;
     let mut uscore2 = 0usize;
-    let mut host_len = 0usize;
 
     let mut chars = data.char_indices().peekable();
     while let Some((offset, char)) = chars.next() {
@@ -4851,42 +4886,31 @@ fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
         match char {
             '\\' => {
                 // Escape: consume the next char as a literal host char.
-                host_len = offset + char.len_utf8();
-                if let Some((next_off, next)) = chars.next() {
-                    host_len = next_off + next.len_utf8();
-                }
+                chars.next();
             }
-            '_' if account => {
-                uscore2 += 1;
-                host_len = offset + char.len_utf8();
-            }
+            '_' if account => uscore2 += 1,
             '.' if account => {
                 uscore1 = uscore2;
                 uscore2 = 0;
                 np += 1;
-                host_len = offset + char.len_utf8();
+                if np > 10 {
+                    return true;
+                }
             }
-            '_' | '.' | '-' => {
-                host_len = offset + char.len_utf8();
-            }
+            '_' | '.' | '-' => {}
             _ => {
                 if !is_valid_hostchar(source_char(char)) {
                     break;
                 }
-                host_len = offset + char.len_utf8();
             }
         }
     }
 
     if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
-        return None;
+        return false;
     }
 
-    if allow_short || np > 0 {
-        Some(host_len)
-    } else {
-        None
-    }
+    allow_short || np > 0
 }
 
 // Forward scan from `start` for the URL extent: Unicode whitespace, `<`, a

@@ -577,6 +577,151 @@ mod reference {
         destination.push_str(&input[index..trimmed]);
         Some((trimmed, destination))
     }
+
+    pub(super) fn parse_math_inline(
+        input: &str,
+        index: usize,
+    ) -> Option<(usize, String, MathInlineKind)> {
+        if let Some((end, value)) = parse_math_code_inline(input, index) {
+            return Some((end, value, MathInlineKind::Code));
+        }
+
+        let bytes = input.as_bytes();
+        let open_dollars = bytes[index..]
+            .iter()
+            .take_while(|byte| **byte == b'$')
+            .count();
+        if open_dollars == 0 || open_dollars > 2 {
+            return None;
+        }
+
+        let content_start = index + open_dollars;
+        let close = scan_to_closing_dollar(input, content_start, open_dollars)?;
+        let content_end = close - open_dollars;
+        if content_end <= content_start {
+            return None;
+        }
+
+        let raw = &input[content_start..content_end];
+        let value = if open_dollars == 1 {
+            normalize_math_text(raw)
+        } else {
+            raw.into()
+        };
+        let dollars = u8::try_from(open_dollars).unwrap_or(u8::MAX);
+        Some((close, value, MathInlineKind::Dollar { dollars }))
+    }
+
+    fn scan_to_closing_dollar(input: &str, start: usize, open_dollars: usize) -> Option<usize> {
+        let bytes = input.as_bytes();
+        if open_dollars == 1 && bytes.get(start).is_some_and(|byte| is_math_space(*byte)) {
+            return None;
+        }
+
+        let mut cursor = start;
+        loop {
+            while cursor < bytes.len() && bytes[cursor] != b'$' {
+                cursor += 1;
+            }
+            if cursor >= bytes.len() {
+                return None;
+            }
+            let prev = bytes[cursor - 1];
+            if open_dollars == 1 && is_math_space(prev) {
+                return None;
+            }
+            if open_dollars == 1 && prev == b'\\' {
+                cursor += 1;
+                continue;
+            }
+            let run = bytes[cursor..]
+                .iter()
+                .take(open_dollars)
+                .take_while(|byte| **byte == b'$')
+                .count();
+            if open_dollars == 1 && bytes.get(cursor + run).is_some_and(u8::is_ascii_digit) {
+                return None;
+            }
+            if run == open_dollars {
+                return Some(cursor + run);
+            }
+            cursor += run;
+        }
+    }
+
+    /// cmark-gfm `check_domain`, walking the whole host.
+    pub(super) fn check_domain(data: &str, allow_short: bool) -> bool {
+        let mut np = 0usize;
+        let mut uscore1 = 0usize;
+        let mut uscore2 = 0usize;
+
+        let mut chars = data.char_indices().peekable();
+        while let Some((offset, char)) = chars.next() {
+            let account = offset != 0 && chars.peek().is_some();
+            match char {
+                '\\' => {
+                    chars.next();
+                }
+                '_' if account => uscore2 += 1,
+                '.' if account => {
+                    uscore1 = uscore2;
+                    uscore2 = 0;
+                    np += 1;
+                }
+                '_' | '.' | '-' => {}
+                _ => {
+                    if !is_valid_hostchar(source_char(char)) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
+            return false;
+        }
+        allow_short || np > 0
+    }
+
+    /// The start of a run of `marker` bytes at or before `index`.
+    pub(super) fn delimiter_run_start(input: &str, index: usize, marker: u8) -> usize {
+        let bytes = input.as_bytes();
+        let mut start = index;
+        while start > 0 && bytes[start - 1] == marker && !is_escaped_at(input, start - 1) {
+            start -= 1;
+        }
+        start
+    }
+
+    /// `definition_label`, finding the label's end afresh in the text of each
+    /// line count.
+    pub(super) fn definition_label(
+        lines: &[Line<'_>],
+        index: usize,
+    ) -> Option<(String, usize, usize)> {
+        let text = trim_ascii_start(lines[index].text);
+        if !text.starts_with('[') {
+            return None;
+        }
+        let mut accumulated = String::from(text);
+        let mut label_end_line = index;
+        let close = loop {
+            if let Some(close) = find_reference_label_end(&accumulated, 0) {
+                if accumulated.as_bytes().get(close + 1) == Some(&b':') {
+                    break close;
+                }
+                return None;
+            }
+            let next = label_end_line + 1;
+            if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
+                return None;
+            }
+            accumulated.push('\n');
+            accumulated.push_str(lines[next].text);
+            label_end_line = next;
+        };
+        Some((accumulated, close, label_end_line))
+    }
 }
 
 /// Runs `check` once per input and query order, with a fresh `InlineScan` each
@@ -735,6 +880,111 @@ fn math_code_spans_match_the_reference_scan() {
             "{input:?} at {index}"
         );
     });
+}
+
+#[test]
+fn inline_math_matches_the_reference_scan() {
+    for_each_scan(18, |input, scan, index| {
+        if input.as_bytes().get(index) != Some(&b'$') {
+            return;
+        }
+        assert_eq!(
+            parse_math_inline(&mut scan.lookups, input, index),
+            reference::parse_math_inline(input, index),
+            "{input:?} at {index}"
+        );
+        assert_eq!(
+            parse_math_inline(&mut DirectLookups { input }, input, index),
+            reference::parse_math_inline(input, index),
+            "{input:?} at {index}"
+        );
+    });
+}
+
+/// Inputs dense in host chars, dots, underscores and escapes, so that hosts
+/// run past the eleven dots that settle `check_domain`.
+fn host_inputs(count: usize, seed: u64) -> Vec<String> {
+    const HOST_PIECES: &[&str] = &[
+        "www.", "a", "b", ".", "..", "_", "-", "\\", "\\ ", "\\.", "\\\n", " ", "\n", "/", ":",
+        "中", "é", "。",
+    ];
+    let mut rng = Rng(seed);
+    (0..count)
+        .map(|_| {
+            let pieces = rng.below(81);
+            (0..pieces)
+                .map(|_| HOST_PIECES[rng.below(HOST_PIECES.len())])
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn domain_checks_match_the_reference_walk() {
+    let mut inputs = host_inputs(3000, 19);
+    inputs.extend(generated_inputs(700, 40, 19));
+    for input in inputs {
+        for index in boundaries(&input) {
+            for allow_short in [false, true] {
+                assert_eq!(
+                    check_domain(&input[index..], allow_short),
+                    reference::check_domain(&input[index..], allow_short),
+                    "{input:?} at {index}, allow_short {allow_short}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn delimiter_run_starts_match_the_reference_walk() {
+    for input in generated_inputs(700, 40, 20) {
+        for (index, marker) in input.bytes().enumerate() {
+            if matches!(marker, b'*' | b'_' | b'~') {
+                assert_eq!(
+                    starts_delimiter_run(&input, index, marker),
+                    reference::delimiter_run_start(&input, index, marker) == index,
+                    "{input:?} at {index}"
+                );
+            }
+        }
+    }
+}
+
+/// Lines of label text, with label lengths around the limit.
+fn label_inputs(count: usize, seed: u64) -> Vec<String> {
+    let long = "a".repeat(240);
+    let wide = "中".repeat(120);
+    let pieces: [&str; 16] = [
+        "[", "]", "]:", ":", "\\", "\\[", "\\]", "a", " ", "\n", "\n\n", "\\\n", "\r\n", "é",
+        &long, &wide,
+    ];
+    let mut rng = Rng(seed);
+    (0..count)
+        .map(|_| {
+            let count = rng.below(61);
+            (0..count)
+                .map(|_| pieces[rng.below(pieces.len())])
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn definition_labels_match_the_reference_scan() {
+    let mut inputs = label_inputs(3000, 21);
+    inputs.extend(generated_inputs(700, 40, 21));
+    for input in inputs {
+        let map = SourceMap::verbatim(input.len(), 0);
+        let lines = collect_lines(&input, &map);
+        for index in 0..lines.len() {
+            assert_eq!(
+                definition_label(&lines, index),
+                reference::definition_label(&lines, index),
+                "{input:?} at line {index}"
+            );
+        }
+    }
 }
 
 #[test]
