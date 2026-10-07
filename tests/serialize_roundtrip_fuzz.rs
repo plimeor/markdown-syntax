@@ -150,8 +150,8 @@ const INPUTS_PER_GENERATOR: usize = 2_000;
 /// Generated inputs whose Markdown reads back as a different tree, with the
 /// reason.
 ///
-/// Each of these awaits a decision (plan one-normative-syntax, Risks): the
-/// difference is whitespace or a blank line that the AST does not record.
+/// Each difference is whitespace or a blank line that the AST does not
+/// record, as decision 0008 (Consequences) accepts.
 const NOT_READING_BACK: &[(&str, &str)] = &[
     (
         "__$$++\t\\\t\n}$==",

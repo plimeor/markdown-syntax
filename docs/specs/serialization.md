@@ -42,15 +42,42 @@ details the AST does not record.
 ### Requirement: Round-trip stability
 For a parsed document, parsing the Markdown that `to_markdown` writes SHALL
 yield a document equal to the first as "Tree comparison" defines, and
-serializing that reparsed document SHALL yield the same text byte for byte.
-This SHALL hold for every fixture under `tests/fixtures/roundtrip/` and for
-every document the seeded generators build from their recorded seeds, apart
-from the generated documents that `tests/serialize_roundtrip_fuzz.rs` lists
-one by one, each with the reason it does not read back.
+serializing that reparsed document SHALL yield the same text byte for byte,
+unless the source holds a detail the AST does not record (decision 0008): a
+lazy continuation line, an indentation width, or a count of blank lines.
 
-#### Scenario: Round-trip fixtures
-- **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed, serialized, reparsed, and serialized again
-- **THEN** the reparsed AST matches the first and the two serialized texts are identical
+The tests check serialization one flow at a time, each against one oracle:
+
+- Markdown → AST: each `.md` under `tests/fixtures/roundtrip/` with a sibling
+  `.ast` parses to the tree that golden holds (`tests/fixtures.rs`).
+- AST → Markdown: each hand-built tree in `tests/serialize_regressions.rs`
+  serializes to exactly the Markdown the test states.
+- Markdown → AST → Markdown: each `.md` with a sibling `.canonical.md`, and
+  each input in `CANONICAL_INPUTS` in `tests/fixtures.rs`, serializes to
+  exactly the Markdown its golden or entry holds.
+- Source read-back, Markdown → AST → Markdown → AST: every input of one
+  corpus, the input `.md` and `.cases` files under `tests/fixtures/roundtrip/`
+  and the inputs `tests/fixtures.rs` lists, reads back, apart from the inputs
+  `NOT_READING_BACK` in `tests/fixtures.rs` lists.
+- Tree read-back over generated documents: every document the seeded
+  generators in `tests/serialize_roundtrip_fuzz.rs` build reads back, apart
+  from the documents `NOT_READING_BACK` in that file lists.
+
+Each of the two exception lists names its inputs one by one, each with what
+the AST does not record that makes it read back as a different tree, and
+fails when a listed input reads back or no longer exists.
+
+#### Scenario: Source read-back corpus
+- **WHEN** each input of the read-back corpus is parsed, serialized, reparsed, and serialized again
+- **THEN** the reparsed AST matches the first and the two serialized texts are identical, unless `NOT_READING_BACK` in `tests/fixtures.rs` lists the input
+
+#### Scenario: Lazy continuation line
+- **WHEN** the document parsed from `"> a\n==="` is serialized
+- **THEN** `to_markdown()` returns `"> a\n> ===\n"`, which reads back as a heading inside the quote, and `NOT_READING_BACK` lists the input as a lazy line
+
+#### Scenario: Stale exception
+- **WHEN** an input `NOT_READING_BACK` lists reads back, or no input of the corpus matches an entry
+- **THEN** the read-back test fails
 
 #### Scenario: Seeded round-trip generators
 - **WHEN** the inline, block-oriented, and emphasis-heavy generators in `tests/serialize_roundtrip_fuzz.rs` run with the seeds recorded in that file

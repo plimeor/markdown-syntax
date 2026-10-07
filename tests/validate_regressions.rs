@@ -80,6 +80,27 @@ mod validation {
             Err(SerializeError::InvalidDocument(_))
         ));
     }
+
+    #[test]
+    fn validation_and_serializer_reject_invalid_ast() {
+        let mut document = Document::default();
+        document.children.push(Block::Heading(Heading {
+            meta: NodeMeta::default(),
+            depth: 9,
+            kind: HeadingKind::Atx,
+            children: vec![Inline::Text(Text {
+                meta: NodeMeta::default(),
+                value: "bad".into(),
+            })],
+        }));
+
+        let diagnostics = document.validate();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(matches!(
+            document.to_markdown().unwrap_err(),
+            SerializeError::InvalidDocument(_)
+        ));
+    }
 }
 
 mod review_validate {

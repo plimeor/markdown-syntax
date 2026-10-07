@@ -3,117 +3,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[path = "normalize.rs"]
-mod normalize;
+use markdown_syntax::{Block, Document, Inline};
 
-use markdown_syntax::{parse, Block, DiagnosticSeverity, Document, Inline};
+/// The fixture corpus: goldens, stability inputs, and `.cases` files.
+pub(crate) const ROUNDTRIP_ROOT: &str = "tests/fixtures/roundtrip";
 
-pub(crate) fn assert_fixture(stem: &str) {
-    let (output, markdown) = assert_fixture_goldens(stem);
-
-    let reparsed = parse(&markdown);
-    assert_eq!(
-        snapshot_document_normalized(&reparsed.document),
-        snapshot_document_normalized(&output.document)
-    );
-
-    let second = reparsed
-        .document
-        .to_markdown()
-        .expect("reparsed document serializes");
-    assert_eq!(second, markdown);
-}
-
-/// Checks a fixture listed as not reading back: its goldens hold, and its
-/// Markdown still reads back as a different tree, so the listing cannot go
-/// stale.
-pub(crate) fn assert_fixture_not_reading_back(stem: &str) {
-    let (output, markdown) = assert_fixture_goldens(stem);
-    let reparsed = parse(&markdown);
-    assert_ne!(
-        snapshot_document_normalized(&reparsed.document),
-        snapshot_document_normalized(&output.document),
-        "{stem}: listed as not reading back, but it does"
-    );
-}
-
-/// Parses a fixture and checks its `.ast` and `.canonical.md` goldens.
-fn assert_fixture_goldens(stem: &str) -> (markdown_syntax::ParseOutput, String) {
-    let input = read_fixture(&format!("{stem}.md"));
-    let expected_ast = read_fixture(&format!("{stem}.ast"));
-    let expected_markdown =
-        normalize_expected_markdown(&read_fixture(&format!("{stem}.canonical.md")));
-
-    let output = parse(&input);
-    assert_eq!(output.diagnostics, Vec::new());
-    assert_eq!(
-        snapshot_document(&output.document),
-        trim_final_newline(&expected_ast)
-    );
-
-    let markdown = output.document.to_markdown().expect("document serializes");
-    assert_eq!(markdown, expected_markdown);
-    (output, markdown)
-}
-
-pub(crate) fn assert_parse_serialize_stable(path: &str) {
-    let input = read_fixture(path);
-    let output = parse(&input);
-    assert!(
-        output
-            .diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error),
-        "{path}: unexpected parse diagnostics: {:?}",
-        output.diagnostics
-    );
-
-    let markdown = output.document.to_markdown().expect("document serializes");
-    let reparsed = parse(&markdown);
-    assert_eq!(
-        snapshot_document_normalized(&reparsed.document),
-        snapshot_document_normalized(&output.document),
-        "{path}: AST changed after serialize/reparse"
-    );
-
-    let second = reparsed
-        .document
-        .to_markdown()
-        .expect("reparsed document serializes");
-    assert_eq!(second, markdown, "{path}: serializer is not idempotent");
-}
-
-pub(crate) fn assert_case_file_stable(path: &Path) -> usize {
-    let metadata = read_derived_metadata(path);
-    let cases = read_derived_cases(path);
-    assert_eq!(
-        cases.len(),
-        metadata.count,
-        "{}: header count does not match parsed cases",
-        path.display()
-    );
-
-    for case in &cases {
-        assert_source_stable(&case.input, path, case.index);
-    }
-
-    cases.len()
-}
-
-/// Checks every case of the derived corpus under `root`. A case `listed`
-/// by its file, relative to `root`, and its number must serialize and read
-/// back as a different tree; every other case must round-trip.
-pub(crate) fn assert_semantic_input_corpus_stable(
-    root: &Path,
-    listed: &[(&str, usize)],
-) -> DerivedCorpusStats {
-    let mut seen = Vec::new();
+/// Every file under `root` with `extension`, sorted.
+pub(crate) fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    collect_files(root, "cases", &mut files);
+    collect_files(root, extension, &mut files);
     files.sort();
+    files
+}
 
+/// Checks the derived corpus under `root`, its metadata, its promoted
+/// sources, and its manifest total, and counts its cases.
+pub(crate) fn derived_corpus_stats(root: &Path) -> DerivedCorpusStats {
     let mut stats = DerivedCorpusStats::default();
-    for file in files {
+    for file in files_with_extension(root, "cases") {
         let metadata = read_derived_metadata(&file);
         assert_eq!(
             metadata.role.as_deref(),
@@ -134,32 +41,7 @@ pub(crate) fn assert_semantic_input_corpus_stable(
             "gfm" => stats.gfm_cases += cases.len(),
             origin => panic!("{}: unexpected origin: {origin}", file.display()),
         }
-
-        let relative = file
-            .strip_prefix(root)
-            .expect("case file is under the root")
-            .to_string_lossy()
-            .replace('\\', "/");
-        for case in cases {
-            stats.total_cases += 1;
-            if listed.contains(&(relative.as_str(), case.index)) {
-                seen.push((relative.clone(), case.index));
-                assert_source_not_reading_back(&case.input, &file, case.index);
-            } else if case.input.contains('\u{0}') {
-                // code-lean: literal NUL fuzz cases cover parse totality only; upgrade when
-                // NUL serializer/reparse stability becomes a contract.
-                let _ = parse(&case.input);
-            } else {
-                assert_source_stable(&case.input, &file, case.index);
-            }
-        }
-    }
-    for &(file, index) in listed {
-        assert!(
-            seen.iter()
-                .any(|(seen_file, seen_index)| seen_file == file && *seen_index == index),
-            "{file}#{index}: listed case not found"
-        );
+        stats.total_cases += cases.len();
     }
 
     assert_promoted_semantic_sources(root);
@@ -330,48 +212,7 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, usize) {
     (index, byte_len)
 }
 
-fn assert_source_not_reading_back(source: &str, path: &Path, index: usize) {
-    let output = parse(source);
-    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
-        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
-    });
-    assert_ne!(
-        snapshot_document_normalized(&parse(&markdown).document),
-        snapshot_document_normalized(&output.document),
-        "{}#{index}: listed as not reading back, but it does",
-        path.display()
-    );
-}
-
-fn assert_source_stable(source: &str, path: &Path, index: usize) {
-    let output = parse(source);
-
-    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
-        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
-    });
-    let reparsed = parse(&markdown);
-    assert_eq!(
-        snapshot_document_normalized(&reparsed.document),
-        snapshot_document_normalized(&output.document),
-        "{}#{index}: AST changed after serialize/reparse",
-        path.display()
-    );
-    let again = reparsed.document.to_markdown().unwrap_or_else(|error| {
-        panic!(
-            "{}#{index}: reserialize failed: {:?}",
-            path.display(),
-            error
-        )
-    });
-    assert_eq!(
-        again,
-        markdown,
-        "{}#{index}: serializing the reparsed document changed the Markdown",
-        path.display()
-    );
-}
-
-fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) {
+pub(crate) fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(root).unwrap_or_else(|error| panic!("{}: {error}", root.display())) {
         let path = entry
             .unwrap_or_else(|error| panic!("{}: {error}", root.display()))
@@ -384,25 +225,18 @@ fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) {
     }
 }
 
-fn read_fixture(path: &str) -> String {
-    fs::read_to_string(Path::new(path)).unwrap_or_else(|error| panic!("{path}: {error}"))
+pub(crate) fn read_fixture(path: &Path) -> String {
+    fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-fn trim_final_newline(input: &str) -> &str {
+pub(crate) fn trim_final_newline(input: &str) -> &str {
     input.trim_end_matches('\n')
 }
 
-fn normalize_expected_markdown(input: &str) -> String {
+pub(crate) fn normalize_expected_markdown(input: &str) -> String {
     let mut output = input.trim_end_matches('\n').to_string();
     output.push('\n');
     output
-}
-
-/// The snapshot of `document` as serialization's tree comparison reads it:
-/// each `Escape` and `CharacterReference` as text, with adjacent text merged.
-/// Spans are never part of a snapshot.
-pub(crate) fn snapshot_document_normalized(document: &Document) -> String {
-    snapshot_document(&normalize::normalized_document(document))
 }
 
 pub(crate) fn snapshot_document(document: &Document) -> String {
