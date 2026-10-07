@@ -74,7 +74,6 @@ pub fn run_all() -> Report {
                     Outcome::PassNormalized
                 } else {
                     Outcome::Fail {
-                        input: t.input.clone(),
                         expected: t.expected_html.clone(),
                         actual: html,
                     }
@@ -87,6 +86,8 @@ pub fn run_all() -> Report {
             index: t.index,
             category: t.category,
             label: t.label.clone(),
+            options: t.options(),
+            input: t.input.clone(),
             outcome,
         });
     }

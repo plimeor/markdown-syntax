@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use crate::deviations::{DEVIATIONS, KNOWN_DEFECTS};
+use crate::deviations::{excerpt, input_hash, Listed, DEVIATIONS, KNOWN_DEFECTS};
 use crate::types::Category;
 
 /// Per-case outcome.
@@ -14,11 +14,7 @@ pub enum Outcome {
     /// difference the normalizer legitimately erases).
     PassNormalized,
     /// Real mismatch after normalization.
-    Fail {
-        input: String,
-        expected: String,
-        actual: String,
-    },
+    Fail { expected: String, actual: String },
     /// The parser returned an error for this input (config or strict failure).
     ParseError(String),
 }
@@ -28,7 +24,29 @@ pub struct CaseResult {
     pub index: usize,
     pub category: Category,
     pub label: Option<String>,
+    /// The case's option tokens as its header writes them (`-` for none).
+    pub options: String,
+    /// The Markdown input.
+    pub input: String,
     pub outcome: Outcome,
+}
+
+impl CaseResult {
+    fn failed(&self) -> bool {
+        matches!(self.outcome, Outcome::Fail { .. } | Outcome::ParseError(_))
+    }
+
+    fn listed_by(&self, entry: &Listed) -> bool {
+        entry.names(self.source_file, &self.options, &self.input)
+    }
+
+    fn listed(&self) -> bool {
+        listed().any(|entry| self.listed_by(entry))
+    }
+}
+
+fn listed() -> impl Iterator<Item = &'static Listed> {
+    DEVIATIONS.iter().chain(KNOWN_DEFECTS)
 }
 
 pub struct Report {
@@ -136,54 +154,66 @@ impl Report {
         println!("=====================================================\n");
     }
 
-    /// The cases that differ from their oracle by design are listed in
-    /// `crate::deviations`. Prints, apart from each other, the listed cases
-    /// that now pass and the unlisted cases that fail.
+    /// The cases that differ from their oracle are listed in
+    /// `crate::deviations`. Prints, apart from each other, the problems with
+    /// the lists and the unlisted cases that fail, each with an entry to fill
+    /// in.
     fn print_deviations(&self) {
-        let listed = |r: &CaseResult| {
-            DEVIATIONS
-                .iter()
-                .chain(KNOWN_DEFECTS)
-                .any(|(file, index, _)| *file == r.source_file && *index == r.index)
-        };
-        let failed =
-            |r: &CaseResult| matches!(r.outcome, Outcome::Fail { .. } | Outcome::ParseError(_));
-        let now_passing: Vec<&CaseResult> = self
-            .results
-            .iter()
-            .filter(|r| listed(r) && !failed(r))
-            .collect();
+        let problems = self.list_problems();
         let unlisted: Vec<&CaseResult> = self
             .results
             .iter()
-            .filter(|r| !listed(r) && failed(r))
-            .collect();
-        let unknown: Vec<&(&str, usize, &str)> = DEVIATIONS
-            .iter()
-            .chain(KNOWN_DEFECTS)
-            .filter(|(file, index, _)| {
-                !self
-                    .results
-                    .iter()
-                    .any(|r| r.source_file == *file && r.index == *index)
-            })
+            .filter(|r| r.failed() && !r.listed())
             .collect();
         println!(
-            "\n-- deviations: {} by design, {} known defects, {} listed now passing, {} unlisted failing --",
+            "\n-- deviations: {} by design, {} known defects, {} list problems, {} unlisted failing --",
             DEVIATIONS.len(),
             KNOWN_DEFECTS.len(),
-            now_passing.len(),
+            problems.len(),
             unlisted.len()
         );
-        for r in now_passing {
-            println!("  listed, now passes: {} case {}", r.source_file, r.index);
+        for problem in &problems {
+            println!("  {problem}");
         }
         for r in unlisted {
-            println!("  UNLISTED deviation: {} case {}", r.source_file, r.index);
+            println!(
+                "  UNLISTED deviation: {} case {}\n    case({:?}, {:?}, {:#018x}, {:?}, \"<reason>\"),",
+                r.source_file,
+                r.index,
+                r.source_file,
+                r.options,
+                input_hash(&r.input),
+                excerpt(&r.input),
+            );
         }
-        for (file, index, _) in unknown {
-            println!("  listed, no such case: {file} case {index}");
+    }
+
+    /// The entries in `crate::deviations` that are out of date: one that names
+    /// no case, one whose case now passes, and one that names the same case as
+    /// an earlier entry. A failing case no entry names is not a problem: the
+    /// bench measures, it does not gate.
+    pub fn list_problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        let entries: Vec<&Listed> = listed().collect();
+        for (n, entry) in entries.iter().enumerate() {
+            let cases: Vec<&CaseResult> =
+                self.results.iter().filter(|r| r.listed_by(entry)).collect();
+            let at = format!("{} {:?} {:?}", entry.file, entry.options, entry.excerpt);
+            if cases.is_empty() {
+                problems.push(format!("listed, no such case: {at}"));
+            }
+            for r in cases.iter().filter(|r| !r.failed()) {
+                problems.push(format!("listed, now passes: {at} (case {})", r.index));
+            }
+            if entries[..n].iter().any(|earlier| {
+                earlier.file == entry.file
+                    && earlier.options == entry.options
+                    && earlier.input_hash == entry.input_hash
+            }) {
+                problems.push(format!("listed twice: {at}"));
+            }
         }
+        problems
     }
 
     /// Dump every failure (and parse error) as an inspectable block for triage.
@@ -192,18 +222,14 @@ impl Report {
         let mut n = 0;
         for r in &self.results {
             match &r.outcome {
-                Outcome::Fail {
-                    input,
-                    expected,
-                    actual,
-                } => {
+                Outcome::Fail { expected, actual } => {
                     n += 1;
                     out.push_str(&format!(
                         "### FAIL #{n} [{} case {}] {}\n--- input ---\n{}\n--- expected ---\n{}\n--- actual ---\n{}\n\n",
                         r.source_file,
                         r.index,
                         r.label.as_deref().unwrap_or(""),
-                        show(input),
+                        show(&r.input),
                         show(expected),
                         show(actual),
                     ));
