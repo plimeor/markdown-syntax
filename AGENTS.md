@@ -16,14 +16,26 @@ Read `docs/overview.md` before starting work.
 
 ## Commands
 
+CI (`.github/workflows/ci.yml`) runs these in this order:
+
 - Format: `cargo fmt --check`
-- Build (default): `cargo build` — the empty-feature / zero-dep gate
-- Test: `cargo test` — parse/serialize/validate/fixtures/roundtrip + the README
-  doc-test; `cargo test --features html` also runs the HTML renderer tests and
-  the commonmark.js reference cases for nested containers
+- Build (default features): `cargo build` — the empty-feature / zero-dep gate
+- Compile the default-feature tests: `cargo test --no-run`
+- Test: `cargo test --profile ci --features html` — every test once:
+  parse/serialize/validate/fixtures/roundtrip, the README doc-test, the HTML
+  renderer tests, and the commonmark.js reference cases for nested containers.
+  `[profile.ci]` in `Cargo.toml` is release with debug assertions and overflow
+  checks on.
 - Docs: `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
-- wasm check: `cargo build --target wasm32-unknown-unknown`
-  (`rustup target add wasm32-unknown-unknown` first)
+
+Observed on 4 cores from an empty `target/`: about 1 min for the sequence,
+of which ~20 s compiles the ci profile and ~22 s runs the tests;
+`tests/pathological_inputs.rs` takes ~13 s and `tests/linear_growth.rs` ~7 s
+of that. Plain `cargo test` (debug) takes ~2.5 min, nearly all in those two
+files.
+
+Inner loop: `cargo test --profile ci --features html --test <name>`; a fast
+file also runs quickly as plain `cargo test --test <name>`.
 
 ## Release
 
@@ -44,9 +56,9 @@ Read `docs/overview.md` before starting work.
 - `tests/html_conformance/` is a measurement bench (AST→HTML vs vendored
   CommonMark/GFM oracles); its pass rate is **not** a CI gate. To observe
   current numbers, run
-  `cargo test --features html --test html_conformance -- --nocapture`. It
-  fails only when an entry in `tests/html_conformance/deviations.rs` names no
-  case or names a case that now passes.
+  `cargo test --profile ci --features html --test html_conformance -- --nocapture`.
+  It fails only when an entry in `tests/html_conformance/deviations.rs` names
+  no case, names a case twice, or names a case that now passes.
 - No bless flag: any `.ast` / `.canonical.md` golden a fix legitimately moves
   must be hand-regenerated in the same commit and verified to reflect correct
   structure — never edit a test to pass a wrong parse.

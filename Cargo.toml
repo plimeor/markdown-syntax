@@ -33,3 +33,11 @@ html = []
 # Build docs.rs with the html feature so the renderer API is documented there.
 [package.metadata.docs.rs]
 features = ["html"]
+
+# The profile CI runs the test suite under: optimized like release, with the
+# debug assertions and integer overflow checks a debug build has. It does not
+# affect the published crate.
+[profile.ci]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true
