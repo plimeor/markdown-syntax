@@ -68,15 +68,12 @@ pub fn excerpt(input: &str) -> &str {
 /// whose input reads as a construct only one side has (one this syntax drops,
 /// or one the oracle lacks, such as literal autolinks, wiki links, or
 /// frontmatter under a CommonMark oracle) is removed from the suite instead:
-/// the two outputs cannot be compared.
+/// the two outputs cannot be compared. So is a case whose oracle turns off a
+/// construct this syntax keeps (indented code, HTML blocks) and that
+/// commonmark.js, with the construct on, renders as this crate does.
 pub const DEVIATIONS: &[Listed] = &[
-    case("commonmark/code_indented.cases", "code_indented_off", 0x3ac7e87e17e3cf3c, "    a", "indented code is part of the syntax; the oracle turns it off"),
-    case("commonmark/code_indented.cases", "code_indented_off", 0xc24b9c53c8f8b8f8, "```\na\n    ```", "indented code is part of the syntax; the oracle turns it off"),
     case("commonmark/gfm_table.cases", "-", 0x344b3ce2752a24d5, "| a |\n| - |\n| b |", "tables are part of the syntax; the oracle reads the rows as text"),
-    case("commonmark/gfm_table.cases", "gfm,code_indented_off", 0xcfaf038193c872fd, "| a |\n    | - |", "indented code is part of the syntax; the oracle turns it off"),
-    case("commonmark/gfm_table.cases", "gfm,code_indented_off", 0xcad0aaca934cedd8, "    | a |\n\t| - |\n    | b |", "indented code is part of the syntax; the oracle turns it off"),
     case("commonmark/gfm_task_list_item.cases", "-", 0xa3f7f4ff52863012, "* [x] y.", "task list items are part of the syntax; the oracle reads `[x]` as text"),
-    case("commonmark/html_flow.cases", "html_flow_off", 0x6fc38c182fd4dc45, "<x>", "raw HTML blocks are part of the syntax; the oracle turns them off"),
     case("gfm/inline_footnotes.cases", "extension.inline_footnotes", 0x23538404ce8325cd, "Text^[note] should not parse.\n", "inline footnotes are part of the syntax; the oracle runs without footnotes"),
     case("gfm/math.cases", "extension.math_dollars", 0xdf5d221a68b26090, "test $$\n2+2\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
     case("gfm/math.cases", "extension.math_dollars", 0x2d7905f74cfccf51, "$$\n2+2\n4+4\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
@@ -87,6 +84,12 @@ pub const DEVIATIONS: &[Listed] = &[
     case("commonmark/list.cases", "-", 0x57ecef8531311db8, "- ```\n   \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/list.cases", "-", 0x68dbf208da8c60bc, "- ```\n    \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/list.cases", "-", 0xcfbe10e540f5a44f, "- ```\n\t\n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0xe753952115ebba0b, "\n[ www.example.com\n\n[ https://example.co", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0x9a69188b3123a018, "H0.\n\n[https://a.com&copy;b\n\n[www.a.com&c", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0xf37a7f8b146691cf, "Image start.\n\n![https://a.com\n\n![http://", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0xf889ed9b7afa71fe, "Link start.\n\n[https://a.com\n\n[http://a.c", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0xceb3e904adfbe2a3, "[www.example.com/a&copy;](#)\n\nwww.exampl", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
+    case("commonmark/gfm_autolink_literal.cases", "gfm", 0x687e2b89bad6463c, "# HTTP\n\nhttps://a.b can start after EOF\n", "a URL after a `[` no `]` has closed yet stays text, as in cmark-gfm; the markdown-rs oracle links it"),
 ];
 
 /// Cases that fail as parser defects, not by design. A case belongs here only
