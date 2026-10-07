@@ -477,33 +477,9 @@ fn write_list(
             format!("{marker_char} ")
         };
         let inner = write_item_blocks(&item.children, options, node.tight, item.checked)?;
-        // A loose list of one item holding one paragraph keeps a blank line
-        // inside the item, which is what makes it loose.
-        let loose_single = !node.tight
-            && node.children.len() == 1
-            && matches!(item.children.as_slice(), [Block::Paragraph(_)])
-            && !inner.is_empty();
-        // A thematic break of the bullet's own char right after the bullet
-        // would read as one longer break, so it starts on the next line.
-        let break_after_bullet = !node.ordered
-            && item.checked.is_none()
-            && matches!(
-                item.children.first(),
-                Some(Block::ThematicBreak(ThematicBreak { marker, .. }))
-                    if thematic_break_char(*marker) == marker_char
-            );
-        // Spaces or a tab opening the item's content would read as padding
-        // after the marker, so that content starts on the next line. Four
-        // spaces or more open indented code, which the marker line holds
-        // after one space: an item that starts empty cannot interrupt a
-        // paragraph.
-        let opens_indented_code = inner.starts_with("    ");
-        let opens_with_whitespace = !opens_indented_code && inner.starts_with([' ', '\t']);
-        if loose_single {
-            output.push_str(marker.trim_end());
-            output.push_str("\n\n");
-            output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
-        } else if break_after_bullet || opens_with_whitespace {
+        let break_after_bullet = breaks_after_bullet(node, item, marker_char);
+        let opens_with_whitespace = opens_with_padding(&inner);
+        if break_after_bullet || opens_with_whitespace {
             output.push_str(marker.trim_end());
             output.push('\n');
             output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
@@ -526,6 +502,52 @@ fn thematic_break_char(marker: ThematicBreakMarker) -> char {
 /// An item's blocks; a task item's, `task` holding whether it is checked,
 /// open with its checkbox: at the start of the first paragraph after the
 /// definitions the item starts with, or else of the item.
+/// A thematic break of the bullet's own char right after the bullet would
+/// read as one longer break, so it starts on the next line.
+fn breaks_after_bullet(list: &List, item: &ListItem, marker_char: char) -> bool {
+    !list.ordered
+        && item.checked.is_none()
+        && matches!(
+            item.children.first(),
+            Some(Block::ThematicBreak(ThematicBreak { marker, .. }))
+                if thematic_break_char(*marker) == marker_char
+        )
+}
+
+/// Spaces or a tab opening an item's written content would read as padding
+/// after the marker, so that content starts on the next line. Four spaces or
+/// more open indented code, which the marker line holds after one space: an
+/// item that starts empty cannot interrupt a paragraph.
+fn opens_with_padding(inner: &str) -> bool {
+    !inner.starts_with("    ") && inner.starts_with([' ', '\t'])
+}
+
+/// Whether, with default options, the serializer starts `list`'s first item
+/// on a line after its bullet, so that the list, written after a paragraph's
+/// line, cannot interrupt the paragraph. Only a leaf block can open with
+/// whitespace, so only a leading leaf block is written to tell.
+pub(crate) fn first_item_starts_below_its_bullet(list: &List) -> bool {
+    let Some(item) = list.children.first() else {
+        return false;
+    };
+    let options = SerializeOptions::default();
+    if breaks_after_bullet(list, item, list_marker(list, &options, None)) {
+        return true;
+    }
+    if item.checked.is_some() {
+        return false;
+    }
+    match item.children.first() {
+        Some(
+            block @ (Block::Paragraph(_)
+            | Block::Heading(_)
+            | Block::HtmlBlock(_)
+            | Block::CodeBlock(_)),
+        ) => write_block(block, &options).is_ok_and(|written| opens_with_padding(&written)),
+        _ => false,
+    }
+}
+
 fn write_item_blocks(
     blocks: &[Block],
     options: &SerializeOptions,

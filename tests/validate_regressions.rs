@@ -31,6 +31,26 @@ mod validation {
     }
 
     #[test]
+    fn empty_paragraph_is_invalid() {
+        for children in [vec![], vec![Inline::Text(Text::from(""))]] {
+            let document = Document {
+                meta: NodeMeta::default(),
+                children: vec![Block::Paragraph(Paragraph {
+                    meta: NodeMeta::default(),
+                    children,
+                })],
+            };
+            let diagnostics = document.validate();
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+            assert_eq!(diagnostics[0].message, "paragraph cannot be empty");
+            assert!(matches!(
+                document.to_markdown(),
+                Err(SerializeError::InvalidDocument(_))
+            ));
+        }
+    }
+
+    #[test]
     fn empty_table_is_invalid() {
         let document = Document {
             meta: NodeMeta::default(),
@@ -514,6 +534,12 @@ mod review_validate {
             vec![text("\ta")],
             vec![soft_break(), text("a")],
             vec![text("a"), soft_break()],
+            // Whitespace as the parser's flanking reads it, past empty text.
+            vec![text("\u{a0}a")],
+            vec![text("a\u{3000}")],
+            vec![text(""), text(" a")],
+            vec![text("a "), text("")],
+            vec![text("")],
         ] {
             assert!(invalid(&paragraph(vec![emphasis(children.clone())])));
             assert!(invalid(&paragraph(vec![Inline::Mark(Mark {
@@ -1247,6 +1273,20 @@ mod written_shapes {
             empty_item,
             html_block("<span>x</span>"),
             html_block("<span>"),
+            // A list whose first item the serializer starts on the line
+            // after its bullet: a dash break under a dash bullet, or content
+            // opening with a space.
+            list(
+                true,
+                vec![item(
+                    None,
+                    vec![Block::ThematicBreak(ThematicBreak {
+                        meta: NodeMeta::default(),
+                        marker: ThematicBreakMarker::Dash,
+                    })],
+                )],
+            ),
+            list(true, vec![item(None, vec![html_block(" <v>")])]),
         ] {
             assert!(invalid(&after(true, bad.clone())), "{bad:?}");
             assert!(valid(&after(false, bad)));
@@ -1280,6 +1320,21 @@ mod written_shapes {
     #[test]
     fn a_list_holds_an_item() {
         assert!(invalid(&document(vec![list(true, vec![])])));
+    }
+
+    /// Blank lines between items or between two blocks of an item make a
+    /// list loose, so no source spells a loose list of one item holding at
+    /// most one block.
+    #[test]
+    fn a_loose_list_holds_two_items_or_an_item_of_two_blocks() {
+        for items in [
+            vec![item(None, vec![])],
+            vec![item(None, vec![paragraph(vec![text("a")])])],
+        ] {
+            assert!(invalid(&document(vec![list(false, items)])));
+        }
+        assert!(valid(&parsed("- a\n\n- b")));
+        assert!(valid(&parsed("- a\n\n  b")));
     }
 
     #[test]

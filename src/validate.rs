@@ -16,7 +16,7 @@ use crate::{
         alert_title, frontmatter_fence_kind, interrupts_paragraph, is_blank, is_footnote_label,
         is_reference_label, is_written_footnote_label, normalize_label, MAX_BLOCK_NESTING,
     },
-    serialize::{writes_setext, written_marker},
+    serialize::{first_item_starts_below_its_bullet, writes_setext, written_marker},
     span::Span,
 };
 
@@ -67,7 +67,16 @@ fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Vec<Diagnos
 
 fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
     match block {
-        Block::Paragraph(paragraph) => validate_inlines(&paragraph.children, diagnostics),
+        Block::Paragraph(paragraph) => {
+            // An empty paragraph writes nothing and reads back as no block.
+            if paragraph.children.iter().all(is_empty_text) {
+                diagnostics.push(Diagnostic::invalid(
+                    paragraph.meta.span,
+                    "paragraph cannot be empty",
+                ));
+            }
+            validate_inlines(&paragraph.children, diagnostics);
+        }
         Block::Heading(heading) => validate_heading(heading, diagnostics),
         Block::BlockQuote(block_quote) => {
             validate_blocks(&block_quote.children, depth + 1, diagnostics);
@@ -178,6 +187,14 @@ fn validate_list(list: &List, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
             "list must hold at least one item",
         ));
     }
+    // A list is loose when blank lines part its items or two blocks of one
+    // item, so one item of at most one block is always tight.
+    if !list.tight && matches!(list.children.as_slice(), [item] if item.children.len() <= 1) {
+        diagnostics.push(Diagnostic::invalid(
+            list.meta.span,
+            "a loose list must hold two items or an item of two blocks",
+        ));
+    }
     validate_list_start(list, diagnostics);
     for item in &list.children {
         validate_task_item(item, diagnostics);
@@ -215,6 +232,9 @@ fn validate_tight_item(item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
         };
         let interrupts = match block {
             Block::Heading(heading) => !writes_setext(heading),
+            Block::List(list) => {
+                interrupts_paragraph(block) && !first_item_starts_below_its_bullet(list)
+            }
             _ => interrupts_paragraph(block),
         };
         if !interrupts {
@@ -691,7 +711,7 @@ fn validate_siblings(before: &Inline, inline: &Inline, diagnostics: &mut Vec<Dia
 fn validate_emphasis_container(node: &Inline, diagnostics: &mut Vec<Diagnostic>) {
     let children = node.children();
     let span = node.span();
-    if children.is_empty() {
+    if children.iter().all(is_empty_text) {
         diagnostics.push(Diagnostic::invalid(
             span,
             "emphasis-like inline container cannot have empty children",
@@ -717,25 +737,31 @@ fn validate_emphasis_container(node: &Inline, diagnostics: &mut Vec<Diagnostic>)
     validate_inlines(children, diagnostics);
 }
 
-/// Whether inline content starts with a space, a tab, or a line break other
-/// than a backslash break: a delimiter run before `\` is followed by
-/// punctuation, which may open it as the characters before it allow.
+/// Whether inline content, past any empty text, starts with whitespace, as
+/// the parser's delimiter flanking reads it, or with a line break other than a
+/// backslash break: a delimiter run before `\` is followed by punctuation,
+/// which may open it as the characters before it allow.
 fn starts_with_whitespace(inlines: &[Inline]) -> bool {
-    match inlines.first() {
-        Some(Inline::Text(text)) => text.value.starts_with([' ', '\t']),
+    match inlines.iter().find(|inline| !is_empty_text(inline)) {
+        Some(Inline::Text(text)) => text.value.starts_with(char::is_whitespace),
         Some(Inline::SoftBreak(_)) => true,
         Some(Inline::LineBreak(node)) => node.kind == LineBreakKind::Spaces,
         _ => false,
     }
 }
 
-/// Whether inline content ends with a space, a tab, or a line break.
+/// Whether inline content, before any empty text, ends with whitespace or a
+/// line break.
 fn ends_with_whitespace(inlines: &[Inline]) -> bool {
-    match inlines.last() {
-        Some(Inline::Text(text)) => text.value.ends_with([' ', '\t']),
+    match inlines.iter().rev().find(|inline| !is_empty_text(inline)) {
+        Some(Inline::Text(text)) => text.value.ends_with(char::is_whitespace),
         Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => true,
         _ => false,
     }
+}
+
+fn is_empty_text(inline: &Inline) -> bool {
+    matches!(inline, Inline::Text(text) if text.value.is_empty())
 }
 
 /// Link text holds no link, at any depth.

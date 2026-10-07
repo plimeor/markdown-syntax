@@ -31,13 +31,19 @@ sits in a table cell or a directive label:
   interrupt it, by the parser's own checks: a `Paragraph`, a `Definition`, an
   indented `CodeBlock`, a `Frontmatter`, a `Heading` written as a setext
   heading, an ordered `List` whose start is not 1, a `List` whose first item
-  has no blocks, or an `HtmlBlock` whose first line opens no HTML block or
-  opens one that only a blank line ends (a lone tag such as `<span>`).
+  has no blocks or that the serializer starts on a line after its bullet (a
+  thematic break of the bullet's char, or content opening with one to three
+  spaces or a tab), or an
+  `HtmlBlock` whose first line opens no HTML block or opens one that only a
+  blank line ends (a lone tag such as `<span>`).
+- `Paragraph`: no children other than empty `Text`, which writes nothing.
 - `Heading`: a depth outside 1–6.
 - `Table`: no rows; a header row with no cells; an alignment count other than
   the header row's width; a row whose width differs from the header row's.
-- `List`: no items; an ordered list whose start is beyond the parser's
-  9-digit marker limit.
+- `List`: no items; a loose list of one item holding at most one block,
+  which no source spells, since blank lines between items or between two
+  blocks of an item make a list loose; an ordered list whose start is beyond
+  the parser's 9-digit marker limit.
 - `ListItem`: a task item (`checked` set) whose first block after its leading
   `Definition`s is not a `Paragraph` with children.
 - `Alert`: a title that is empty or starts or ends with a space or a tab.
@@ -79,10 +85,10 @@ sits in a table cell or a directive label:
 - Inline content: a `Text` holding a line ending; a `SoftBreak`, or a
   `LineBreak` of trailing spaces, right after a `SoftBreak` or a `LineBreak`,
   which leaves an empty line; two adjacent `Delete`s, written `~~a~~~~b~~`.
-- `Emphasis`, `Strong`, `Delete`, and `Mark`: no children; content that
-  starts with a space, a tab, a `SoftBreak`, or a `LineBreak` of trailing
-  spaces, or that ends with a space, a tab, a `SoftBreak`, or a `LineBreak`;
-  an
+- `Emphasis`, `Strong`, `Delete`, and `Mark`: no children other than empty
+  `Text`; content that, past empty `Text`, starts with a Unicode whitespace
+  char, a `SoftBreak`, or a `LineBreak` of trailing spaces, or ends with a
+  Unicode whitespace char, a `SoftBreak`, or a `LineBreak`; an
   `Emphasis` or a `Strong` whose only child is an `Emphasis` with the same
   delimiter (written `**a**` or `***a***`), a `Delete` whose only child is a
   `Delete`, and a `Mark` whose only child is a `Mark`.
@@ -263,10 +269,10 @@ Validation does not check, among others:
 - A collapsed or shortcut reference whose text, as written, does not
   normalize to its identifier: a code span's fence and padding are not
   recorded, so ```[`` a ``]``` is written `` [`a`] ``.
-- A `List` after a `Paragraph` in a tight item whose first item the
-  serializer starts on the line after its marker, such as an item whose
-  content is a thematic break of its bullet's char, written `- a\n  -\n    ---`,
-  which reads back as a setext heading.
+- A `List` after a `Paragraph` in a tight item whose first item a `bullet`
+  override makes start on the line after its marker: `- a\n  * ---` written
+  with `bullet = Some(BulletMarker::Dash)` is `- a\n  -\n    ---`, which reads
+  back as a setext heading.
 - A `WikiLink` target that holds an unescaped `|`, or a target or label that
   holds an unescaped `[` or `]` or a line ending.
 
