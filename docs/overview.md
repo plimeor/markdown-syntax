@@ -31,6 +31,8 @@ CommonMark input handling (leading BOM, NUL), source-mapped spans, block
 parsing on one stack of open blocks, one normative syntax in place of the
 dialect presets, a render-only serializer with validation as its only gate,
 and AST nodes that store each written fact once (plimeor/markdown-syntax#14).
+The one-normative-syntax plan has shipped on its branch and is archived; the
+release follows its merge.
 
 ## Next
 
