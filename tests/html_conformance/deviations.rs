@@ -63,7 +63,8 @@ pub fn excerpt(input: &str) -> &str {
     }
 }
 
-/// Cases that differ by design: the oracle reads them under another dialect.
+/// Cases that differ by design: the oracle reads them under another dialect,
+/// or commonmark.js, which this crate follows, renders them otherwise.
 pub const DEVIATIONS: &[Listed] = &[
     case("commonmark/autolink.cases", "-", 0x8d336d2ce0091b58, "<http://foo.bar/baz bim>", "a literal autolink forms inside the `<…>` the oracle reads as text"),
     case("commonmark/autolink.cases", "-", 0x47c41072fc131820, "< http://foo.bar >", "a literal autolink forms inside the `<…>` the oracle reads as text"),
@@ -131,16 +132,16 @@ pub const DEVIATIONS: &[Listed] = &[
     case("gfm/wikilinks.cases", "extension.wikilinks_title_before_pipe", 0x2a0637484a418a0b, "This is [[a &lt;link|&lt;script&gt;alert", "wiki links take the title after the pipe; the oracle takes it before"),
     case("gfm/wikilinks.cases", "extension.wikilinks_title_before_pipe", 0xf05bd3ae39a75119, "[[a|http:'\"injected=attribute&gt;&lt;img", "wiki links take the title after the pipe; the oracle takes it before"),
     case("gfm/wikilinks.cases", "extension.wikilinks_title_before_pipe", 0x0f63f2981df76fe1, "<i>[[a|'\"&gt;&lt;svg&gt;&lt;i/class=gl-s", "wiki links take the title after the pipe; the oracle takes it before"),
+    case("commonmark/code_fenced.cases", "-", 0x8be7f99eb116458d, "  ```\n ", "an unclosed fence whose last line holds only whitespace and no line ending renders that line as an empty content line; the oracle renders the fence empty; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/fuzz.cases", "-", 0x9165948c43745101, "> ```\n", "a fence in a block quote that the end of input closes right after its opening line renders empty; the oracle renders one empty content line; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/fuzz.cases", "-", 0x5b4ae38f093b60d6, "- ```\n", "a fence in a list item that the end of input closes right after its opening line renders empty; the oracle renders one empty content line; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/list.cases", "-", 0x57ecef8531311db8, "- ```\n   \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/list.cases", "-", 0x68dbf208da8c60bc, "- ```\n    \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
+    case("commonmark/list.cases", "-", 0xcfbe10e540f5a44f, "- ```\n\t\n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
 ];
 
 /// Cases that fail as parser defects, not by design.
 pub const KNOWN_DEFECTS: &[Listed] = &[
-    case("commonmark/code_fenced.cases", "-", 0x8be7f99eb116458d, "  ```\n ", "an unclosed fence whose last line holds only whitespace and no line ending renders that line as an empty content line; the oracle renders the fence empty (commonmark.js renders it as this crate does)"),
-    case("commonmark/fuzz.cases", "-", 0x9165948c43745101, "> ```\n", "a fence in a block quote that the end of input closes right after its opening line renders empty; the oracle renders one empty content line (commonmark.js renders it as this crate does)"),
-    case("commonmark/fuzz.cases", "-", 0x5b4ae38f093b60d6, "- ```\n", "a fence in a list item that the end of input closes right after its opening line renders empty; the oracle renders one empty content line (commonmark.js renders it as this crate does)"),
-    case("commonmark/list.cases", "-", 0x57ecef8531311db8, "- ```\n   \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it (commonmark.js renders it as this crate does)"),
-    case("commonmark/list.cases", "-", 0x68dbf208da8c60bc, "- ```\n    \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it (commonmark.js renders it as this crate does)"),
-    case("commonmark/list.cases", "-", 0xcfbe10e540f5a44f, "- ```\n\t\n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it (commonmark.js renders it as this crate does)"),
     case("gfm/autolink.cases", "extension.autolink", 0xeeec9d08384f38db, "[https://foo.com]", "a literal autolink forms inside `[…]`; the oracle leaves a URL in brackets unlinked unless relaxed autolinks are on"),
     case("gfm/autolink.cases", "extension.autolink", 0x57b1699985b000e9, "[[https://foo.com]]", "`[[…]]` around a URL reads as a wiki link; the oracle, without wiki links, reads it as text"),
     case("gfm/autolink.cases", "extension.autolink", 0xd50e442a846c8be9, "[[Foo|https://foo.com]]", "`[[…]]` around a URL reads as a wiki link; the oracle, without wiki links, reads it as text"),
