@@ -1,6 +1,6 @@
 //! Shared, dependency-free types for the AST→HTML conformance bench.
 //!
-//! These are the FROZEN interface between the extractor and runner/report. The
+//! These are the interface between the extractor and runner/report. The
 //! extractor produces [`OracleTuple`]s; the runner parses each input with
 //! `markdown_syntax::parse` and maps the tuple's captured render option tokens
 //! to public [`markdown_syntax::HtmlOptions`].
@@ -42,4 +42,16 @@ pub struct OracleTuple {
     /// The runner interprets the render tokens into [`markdown_syntax::HtmlOptions`];
     /// parse tokens are kept as recorded and have no effect.
     pub option_tokens: Vec<String>,
+}
+
+impl OracleTuple {
+    /// The option tokens as the case header writes them: comma-separated, or
+    /// `-` for none.
+    pub fn options(&self) -> String {
+        if self.option_tokens.is_empty() {
+            "-".to_string()
+        } else {
+            self.option_tokens.join(",")
+        }
+    }
 }

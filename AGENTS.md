@@ -42,8 +42,11 @@ Read `docs/overview.md` before starting work.
 ## Conformance
 
 - `tests/html_conformance/` is a measurement bench (AST→HTML vs vendored
-  CommonMark/GFM oracles), **not** a CI gate. To observe current numbers, run
-  `cargo test --features html --test html_conformance -- --nocapture`.
+  CommonMark/GFM oracles); its pass rate is **not** a CI gate. To observe
+  current numbers, run
+  `cargo test --features html --test html_conformance -- --nocapture`. It
+  fails only when an entry in `tests/html_conformance/deviations.rs` names no
+  case or names a case that now passes.
 - No bless flag: any `.ast` / `.canonical.md` golden a fix legitimately moves
   must be hand-regenerated in the same commit and verified to reflect correct
   structure — never edit a test to pass a wrong parse.
