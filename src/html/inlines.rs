@@ -5,9 +5,7 @@ use alloc::string::String;
 
 use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
 
-use super::escape::{
-    attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
-};
+use super::escape::{attr_escape, encode_href, escape_text, filter_img_protocol, filter_protocol};
 use super::footnotes;
 use super::refs::{escaped_alt, flatten_alt};
 use super::{Ctx, SafeRawHtmlForm};
@@ -170,9 +168,12 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             footnote_marker(&id, ctx)
         }
 
-        // 20. WikiLink — GFM shape.
+        // 20. WikiLink — GFM shape. A note name like `Note: x` reads as a
+        //     scheme, so the target takes the scheme denylist, never the
+        //     allowlist: only a dangerous scheme is blanked.
         Inline::WikiLink(w) => {
-            let href = attr_escape_gfm(&encode_href(&w.decoded_target()));
+            let target = filter_protocol(&w.decoded_target(), ctx.allow_dangerous_protocol, true);
+            let href = encode_href(&target);
             let embed = if w.embed {
                 " data-wikilink-embed=\"true\""
             } else {

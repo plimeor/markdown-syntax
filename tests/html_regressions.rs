@@ -274,9 +274,39 @@ fn dangerous_protocol_matrix_matches_public_options() {
         ),
         "<p><img src=\"data:image/png;base64,abc\" alt=\"x\" /> <img src=\"\" alt=\"x\" /></p>",
     );
+    // A wikilink target is blanked for a dangerous scheme, decoded or not, and
+    // kept for a note name that reads as another scheme.
+    for source in [
+        "[[javascript:alert(1)|x]]\n",
+        "[[JavaScript&#58;alert(1)|x]]\n",
+        "[[javascript\\:alert(1)|x]]\n",
+    ] {
+        assert_eq!(
+            parse_render(source, &HtmlOptions::default()),
+            "<p><a href=\"\" data-wikilink=\"true\">x</a></p>",
+            "{source:?}"
+        );
+    }
+    assert_eq!(
+        parse_render("![[javascript:alert(1)|x]]\n", &HtmlOptions::default()),
+        "<p><a href=\"\" data-wikilink=\"true\" data-wikilink-embed=\"true\">x</a></p>",
+    );
+    assert_eq!(
+        parse_render("[[Note: x]]\n", &HtmlOptions::default()),
+        "<p><a href=\"Note:%20x\" data-wikilink=\"true\">Note: x</a></p>",
+    );
+    // The target is encoded once, as a link destination is.
+    assert_eq!(
+        parse_render("[[a&b]] [x](a&b)\n", &HtmlOptions::default()),
+        "<p><a href=\"a&amp;b\" data-wikilink=\"true\">a&amp;b</a> <a href=\"a&amp;b\">x</a></p>",
+    );
 
     let mut dangerous = HtmlOptions::default();
     dangerous.allow_dangerous_protocol = true;
+    assert_eq!(
+        parse_render("[[javascript:alert(1)|x]]\n", &dangerous),
+        "<p><a href=\"javascript:alert(1)\" data-wikilink=\"true\">x</a></p>",
+    );
     assert_eq!(
         parse_render(
             "[x](javascript:alert(1)) ![x](javascript:alert(1))\n",
