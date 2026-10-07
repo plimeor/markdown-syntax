@@ -56,6 +56,11 @@ with struct literals, or compares canonical output needs these updates.
     `CharacterReference.value` is removed, and
     `CharacterReference::value()` decodes the reference.
     `CharacterReference::new(reference)` builds one.
+  - `Link`, `Image`, and `Definition` hold `title: Option<Title>`, where
+    `Title { value, kind }` keeps the title text with its `LinkTitleKind`;
+    the separate `title_kind` field is removed, so a title without quotes,
+    which was dropped when written, cannot be built. `Title::new(value,
+    kind)` builds one.
 - **Escapes and character references are always nodes.**
   `ParseOptions::preserve_character_escapes` and
   `ParseOptions::preserve_character_references` are removed with

@@ -66,7 +66,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                 ctx.allow_dangerous_protocol,
                 ctx.gfm_url_denylist(),
             ));
-            let title = title_attr(n.title.as_deref());
+            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
             format!(
                 "<a href=\"{href}\"{title}>{}</a>",
                 render_inlines(&n.children, ctx)
@@ -91,7 +91,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                 ctx.allow_any_img_src,
             ));
             let alt = escaped_alt(&n.alt);
-            let title = title_attr(n.title.as_deref());
+            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
             format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
         }
 
@@ -103,7 +103,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                     ctx.allow_dangerous_protocol,
                     ctx.gfm_url_denylist(),
                 ));
-                let title = title_attr(def.title.as_deref());
+                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
                 format!(
                     "<a href=\"{href}\"{title}>{}</a>",
                     render_inlines(&n.children, ctx)
@@ -121,7 +121,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                     ctx.allow_any_img_src,
                 ));
                 let alt = escaped_alt(&n.alt);
-                let title = title_attr(def.title.as_deref());
+                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
                 format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
             }
             None => image_reference_fallback(n),

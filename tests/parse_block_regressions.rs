@@ -241,7 +241,7 @@ mod review_block {
 mod parser {
     use markdown_syntax::{
         parse, Block, HtmlContainerContent, Inline, LinkDestinationKind, LinkTitleKind,
-        ReferenceKind, Span,
+        ReferenceKind, Span, Title,
     };
 
     #[test]
@@ -690,8 +690,10 @@ mod parser {
         };
         assert_eq!(definition.destination, "my url");
         assert_eq!(definition.destination_kind, LinkDestinationKind::Angle);
-        assert_eq!(definition.title.as_deref(), Some("title"));
-        assert_eq!(definition.title_kind, Some(LinkTitleKind::SingleQuote));
+        assert_eq!(
+            definition.title,
+            Some(Title::new("title", LinkTitleKind::SingleQuote))
+        );
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.get(1) else {
             panic!("expected paragraph");
@@ -706,16 +708,13 @@ mod parser {
                 Inline::Link(empty)
             ] if angle.destination == "foo bar"
                 && angle.destination_kind == LinkDestinationKind::Angle
-                && angle.title.as_deref() == Some("single")
-                && angle.title_kind == Some(LinkTitleKind::SingleQuote)
+                && angle.title == Some(Title::new("single", LinkTitleKind::SingleQuote))
                 && paren.destination == "url"
                 && paren.destination_kind == LinkDestinationKind::Bare
-                && paren.title.as_deref() == Some("paren title")
-                && paren.title_kind == Some(LinkTitleKind::Paren)
+                && paren.title == Some(Title::new("paren title", LinkTitleKind::Paren))
                 && empty.destination.is_empty()
                 && empty.destination_kind == LinkDestinationKind::Omitted
-                && empty.title.as_deref() == Some("title")
-                && empty.title_kind == Some(LinkTitleKind::DoubleQuote)
+                && empty.title == Some(Title::new("title", LinkTitleKind::DoubleQuote))
         ));
     }
 
@@ -1860,7 +1859,10 @@ mod one_pass_over_open_blocks {
         let Block::Definition(definition) = &blocks[0] else {
             panic!("expected a definition, got {blocks:?}");
         };
-        assert_eq!(definition.title.as_deref(), Some("x\ny"));
+        assert_eq!(
+            definition.title.as_ref().map(|title| title.value.as_str()),
+            Some("x\ny")
+        );
     }
 
     #[test]
@@ -2283,7 +2285,7 @@ mod serialized_spellings {
             .iter()
             .filter_map(|block| match block {
                 Block::Paragraph(Paragraph { children, .. }) => match &children[..] {
-                    [Inline::Link(link)] => Some((link.title.clone(), link.title_kind)),
+                    [Inline::Link(link)] => link.title.clone(),
                     _ => None,
                 },
                 _ => None,
@@ -2292,10 +2294,10 @@ mod serialized_spellings {
         assert_eq!(
             link_titles,
             vec![
-                (Some(String::new()), Some(LinkTitleKind::DoubleQuote)),
-                (Some(String::new()), Some(LinkTitleKind::SingleQuote)),
-                (Some(String::new()), Some(LinkTitleKind::Paren)),
-                (Some(String::new()), Some(LinkTitleKind::DoubleQuote)),
+                Title::new("", LinkTitleKind::DoubleQuote),
+                Title::new("", LinkTitleKind::SingleQuote),
+                Title::new("", LinkTitleKind::Paren),
+                Title::new("", LinkTitleKind::DoubleQuote),
             ]
         );
     }

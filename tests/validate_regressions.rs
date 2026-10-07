@@ -285,7 +285,6 @@ mod review_validate {
                 destination: destination.into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
-                title_kind: None,
                 children: vec![Text::from(text).into()],
             })])
         };
@@ -434,7 +433,6 @@ mod review_validate {
                 destination: "/uri".into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
-                title_kind: None,
             })],
         };
         assert!(!bad.validate().is_empty());
@@ -448,7 +446,6 @@ mod review_validate {
                 destination: "/uri".into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
-                title_kind: None,
             })],
         };
         assert!(good.validate().is_empty());
@@ -567,7 +564,6 @@ mod review_validate {
             destination: "i".into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,
-            title_kind: None,
             alt: vec![Inline::Link(Link::new("v", [Text::from("b")]))],
         });
         assert!(paragraph(vec![image]).validate().is_empty());

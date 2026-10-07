@@ -291,6 +291,9 @@ angle-bracket URI itself and an angle-bracket email after `mailto:`; a literal
 `www.` domain after `http://`, a literal email without a scheme after
 `mailto:`, and any other literal autolink itself; or `None` when the text is
 not exactly one autolink of its form.
+A `Link`, an `Image`, and a `Definition` SHALL hold a title, when they have
+one, as one `Title` holding its value and the quotes it is written in, so a
+title without quotes or quotes without a title cannot be built.
 
 #### Scenario: Character reference value
 - **WHEN** `value()` is called on the `CharacterReference` parsed from `"&amp;"`
@@ -307,6 +310,10 @@ not exactly one autolink of its form.
 #### Scenario: Text the parser would trim
 - **WHEN** `destination()` is called on a hand-built literal `Autolink` holding `"http://a.b."`
 - **THEN** it returns `None`
+
+#### Scenario: Link title
+- **WHEN** `parse("[a](/u 'b')")` runs
+- **THEN** the paragraph holds a `Link` whose `title` is `Some(Title::new("b", LinkTitleKind::SingleQuote))`
 
 ### Requirement: Shortcode glyph
 `Shortcode::glyph()` SHALL return the emoji that the crate's pinned gemoji

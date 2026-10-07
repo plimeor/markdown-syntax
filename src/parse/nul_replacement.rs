@@ -24,6 +24,12 @@ fn optional(value: &mut Option<String>) {
     }
 }
 
+fn title(title: &mut Option<Title>) {
+    if let Some(title) = title {
+        string(&mut title.value);
+    }
+}
+
 fn attributes(attributes: &mut [DirectiveAttribute]) {
     for attribute in attributes {
         string(&mut attribute.name);
@@ -69,7 +75,7 @@ fn blocks(blocks: &mut [Block]) {
                 string(&mut node.label);
                 string(&mut node.identifier);
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
             }
             Block::FootnoteDefinition(node) => {
                 string(&mut node.label);
@@ -115,13 +121,13 @@ fn inlines(inlines: &mut [Inline]) {
             Inline::Code(node) => string(&mut node.value),
             Inline::Link(node) => {
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
                 self::inlines(&mut node.children);
             }
             Inline::Autolink(node) => string(&mut node.text),
             Inline::Image(node) => {
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
                 self::inlines(&mut node.alt);
             }
             Inline::LinkReference(node) => {

@@ -152,16 +152,14 @@ mod value_encodings {
                     meta: NodeMeta::default(),
                     destination: "b|c".into(),
                     destination_kind: LinkDestinationKind::Bare,
-                    title: Some("t|u".into()),
-                    title_kind: Some(LinkTitleKind::DoubleQuote),
+                    title: Some(Title::new("t|u", LinkTitleKind::DoubleQuote)),
                     children: vec![text("a")],
                 })],
                 vec![Inline::Image(Image {
                     meta: NodeMeta::default(),
                     destination: "y|z".into(),
                     destination_kind: LinkDestinationKind::Bare,
-                    title: Some("i|j".into()),
-                    title_kind: Some(LinkTitleKind::DoubleQuote),
+                    title: Some(Title::new("i|j", LinkTitleKind::DoubleQuote)),
                     alt: vec![text("x")],
                 })],
             ],
@@ -209,7 +207,6 @@ mod value_encodings {
                         destination: "/img".into(),
                         destination_kind: LinkDestinationKind::Bare,
                         title: None,
-                        title_kind: None,
                         alt: vec![text("img"), escape('|'), text("alt")],
                     })],
                     vec![Inline::LinkReference(LinkReference {
@@ -237,7 +234,6 @@ mod value_encodings {
                 destination: "/dest".into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
-                title_kind: None,
             }),
         ]);
 
@@ -389,16 +385,14 @@ mod value_encodings {
                 identifier: "foo".into(),
                 destination: "my url".into(),
                 destination_kind: LinkDestinationKind::Angle,
-                title: Some("single title".into()),
-                title_kind: Some(LinkTitleKind::SingleQuote),
+                title: Some(Title::new("single title", LinkTitleKind::SingleQuote)),
             }),
             paragraph(vec![
                 Inline::Link(Link {
                     meta: NodeMeta::default(),
                     destination: "foo bar".into(),
                     destination_kind: LinkDestinationKind::Angle,
-                    title: Some("paren title".into()),
-                    title_kind: Some(LinkTitleKind::Paren),
+                    title: Some(Title::new("paren title", LinkTitleKind::Paren)),
                     children: vec![text("angle")],
                 }),
                 text(" "),
@@ -406,8 +400,7 @@ mod value_encodings {
                     meta: NodeMeta::default(),
                     destination: String::new(),
                     destination_kind: LinkDestinationKind::Omitted,
-                    title: Some("empty title".into()),
-                    title_kind: Some(LinkTitleKind::DoubleQuote),
+                    title: Some(Title::new("empty title", LinkTitleKind::DoubleQuote)),
                     alt: vec![text("empty")],
                 }),
             ]),
@@ -435,7 +428,6 @@ mod value_encodings {
             destination: "/u".into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,
-            title_kind: None,
         })])
     }
 
@@ -620,7 +612,6 @@ mod recorded_spellings {
                     destination: "/u".into(),
                     destination_kind: LinkDestinationKind::Bare,
                     title: None,
-                    title_kind: None,
                 }),
             ])
         };

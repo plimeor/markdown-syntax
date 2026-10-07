@@ -373,7 +373,7 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
                 "Definition label={} destination={} title={}",
                 node.label,
                 node.destination,
-                snapshot_title(&node.title)
+                snapshot_link_title(node.title.as_ref())
             ),
         ),
         Block::FootnoteDefinition(node) => {
@@ -517,7 +517,7 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                     format!(
                         "Link destination={} title={}",
                         node.destination,
-                        snapshot_title(&node.title)
+                        snapshot_link_title(node.title.as_ref())
                     ),
                 );
                 snapshot_inlines(&node.children, indent + 1, lines);
@@ -542,7 +542,7 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                     format!(
                         "Image destination={} title={}",
                         node.destination,
-                        snapshot_title(&node.title)
+                        snapshot_link_title(node.title.as_ref())
                     ),
                 );
                 snapshot_inlines(&node.alt, indent + 1, lines);
@@ -643,6 +643,11 @@ fn snapshot_title(title: &Option<String>) -> String {
         .as_ref()
         .map(|title| quote(title))
         .unwrap_or_else(|| "none".into())
+}
+
+/// A link title's value; the quotes it is written in are not snapshotted.
+fn snapshot_link_title(title: Option<&markdown_syntax::Title>) -> String {
+    title.map_or_else(|| "none".into(), |title| quote(&title.value))
 }
 
 fn push(lines: &mut Vec<String>, indent: usize, text: impl Into<String>) {

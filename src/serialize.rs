@@ -317,9 +317,9 @@ fn write_heading(node: &Heading) -> Result<String, SerializeError> {
 fn write_definition(node: &Definition) -> String {
     let destination = write_destination(&node.destination, node.destination_kind);
     let mut output = format!("[{}]: {}", node.label, destination);
-    if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
+    if let Some(title) = &node.title {
         output.push(' ');
-        output.push_str(&write_title(title, title_kind));
+        output.push_str(&write_title(title));
     }
     output
 }
@@ -806,7 +806,7 @@ fn write_inline(
                     out,
                     &node.destination,
                     node.destination_kind,
-                    node.title.as_deref().zip(node.title_kind),
+                    node.title.as_ref(),
                 );
             });
         }
@@ -825,7 +825,7 @@ fn write_inline(
                     out,
                     &node.destination,
                     node.destination_kind,
-                    node.title.as_deref().zip(node.title_kind),
+                    node.title.as_ref(),
                 );
             });
         }
@@ -911,12 +911,12 @@ fn write_resource(
     out: &mut String,
     destination: &str,
     kind: LinkDestinationKind,
-    title: Option<(&str, LinkTitleKind)>,
+    title: Option<&Title>,
 ) {
     out.push_str(&write_destination(destination, kind));
-    if let Some((title, title_kind)) = title {
+    if let Some(title) = title {
         out.push(' ');
-        out.push_str(&write_title(title, title_kind));
+        out.push_str(&write_title(title));
     }
     out.push(')');
 }
@@ -1088,15 +1088,15 @@ fn write_destination(input: &str, kind: LinkDestinationKind) -> String {
     }
 }
 
-fn write_title(input: &str, kind: LinkTitleKind) -> String {
-    let (open, close) = match kind {
+fn write_title(title: &Title) -> String {
+    let (open, close) = match title.kind {
         LinkTitleKind::DoubleQuote => ('"', '"'),
         LinkTitleKind::SingleQuote => ('\'', '\''),
         LinkTitleKind::Paren => ('(', ')'),
     };
     let mut output = String::new();
     output.push(open);
-    output.push_str(&escape_title(input, kind));
+    output.push_str(&escape_title(&title.value, title.kind));
     output.push(close);
     output
 }

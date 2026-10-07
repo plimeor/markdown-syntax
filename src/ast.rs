@@ -290,10 +290,8 @@ pub struct Definition {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional link title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional link title, with the quotes it is written in.
+    pub title: Option<Title>,
 }
 
 /// A footnote definition. Source: `[^id]: footnote text`.
@@ -567,10 +565,8 @@ pub struct Link {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional link title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional link title, with the quotes it is written in.
+    pub title: Option<Title>,
     /// The link's inline content (the visible text).
     pub children: Vec<Inline>,
 }
@@ -609,10 +605,8 @@ pub struct Image {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional image title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional image title, with the quotes it is written in.
+    pub title: Option<Title>,
     /// The image's alt-text inline content.
     pub alt: Vec<Inline>,
 }
@@ -637,6 +631,16 @@ pub enum LinkTitleKind {
     SingleQuote,
     /// Parenthesized: `(title)`.
     Paren,
+}
+
+/// The title of a [`Link`], [`Image`], or [`Definition`]: its text and the
+/// quotes it is written in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Title {
+    /// The title text, with its escapes and character references decoded.
+    pub value: String,
+    /// How the title is quoted.
+    pub kind: LinkTitleKind,
 }
 
 /// A reference link: `[text][label]`, `[text][]`, or `[text]`.
@@ -962,6 +966,16 @@ impl Autolink {
     }
 }
 
+impl Title {
+    /// A title holding `value`, quoted as `kind`.
+    pub fn new(value: impl Into<String>, kind: LinkTitleKind) -> Self {
+        Self {
+            value: value.into(),
+            kind,
+        }
+    }
+}
+
 impl Shortcode {
     /// The emoji the crate's pinned gemoji table gives this shortcode's
     /// name, or `None` for a name the table does not hold.
@@ -1049,7 +1063,6 @@ impl Link {
             destination: destination.into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,
-            title_kind: None,
             children: children.into_iter().map(Into::into).collect(),
         }
     }

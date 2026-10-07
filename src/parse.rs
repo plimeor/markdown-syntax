@@ -44,8 +44,7 @@ pub struct ParseOutput {
 struct ParsedLinkResource {
     destination: String,
     destination_kind: LinkDestinationKind,
-    title: Option<String>,
-    title_kind: Option<LinkTitleKind>,
+    title: Option<Title>,
 }
 
 const REFERENCE_LABEL_MAX_CHARS: usize = 999;
@@ -494,7 +493,6 @@ fn definition_node(label: &str, resource: ParsedLinkResource) -> Definition {
         destination: resource.destination,
         destination_kind: resource.destination_kind,
         title: resource.title,
-        title_kind: resource.title_kind,
     }
 }
 
@@ -1857,7 +1855,6 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
             destination: resource.destination,
             destination_kind: resource.destination_kind,
             title: resource.title,
-            title_kind: resource.title_kind,
             children,
         }),
         (LinkTarget::Resource(resource), true) => Inline::Image(Image {
@@ -1865,7 +1862,6 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
             destination: resource.destination,
             destination_kind: resource.destination_kind,
             title: resource.title,
-            title_kind: resource.title_kind,
             alt: children,
         }),
         (LinkTarget::Reference { identifier, kind }, false) => {
@@ -3762,12 +3758,11 @@ fn parse_link_resource(
                 destination: String::new(),
                 destination_kind: LinkDestinationKind::Omitted,
                 title: None,
-                title_kind: None,
             },
         ));
     }
     if initial_space && matches!(bytes.get(cursor), Some(b'"' | b'\'' | b'(')) {
-        let (title, title_kind, next) = parse_link_title(input, cursor)?;
+        let (title, next) = parse_link_title(input, cursor)?;
         cursor = skip_link_resource_space(input, next)?;
         if bytes.get(cursor) == Some(&b')') {
             return Some((
@@ -3776,7 +3771,6 @@ fn parse_link_resource(
                     destination: String::new(),
                     destination_kind: LinkDestinationKind::Omitted,
                     title: Some(title),
-                    title_kind: Some(title_kind),
                 },
             ));
         }
@@ -3792,7 +3786,6 @@ fn parse_link_resource(
                 destination,
                 destination_kind,
                 title: None,
-                title_kind: None,
             },
         ));
     }
@@ -3800,7 +3793,7 @@ fn parse_link_resource(
         return None;
     }
 
-    let (title, title_kind, next) = parse_link_title(input, cursor)?;
+    let (title, next) = parse_link_title(input, cursor)?;
     cursor = skip_link_resource_space(input, next)?;
     if bytes.get(cursor) == Some(&b')') {
         Some((
@@ -3809,7 +3802,6 @@ fn parse_link_resource(
                 destination,
                 destination_kind,
                 title: Some(title),
-                title_kind: Some(title_kind),
             },
         ))
     } else {
@@ -3871,7 +3863,7 @@ fn parse_link_destination(
     }
 }
 
-fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind, usize)> {
+fn parse_link_title(input: &str, index: usize) -> Option<(Title, usize)> {
     let opener = input.as_bytes().get(index).copied()?;
     let (closer, title_kind) = match opener {
         b'"' => ('"', LinkTitleKind::DoubleQuote),
@@ -3886,11 +3878,8 @@ fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind,
             if contains_blank_line(&input[index + 1..cursor]) {
                 return None;
             }
-            return Some((
-                decode_escapes_and_references(&input[index + 1..cursor]),
-                title_kind,
-                next,
-            ));
+            let value = decode_escapes_and_references(&input[index + 1..cursor]);
+            return Some((Title::new(value, title_kind), next));
         }
         if opener == b'(' && char == '(' && !is_escaped_at(input, cursor) {
             return None;
@@ -3980,20 +3969,18 @@ fn parse_definition_destination_title(input: &str) -> Option<ParsedLinkResource>
             destination,
             destination_kind,
             title: None,
-            title_kind: None,
         });
     }
     if !had_space {
         return None;
     }
 
-    let (title, title_kind, next) = parse_link_title(input, cursor)?;
+    let (title, next) = parse_link_title(input, cursor)?;
     let after_title = skip_link_resource_space(input, next)?;
     (after_title == input.len()).then_some(ParsedLinkResource {
         destination,
         destination_kind,
         title: Some(title),
-        title_kind: Some(title_kind),
     })
 }
 
