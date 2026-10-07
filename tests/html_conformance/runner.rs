@@ -6,8 +6,8 @@
 //! suite fixtures can stay faithful token-capturers and the renderer a pure
 //! function of `(Document, HtmlOptions)`. Parse tokens (`gfm`, `math`,
 //! `extension.*`, …) selected a dialect when the crate had several; every case
-//! now parses with `parse`, and a case whose oracle needs another dialect is
-//! listed in `crate::deviations` with its reason.
+//! now parses with `parse`, and a case this syntax reads otherwise by decision
+//! lives in `tests/fixtures/syntax_decisions/` instead of the bench.
 
 use markdown_syntax::{parse, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
 

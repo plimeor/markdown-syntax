@@ -130,12 +130,6 @@ enum HtmlBlockKind {
 /// Parse `input`. Infallible and tolerant: problems are reported as
 /// diagnostics in the returned [`ParseOutput`].
 pub fn parse(input: &str) -> ParseOutput {
-    parse_with_definitions(input, &[])
-}
-
-/// Parses `input` with each identifier in `known`, sorted and deduplicated,
-/// read as defined.
-pub(crate) fn parse_with_definitions(input: &str, known: &[String]) -> ParseOutput {
     let mut diagnostics = Vec::new();
     // A leading byte order mark is not content; parsing starts after it while
     // spans keep counting from the start of `input`.
@@ -147,7 +141,7 @@ pub(crate) fn parse_with_definitions(input: &str, known: &[String]) -> ParseOutp
     let source = &input[start..];
     let map = SourceMap::verbatim(source.len(), start);
     let lines = collect_lines(source, &map);
-    let children = blocks::parse_document(&lines, known, &mut diagnostics);
+    let children = blocks::parse_document(&lines, &mut diagnostics);
     let mut document = Document {
         meta: NodeMeta::new(Some(Span::new(0, input.len()))),
         children,
@@ -174,8 +168,7 @@ fn source_char(char: char) -> char {
 }
 
 /// The deepest block-container nesting (block quotes, list items, container
-/// directives, footnote definitions, HTML containers, description details) the
-/// parser opens. Deeper container markers stay leaf-block text, so recursion
+/// directives, footnote definitions, HTML containers) the parser opens. Deeper container markers stay leaf-block text, so recursion
 /// and the native stack it uses stay bounded.
 pub(crate) const MAX_BLOCK_NESTING: usize = 32;
 
@@ -2391,7 +2384,7 @@ fn parse_inline_content(
             }
         }
 
-        // A cell's `|` read from `\|` is an escape, never a spoiler bar.
+        // A cell's `|` read from `\|` is an escape.
         if bytes[index] == b'|' && pass.state.is_escaped_pipe(base_offset + index) {
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
             nodes.push(Inline::Escape(Escape {
@@ -4119,12 +4112,10 @@ pub(crate) fn normalize_label(label: &str) -> String {
 }
 
 /// The identifiers a document's references can resolve to: those of its own
-/// definitions, and those a caller knows of, each sorted and deduplicated so
-/// that a lookup is a binary search.
+/// definitions, sorted and deduplicated so that a lookup is a binary search.
 #[derive(Clone, Copy)]
 pub(crate) struct Definitions<'a> {
     pub(crate) own: &'a [String],
-    pub(crate) known: &'a [String],
 }
 
 fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool {
@@ -4136,7 +4127,6 @@ fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool 
     };
     let identifier = normalize_label(label);
     definitions.own.binary_search(&identifier).is_ok()
-        || definitions.known.binary_search(&identifier).is_ok()
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
@@ -4694,14 +4684,13 @@ fn is_email_autolink(input: &str) -> bool {
 ///
 /// Whether a literal autolink forms depends in part on what follows it:
 /// cmark-gfm's domain check counts the `.` and `_` in the punctuation trimmed
-/// off its end, `www.` at a line start links `www`, and a bracketed host's
-/// `]` is looked for anywhere after it. So `text` is read at a line start and
-/// followed by what lets the most through, `..`, a space, and a `]`: every
-/// literal autolink the parser reads has a destination, and a text the parser
-/// would trim never does.
+/// off its end, and `www.` at a line start links `www`. So `text` is read at a
+/// line start and followed by what lets the most through, `..` and a space:
+/// every literal autolink the parser reads has a destination, and a text the
+/// parser would trim never does.
 pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
     let mut input = String::from(text);
-    input.push_str(".. ]");
+    input.push_str(".. ");
     let (end, prefix) =
         parse_literal_autolink(&input, 0, &mut LiteralAutolinkScan::default(), true)?;
     (end == text.len()).then(|| {
@@ -4711,16 +4700,18 @@ pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
     })
 }
 
-// GFM literal-autolink dispatch. Tries, in order: `http(s)://` URLs, `www.`
-// URLs, extended-protocol (`mailto:`/`xmpp:`) emails, and bare emails. Each
-// branch enforces cmark-gfm's per-scheme preceding-character guard and its
-// domain/host rules; the trailing trim is shared (`autolink_delim`). Returns
-// the end and the prefix the destination puts before `input[index..end]`, the
-// visible original: `http://` for a `www.` URL, `mailto:` for a bare email,
-// and nothing otherwise.
-/// A literal autolink starting at `index`. `urls` is false inside an open
-/// `[`: as in cmark-gfm, a `http://`, `https://`, or `www.` URL after a `[`
-/// no `]` has closed yet stays text, and only an email address links.
+/// A literal autolink starting at `index`, by cmark-gfm's dispatch: it tries,
+/// in order, `http(s)://` URLs, `www.` URLs, extended-protocol
+/// (`mailto:`/`xmpp:`) emails, and bare emails. Each branch enforces
+/// cmark-gfm's per-scheme preceding-character guard and its domain/host
+/// rules; the trailing trim is shared (`autolink_delim`). Returns the end and
+/// the prefix the destination puts before `input[index..end]`, the visible
+/// original: `http://` for a `www.` URL, `mailto:` for a bare email, and
+/// nothing otherwise.
+///
+/// `urls` is false inside an open `[`: as in cmark-gfm, a `http://`,
+/// `https://`, or `www.` URL after a `[` no `]` has closed yet stays text, and
+/// only an email address links.
 fn parse_literal_autolink(
     input: &str,
     index: usize,
@@ -4990,11 +4981,6 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
     end
 }
 
-// GFM bare-email literal (and the extended `mailto:`/`xmpp:` protocol forms).
-// `index` must be the link start: cmark anchors the email at the left edge
-// found by rewinding from `@` over `[A-Za-z0-9._+-]` (or a `mailto:`/`xmpp:`
-// scheme), so this only succeeds when the char before `index` is not part of
-// that left extent.
 /// Scan state shared by the `parse_literal_autolink` calls of one inline pass.
 /// The pass only moves forward, so each piece lets a later start position reuse
 /// the bytes already walked for an earlier one instead of rescanning them.
@@ -5159,6 +5145,11 @@ fn is_email_local_or_scheme_byte(byte: u8) -> bool {
     is_gfm_email_local_byte(byte) || byte == b':'
 }
 
+/// A GFM bare-email literal (and the extended `mailto:`/`xmpp:` protocol
+/// forms) starting at `index`, which must be the link start: cmark anchors
+/// the email at the left edge found by rewinding from `@` over
+/// `[A-Za-z0-9._+-]` (or a `mailto:`/`xmpp:` scheme), so this only succeeds
+/// when the char before `index` is not part of that left extent.
 fn parse_literal_email(
     input: &str,
     index: usize,

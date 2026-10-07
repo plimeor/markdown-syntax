@@ -7,7 +7,8 @@
 //! block is a paragraph the line did not reach, or is added to the open leaf
 //! block. A block that a line does not continue is closed with every block
 //! inside it. The crate's extension containers (container directives,
-//! footnote definitions, and HTML containers) sit on the same stack as block quotes and list items.
+//! footnote definitions, and HTML containers) sit on the same stack as block
+//! quotes and list items.
 //!
 //! Inline content is parsed after every line is read, once all link reference
 //! definitions are known.
@@ -19,11 +20,7 @@ use super::*;
 use crate::memo::BracketMemo;
 
 /// Reads the blocks of the document split into `lines`.
-pub(super) fn parse_document(
-    lines: &[Line<'_>],
-    known: &[String],
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<Block> {
+pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
     let mut parser = BlockParser::new(lines);
     for index in 0..lines.len() {
         parser.read_line(index);
@@ -41,10 +38,7 @@ pub(super) fn parse_document(
     definitions.dedup();
     let mut found = parser.diagnostics;
     let finish = Finish {
-        definitions: Definitions {
-            own: &definitions,
-            known,
-        },
+        definitions: Definitions { own: &definitions },
     };
     let blocks = document
         .children
@@ -565,10 +559,9 @@ struct BlockParser<'a> {
     /// paragraph's first line, so no indented code interrupts it.
     after_alert_marker: bool,
     /// The lookaheads of closed containers, with what their open blocks
-    /// read of a line. A container that
-    /// opens later under blocks that read lines alike takes one over, so
-    /// containers opening one after another do not each read the lines
-    /// ahead again.
+    /// read of a line. A container that opens later under blocks that read
+    /// lines alike takes one over, so containers opening one after another do
+    /// not each read the lines ahead again.
     retired: Vec<(Vec<ReachKey>, Box<Lookahead<'a>>)>,
 }
 

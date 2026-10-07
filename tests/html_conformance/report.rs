@@ -15,7 +15,7 @@ pub enum Outcome {
     PassNormalized,
     /// Real mismatch after normalization.
     Fail { expected: String, actual: String },
-    /// The parser returned an error for this input (config or strict failure).
+    /// The renderer returned an error for this input.
     ParseError(String),
 }
 

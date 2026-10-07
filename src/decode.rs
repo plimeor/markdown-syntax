@@ -48,9 +48,6 @@ pub(crate) fn decode_selected_escapes_and_references(
     output
 }
 
-/// The character reference starting at the `&` at `index`: the byte offset
-/// just past its `;` and the text it names, or `None` when no valid reference
-/// starts there.
 /// The character `reference` decodes to, when it is exactly one character
 /// reference.
 pub(crate) fn decode_character_reference(reference: &str) -> Option<String> {
@@ -59,6 +56,9 @@ pub(crate) fn decode_character_reference(reference: &str) -> Option<String> {
         .map(|(_, value)| value)
 }
 
+/// The character reference starting at the `&` at `index`: the byte offset
+/// just past its `;` and the text it names, or `None` when no valid reference
+/// starts there.
 pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
     let rest = input.get(index..)?;
     if let Some(rest) = rest

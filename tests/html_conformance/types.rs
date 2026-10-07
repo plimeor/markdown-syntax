@@ -38,7 +38,7 @@ pub struct OracleTuple {
     pub expected_html: String,
     /// Raw option identifiers captured at the call site, e.g.
     /// `"allow_dangerous_html"`, `"Options::gfm"`, `"extension.table"`,
-    /// `"render.unsafe_"`, `"ParseOptions::mdx"`, `"closure"`, `"math"`.
+    /// `"render.unsafe_"`, `"closure"`, `"math"`.
     /// The runner interprets the render tokens into [`markdown_syntax::HtmlOptions`];
     /// parse tokens are kept as recorded and have no effect.
     pub option_tokens: Vec<String>,

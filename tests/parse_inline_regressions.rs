@@ -16,7 +16,7 @@ mod emphasis {
 
     use markdown_syntax::{parse, Block, Inline};
 
-    /// Parses `input` as CommonMark and returns the inlines of the first paragraph.
+    /// Parses `input` and returns the inlines of the first paragraph.
     fn paragraph_inlines(input: &str) -> Vec<Inline> {
         let output = parse(input);
         match output.document.children.into_iter().next() {
@@ -225,7 +225,7 @@ mod inline_delimiter {
     }
 
     #[test]
-    fn strikethrough_coexists_with_attention_when_gfm_is_enabled() {
+    fn strikethrough_holds_emphasis() {
         let inlines = paragraph("~~two *emphasis* two~~\n");
         let [Inline::Delete(delete)] = inlines.as_slice() else {
             panic!("expected delete");
@@ -736,7 +736,7 @@ mod wiki_embeds {
     }
 }
 
-mod autolinks_as_links {
+mod autolink_nodes {
     //! Literal and angle-bracket autolinks are `Autolink` nodes holding the
     //! URL as written, from which their destination derives.
 
@@ -776,7 +776,7 @@ mod autolinks_as_links {
     }
 
     #[test]
-    fn a_bare_url_is_a_link_whose_text_is_the_url() {
+    fn a_bare_url_is_an_autolink_whose_text_is_the_url() {
         assert_eq!(
             only_link("see https://example.com"),
             ("https://example.com".into(), "https://example.com".into())
@@ -810,9 +810,8 @@ mod autolinks_as_links {
 
 mod literal_autolink_boundaries {
     //! A literal autolink ends before Unicode whitespace, `<`, a non-ASCII
-    //! char in CommonMark's Unicode punctuation set, and, with wikilinks
-    //! enabled, `[[`; every boundary check reads whitespace as Unicode
-    //! whitespace, on char boundaries.
+    //! char in CommonMark's Unicode punctuation set, and `[[`; every boundary
+    //! check reads whitespace as Unicode whitespace, on char boundaries.
 
     use markdown_syntax::prelude::*;
 

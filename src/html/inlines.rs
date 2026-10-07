@@ -41,7 +41,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
         // 5. Strong.
         Inline::Strong(n) => format!("<strong>{}</strong>", render_inlines(&n.children, ctx)),
 
-        // 6. Delete — both markers render identically.
+        // 6. Delete.
         Inline::Delete(n) => format!("<del>{}</del>", render_inlines(&n.children, ctx)),
 
         // 7. Mark (GFM `==x==`).
