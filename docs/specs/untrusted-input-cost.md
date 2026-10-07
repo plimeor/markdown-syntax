@@ -31,7 +31,7 @@ input size.
 
 #### Scenario: Long run of tildes
 - **WHEN** a paragraph holding tens of thousands of `~` between two words is parsed and serialized
-- **THEN** quadrupling the run at most roughly quadruples the serialization time
+- **THEN** quadrupling the run at most roughly quadruples the parse and the serialization time
 
 #### Scenario: Deeply nested emphasis
 - **WHEN** a paragraph holding 16 levels of nested emphasis and a mark around further nested emphasis is serialized
