@@ -4833,11 +4833,11 @@ fn parse_literal_autolink(
         }
         // The URL extent is scanned from the very start (after `://`) and the
         // trailing trim runs over the whole URL.
-        let end = autolink_url_end(input, index + scheme_len, index + scheme_len);
+        let end = autolink_url_end(input, index + scheme_len);
         if end <= index + scheme_len {
             return None;
         }
-        if literal_autolink_suppressed_by_link_label(input, index, end, &mut scan.label_openers) {
+        if scan.suppressed_by_link_label(input, index, end) {
             return None;
         }
         return Some((end, input[index..end].into()));
@@ -4854,11 +4854,11 @@ fn parse_literal_autolink(
             return None;
         }
         check_domain(rest, false)?;
-        let end = autolink_url_end(input, index, index);
+        let end = autolink_url_end(input, index);
         if end <= index || (end <= index + 3 && !literal_starts_line(input, index)) {
             return None;
         }
-        if literal_autolink_suppressed_by_link_label(input, index, end, &mut scan.label_openers) {
+        if scan.suppressed_by_link_label(input, index, end) {
             return None;
         }
         let mut destination = String::from("http://");
@@ -4906,17 +4906,6 @@ fn literal_starts_line(input: &str, index: usize) -> bool {
             .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
 }
 
-fn literal_autolink_suppressed_by_link_label(
-    input: &str,
-    index: usize,
-    end: usize,
-    label_openers: &mut LabelOpenerScan,
-) -> bool {
-    label_openers.has_unclosed_opener(input, index)
-        && input[end..].starts_with("](")
-        && !link_resource_tail_has_close(input, end + 2)
-}
-
 /// Whether an unclosed `[` precedes a literal autolink on its line: the
 /// `[`/`]` depth from the line start (honouring `\` escapes) is positive. The
 /// walk is kept across calls because one inline scan asks about increasing
@@ -4962,26 +4951,18 @@ impl LabelOpenerScan {
     }
 }
 
-fn link_resource_tail_has_close(input: &str, start: usize) -> bool {
-    let mut cursor = start;
-    while cursor < input.len() {
-        let Some((next, char)) = next_char(input, cursor) else {
-            break;
-        };
-        match char {
-            '\\' => {
-                cursor = next_char(input, next)
-                    .map(|(after_escape, _)| after_escape)
-                    .unwrap_or(next);
-                continue;
-            }
-            '\n' | '\r' => return false,
-            ')' => return true,
-            _ => {}
-        }
-        cursor = next;
+/// One step of the walk from a link resource's start to the `)` that closes
+/// it on its line.
+fn resource_tail_close_step(input: &str, cursor: usize) -> Step {
+    let Some((next, char)) = next_char(input, cursor) else {
+        return Step::Done(None);
+    };
+    match char {
+        '\\' => Step::Next(next_char(input, next).map_or(next, |(after_escape, _)| after_escape)),
+        '\n' | '\r' => Step::Done(None),
+        ')' => Step::Done(Some(cursor)),
+        _ => Step::Next(next),
     }
-    false
 }
 
 fn http_literal_host_ok(host: &str) -> bool {
@@ -5079,9 +5060,8 @@ fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
 // `。`) other than the replacement char, `[[`, or `]` ends the URL. CommonMark allows
 // `>` and `[` inside (the renderer percent-encodes them); a `]` is
 // additionally treated as a hard URL boundary (autolink-3), so a `]` ends the
-// scan and is never part of the link. `trim_from` is where the trailing trim
-// may reach (the URL start).
-fn autolink_url_end(input: &str, start: usize, trim_from: usize) -> usize {
+// scan and is never part of the link. The trailing trim may reach `start`.
+fn autolink_url_end(input: &str, start: usize) -> usize {
     let bytes = input.as_bytes();
     let mut end = start;
     // The extent stops at the first `]` outside backticks unless a `[` came
@@ -5120,7 +5100,7 @@ fn autolink_url_end(input: &str, start: usize, trim_from: usize) -> usize {
         }
         end = start + offset + char.len_utf8();
     }
-    autolink_delim(input, trim_from, end)
+    autolink_delim(input, start, end)
 }
 
 fn is_autolink_terminating_control(char: char) -> bool {
@@ -5187,6 +5167,28 @@ struct LiteralAutolinkScan {
     /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
     email_local: ByteRun,
     label_openers: LabelOpenerScan,
+    /// The `)` closing a link resource on its line, by resource start.
+    resource_closes: PathMemo,
+}
+
+impl LiteralAutolinkScan {
+    /// Whether the literal autolink at `index..end` stays text: an unclosed
+    /// `[` precedes it on its line, and `](` follows it with no `)` closing
+    /// that resource on the line.
+    fn suppressed_by_link_label(&mut self, input: &str, index: usize, end: usize) -> bool {
+        self.label_openers.has_unclosed_opener(input, index)
+            && input[end..].starts_with("](")
+            && self.resource_tail_close(input, end + 2).is_none()
+    }
+
+    /// The `)` closing, on its line, the link resource that starts at
+    /// `start`, memoized.
+    fn resource_tail_close(&mut self, input: &str, start: usize) -> Option<usize> {
+        self.resource_closes
+            .resolve(input.len() + 1, start, |cursor| {
+                resource_tail_close_step(input, cursor)
+            })
+    }
 }
 
 /// The extent of one run of bytes accepted by a fixed predicate: every start

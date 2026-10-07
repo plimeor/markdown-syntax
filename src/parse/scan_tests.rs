@@ -358,6 +358,26 @@ mod reference {
         depth > 0
     }
 
+    pub(super) fn find_link_resource_tail_close(input: &str, start: usize) -> Option<usize> {
+        let mut cursor = start;
+        while cursor < input.len() {
+            let (next, char) = next_char(input, cursor)?;
+            match char {
+                '\\' => {
+                    cursor = next_char(input, next)
+                        .map(|(after_escape, _)| after_escape)
+                        .unwrap_or(next);
+                    continue;
+                }
+                '\n' | '\r' => return None,
+                ')' => return Some(cursor),
+                _ => {}
+            }
+            cursor = next;
+        }
+        None
+    }
+
     pub(super) fn find_html_container_close(
         lines: &[Line<'_>],
         mut cursor: usize,
@@ -747,6 +767,11 @@ fn literal_autolink_scans_match_the_reference_scan() {
         assert_eq!(
             found_email,
             reference::parse_literal_email(input, index),
+            "{input:?} at {index}"
+        );
+        assert_eq!(
+            scan.literal_autolinks.resource_tail_close(input, index),
+            reference::find_link_resource_tail_close(input, index),
             "{input:?} at {index}"
         );
         assert_eq!(
