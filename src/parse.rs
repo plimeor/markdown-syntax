@@ -3667,6 +3667,14 @@ fn parse_math_inline(
     Some((close, value, MathInlineKind::Dollar { dollars }))
 }
 
+/// Whether `written`, read alone, is exactly one inline math holding `value`
+/// as `kind`: validation's check that dollar math reads back as written.
+pub(crate) fn reads_as_inline_math(written: &str, value: &str, kind: MathInlineKind) -> bool {
+    parse_math_inline(&mut DirectLookups { input: written }, written, 0).is_some_and(
+        |(end, read, read_kind)| end == written.len() && read == value && read_kind == kind,
+    )
+}
+
 /// Scans for the closing dollar run. `start` is the first content byte
 /// (just past the opening run); returns the byte offset just past a matching
 /// closing run of exactly `open_dollars` `$`.

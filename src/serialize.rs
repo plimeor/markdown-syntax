@@ -1063,7 +1063,7 @@ fn code_span_needs_padding(input: &str) -> bool {
         || (input.starts_with(' ') && input.ends_with(' ') && input.chars().any(|char| char != ' '))
 }
 
-fn write_inline_math(node: &MathInline) -> String {
+pub(crate) fn write_inline_math(node: &MathInline) -> String {
     match node.kind {
         MathInlineKind::Code => format!("$`{}`$", node.value),
         // Dollar math is written verbatim behind its exact-length fence.

@@ -104,7 +104,11 @@ sits in a table cell or a directive label:
 - `WikiLink`: an empty target.
 - `CodeInline`: an empty value, or a value holding a line ending.
 - `MathInline`: an empty value; a dollar fence of length 0; code-form math
-  whose value holds a backtick followed by `$`, which would close it early.
+  whose value holds a backtick followed by `$`, which would close it early;
+  dollar math that, written alone behind its fence, the parser does not read
+  back as the same value and fence: a fence of three or more, a `$` that
+  closes it early, whitespace at an edge of single-`$` math, or a line
+  ending, which single-`$` math reads as a space.
 - In a table cell, or in the label of a `LeafDirective` or a
   `ContainerDirective`, at any depth: a `SoftBreak` or a `LineBreak`.
 - In a table cell, at any depth: a `CodeInline`, `MathInline`, or `Html`

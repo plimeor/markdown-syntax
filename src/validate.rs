@@ -14,9 +14,12 @@ use crate::{
     diagnostic::Diagnostic,
     parse::{
         alert_title, frontmatter_fence_kind, interrupts_paragraph, is_blank, is_footnote_label,
-        is_reference_label, is_written_footnote_label, normalize_label, MAX_BLOCK_NESTING,
+        is_reference_label, is_written_footnote_label, normalize_label, reads_as_inline_math,
+        MAX_BLOCK_NESTING,
     },
-    serialize::{first_item_starts_below_its_bullet, writes_setext, written_marker},
+    serialize::{
+        first_item_starts_below_its_bullet, write_inline_math, writes_setext, written_marker,
+    },
     span::Span,
 };
 
@@ -827,6 +830,18 @@ fn validate_math_inline(math: &MathInline, diagnostics: &mut Vec<Diagnostic>) {
             math.meta.span,
             "code-form inline math value cannot contain a backtick followed by `$`",
         )),
+        // The parser's own scan tells whether the fence closes where it is
+        // written: not before a `$` inside, nor around edge whitespace or a
+        // line ending the single-`$` form reads as a space.
+        MathInlineKind::Dollar { .. }
+            if !math.value.is_empty()
+                && !reads_as_inline_math(&write_inline_math(math), &math.value, math.kind) =>
+        {
+            diagnostics.push(Diagnostic::invalid(
+                math.meta.span,
+                "dollar-fenced inline math must read back as written",
+            ));
+        }
         _ => {}
     }
 }

@@ -192,7 +192,13 @@ mod review_validate {
                 bad.to_markdown(),
                 Err(SerializeError::InvalidDocument(_))
             ));
-            assert!(math(" ", kind).validate().is_empty(), "{kind:?}");
+            // A space after a single `$` keeps it from opening.
+            let space_is_valid = kind != MathInlineKind::Dollar { dollars: 1 };
+            assert_eq!(
+                math(" ", kind).validate().is_empty(),
+                space_is_valid,
+                "{kind:?}"
+            );
         }
     }
 
@@ -212,6 +218,36 @@ mod review_validate {
             math("a$b`c", MathInlineKind::Code),
             math("$`a", MathInlineKind::Code),
             math("a`$b", MathInlineKind::Dollar { dollars: 2 }),
+        ] {
+            assert!(good.validate().is_empty(), "{good:?}");
+        }
+    }
+
+    #[test]
+    fn dollar_math_that_does_not_read_back_is_invalid() {
+        let one = MathInlineKind::Dollar { dollars: 1 };
+        let two = MathInlineKind::Dollar { dollars: 2 };
+        for bad in [
+            math("a$b", one),
+            math("$a", one),
+            math("a$", one),
+            math(" a ", one),
+            math(" ", one),
+            math("a\nb", one),
+            math("a$$b", two),
+            math("a", MathInlineKind::Dollar { dollars: 3 }),
+        ] {
+            assert!(!bad.validate().is_empty(), "{bad:?}");
+            assert!(
+                matches!(bad.to_markdown(), Err(SerializeError::InvalidDocument(_))),
+                "{bad:?}"
+            );
+        }
+        for good in [
+            math("a b", one),
+            math("a\\$b", one),
+            math(" a ", two),
+            math("a$b", two),
         ] {
             assert!(good.validate().is_empty(), "{good:?}");
         }
