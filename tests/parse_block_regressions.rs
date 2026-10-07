@@ -2260,3 +2260,104 @@ mod directive_attributes {
         assert_eq!(texts, ["=x"]);
     }
 }
+
+mod serialized_spellings {
+    //! The values that the spellings the serializer writes parse to: titles
+    //! and their kinds, labels and identifiers as written, and values whose
+    //! whitespace is written as character references.
+
+    use markdown_syntax::prelude::*;
+
+    #[test]
+    fn empty_resource_titles_keep_their_kind() {
+        let input = concat!(
+            "[a](/u \"\")\n\n",
+            "[b](/u '')\n\n",
+            "[c](/u ())\n\n",
+            "[](<> \"\")\n\n",
+            "[d]: /u \"\"\n",
+        );
+        let document = parse(input).document;
+        let link_titles = document
+            .children
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(Paragraph { children, .. }) => match &children[..] {
+                    [Inline::Link(link)] => Some((link.title.clone(), link.title_kind)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            link_titles,
+            vec![
+                (Some(String::new()), Some(LinkTitleKind::DoubleQuote)),
+                (Some(String::new()), Some(LinkTitleKind::SingleQuote)),
+                (Some(String::new()), Some(LinkTitleKind::Paren)),
+                (Some(String::new()), Some(LinkTitleKind::DoubleQuote)),
+            ]
+        );
+    }
+
+    #[test]
+    fn definition_labels_are_read_as_written() {
+        for (markdown, label, identifier) in [
+            ("[line\nbreak]: /u\n", "line\nbreak", "line break"),
+            ("[a\\]b\\\\c\\[d]: /u\n", "a\\]b\\\\c\\[d", "a\\]b\\\\c\\[d"),
+        ] {
+            match &parse(markdown).document.children[..] {
+                [Block::Definition(definition)] => {
+                    assert_eq!(definition.label, label);
+                    assert_eq!(definition.identifier, identifier);
+                }
+                other => panic!("unexpected document shape: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn footnote_identifiers_are_the_raw_label() {
+        // A footnote reference and its definition fold identically, and the
+        // identifier keeps the escaped or entity-encoded spelling.
+        let input = "See [^a\\]b\\\\c\\[d] and [^white&#x20;space]\n\n[^a\\]b\\\\c\\[d]: bracket\n\n[^white&#x20;space]: space\n";
+        let identifiers: Vec<String> = parse(input)
+            .document
+            .children
+            .iter()
+            .filter_map(|block| match block {
+                Block::FootnoteDefinition(definition) => Some(definition.identifier.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(identifiers, ["a\\]b\\\\c\\[d", "white&#x20;space"]);
+    }
+
+    #[test]
+    fn references_at_the_ends_of_an_info_string_are_its_whitespace() {
+        let document = parse("``` &#x20;a&#x9;\nb\n```\n").document;
+        let [Block::CodeBlock(code)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        assert_eq!(code.info.as_deref(), Some(" a\t"));
+    }
+
+    #[test]
+    fn a_referenced_space_is_a_bare_destination() {
+        let document = parse("[o]: &#x20;\n").document;
+        let [Block::Definition(definition)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        assert_eq!(definition.destination, " ");
+        assert_eq!(definition.destination_kind, LinkDestinationKind::Bare);
+    }
+
+    #[test]
+    fn an_html_block_value_ends_at_its_last_line() {
+        let document = parse("<!--\n\n").document;
+        let [Block::HtmlBlock(html)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        assert_eq!(html.value, "<!--\n");
+    }
+}

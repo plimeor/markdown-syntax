@@ -59,6 +59,14 @@ file also runs quickly as plain `cargo test --test <name>`.
   `cargo test --profile ci --features html --test html_conformance -- --nocapture`.
   It fails only when an entry in `tests/html_conformance/deviations.rs` names
   no case, names a case twice, or names a case that now passes.
+- Parse and serialize tests are split by flow, each with one oracle:
+  Markdown → AST (`.ast` goldens, `tests/fixtures.rs`); AST → Markdown
+  (hand-built trees, exact output, `tests/serialize_regressions.rs`);
+  Markdown → AST → Markdown (`.canonical.md` goldens and `CANONICAL_INPUTS`,
+  `tests/fixtures.rs`); source read-back (one corpus, one `NOT_READING_BACK`
+  list, `tests/fixtures.rs`); generated read-back (seeded, with its own list,
+  `tests/serialize_roundtrip_fuzz.rs`). Goldens stay together by topic under
+  `tests/fixtures/roundtrip/`; each test finds the ones it reads.
 - No bless flag: any `.ast` / `.canonical.md` golden a fix legitimately moves
   must be hand-regenerated in the same commit and verified to reflect correct
   structure — never edit a test to pass a wrong parse.
