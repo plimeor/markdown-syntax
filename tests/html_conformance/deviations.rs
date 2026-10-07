@@ -64,41 +64,19 @@ pub fn excerpt(input: &str) -> &str {
 }
 
 /// Cases that differ by design: the oracle reads them under another dialect,
-/// or commonmark.js, which this crate follows, renders them otherwise.
+/// or commonmark.js, which this crate follows, renders them otherwise. A case
+/// whose input reads as a construct only one side has (one this syntax drops,
+/// or one the oracle lacks, such as literal autolinks, wiki links, or
+/// frontmatter under a CommonMark oracle) is removed from the suite instead:
+/// the two outputs cannot be compared.
 pub const DEVIATIONS: &[Listed] = &[
-    case("commonmark/autolink.cases", "-", 0x8d336d2ce0091b58, "<http://foo.bar/baz bim>", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/autolink.cases", "-", 0x47c41072fc131820, "< http://foo.bar >", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/autolink.cases", "-", 0xf6e395b64dad9ae4, "http://example.com", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/autolink.cases", "-", 0x503d30b802c63bc9, "foo@bar.example.com", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/autolink.cases", "-", 0xd76ab36872096640, "<asd@01234567890123456789012345678901234", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/autolink.cases", "-", 0x7b67e1e142d5bbcb, "<asd@-example.com>", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/autolink.cases", "-", 0xb708fdc951b8af95, "<asd@example-.com>", "a literal autolink forms inside the `<…>` the oracle reads as text"),
     case("commonmark/code_indented.cases", "code_indented_off", 0x3ac7e87e17e3cf3c, "    a", "indented code is part of the syntax; the oracle turns it off"),
     case("commonmark/code_indented.cases", "code_indented_off", 0xc24b9c53c8f8b8f8, "```\na\n    ```", "indented code is part of the syntax; the oracle turns it off"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x85a2b91000f9635a, "---\nFoo\n---\nBar\n---\nBaz\n", "frontmatter is part of the syntax; the oracle reads the leading `---` lines as breaks and a heading"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x3702e9bd361ac825, "---\n---\n", "frontmatter is part of the syntax; the oracle reads the leading `---` lines as breaks and a heading"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x3a87d9bc9cc4d729, "[[[foo]]]\n\n[[[foo]]]: /url\n", "wiki links are part of the syntax and win over link and reference syntax"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x4a83e42041208161, "[[*foo* bar]]\n\n[*foo* bar]: /url \"title\"", "wiki links are part of the syntax and win over link and reference syntax"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0xce9484f01a55309c, "![[foo]]\n\n[[foo]]: /url \"title\"\n", "wiki links are part of the syntax and win over link and reference syntax"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0xe395b72ebf329d31, "<https://foo.bar/baz bim>\n", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0xab5ec990ca592a3f, "< https://foo.bar >\n", "a literal autolink forms inside the `<…>` the oracle reads as text"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x0c8b5ecfdcb3fa5b, "https://example.com\n", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/commonmark.cases", "allow_dangerous_html,allow_dangerous_protocol", 0x1e358bacb6d78c59, "foo@bar.example.com\n", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/frontmatter.cases", "-", 0xc7b84559ee61d622, "---\ntitle: Jupyter\n---", "frontmatter is part of the syntax; the oracle reads the leading `---` lines as breaks and a heading"),
-    case("commonmark/gfm_autolink_literal.cases", "-", 0x837b2b5793a240b3, "https://example.com", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/gfm_autolink_literal.cases", "-", 0xacc7e7b8b7a0236b, "www.example.com", "literal autolinks are part of the syntax; the oracle reads this without them"),
-    case("commonmark/gfm_autolink_literal.cases", "-", 0xb8169be981f3cadb, "user@example.com", "literal autolinks are part of the syntax; the oracle reads this without them"),
     case("commonmark/gfm_table.cases", "-", 0x344b3ce2752a24d5, "| a |\n| - |\n| b |", "tables are part of the syntax; the oracle reads the rows as text"),
     case("commonmark/gfm_table.cases", "gfm,code_indented_off", 0xcfaf038193c872fd, "| a |\n    | - |", "indented code is part of the syntax; the oracle turns it off"),
     case("commonmark/gfm_table.cases", "gfm,code_indented_off", 0xcad0aaca934cedd8, "    | a |\n\t| - |\n    | b |", "indented code is part of the syntax; the oracle turns it off"),
-    case("commonmark/gfm_tagfilter.cases", "allow_dangerous_html,gfm_tagfilter", 0xf96faea142502e88, "\n<title>\n\n<div title=\"<title>\"></div>\n\n<", "literal autolinks are part of the syntax; the oracle reads this without them"),
     case("commonmark/gfm_task_list_item.cases", "-", 0xa3f7f4ff52863012, "* [x] y.", "task list items are part of the syntax; the oracle reads `[x]` as text"),
-    case("commonmark/heading_setext.cases", "-", 0x977989679d221e34, "---\nFoo\n---\nBar\n---\nBaz", "frontmatter is part of the syntax; the oracle reads the leading `---` lines as breaks and a heading"),
-    case("commonmark/heading_setext.cases", "-", 0xe1934f8733e9b2cd, "---\n---", "frontmatter is part of the syntax; the oracle reads the leading `---` lines as breaks and a heading"),
     case("commonmark/html_flow.cases", "html_flow_off", 0x6fc38c182fd4dc45, "<x>", "raw HTML blocks are part of the syntax; the oracle turns them off"),
-    case("commonmark/image.cases", "-", 0x0ae6d075a41b2254, "[[foo]]: /url \"title\"\n\n![[foo]]", "wiki links are part of the syntax and win over link and reference syntax"),
-    case("commonmark/link_reference.cases", "-", 0xcabd7820a75b4f39, "[[[foo]]]: /url\n\n[[[foo]]]", "wiki links are part of the syntax and win over link and reference syntax"),
-    case("commonmark/link_reference.cases", "-", 0x7136c3f6ddadc171, "[*foo* bar]: /url \"title\"\n\n[[*foo* bar]]", "wiki links are part of the syntax and win over link and reference syntax"),
     case("gfm/inline_footnotes.cases", "extension.inline_footnotes", 0x23538404ce8325cd, "Text^[note] should not parse.\n", "inline footnotes are part of the syntax; the oracle runs without footnotes"),
     case("gfm/math.cases", "extension.math_dollars", 0xdf5d221a68b26090, "test $$\n2+2\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
     case("gfm/math.cases", "extension.math_dollars", 0x2d7905f74cfccf51, "$$\n2+2\n4+4\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
@@ -110,8 +88,6 @@ pub const DEVIATIONS: &[Listed] = &[
     case("commonmark/list.cases", "-", 0x68dbf208da8c60bc, "- ```\n    \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/list.cases", "-", 0xcfbe10e540f5a44f, "- ```\n\t\n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("gfm/autolink.cases", "extension.autolink", 0xeeec9d08384f38db, "[https://foo.com]", "a URL its author wrapped in brackets is linked, with the brackets as text; the oracle, without relaxed autolinks, leaves it unlinked. With a matching definition the brackets form a shortcut reference instead"),
-    case("gfm/autolink.cases", "extension.autolink", 0x57b1699985b000e9, "[[https://foo.com]]", "`[[…]]` is wiki link syntax, so the author wrote a wiki link to the URL; the oracle, without wiki links, reads it as text"),
-    case("gfm/autolink.cases", "extension.autolink", 0xd50e442a846c8be9, "[[Foo|https://foo.com]]", "`[[…]]` is wiki link syntax, so the author wrote a wiki link with a title after the pipe; the oracle, without wiki links, reads it as text"),
 ];
 
 /// Cases that fail as parser defects, not by design. A case belongs here only
