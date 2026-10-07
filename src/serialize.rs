@@ -34,6 +34,27 @@ impl LineEnding {
     }
 }
 
+/// The bullet char [`SerializeOptions::bullet`] writes unordered lists with.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BulletMarker {
+    /// `-`.
+    Dash,
+    /// `*`.
+    Asterisk,
+    /// `+`.
+    Plus,
+}
+
+/// The delimiter [`SerializeOptions::ordered_delimiter`] writes ordered-list
+/// markers with.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OrderedDelimiter {
+    /// `.`, as in `1.`.
+    Period,
+    /// `)`, as in `1)`.
+    Paren,
+}
+
 /// Output-style options for serialization. Defaults: LF, trailing newline, and
 /// the list markers and code fences the AST records.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,15 +64,16 @@ pub struct SerializeOptions {
     pub line_ending: LineEnding,
     /// Whether to end the output with a trailing newline.
     pub final_newline: bool,
-    /// The bullet marker for unordered lists. `-`, the default, keeps the
-    /// marker the AST records; another marker replaces it.
-    pub bullet: ListDelimiter,
-    /// The delimiter for ordered-list markers (e.g. `.` → `1.`). `.`, the
-    /// default, keeps the delimiter the AST records; another replaces it.
-    pub ordered_delimiter: ListDelimiter,
-    /// The fence character for fenced code blocks. Backticks, the default,
-    /// keep the fence the AST records; tildes replace it.
-    pub fence_marker: FenceMarker,
+    /// The bullet for unordered lists: `None`, the default, keeps the marker
+    /// each list records; `Some` writes every unordered list with it.
+    pub bullet: Option<BulletMarker>,
+    /// The delimiter for ordered-list markers: `None`, the default, keeps the
+    /// delimiter each list records; `Some` writes every ordered list with it.
+    pub ordered_delimiter: Option<OrderedDelimiter>,
+    /// The fence char for fenced code blocks: `None`, the default, keeps the
+    /// fence each block records; `Some` writes every fenced block with it,
+    /// except that an info string holding a backtick always takes tildes.
+    pub fence_marker: Option<FenceMarker>,
 }
 
 impl Default for SerializeOptions {
@@ -59,9 +81,9 @@ impl Default for SerializeOptions {
         Self {
             line_ending: LineEnding::Lf,
             final_newline: true,
-            bullet: ListDelimiter::Dash,
-            ordered_delimiter: ListDelimiter::Period,
-            fence_marker: FenceMarker::Backtick,
+            bullet: None,
+            ordered_delimiter: None,
+            fence_marker: None,
         }
     }
 }
@@ -152,8 +174,9 @@ fn write_blocks(
     document_start: bool,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
-    // The kind and marker of the list written right before the current block.
-    let mut previous_list: Option<(bool, char)> = None;
+    // The marker of the list written right before the current block; ordered
+    // and unordered markers never share a char.
+    let mut previous_list: Option<char> = None;
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
             match join {
@@ -166,7 +189,7 @@ fn write_blocks(
         let written = match block {
             Block::List(list) => {
                 let marker = list_marker(list, options, previous_list);
-                previous_list = Some((list.ordered, marker));
+                previous_list = Some(marker);
                 write_list(list, options, marker)?
             }
             Block::ThematicBreak(node) => {
@@ -352,39 +375,22 @@ fn alert_kind_name(kind: AlertKind) -> &'static str {
     }
 }
 
-/// The marker char a list is written with: the one the AST records, or the
-/// one the options replace it with. A replaced marker that the list written
-/// right before it in the same container, `previous`, also uses yields to the
-/// next one in the order `-`, `*`, `+`, or `.`, `)`.
-fn list_marker(list: &List, options: &SerializeOptions, previous: Option<(bool, char)>) -> char {
-    let defaults = SerializeOptions::default();
-    let (replaced, delimiter) = if list.ordered {
-        let replaced = options.ordered_delimiter != defaults.ordered_delimiter;
-        (
-            replaced,
-            if replaced {
-                options.ordered_delimiter
-            } else {
-                list.delimiter
-            },
-        )
-    } else {
-        let replaced = options.bullet != defaults.bullet;
-        (
-            replaced,
-            if replaced {
-                options.bullet
-            } else {
-                list.delimiter
-            },
-        )
-    };
+/// The marker char a list is written with: the one the options replace it
+/// with, or else the one the AST records. A marker that the list written right
+/// before it in the same container, `previous`, also uses yields to the next
+/// one in the order `-`, `*`, `+`, or `.`, `)`; validation keeps two adjacent
+/// recorded markers apart, so only a replaced marker can meet this.
+fn list_marker(list: &List, options: &SerializeOptions, previous: Option<char>) -> char {
     let marker = if list.ordered {
-        ordered_list_marker(delimiter)
+        options
+            .ordered_delimiter
+            .map_or_else(|| written_marker(list), ordered_delimiter_char)
     } else {
-        unordered_list_marker(delimiter)
+        options
+            .bullet
+            .map_or_else(|| written_marker(list), bullet_char)
     };
-    if replaced && previous == Some((list.ordered, marker)) {
+    if previous == Some(marker) {
         let order: &[char] = if list.ordered {
             &['.', ')']
         } else {
@@ -394,6 +400,34 @@ fn list_marker(list: &List, options: &SerializeOptions, previous: Option<(bool, 
         return order[(at + 1) % order.len()];
     }
     marker
+}
+
+/// The marker char the AST records for a list: its bullet, or its ordered
+/// delimiter. A delimiter of the other list kind is written `-` or `.`.
+/// Serialization and validation's adjacent-list rule both read it.
+pub(crate) fn written_marker(list: &List) -> char {
+    match (list.ordered, list.delimiter) {
+        (false, ListDelimiter::Asterisk) => '*',
+        (false, ListDelimiter::Plus) => '+',
+        (false, _) => '-',
+        (true, ListDelimiter::Paren) => ')',
+        (true, _) => '.',
+    }
+}
+
+fn bullet_char(bullet: BulletMarker) -> char {
+    match bullet {
+        BulletMarker::Dash => '-',
+        BulletMarker::Asterisk => '*',
+        BulletMarker::Plus => '+',
+    }
+}
+
+fn ordered_delimiter_char(delimiter: OrderedDelimiter) -> char {
+    match delimiter {
+        OrderedDelimiter::Period => '.',
+        OrderedDelimiter::Paren => ')',
+    }
 }
 
 fn write_list(
@@ -553,11 +587,7 @@ fn code_block_fence_marker(
     if node.info.as_deref().is_some_and(|info| info.contains('`')) {
         return FenceMarker::Tilde;
     }
-    if options.fence_marker == SerializeOptions::default().fence_marker {
-        marker
-    } else {
-        options.fence_marker
-    }
+    options.fence_marker.unwrap_or(marker)
 }
 
 fn escape_code_info(input: &str) -> String {
@@ -1126,25 +1156,6 @@ fn escape_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
         }
     }
     output
-}
-
-fn unordered_list_marker(delimiter: ListDelimiter) -> char {
-    match delimiter {
-        ListDelimiter::Dash => '-',
-        ListDelimiter::Asterisk => '*',
-        ListDelimiter::Plus => '+',
-        ListDelimiter::Period | ListDelimiter::Paren => '-',
-    }
-}
-
-fn ordered_list_marker(delimiter: ListDelimiter) -> char {
-    match delimiter {
-        ListDelimiter::Paren => ')',
-        ListDelimiter::Dash
-        | ListDelimiter::Asterisk
-        | ListDelimiter::Plus
-        | ListDelimiter::Period => '.',
-    }
 }
 
 /// Prefixes every line of `input` with `prefix`, keeping each line's ending.

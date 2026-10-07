@@ -674,6 +674,53 @@ mod review_validate {
         .is_empty());
     }
 
+    /// A delimiter of the other list kind is written as that kind's first
+    /// marker, so the adjacent-list rule compares the written marker chars:
+    /// an unordered `Period` list is written `-` and an ordered `Dash` list
+    /// `1.`, each reading back as one list with its neighbor.
+    #[test]
+    fn adjacent_lists_compare_the_marker_they_are_written_with() {
+        let item = || ListItem {
+            meta: NodeMeta::default(),
+            checked: None,
+            children: vec![Paragraph::new([Text::from("a")]).into()],
+        };
+        let list = |ordered: bool, delimiter| {
+            Block::List(List {
+                meta: NodeMeta::default(),
+                ordered,
+                start: ordered.then_some(1),
+                delimiter,
+                tight: true,
+                children: vec![item()],
+            })
+        };
+        let document = |first, second| Document {
+            meta: NodeMeta::default(),
+            children: vec![first, second],
+        };
+        assert!(invalid(&document(
+            list(false, ListDelimiter::Period),
+            list(false, ListDelimiter::Dash)
+        )));
+        assert!(invalid(&document(
+            list(true, ListDelimiter::Dash),
+            list(true, ListDelimiter::Period)
+        )));
+        assert!(document(
+            list(false, ListDelimiter::Paren),
+            list(false, ListDelimiter::Asterisk)
+        )
+        .validate()
+        .is_empty());
+        assert!(document(
+            list(true, ListDelimiter::Plus),
+            list(true, ListDelimiter::Paren)
+        )
+        .validate()
+        .is_empty());
+    }
+
     #[test]
     fn directive_names_are_runs_of_letters_joined_by_dashes() {
         let directive = |name: &str| {

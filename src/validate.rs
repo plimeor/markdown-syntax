@@ -11,6 +11,7 @@ use crate::{
         MathInlineKind, Table, TextDirective,
     },
     diagnostic::Diagnostic,
+    serialize::written_marker,
     span::Span,
 };
 
@@ -35,7 +36,7 @@ fn validate_blocks(blocks: &[Block], diagnostics: &mut Vec<Diagnostic>) {
         if let (Some(Block::List(before)), Block::List(list)) =
             (index.checked_sub(1).map(|before| &blocks[before]), block)
         {
-            if before.ordered == list.ordered && before.delimiter == list.delimiter {
+            if written_marker(before) == written_marker(list) {
                 diagnostics.push(Diagnostic::invalid(
                     list.meta.span,
                     "adjacent lists cannot use the same marker",

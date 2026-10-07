@@ -23,8 +23,9 @@ diagnostic per invalid shape it finds, and an empty list for a valid document.
 Validation SHALL reject exactly these shapes, each visible from the node, its
 children, or its sibling blocks:
 
-- Block sequences: two adjacent `List`s that are both ordered or both
-  unordered and record the same delimiter.
+- Block sequences: two adjacent `List`s in the same container written with
+  the same marker char; a list recording a delimiter of the other list kind is
+  written with `-` when unordered and `.` when ordered.
 - `Heading`: a depth outside 1–6.
 - `Table`: no rows; a header row with no cells; an alignment count other than
   the header row's width; a row whose width differs from the header row's.
@@ -93,6 +94,10 @@ children, or its sibling blocks:
 
 #### Scenario: Adjacent lists with one marker
 - **WHEN** a document holding two adjacent unordered `List`s that both use `-` is validated
+- **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Adjacent lists written with one marker
+- **WHEN** a document holding an unordered `List` recording `Period` next to an unordered `List` recording `Dash` is validated
 - **THEN** the result holds an `InvalidDocument` error
 
 #### Scenario: Directive name with a digit
