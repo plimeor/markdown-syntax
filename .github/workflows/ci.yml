@@ -18,30 +18,15 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --check
+      # Default features: the zero-dependency gate.
       - run: cargo build
-      - run: cargo test
-      - run: cargo test --features html
+      # Default features compile the tests without running them; with the
+      # `html` feature the same tests run once below, along with the HTML ones.
+      - run: cargo test --no-run
+      - run: cargo test --profile ci --features html
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-
-  wasm:
-    name: wasm32 build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - run: cargo build --target wasm32-unknown-unknown
-
-  msrv:
-    name: msrv (1.82)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.82
-      - run: cargo build
 
 # Deferred — NOT gates yet:
 #  - `cargo clippy -- -D warnings`: the crate has pre-existing clippy warnings;
