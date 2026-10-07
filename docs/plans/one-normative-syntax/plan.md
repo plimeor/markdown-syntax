@@ -321,7 +321,7 @@ Specs:
 
 ### 9. Integration checks
 - [x] 9.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
-- [ ] 9.2 Conformance numbers observed on `main` and on the branch, reported in the PR and not stored; every deviation is listed with its reason.
+- [x] 9.2 Conformance numbers observed on `main` and on the branch, reported in the PR and not stored; every deviation is listed with its reason. Oracle cases written for a construct this syntax drops (relaxed literal autolinks, single-tilde strikethrough, superscript, wiki links with the title before the pipe) are removed from the bench.
 - [x] 9.3 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
 
 ### 10. Design review follow-ups
