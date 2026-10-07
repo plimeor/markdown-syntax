@@ -1410,7 +1410,7 @@ mod unicode_whitespace {
 }
 
 mod footnotes_and_directives {
-    use markdown_syntax::{parse, Block, Inline};
+    use markdown_syntax::{parse, Block, DiagnosticCode, Inline};
 
     #[test]
     fn a_footnote_definitions_first_line_keeps_a_hard_break() {
@@ -1457,6 +1457,45 @@ mod footnotes_and_directives {
                 [Block::ContainerDirective(inner), Block::ContainerDirective(inner2)]
                     if inner.name == "inner" && inner2.name == "other"
             ),
+            "{blocks:?}"
+        );
+    }
+
+    #[test]
+    fn a_digit_in_a_nested_directive_name_leaves_its_lines_as_text() {
+        let output = parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
+        let codes: Vec<_> = output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.code,
+                    diagnostic.span.map(|span| span.start..span.end),
+                )
+            })
+            .collect();
+        assert_eq!(
+            codes,
+            [
+                (DiagnosticCode::InvalidDirectiveName, Some(26..35)),
+                (DiagnosticCode::InvalidDirectiveName, Some(42..45)),
+            ]
+        );
+        let blocks = output.document.children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(rest)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert!(
+            matches!(
+                outer.children.as_slice(),
+                [Block::ContainerDirective(inner), Block::Paragraph(text)]
+                    if inner.name == "inner"
+                        && matches!(text.children.first(), Some(Inline::Text(t)) if t.value == ":::inner2")
+            ),
+            "{blocks:?}"
+        );
+        assert!(
+            matches!(rest.children.as_slice(), [Inline::Text(a), Inline::SoftBreak(_), Inline::Text(b)] if a.value == ":::" && b.value == "after"),
             "{blocks:?}"
         );
     }

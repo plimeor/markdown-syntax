@@ -251,8 +251,8 @@ nested directive leaves open ends with that directive.
 - **THEN** the document holds one `ContainerDirective` named `t` holding a `CodeBlock` whose value is `":::e\n"`
 
 #### Scenario: Fence left open in a nested directive
-- **WHEN** ``":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter"`` is parsed
-- **THEN** the `ContainerDirective` named `outer` holds the directives `inner` and `inner2`, a `Paragraph` holding `Text("after")` follows it, and no diagnostic is reported
+- **WHEN** ``":::outer\n:::inner\n```\n:::\n:::other\nx\n:::\n:::\nafter"`` is parsed
+- **THEN** the `ContainerDirective` named `outer` holds the directives `inner` and `other`, a `Paragraph` holding `Text("after")` follows it, and no diagnostic is reported
 
 ### Requirement: Footnote definition content
 A footnote definition's content SHALL start after the spaces and tabs that

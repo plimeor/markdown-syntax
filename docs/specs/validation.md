@@ -264,8 +264,9 @@ Validation does not check, among others:
   normalize to its identifier: a code span's fence and padding are not
   recorded, so ```[`` a ``]``` is written `` [`a`] ``.
 - A `List` after a `Paragraph` in a tight item whose first item the
-  serializer starts on the line after its marker, such as an item opening
-  with indented code (`- a\n  -     x`).
+  serializer starts on the line after its marker, such as an item whose
+  content is a thematic break of its bullet's char, written `- a\n  -\n    ---`,
+  which reads back as a setext heading.
 - A `WikiLink` target that holds an unescaped `|`, or a target or label that
   holds an unescaped `[` or `]` or a line ending.
 
