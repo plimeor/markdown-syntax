@@ -859,10 +859,9 @@ struct DelimMarker {
     /// `openers_bottom` key that caches its verdicts, read this rather than
     /// what is left after earlier pairings.
     run_length: usize,
+    /// Whether the run can open and close; settled by `assign_emphasis_roles`.
     can_open: bool,
     can_close: bool,
-    /// A `~~` run that can pair as strikethrough.
-    strike: bool,
     /// How many more times a long `==` run closes, two characters at a time,
     /// after closing with its first two.
     recloses: usize,
@@ -1031,17 +1030,6 @@ impl InlineList {
     }
 }
 
-/// The roles a recorded run can play; see `DelimMarker`.
-#[derive(Clone, Copy, Default)]
-struct DelimRoles {
-    can_open: bool,
-    can_close: bool,
-    /// A `~~` run that can pair as strikethrough; its roles are settled by
-    /// `assign_emphasis_roles`.
-    strike: bool,
-    recloses: usize,
-}
-
 /// Pushes a literal text node for `value` starting at `start` of the block-level
 /// inline input.
 fn push_text(nodes: &mut Vec<Inline>, start: usize, value: &str) {
@@ -1172,8 +1160,7 @@ fn drop_label(
 }
 
 /// Pushes the `length`-byte run of `marker` at `index` as a literal text node
-/// plus a delimiter entry with `roles`.
-#[allow(clippy::too_many_arguments)]
+/// plus a delimiter entry, whose roles `assign_emphasis_roles` settles.
 fn push_delimiter(
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
@@ -1181,7 +1168,6 @@ fn push_delimiter(
     base_offset: usize,
     marker: u8,
     length: usize,
-    roles: DelimRoles,
 ) {
     let node_index = nodes.len();
     nodes.push(Inline::Text(Text {
@@ -1196,10 +1182,9 @@ fn push_delimiter(
         marker,
         length,
         run_length: length,
-        can_open: roles.can_open,
-        can_close: roles.can_close,
-        strike: roles.strike,
-        recloses: roles.recloses,
+        can_open: false,
+        can_close: false,
+        recloses: 0,
         enclosed_from: NIL,
         position: index,
     });
@@ -1252,20 +1237,21 @@ fn emphasis_roles(
     (can_open, can_close)
 }
 
-/// Settles the roles of every `*`, `_`, and `~~` run once the `==` spans are
-/// known. The `==` runs are paired among themselves first; an emphasis run
-/// touching the inner side of such a span's delimiter then flanks as the edge
-/// of that span's content.
+/// Settles the roles of every recorded run. The `==` runs take theirs first
+/// and are paired among themselves; each `*`, `_`, and `~~` run then takes its
+/// roles once the `==` spans are known, flanking as the edge of a span's
+/// content where it touches the inner side of the span's delimiter.
 fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
     let mut opens_span = alloc::vec![false; delimiters.len()];
     let mut closes_span = alloc::vec![false; delimiters.len()];
     let mut open_marks: Vec<usize> = Vec::new();
     // The run each span opened by a run closes at (a run opens at most one).
     let mut span_close = alloc::vec![NIL; delimiters.len()];
-    for (index, run) in delimiters.iter().enumerate() {
+    for (index, run) in delimiters.iter_mut().enumerate() {
         if run.marker != b'=' {
             continue;
         }
+        assign_double_mark_roles(input, run);
         let mut closed = 0;
         if run.can_close {
             while closed <= run.recloses {
@@ -1286,7 +1272,7 @@ fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
 
     for index in 0..delimiters.len() {
         let run = delimiters[index];
-        if !matches!(run.marker, b'*' | b'_') && !run.strike {
+        if run.marker == b'=' {
             continue;
         }
         let bounded_before = index > 0 && {
@@ -1329,27 +1315,23 @@ fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
     }
 }
 
-/// The roles of a `==` run of `length` bytes at `index`: it opens with
-/// its last two characters and closes with its first two (and then the next
-/// two), each subject to CommonMark flanking of that two-character delimiter.
-/// A run right after an escaped character of the same mark never closes.
-fn double_mark_roles(input: &str, index: usize, length: usize, marker: u8) -> DelimRoles {
+/// Sets the roles of a `==` run: it opens with its last two characters and
+/// closes with its first two (and then the next two), each subject to
+/// CommonMark flanking of that two-character delimiter. A run right after an
+/// escaped character of the same mark never closes.
+fn assign_double_mark_roles(input: &str, run: &mut DelimMarker) {
+    let (index, length) = (run.position, run.length);
     let after_escaped_mark =
-        index > 0 && input.as_bytes()[index - 1] == marker && is_escaped_at(input, index - 1);
-    let can_close = !after_escaped_mark && can_close_delimited(input, index, 2);
-    let recloses = if can_close {
+        index > 0 && input.as_bytes()[index - 1] == run.marker && is_escaped_at(input, index - 1);
+    run.can_close = !after_escaped_mark && can_close_delimited(input, index, 2);
+    run.recloses = if run.can_close {
         (1..length / 2)
             .take_while(|pair| can_close_delimited(input, index + 2 * pair, 2))
             .count()
     } else {
         0
     };
-    DelimRoles {
-        can_open: can_open_delimited(input, index + length - 2, 2),
-        can_close,
-        recloses,
-        ..DelimRoles::default()
-    }
+    run.can_open = can_open_delimited(input, index + length - 2, 2);
 }
 
 /// Resolves recorded delimiter runs into emphasis and mark nodes using the
@@ -1553,8 +1535,8 @@ fn span_floor(closer: &DelimMarker) -> Option<usize> {
 /// How many characters a pair consumes from each run, and the node it forms.
 fn pair_shape(opener: &DelimMarker, closer: &DelimMarker) -> (usize, EmphasisWrap) {
     match closer.marker {
-        // Strikethrough consumes the whole (equal-length) run on each side.
-        b'~' => (closer.length, EmphasisWrap::Delete),
+        // Strikethrough consumes the whole `~~` run on each side.
+        b'~' => (2, EmphasisWrap::Delete),
         b'=' => (2, EmphasisWrap::Mark),
         marker => {
             let delimiter = if marker == b'_' {
@@ -1633,9 +1615,10 @@ fn openers_bottom_key(closer: &DelimMarker) -> usize {
 /// Nested opener/closer compatibility, including CommonMark's rule of three.
 fn emphasis_delimiters_match(opener: &DelimMarker, closer: &DelimMarker) -> bool {
     match opener.marker {
-        // GFM strikethrough: opener and closer runs must be the same length (a
-        // `~` never pairs with `~~`). The rule of three does not apply to `~`.
-        b'~' => opener.length == closer.length,
+        // GFM strikethrough: only runs of exactly two `~` are recorded, and a
+        // pair consumes both whole, so any two live runs match. The rule of
+        // three does not apply to `~`.
+        b'~' => true,
         // `==` pairs two characters from each run.
         b'=' => opener.length >= 2 && closer.length >= 2,
         _ => {
@@ -2459,8 +2442,6 @@ fn parse_inline_content(
         if bytes[index] == b'*' && delimiter_byte_run_start(input, index, b'*') == index {
             let run_len = delimiter_byte_run_len(input, index, b'*');
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            // Roles are settled by `assign_emphasis_roles`.
-            let roles = DelimRoles::default();
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
@@ -2468,7 +2449,6 @@ fn parse_inline_content(
                 base_offset,
                 b'*',
                 run_len,
-                roles,
             );
             index += run_len;
             text_start = index;
@@ -2499,8 +2479,6 @@ fn parse_inline_content(
             }
             let run_len = delimiter_byte_run_len(input, index, b'_');
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            // Roles are settled by `assign_emphasis_roles`.
-            let roles = DelimRoles::default();
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
@@ -2508,7 +2486,6 @@ fn parse_inline_content(
                 base_offset,
                 b'_',
                 run_len,
-                roles,
             );
             index += run_len;
             text_start = index;
@@ -2519,7 +2496,6 @@ fn parse_inline_content(
             let run_len = delimiter_byte_run_len(input, index, b'=');
             if run_len >= 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                let roles = double_mark_roles(input, index, run_len, b'=');
                 push_delimiter(
                     &mut nodes,
                     &mut delimiters,
@@ -2527,7 +2503,6 @@ fn parse_inline_content(
                     base_offset,
                     b'=',
                     run_len,
-                    roles,
                 );
                 index += run_len;
                 text_start = index;
@@ -2565,10 +2540,6 @@ fn parse_inline_content(
                     base_offset,
                     b'~',
                     run_len,
-                    DelimRoles {
-                        strike: true,
-                        ..DelimRoles::default()
-                    },
                 );
                 index += run_len;
                 text_start = index;
@@ -3047,24 +3018,9 @@ fn parse_text_directive(
             return None;
         }
     }
-    let opener_source = &input[index + 1..];
     let opener_offset = index + 1;
-    // A name opens a directive only when a label, attributes, whitespace, or
-    // the end of the content follows it: `:word:`, `:a@b.c`, and `(:note)`
-    // stay text.
-    let name_len = opener_source
-        .bytes()
-        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        .count();
-    if !matches!(
-        opener_source.as_bytes().get(name_len),
-        None | Some(b'[' | b'{' | b' ' | b'\t' | b'\n' | b'\r')
-    ) {
-        return None;
-    }
-    let mut ends = true;
     let opener = parse_directive_opener_with(
-        opener_source,
+        &input[opener_offset..],
         |close, open| {
             let found = match close {
                 DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
@@ -3074,22 +3030,23 @@ fn parse_text_directive(
             };
             found.map(|position| position - opener_offset)
         },
-        |label, attributes, next| {
-            ends = text_directive_ends(label, attributes, next);
-            ends
-        },
+        |label, attributes, rest| text_directive_ends(label, attributes, rest.bytes().next()),
     );
-    let Some(opener) = opener else {
-        // An opener refused for the char after it is text, not malformed.
-        if ends && directive_opener_looks_malformed(opener_source) {
-            diagnostics.push(Diagnostic::new(
-                DiagnosticSeverity::Error,
-                DiagnosticCode::InvalidDirectiveName,
-                Span::new(base_offset + index, base_offset + input.len()),
-                "text directive opener is malformed",
-            ));
+    let opener = match opener {
+        Ok(opener) => opener,
+        Err(refused) => {
+            // A `[` or `{` left open after a valid name is malformed; a bad
+            // name, or an opener refused for what follows it, is plain text.
+            if refused == Refused::Unclosed {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticSeverity::Error,
+                    DiagnosticCode::InvalidDirectiveName,
+                    Span::new(base_offset + index, base_offset + input.len()),
+                    "text directive opener is malformed",
+                ));
+            }
+            return None;
         }
-        return None;
     };
     let label = opener
         .label
@@ -3128,8 +3085,9 @@ fn parse_text_directive(
 /// Whether a text directive with this label and attribute source ends before
 /// `next`: whitespace or the end of the content, or ASCII punctuation when the
 /// label is not empty or the attributes hold a non-space char. So `:e[a].` is
-/// a directive, while `:e{}x`, `:e{}.`, and `:e[a]b` stay text. Deciding from
-/// the sources keeps a refused opener from parsing its attributes.
+/// a directive, while `:word:`, `:a@b.c`, `(:note)`, `:e{}x`, `:e{}.`, and
+/// `:e[a]b` stay text. Deciding from the sources keeps a refused opener from
+/// parsing its attributes.
 fn text_directive_ends(label: Option<&str>, attributes: Option<&str>, next: Option<u8>) -> bool {
     match next {
         None | Some(b' ' | b'\t' | b'\n' | b'\r') => true,
@@ -3172,14 +3130,30 @@ impl DirectiveOpener<'_> {
     }
 }
 
-fn parse_directive_opener(input: &str) -> Option<DirectiveOpener<'_>> {
+/// Why `parse_directive_opener_with` read no opener.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Refused {
+    /// The text after the colons does not start with a valid directive name.
+    Name,
+    /// The `[` or `{` after the name has no closing `]` or `}`.
+    Unclosed,
+    /// `accept` refused the opener for its label, attributes, or what follows.
+    Follow,
+}
+
+/// `parse_directive_opener_with` for a block directive line, finding closing
+/// brackets in `input` alone.
+fn parse_directive_opener<'a>(
+    input: &'a str,
+    accept: impl FnOnce(Option<&str>, Option<&str>, &str) -> bool,
+) -> Result<DirectiveOpener<'a>, Refused> {
     parse_directive_opener_with(
         input,
         |close, open| match close {
             DirectiveClose::Label => find_link_label_end(input, open),
             DirectiveClose::Attributes => find_directive_attributes_close(input, open),
         },
-        |_, _, _| true,
+        accept,
     )
 }
 
@@ -3192,13 +3166,23 @@ enum DirectiveClose {
     Attributes,
 }
 
-/// `accept` sees the label source, the attribute source, and the byte after
-/// the opener, and can refuse the opener before its attributes are parsed.
-fn parse_directive_opener_with(
-    input: &str,
+/// Reads the directive opener at the start of `input`, the text after the
+/// colons: a name, then an optional `[label]`, then optional `{attributes}`.
+/// `find_close` gives the `]` or `}` closing the bracket at a position.
+///
+/// `accept` sees the label source, the attribute source, and the text after
+/// the opener, and runs before the attributes are parsed. That order keeps
+/// refused openers linear-time: `:a{` repeated, then `}x`, refuses every
+/// opener without parsing the attribute source each one spans to the end.
+/// The cost is that acceptance reads the attribute source, not the parsed
+/// attributes: `:e{!}.` is a text directive, since its attribute source is not
+/// blank, whose invalid attribute is dropped, so it is written `:e.`, which
+/// reads back as text.
+fn parse_directive_opener_with<'a>(
+    input: &'a str,
     mut find_close: impl FnMut(DirectiveClose, usize) -> Option<usize>,
-    accept: impl FnOnce(Option<&str>, Option<&str>, Option<u8>) -> bool,
-) -> Option<DirectiveOpener<'_>> {
+    accept: impl FnOnce(Option<&str>, Option<&str>, &str) -> bool,
+) -> Result<DirectiveOpener<'a>, Refused> {
     let mut index = 0;
     while let Some((next, char)) = next_char(input, index) {
         if char.is_ascii_alphanumeric() || char == '_' || char == '-' {
@@ -3209,28 +3193,28 @@ fn parse_directive_opener_with(
     }
     let name = &input[..index];
     if !is_directive_name(name) {
-        return None;
+        return Err(Refused::Name);
     }
 
     let mut label = None;
     let mut attribute_source = None;
     let mut consumed = index;
     if input.as_bytes().get(consumed) == Some(&b'[') {
-        let close = find_close(DirectiveClose::Label, consumed)?;
+        let close = find_close(DirectiveClose::Label, consumed).ok_or(Refused::Unclosed)?;
         label = Some(&input[consumed + 1..close]);
         consumed = close + 1;
     }
     if input.as_bytes().get(consumed) == Some(&b'{') {
-        let close = find_close(DirectiveClose::Attributes, consumed)?;
+        let close = find_close(DirectiveClose::Attributes, consumed).ok_or(Refused::Unclosed)?;
         attribute_source = Some((consumed + 1, &input[consumed + 1..close]));
         consumed = close + 1;
     }
     if !accept(
         label,
         attribute_source.map(|(_, source)| source),
-        input.as_bytes().get(consumed).copied(),
+        &input[consumed..],
     ) {
-        return None;
+        return Err(Refused::Follow);
     }
     let (attributes, dropped) = match attribute_source {
         Some((start, source)) => {
@@ -3243,27 +3227,13 @@ fn parse_directive_opener_with(
         None => (Vec::new(), Vec::new()),
     };
 
-    Some(DirectiveOpener {
+    Ok(DirectiveOpener {
         name: name.into(),
         label,
         attributes,
         dropped,
         consumed,
     })
-}
-
-fn directive_opener_looks_malformed(input: &str) -> bool {
-    let mut index = 0;
-    while let Some((next, char)) = next_char(input, index) {
-        if char.is_ascii_alphanumeric() || char == '_' || char == '-' {
-            index = next;
-        } else {
-            break;
-        }
-    }
-    index > 0
-        && is_directive_name(&input[..index])
-        && matches!(input.as_bytes().get(index), Some(b'[' | b'{'))
 }
 
 /// Quote states of the walk to a directive's closing `}`: outside quotes,

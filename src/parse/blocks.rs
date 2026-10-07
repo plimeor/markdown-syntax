@@ -1179,8 +1179,8 @@ impl<'a> BlockParser<'a> {
         // Container directive.
         if !indented && byte == Some(b':') {
             if let Some((fence, rest)) = directive_container_opener_prefix(cursor.nonspace_rest()) {
-                match parse_directive_opener(rest) {
-                    Some(opener) if nesting => {
+                match parse_directive_opener(rest, |_, _, _| true) {
+                    Ok(opener) if nesting => {
                         let source = cursor.view(cursor.next_nonspace);
                         let label = opener.label.map(|label| {
                             let mut text = DerivedText::default();
@@ -1211,8 +1211,10 @@ impl<'a> BlockParser<'a> {
                         cursor.skip_to_end();
                         return Started::Container;
                     }
-                    Some(_) => {}
-                    None => {
+                    Ok(_) => {}
+                    // A bad name or an unclosed `[` / `{`: nothing is refused
+                    // for what follows the opener.
+                    Err(_) => {
                         if !tip_holds_text {
                             self.diagnostics.push(Diagnostic::new(
                                 DiagnosticSeverity::Error,
@@ -1349,37 +1351,37 @@ impl<'a> BlockParser<'a> {
         if !indented && byte == Some(b':') {
             let text = cursor.nonspace_rest();
             if text.starts_with("::") && !text.starts_with(":::") {
-                match parse_directive_opener(&text[2..]) {
-                    Some(opener) => {
-                        if is_blank(&text[2 + opener.consumed..]) {
-                            let source = cursor.view(cursor.next_nonspace);
-                            let label = opener.label.map(|label| {
-                                let mut derived = DerivedText::default();
-                                derived.append(&source, label);
-                                derived
-                            });
-                            let at = cursor.next_nonspace + 2;
-                            opener.report_dropped(&mut self.diagnostics, |start, end| {
-                                Span::new(line.source_start(at + start), line.source_end(at + end))
-                            });
-                            let DirectiveOpener {
-                                name, attributes, ..
-                            } = opener;
-                            self.close_unmatched();
-                            self.add_block(
-                                Pending::LeafDirective {
-                                    span: Span::new(start, line.end),
-                                    name,
-                                    label,
-                                    attributes,
-                                },
-                                index,
-                                line.end,
-                            );
-                            return Started::Line;
-                        }
+                // Only whitespace may follow a leaf directive's opener.
+                match parse_directive_opener(&text[2..], |_, _, rest| is_blank(rest)) {
+                    Ok(opener) => {
+                        let source = cursor.view(cursor.next_nonspace);
+                        let label = opener.label.map(|label| {
+                            let mut derived = DerivedText::default();
+                            derived.append(&source, label);
+                            derived
+                        });
+                        let at = cursor.next_nonspace + 2;
+                        opener.report_dropped(&mut self.diagnostics, |start, end| {
+                            Span::new(line.source_start(at + start), line.source_end(at + end))
+                        });
+                        let DirectiveOpener {
+                            name, attributes, ..
+                        } = opener;
+                        self.close_unmatched();
+                        self.add_block(
+                            Pending::LeafDirective {
+                                span: Span::new(start, line.end),
+                                name,
+                                label,
+                                attributes,
+                            },
+                            index,
+                            line.end,
+                        );
+                        return Started::Line;
                     }
-                    None => {
+                    Err(Refused::Follow) => {}
+                    Err(Refused::Name | Refused::Unclosed) => {
                         if !tip_holds_text {
                             self.diagnostics.push(Diagnostic::new(
                                 DiagnosticSeverity::Error,
