@@ -3,7 +3,7 @@
 //!
 //! - Markdown → AST: every `.md` under `tests/fixtures/roundtrip/` with a
 //!   sibling `.ast` parses, without diagnostics, to the tree that golden
-//!   holds.
+//!   holds; every stability fixture parses without an error diagnostic.
 //! - Markdown → AST → Markdown: every `.md` with a sibling `.canonical.md`,
 //!   and every input in `CANONICAL_INPUTS`, serializes to exactly the
 //!   Markdown its golden or entry holds.
@@ -74,6 +74,31 @@ fn ast_goldens_match() {
             input.display()
         );
     }
+}
+
+/// The stability fixtures have no `.ast` golden; each still parses without an
+/// error diagnostic.
+#[test]
+fn stability_fixtures_parse_without_errors() {
+    let root = Path::new("tests/fixtures/roundtrip/stability");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(root).expect("stability fixtures") {
+        let path = entry.expect("stability fixture").path();
+        if path.extension().is_some_and(|extension| extension == "md") {
+            let output = parse(&read_fixture(&path));
+            assert!(
+                output
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error),
+                "{}: {:?}",
+                path.display(),
+                output.diagnostics
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 8, "stability fixtures drifted");
 }
 
 const HTML_SYNTAX_NODES: &str = concat!(
