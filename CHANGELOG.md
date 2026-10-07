@@ -47,14 +47,16 @@ with struct literals, or compares canonical output needs these updates.
 - **Each fact is stored once.**
   - `Autolink` holds `form: AutolinkForm` (`Angle` or `Literal`) and `text`,
     the URL or address as written; `Autolink::destination()` derives the
-    href (`www.a.b` → `http://www.a.b`, `a@b.c` → `mailto:a@b.c`).
+    href (`www.a.b` → `http://www.a.b`, `a@b.c` → `mailto:a@b.c`), and
+    returns `None` when `text` is not exactly one autolink of its form.
     `Autolink.destination`, `Autolink.kind`, and `AutolinkKind` are removed.
     `Autolink::new(form, text)` builds one.
   - `CodeInline` holds only its `value`: `raw` and `fence_length` are
     removed, and the serializer picks the fence and padding.
   - `CharacterReference` holds only its `reference` as written:
     `CharacterReference.value` is removed, and
-    `CharacterReference::value()` decodes the reference.
+    `CharacterReference::value()` decodes the reference, or returns `None`
+    when it is not exactly one character reference.
     `CharacterReference::new(reference)` builds one.
   - `Link`, `Image`, and `Definition` hold `title: Option<Title>`, where
     `Title { value, kind }` keeps the title text with its `LinkTitleKind`;
@@ -73,9 +75,16 @@ with struct literals, or compares canonical output needs these updates.
     other scheme stays text. A literal autolink ends at Unicode whitespace,
     `<`, a non-ASCII punctuation or symbol char (`，`, `。`, `、`), or `[[`.
     `parse` no longer panics on a no-break space before an email-like run.
-    As in cmark-gfm, a URL after a `[` no `]` has closed yet stays text
-    (`[https://foo.com]`), while an email address still links, and a
-    bracketed IPv6 host (`https://[fe80::1]`) is not a URL host.
+    As in cmark-gfm, a URL after a `[` or `![` no `]` has closed yet stays
+    text (`[https://foo.com]`), while an email address still links, and a
+    bracketed IPv6 host (`https://[fe80::1]`) is not a URL host. An inline
+    footnote's `^[` opens no link text, so `^[see https://a.b]` links.
+  - Link text holds no link. An autolink inside it, in an image's alt
+    included, reads as its text, an angle-bracket one without its brackets
+    (`[this <http://and.com> that](url)` is one link whose text is
+    `this http://and.com that`), and a wiki link, also in a text directive's
+    label, keeps the brackets around it from forming a link
+    (`[a [[b]] c](u)` is text, a wiki link, and text).
   - A directive name is one or more runs of ASCII letters joined by single
     `-`, in all three directive forms. A text directive forms only when its
     name is followed by `[`, `{`, a space, a tab, or a line ending, or ends
@@ -95,6 +104,7 @@ with struct literals, or compares canonical output needs these updates.
     cmark-gfm.
   - Table rows split at every unescaped `|`, including one inside a code
     span.
+  - A `_` run gets no strikethrough bonus beside a `~`: `d_~_` is text.
 - **Wiki embeds.** `WikiLink` gains `embed: bool`: `![[x]]` is an embed and
   `\![[x]]` is an escaped `!` before a plain wiki link. The HTML renderer
   marks an embed with `data-wikilink-embed="true"`.
@@ -103,6 +113,11 @@ with struct literals, or compares canonical output needs these updates.
   included (`[[a\$b]]` has target `a\$b`), and are written back as they
   are. `WikiLink::decoded_target()` and `WikiLink::decoded_label()` decode
   them as the HTML renderer does.
+- **Wiki link hrefs are filtered.** The HTML renderer blanks a wiki link
+  whose decoded target uses `javascript:`, `vbscript:`, `file:`, or a
+  non-image `data:` URI, unless `allow_dangerous_protocol` is set, and
+  encodes the target once, as a link destination (`[[a&b]]` gets
+  `href="a&amp;b"`).
 - **Shortcodes come from gemoji.** A shortcode needs a name in the pinned
   github/gemoji v4.1.0 table and no letter or digit directly outside either
   colon, so clock times and `a:b:c` stay text. A `:word:` outside the table
@@ -110,16 +125,20 @@ with struct literals, or compares canonical output needs these updates.
   a name outside the table, and the HTML renderer writes the glyph.
 - **New validation rejections.** `validate` reports, and `to_markdown` and
   `to_html` return `InvalidDocument` for:
-  - an empty `Emphasis`, `Strong`, `Delete`, or `Mark`, or one whose content
-    starts with a space, a tab, a soft break, or a hard break of trailing
-    spaces, or ends with a space, a tab, a soft break, or a hard break;
+  - an empty `Paragraph`;
+  - an `Emphasis`, `Strong`, `Delete`, or `Mark` holding nothing but empty
+    text, or whose content, past empty text, starts with Unicode whitespace,
+    a soft break, or a hard break of trailing spaces, or ends with Unicode
+    whitespace, a soft break, or a hard break;
   - a `Link`, `Autolink`, `LinkReference`, or `WikiLink` inside the text of
     a `Link` or `LinkReference`;
   - an `Autolink` whose text is not exactly one autolink of its form;
   - a `CharacterReference` that is not exactly one character reference;
   - a `CodeInline` whose value is empty or holds a line ending;
-  - an empty `MathInline`, and code-form math whose value holds a backtick
-    followed by `$`;
+  - an empty `MathInline`; code-form math whose value holds a backtick
+    followed by `$`; dollar math that, written alone, does not read back
+    with its value and fence (a `$` that closes it early, whitespace at an
+    edge or a line ending in the single-`$` form, a fence of three or more);
   - two adjacent lists in one container written with the same marker char;
   - inside a table cell, a code span, math, raw HTML, autolink, reference
     label, or wiki link value holding a `|` after an odd run of
@@ -142,7 +161,10 @@ with struct literals, or compares canonical output needs these updates.
   - in a tight list item, a block after a paragraph that cannot interrupt
     it: a paragraph, a definition, indented code, frontmatter, a setext
     heading, an ordered list not starting at 1, a list whose first item is
-    empty, or an HTML block that is a lone tag or opens no HTML block;
+    empty or is written starting on the line after its bullet, or an HTML
+    block that is a lone tag or opens no HTML block;
+  - a loose `List` of one item holding at most one block, which no source
+    spells;
   - an empty `List`; a `Frontmatter` inside a container or holding its own
     fence line; an empty `InlineFootnote`; an `Alert` title that is empty or
     has spaces or tabs around it; a `CodeBlock` info string of `Some("")`;
@@ -189,10 +211,15 @@ with struct literals, or compares canonical output needs these updates.
   - An ordered list's item numbers stop at 999999999, the largest a marker
     holds, so `999999999. a` followed by a second item reads back as one
     list.
-- **Linear time on more inputs.** Literal autolinks inside unclosed link
-  text, `www.` hosts after backslash escapes, long `~` runs in a paragraph,
-  runs of escaped `$`, and multi-line definition labels parse in linear
-  time.
+  - An ATX heading whose content ends in a `#` run after a space, or is all
+    `#`, gets a closing sequence of its own: `# C # #` is written as it is.
+  - The empty last line of a value inside a block quote or alert keeps its
+    `>`, and footnote content that opens with a space or a tab, such as
+    indented code, starts on the line after the label.
+- **Linear time on more inputs.** Email candidates in a long run before one
+  `@` (`"-a".repeat(n) + "@b"`, `"a+".repeat(n) + "@b"`), `www.` hosts after
+  backslash escapes, long `~` runs in a paragraph, runs of escaped `$`, and
+  multi-line definition labels parse in linear time.
 - **Block structure follows CommonMark's algorithm.** Block quotes, list
   items, container directives, footnote definitions, HTML containers, and
   alerts are read in one pass over a stack of open blocks, matching
