@@ -17,25 +17,38 @@ serializer error, `Unrepresentable`.
 
 Each spelling decision is made once, where the information to make it exists:
 
-- **The parser records spellings.** When one node kind has more than one
-  spelling, the parse records which one the source used. `Emphasis` and
-  `Strong` record their `*` or `_` delimiter and `Link` records whether it was
-  written inline, as an angle-bracket autolink, or as a literal autolink. An
-  escape or character reference that matters in the source is already an
-  `Escape` or `CharacterReference` node.
+- **The parser records spellings, each fact once.** When one node kind has
+  more than one spelling, the parse records which one the source used.
+  `Emphasis` and `Strong` record their `*` or `_` delimiter, and an
+  `Autolink` records its form (angle-bracket or literal) and its text as
+  written; its destination is derived from that text. An escape or character
+  reference that matters in the source is already an `Escape` or a
+  `CharacterReference` node, which holds the reference as written and derives
+  its value. A node stores no fact twice: `CodeInline` holds only its value,
+  and the fence and padding it is written with are chosen when it is
+  written.
 - **Validation is the only gate.** `Document::validate` rejects, with
   `InvalidDocument`, the shapes that the node and its siblings show to have no
   spelling: a link in link text, emphasis-like content with whitespace at an
-  edge, a recorded autolink form that does not fit its content, adjacent lists
-  with one marker, and a directive name outside the name rule. A shape that
-  depends on neighbouring characters is not rejected; it renders and may read
-  back differently.
+  edge, an autolink text that is not one autolink of its form, a character
+  reference that is not one reference, an empty code span or one holding a
+  line ending, empty inline math or code-form math holding its close,
+  adjacent lists written with one marker, a table cell value no cell source
+  spells, and a directive name outside the name rule. Each rule is decided by
+  the code that owns it: the parser's own functions say whether a text is an
+  autolink, and the serializer's says which marker a list is written with.
+  The serializer refuses nothing that validates. A shape that depends on
+  neighbouring characters is not rejected; it renders and may read back
+  differently.
 - **The serializer only renders.** It writes text, escapes, and references as
   recorded; gives every container line its full prefix; writes a heading soft
   break as a space; encodes values (code, destinations, titles, attributes)
-  by fixed rules; and lets an overridden list marker yield to the next marker
-  when it would repeat the previous sibling list's. It never parses its
-  output, and returns it even when it would read back differently.
+  by fixed rules; encodes each table cell once after writing it, giving a
+  `|` after zero or an even number of backslashes one more backslash, so text
+  in a cell is the one place text is not written exactly as recorded; and
+  lets an overridden list marker yield to the next marker when it would
+  repeat the previous sibling list's. It never parses its output, and returns
+  it even when it would read back differently.
 
 For hand-built trees, the builder answers for literal text: punctuation that
 must stay literal is built as `Escape` nodes.
@@ -54,8 +67,10 @@ must stay literal is built as `Escape` nodes.
 
 ## Consequences
 
-- Lazy continuation lines, indentation widths, and blank-line counts are not
-  recorded; the serializer writes them by its standard rules.
-- The seeded round-trip test lists, with reasons, the generated documents that
-  do not read back, and fails when a listed one starts to.
+- Lazy continuation lines, indentation widths, blank-line counts, and a code
+  span's fence length and padding are not recorded; the serializer writes
+  them by its standard rules.
+- The source read-back test in `tests/fixtures.rs` and the seeded round-trip
+  test each list, with reasons, the documents that do not read back, keyed
+  by content, and fail when a listed one starts to or no longer exists.
 - Round-trip comparison reads a heading's `SoftBreak` as a space.

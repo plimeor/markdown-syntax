@@ -34,8 +34,9 @@ performs.
   `[` or `]`, and which win over a defined reference label;
 - inline and block math;
 - directives, whose names are runs of ASCII letters joined by single `-`, and
-  whose text form needs `[`, `{`, whitespace, or the end of the content after
-  its name.
+  whose text form is followed by whitespace or the end of the content, or by
+  ASCII punctuation when it has a non-empty label or non-blank attribute
+  braces.
 
 Subscript, superscript, insert, spoiler, underline, description lists,
 single-tilde strikethrough, relaxed literal autolinks, and MDX are not part of
