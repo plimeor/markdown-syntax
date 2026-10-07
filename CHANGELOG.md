@@ -41,16 +41,21 @@ with struct literals, or compares canonical output needs these updates.
 - **New diagnostic code.** `DiagnosticCode::InvalidDirectiveAttribute` warns
   about a directive attribute without a valid name, which is dropped.
 - **Recorded spellings.** `Emphasis` and `Strong` gain
-  `delimiter: EmphasisDelimiter` (`Asterisk` or `Underscore`), and `Link`
-  gains `form: LinkForm` (`Inline`, `AngleAutolink`, or `LiteralAutolink`).
-  The parser fills them from the source; `Link::new` records an inline link,
-  and both types default to `*` and an inline link. Struct literals of these
-  nodes need the new field.
-- **Autolinks are links.** `Inline::Autolink` and `AutolinkKind` are removed.
-  Literal autolinks (`https://a.b`, `www.a.b`, `a@b.c`), angle-bracket
-  autolinks (`<https://a.b>`), and links whose text equals their URL are all
-  `Link` nodes whose one child is a `Text` holding the URL as written, and
-  each is written back in the form its `form` records.
+  `delimiter: EmphasisDelimiter` (`Asterisk` or `Underscore`). The parser
+  fills it from the source and `EmphasisDelimiter` defaults to `Asterisk`.
+  Struct literals of these nodes need the new field.
+- **Each fact is stored once.**
+  - `Autolink` holds `form: AutolinkForm` (`Angle` or `Literal`) and `text`,
+    the URL or address as written; `Autolink::destination()` derives the
+    href (`www.a.b` → `http://www.a.b`, `a@b.c` → `mailto:a@b.c`).
+    `Autolink.destination`, `Autolink.kind`, and `AutolinkKind` are removed.
+    `Autolink::new(form, text)` builds one.
+  - `CodeInline` holds only its `value`: `raw` and `fence_length` are
+    removed, and the serializer picks the fence and padding.
+  - `CharacterReference` holds only its `reference` as written:
+    `CharacterReference.value` is removed, and
+    `CharacterReference::value()` decodes the reference.
+    `CharacterReference::new(reference)` builds one.
 - **Escapes and character references are always nodes.**
   `ParseOptions::preserve_character_escapes` and
   `ParseOptions::preserve_character_references` are removed with
@@ -88,7 +93,8 @@ with struct literals, or compares canonical output needs these updates.
 - **Wiki link text as written.** `WikiLink.target` and `WikiLink.label` hold
   their source as written, backslash escapes and character references
   included (`[[a\$b]]` has target `a\$b`), and are written back as they
-  are. The HTML renderer decodes them.
+  are. `WikiLink::decoded_target()` and `WikiLink::decoded_label()` decode
+  them as the HTML renderer does.
 - **Shortcodes come from gemoji.** A shortcode needs a name in the pinned
   github/gemoji v4.1.0 table and no letter or digit directly outside either
   colon, so clock times and `a:b:c` stay text. A `:word:` outside the table
@@ -98,13 +104,24 @@ with struct literals, or compares canonical output needs these updates.
   `to_html` return `InvalidDocument` for:
   - an empty `Emphasis`, `Strong`, `Delete`, or `Mark`, or one whose content
     starts or ends with a space, a tab, a soft break, or a hard break;
-  - a `Link`, `LinkReference`, or `WikiLink` inside the text of a `Link` or
-    `LinkReference`;
-  - a `Link` recorded as an autolink whose content is not one `Text` that
-    such an autolink writes for its destination, or that has a title;
-  - two adjacent lists in one container with the same marker, both ordered
-    or both unordered;
+  - a `Link`, `Autolink`, `LinkReference`, or `WikiLink` inside the text of
+    a `Link` or `LinkReference`;
+  - an `Autolink` whose text is not exactly one autolink of its form;
+  - a `CharacterReference` that is not exactly one character reference;
+  - a `CodeInline` whose value is empty or holds a line ending;
+  - an empty `MathInline`, and code-form math whose value holds a backtick
+    followed by `$`;
+  - two adjacent lists in one container written with the same marker char;
   - a directive name outside the name rule.
+- **Validation is the only gate.** `SerializeError::UnsupportedNode` is
+  removed: every tree that validates is written.
+- **Serialize options keep or replace.** `SerializeOptions::bullet` is an
+  `Option<BulletMarker>` (`Dash`, `Asterisk`, `Plus`),
+  `SerializeOptions::ordered_delimiter` an `Option<OrderedDelimiter>`
+  (`Period`, `Paren`), and `SerializeOptions::fence_marker` an
+  `Option<FenceMarker>`. `None`, the default, keeps the marker or fence the
+  AST records; `Some` writes every list or fence with it, so `* a` with
+  `Some(BulletMarker::Dash)` is written `- a`.
 - **The serializer only renders.** It writes each node in the spelling the
   AST records, or else by one fixed rule, and never parses its output: when
   the output would read back as a different tree, it is still returned.
@@ -116,6 +133,9 @@ with struct literals, or compares canonical output needs these updates.
   - Recorded spellings come back as written: `_a_ __b__`, `a\.b \#tag`,
     `&#35;tag &amp; x`, `www.a.b`, `a@b.c`, `<http://a.b>`, and
     `[http://a.b](http://a.b)` are each written as they were parsed.
+  - A code span is written with the shortest backtick fence that neither
+    occurs in its value nor closes an earlier unmatched backtick run, and
+    with a padding space at each end only where the value needs one.
   - Unpaired delimiters stay raw: `x_y_ a*b x^2 ~5`.
   - Every line inside a block quote, alert, list item, or footnote
     definition takes its container's full prefix, a lazy continuation line
