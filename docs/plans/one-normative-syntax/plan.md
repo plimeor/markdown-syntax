@@ -323,3 +323,19 @@ Specs:
 - [x] 9.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
 - [ ] 9.2 Conformance numbers observed on `main` and on the branch, reported in the PR and not stored; every deviation is listed with its reason.
 - [x] 9.3 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
+
+### 10. Design review follow-ups
+The design review of this branch found the issues below; each task carries the owner's decided fix. Where a task and an earlier task disagree (4.1's `Link` form, 5.1's autolink rule), the later task wins.
+- [ ] 10.1 Linear time: memoize the link-resource tail scan behind literal autolinks in unclosed link text; add `tests/linear_growth.rs`, which times pairs and triples of syntax fragments at n and 2n; fix every quadratic shape it finds; recalibrate `tests/pathological_inputs.rs` for the `ci` profile. Verified by `cargo test --profile ci --features html --test linear_growth --test pathological_inputs`.
+- [x] 10.2 Validation defers to the owner of each rule: an `Autolink` is valid when the parser's own destination function accepts its text, and validation and the serializer share `written_marker` for adjacent lists. Verified by validation "Autolink text that is not one autolink" and "Adjacent lists written with one marker".
+- [x] 10.3 Validation is the only gate: code-form math holding its close and empty inline math are validation errors, `SerializeError::UnsupportedNode` is removed, and the validation spec lists exactly the checks the code makes. Verified by `tests/validate_regressions.rs`.
+- [x] 10.4 Conformance exception lists are keyed by case content, and `exception_lists_are_current` fails on a stale or duplicate entry. Verified by `cargo test --profile ci --features html --test html_conformance`.
+- [ ] 10.5 Tests organized by flow: Markdown → AST (`.ast`), AST → Markdown (exact strings), Markdown → AST → Markdown (`.canonical.md`), source read-back with one content-keyed exception list, and tree read-back in the seeded fuzz test only.
+- [ ] 10.6 Table cells: the serializer encodes `|` in one pass over each written cell, following the parser's cell split.
+- [x] 10.7 A directive opener reports why it was refused (`Refused::{Name, Unclosed, Follow}`); diagnostics are emitted by reason. Verified by the existing directive tests and a differential parse of about 575k inputs.
+- [x] 10.8 Strikethrough and autolink residue of removed configuration is deleted (`strike`, `DelimRoles`, `trim_from`). Verified by the same differential parse.
+- [x] 10.9 One crate-private decoder for escapes and character references; `WikiLink::decoded_target()` and `WikiLink::decoded_label()`. Verified by `tests/parse_inline_regressions.rs`.
+- [ ] 10.10 Docs agree with the code: literal autolink extents, constructors, fixture READMEs, and this plan's serialization spec copy.
+- [x] 10.11 CI runs every test once under `[profile.ci]` (release with debug assertions and overflow checks); the wasm32 and MSRV jobs are removed. Verified by reading `.github/workflows/ci.yml` and running its steps.
+- [x] 10.12 `SerializeOptions` list-marker and fence fields are `Option`s: `None` keeps the recorded spelling, `Some` replaces it. Verified by serialization "Serialize options".
+- [x] 10.13 Each fact is stored once: `Autolink { form, text }` with `destination()`, `CodeInline { value }`, and `CharacterReference { reference }` with `value()`. Verified by public-api and validation scenarios and unchanged conformance numbers.
