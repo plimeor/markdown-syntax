@@ -4,7 +4,7 @@ decision: A URL after a `[` no `]` has closed yet stays text, as in cmark-gfm.
 count: 6
 
 --- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 299 expected-bytes 533
-from commonmark/gfm_autolink_literal.cases #34; verified: cmark-gfm
+from commonmark/gfm_autolink_literal.cases #37; verified: cmark-gfm
 --- input
 
 [ www.example.com
@@ -46,7 +46,7 @@ from commonmark/gfm_autolink_literal.cases #34; verified: cmark-gfm
 <p><img src="#" alt=" contact@example.com " /></p>
 --- end
 --- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 299 expected-bytes 650
-from commonmark/gfm_autolink_literal.cases #37; verified: micromark
+from commonmark/gfm_autolink_literal.cases #40; verified: micromark
 --- input
 H0.
 
@@ -105,7 +105,7 @@ H5.
 <p>[[]]<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
 --- end
 --- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 515 expected-bytes 1016
-from commonmark/gfm_autolink_literal.cases #38; verified: cmark-gfm
+from commonmark/gfm_autolink_literal.cases #41; verified: cmark-gfm
 --- input
 Image start.
 
@@ -187,7 +187,7 @@ Autolink literal after image.
 <p><img src="" alt="a" /> <a href="mailto:a@b.c">a@b.c</a></p>
 --- end
 --- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 117 input-bytes 1060 expected-bytes 2288
-from commonmark/gfm_autolink_literal.cases #39; cmark-gfm for URLs after an open `[`, markdown-rs oracle for the rest
+from commonmark/gfm_autolink_literal.cases #42; cmark-gfm for URLs after an open `[`, markdown-rs oracle for the rest
 --- input
 Link start.
 
@@ -359,7 +359,7 @@ Autolink literal after link.
 <p><a href="">a</a> <a href="mailto:a@b.c">a@b.c</a></p>
 --- end
 --- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 78 input-bytes 158 expected-bytes 346
-from commonmark/gfm_autolink_literal.cases #47; verified: cmark-gfm, micromark
+from commonmark/gfm_autolink_literal.cases #50; verified: cmark-gfm, micromark
 --- input
 [www.example.com/a&copy;](#)
 
@@ -382,7 +382,7 @@ www.example.com/a\.
 <p><a href="http://www.example.com/a%5C">www.example.com/a\</a>.</p>
 --- end
 --- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 67 input-bytes 1442 expected-bytes 3049
-from commonmark/gfm_autolink_literal.cases #52; verified: micromark
+from commonmark/gfm_autolink_literal.cases #55; verified: micromark
 --- input
 # HTTP
 

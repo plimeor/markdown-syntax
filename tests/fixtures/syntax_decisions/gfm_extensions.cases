@@ -23,8 +23,8 @@ from commonmark/gfm_table.cases #1; verified: cmark-gfm, micromark
 </tbody>
 </table>
 --- end
---- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 75 input-bytes 8 expected-bytes 71
-from commonmark/gfm_task_list_item.cases #1; verified: cmark-gfm, micromark
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 117 input-bytes 8 expected-bytes 71
+from commonmark/gfm_task_list_item.cases #1; verified: micromark (cmark-gfm writes `checked=""` before `disabled=""`)
 --- input
 * [x] y.
 --- expected

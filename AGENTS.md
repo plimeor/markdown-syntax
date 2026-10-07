@@ -61,7 +61,8 @@ file also runs quickly as plain `cargo test --test <name>`.
   current numbers, run
   `cargo test --profile ci --features html --test html_conformance -- --nocapture`.
   It fails only when an entry in `tests/html_conformance/deviations.rs` names
-  no case, names a case twice, or names a case that now passes.
+  no case, names a case twice, or names a case that now passes, or when
+  `commonmark/commonmark.cases` no longer holds its 643 cases.
 - An oracle case that differs by decision of this syntax (a construct the
   syntax drops, one the oracle lacks or turns off, or a rule shared with
   another reference renderer) leaves the bench. Its input moves to

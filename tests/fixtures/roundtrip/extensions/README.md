@@ -19,6 +19,9 @@ paragraph text:
 - `insert_highlight`: `++insert++` reads as text; `==highlight==` is a `Mark`.
 - `inline_markup_extras`: subscript, superscript, and `||spoiler||` markers
   read as text, and a spoiler's bars split table cells.
+- `wikilinks_before_pipe` and `../stability/wikilinks_title_before_pipe.md`:
+  the title-before-pipe order is not read; the text before the pipe is the
+  target, as in `wikilinks_after_pipe`.
 
 The names stay so the goldens keep their paths; a note inside a fixture's `.md`
 would change what it parses to.

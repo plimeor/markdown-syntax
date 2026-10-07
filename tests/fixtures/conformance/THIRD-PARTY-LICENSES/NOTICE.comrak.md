@@ -1,8 +1,9 @@
 # Comrak Fixture Texts
 
-Fixtures under `../gfm/` and `../../roundtrip/cases/` include Markdown inputs
-and expected-HTML oracle snapshots derived from `kivikakk/comrak` at local
-comparison commit `d2da7a0`.
+Fixtures under `../gfm/`, `../../roundtrip/cases/`, and
+`../../syntax_decisions/` include Markdown inputs and expected-HTML oracle
+snapshots derived from `kivikakk/comrak` at local comparison commit
+`d2da7a0`.
 
 The upstream Rust test sources are not present in this tree. This crate stores
 only the byte-counted fixture snapshots it executes or audits locally; upstream

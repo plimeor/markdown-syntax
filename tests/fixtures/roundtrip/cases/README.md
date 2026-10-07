@@ -5,9 +5,9 @@ from upstream test sources. The tests do not execute any upstream source
 directly; the upstream license text is under
 `../../conformance/THIRD-PARTY-LICENSES/`.
 
-Cases are organized by dialect, not by upstream tool. `origin:` in each case
-header is a count-bucket label (`commonmark` or `gfm`) selecting which
-expected-behavior dialect produced the input; it is no longer a path segment.
+Cases are grouped by the upstream suite their input came from, not by
+upstream tool. `origin:` in each case header is a count-bucket label
+(`commonmark` or `gfm`); it is no longer a path segment.
 
 ## Executable Inputs
 
@@ -24,6 +24,10 @@ The executable check uses the public `markdown-syntax` boundary:
 - serialize AST back to Markdown source
 - parse the serialized Markdown again
 - compare the public AST projection
+
+An input that reads back only with a lazy line, whitespace, or a blank line
+the AST does not record is listed, with its reason, in `NOT_READING_BACK` in
+`tests/fixtures.rs`; a listed input that reads back fails the check.
 
 ## Format
 

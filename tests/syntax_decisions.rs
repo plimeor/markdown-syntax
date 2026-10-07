@@ -3,7 +3,9 @@
 //! lacks, or a rule it shares with another reference implementation.
 //!
 //! Each case in `tests/fixtures/syntax_decisions/` names the upstream case it
-//! came from and what verified its expected HTML: the reference renderers that
+//! came from, numbered as in its file under `tests/fixtures/conformance/` at
+//! commit 8ba83e2, before it left the bench, and what verified its expected
+//! HTML: the reference renderers that
 //! produce the same HTML (cmark-gfm, commonmark.js, micromark with GFM, math,
 //! and frontmatter extensions and single-tilde strikethrough off), or the
 //! decision that sets the reading where no reference shares it. The HTML must
