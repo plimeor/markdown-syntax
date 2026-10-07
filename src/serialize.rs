@@ -71,8 +71,6 @@ impl Default for SerializeOptions {
 pub enum SerializeError {
     /// The AST failed validation; carries the validation diagnostics.
     InvalidDocument(Vec<Diagnostic>),
-    /// A node kind that the serializer does not support was encountered.
-    UnsupportedNode(&'static str),
 }
 
 impl Document {
@@ -723,7 +721,7 @@ fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(
             LineBreakKind::Backslash => out.push_str("\\\n"),
             LineBreakKind::Spaces => out.push_str("  \n"),
         },
-        Inline::Math(node) => push_verbatim(out, &write_inline_math(node)?, context),
+        Inline::Math(node) => push_verbatim(out, &write_inline_math(node), context),
         Inline::FootnoteReference(node) => {
             out.push_str("[^");
             out.push_str(&escape_label(&node.label, context.table_cell));
@@ -838,20 +836,13 @@ fn code_span_needs_padding(input: &str) -> bool {
         || (input.starts_with(' ') && input.ends_with(' ') && input.chars().any(|char| char != ' '))
 }
 
-fn write_inline_math(node: &MathInline) -> Result<String, SerializeError> {
+fn write_inline_math(node: &MathInline) -> String {
     match node.kind {
-        MathInlineKind::Code => {
-            if node.value.contains("`$") {
-                return Err(SerializeError::UnsupportedNode(
-                    "inline math (code-math form) containing a `$` close",
-                ));
-            }
-            Ok(format!("$`{}`$", node.value))
-        }
+        MathInlineKind::Code => format!("$`{}`$", node.value),
         // Dollar math is written verbatim behind its exact-length fence.
         MathInlineKind::Dollar { dollars } => {
             let fence = "$".repeat(usize::from(dollars));
-            Ok(format!("{fence}{}{fence}", node.value))
+            format!("{fence}{}{fence}", node.value)
         }
     }
 }

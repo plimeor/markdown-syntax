@@ -8,7 +8,7 @@ use crate::{
     ast::{
         Block, CodeInline, ContainerDirective, DirectiveAttribute, Document, Escape, Heading,
         HtmlContainer, HtmlContainerContent, Inline, LeafDirective, Link, LinkDestinationKind,
-        LinkForm, List, MathInlineKind, Table, TextDirective,
+        LinkForm, List, MathInline, MathInlineKind, Table, TextDirective,
     },
     diagnostic::Diagnostic,
     span::Span,
@@ -294,14 +294,7 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                 }
             }
             Inline::Code(node) => validate_code_inline(node, diagnostics),
-            Inline::Math(node) => {
-                if let MathInlineKind::Dollar { dollars: 0 } = node.kind {
-                    diagnostics.push(Diagnostic::invalid(
-                        node.meta.span,
-                        "dollar-fenced inline math must have a fence length of at least 1",
-                    ));
-                }
-            }
+            Inline::Math(node) => validate_math_inline(node, diagnostics),
             Inline::Text(_) | Inline::Html(_) | Inline::SoftBreak(_) | Inline::LineBreak(_) => {}
         }
     }
@@ -449,6 +442,29 @@ fn raw_has_backtick_run(input: &str, length: usize) -> bool {
         }
     }
     current == length
+}
+
+/// Inline math that its fence closes around: math needs a value (both `$$`
+/// and `` $`` `$ `` read back as other text), and code-form math ends at the
+/// first `` `$ ``, so its value cannot hold one.
+fn validate_math_inline(math: &MathInline, diagnostics: &mut Vec<Diagnostic>) {
+    if math.value.is_empty() {
+        diagnostics.push(Diagnostic::invalid(
+            math.meta.span,
+            "inline math value cannot be empty",
+        ));
+    }
+    match math.kind {
+        MathInlineKind::Dollar { dollars: 0 } => diagnostics.push(Diagnostic::invalid(
+            math.meta.span,
+            "dollar-fenced inline math must have a fence length of at least 1",
+        )),
+        MathInlineKind::Code if math.value.contains("`$") => diagnostics.push(Diagnostic::invalid(
+            math.meta.span,
+            "code-form inline math value cannot contain a backtick followed by `$`",
+        )),
+        _ => {}
+    }
 }
 
 fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {
