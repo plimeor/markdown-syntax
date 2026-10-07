@@ -101,7 +101,7 @@ for diagnostic in &output.diagnostics {
 ### Customize serialization
 
 ```rust
-use markdown_syntax::{parse, LineEnding, SerializeOptions};
+use markdown_syntax::{parse, BulletMarker, LineEnding, SerializeOptions};
 
 // `SerializeOptions` is #[non_exhaustive]: mutate a default rather than using a
 // struct literal.
@@ -111,6 +111,12 @@ options.final_newline = false;
 
 let markdown = parse("# Title").document.to_markdown_with(&options)?;
 assert_eq!(markdown, "# Title");
+
+// List-marker and fence options are `None` by default, keeping the marker
+// each node records; `Some` writes every list or fence with the one given.
+let mut options = SerializeOptions::default();
+options.bullet = Some(BulletMarker::Dash);
+assert_eq!(parse("* a").document.to_markdown_with(&options)?, "- a\n");
 
 // Each node is written in the spelling it records: `_` emphasis stays `_`,
 // an escape stays an escape, and a literal autolink stays bare.

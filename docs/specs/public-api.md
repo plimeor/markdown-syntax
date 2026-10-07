@@ -52,6 +52,19 @@ and `validate()`, and with the `html` feature `to_html()` and
 - **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
 - **THEN** it returns `Ok("# Title\n\nHello *world*.\n")`
 
+### Requirement: Serialize option types
+`SerializeOptions` SHALL be `#[non_exhaustive]` and hold `line_ending:
+LineEnding`, `final_newline: bool`, `bullet: Option<BulletMarker>`,
+`ordered_delimiter: Option<OrderedDelimiter>`, and `fence_marker:
+Option<FenceMarker>`, each marker option `None` by default. `BulletMarker`
+SHALL hold only `Dash`, `Asterisk`, and `Plus`, and `OrderedDelimiter` only
+`Period` and `Paren`. Both SHALL be exported from the crate root and the
+prelude.
+
+#### Scenario: Bullet that is not a bullet
+- **WHEN** code assigns `ListDelimiter::Period` to `SerializeOptions::bullet`
+- **THEN** it does not compile
+
 ### Requirement: One diagnostic type
 Parser diagnostics, AST validation, and serializer and HTML pre-validation SHALL
 all report a single `Diagnostic { severity, code, span: Option<Span>, message }`.

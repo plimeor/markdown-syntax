@@ -26,7 +26,7 @@ pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 #[cfg(feature = "html")]
 pub use html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
 pub use parse::{parse, ParseOutput};
-pub use serialize::{LineEnding, SerializeError, SerializeOptions};
+pub use serialize::{BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions};
 pub use span::{LineIndex, LinePosition, Span};
 
 /// Not part of the public API: the tree comparison that round-trip checks use,
@@ -46,6 +46,8 @@ pub mod prelude {
     #[cfg(feature = "html")]
     pub use crate::html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
     pub use crate::parse::{parse, ParseOutput};
-    pub use crate::serialize::{LineEnding, SerializeError, SerializeOptions};
+    pub use crate::serialize::{
+        BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions,
+    };
     pub use crate::span::{LineIndex, LinePosition, Span};
 }

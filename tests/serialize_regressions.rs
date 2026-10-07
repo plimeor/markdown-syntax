@@ -177,13 +177,52 @@ mod value_encodings {
         assert_eq!(written(input), input);
 
         let mut options = SerializeOptions::default();
-        options.bullet = ListDelimiter::Plus;
+        options.bullet = Some(BulletMarker::Plus);
         let overridden = document
             .to_markdown_with(&options)
             .expect("document serializes with options");
         // The override yields where two adjacent lists would read as one.
         assert_eq!(overridden, "+ a\n\n- b\n\n+ c\n");
         assert_eq!(parse(&overridden).document.children.len(), 3);
+
+        let mut options = SerializeOptions::default();
+        options.ordered_delimiter = Some(OrderedDelimiter::Period);
+        let input = "1) a\n\n1. b\n";
+        let overridden = parse(input)
+            .document
+            .to_markdown_with(&options)
+            .expect("document serializes with options");
+        assert_eq!(overridden, "1. a\n\n1) b\n");
+        assert_eq!(parse(&overridden).document.children.len(), 2);
+    }
+
+    #[test]
+    fn some_marker_replaces_every_recorded_marker_and_none_keeps_it() {
+        let input = "* a\n\n2) b\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n";
+        let document = parse(input).document;
+
+        let defaults = SerializeOptions::default();
+        assert_eq!(defaults.bullet, None);
+        assert_eq!(defaults.ordered_delimiter, None);
+        assert_eq!(defaults.fence_marker, None);
+        assert_eq!(document.to_markdown_with(&defaults).unwrap(), input);
+
+        // `Some` holding the marker a default build would pick still replaces.
+        let mut options = SerializeOptions::default();
+        options.bullet = Some(BulletMarker::Dash);
+        options.ordered_delimiter = Some(OrderedDelimiter::Period);
+        options.fence_marker = Some(FenceMarker::Backtick);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "- a\n\n2. b\n\n```\ncode\n```\n\n```\nmore\n```\n"
+        );
+
+        let mut options = SerializeOptions::default();
+        options.fence_marker = Some(FenceMarker::Tilde);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "* a\n\n2) b\n\n~~~\ncode\n~~~\n\n~~~\nmore\n~~~\n"
+        );
     }
 
     #[test]
@@ -452,9 +491,9 @@ mod value_encodings {
             }),
         ]);
         let mut options = SerializeOptions::default();
-        options.bullet = ListDelimiter::Plus;
-        options.ordered_delimiter = ListDelimiter::Paren;
-        options.fence_marker = FenceMarker::Tilde;
+        options.bullet = Some(BulletMarker::Plus);
+        options.ordered_delimiter = Some(OrderedDelimiter::Paren);
+        options.fence_marker = Some(FenceMarker::Tilde);
 
         let markdown = document
             .to_markdown_with(&options)

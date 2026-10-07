@@ -57,21 +57,36 @@ one by one, each with the reason it does not read back.
 - **THEN** every generated document round-trips, except those the file lists with a reason, which serialize without panicking
 
 ### Requirement: Serialize options
-`SerializeOptions` SHALL control the line ending and the trailing newline; a
-bullet marker, ordered-list delimiter, or code fence character other than its
-default SHALL replace the one the AST records, while the default keeps it. A
-replaced list marker SHALL yield where the list before it in the same
-container is written with the same marker: that list takes the next marker in
-the order `-`, `*`, `+`, or `.`, `)` for an ordered list. Options SHALL be
-constructed by mutating `SerializeOptions::default()`.
+`SerializeOptions` SHALL control the line ending and the trailing newline. The
+`bullet`, `ordered_delimiter`, and `fence_marker` options SHALL keep the
+marker each node records when `None`, the default, and SHALL write every
+unordered list, ordered list, or fenced code block with the marker they hold
+when `Some`, whichever marker that is; a fenced block whose info string holds a
+backtick SHALL take tildes regardless. A replaced list marker SHALL yield where
+the list before it in the same container is written with the same marker: that
+list takes the next marker in the order `-`, `*`, `+`, or `.`, `)` for an
+ordered list. Options SHALL be constructed by mutating
+`SerializeOptions::default()`.
 
 #### Scenario: CRLF without final newline
 - **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
 - **THEN** it returns `"# Title"`
 
 #### Scenario: Bullet override
-- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
+- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Plus)`
 - **THEN** it returns `"+ a\n\n- b\n\n+ c\n"`
+
+#### Scenario: Normalizing to the dash
+- **WHEN** `parse("* a").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Dash)`
+- **THEN** it returns `"- a\n"`
+
+#### Scenario: Tilde fences
+- **WHEN** `parse("```\na\n```").document.to_markdown_with(&options)` runs with `fence_marker = Some(FenceMarker::Tilde)`
+- **THEN** it returns `"~~~\na\n~~~\n"`
+
+#### Scenario: Recorded markers by default
+- **WHEN** `parse("* a\n\n~~~\nb\n~~~").document.to_markdown()` runs
+- **THEN** it returns `"* a\n\n~~~\nb\n~~~\n"`
 
 ### Requirement: Invalid documents are rejected
 Serialization SHALL validate the document first and return

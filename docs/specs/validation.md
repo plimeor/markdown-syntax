@@ -27,8 +27,9 @@ space, a tab, a soft break, or a hard break; a `Link`, `LinkReference`, or
 `WikiLink` inside the text of a `Link` or `LinkReference`; a `Link` recorded
 as a literal or angle-bracket autolink whose content is not one `Text` that
 such an autolink writes for its destination, or that has a title; two
-adjacent lists in the same container written with the same marker and both
-ordered or both unordered; an escape of a non-punctuation character; a
+adjacent lists in the same container written with the same marker char (a
+list recording a delimiter of the other list kind is written with `-` when
+unordered and `.` when ordered); an escape of a non-punctuation character; a
 shortcode whose name is not in the crate's pinned gemoji table; a directive
 whose name is not one or more runs of ASCII letters joined by single `-`
 chars; inline code whose raw text holds a backtick run exactly as long as its
@@ -56,6 +57,10 @@ line endings.
 
 #### Scenario: Adjacent lists with one marker
 - **WHEN** a document holding two adjacent unordered `List`s that both use `-` is validated
+- **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Adjacent lists written with one marker
+- **WHEN** a document holding an unordered `List` recording `Period` next to an unordered `List` recording `Dash` is validated
 - **THEN** the result holds an `InvalidDocument` error
 
 #### Scenario: Directive name with a digit
