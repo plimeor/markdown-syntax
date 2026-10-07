@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: math
-count: 40
+count: 37
 
 --- case 1 options extension.math_dollars label-bytes 21 input-bytes 5 expected-bytes 49
 math_dollars_inline#0
@@ -146,19 +146,7 @@ $$20,000 and $$30,000
 <p><span data-math-style="display">20,000 and </span>30,000</p>
 
 --- end
---- case 19 options extension.math_dollars label-bytes 29 input-bytes 14 expected-bytes 57
-math_dollars_inline_display#6
---- input
-test $$
-2+2
-$$
---- expected
-<p>test <span data-math-style="display">
-2+2
-</span></p>
-
---- end
---- case 20 options extension.math_dollars label-bytes 29 input-bytes 25 expected-bytes 103
+--- case 19 options extension.math_dollars label-bytes 29 input-bytes 25 expected-bytes 103
 math_dollars_inline_display#7
 --- input
 $$22+1$$ and $$22 + a^2$$
@@ -166,7 +154,7 @@ $$22+1$$ and $$22 + a^2$$
 <p><span data-math-style="display">22+1</span> and <span data-math-style="display">22 + a^2</span></p>
 
 --- end
---- case 21 options extension.math_dollars label-bytes 29 input-bytes 34 expected-bytes 112
+--- case 20 options extension.math_dollars label-bytes 29 input-bytes 34 expected-bytes 112
 math_dollars_inline_display#8
 --- input
 $$2+2$$ $22 and dollars$22 $$2+2$$
@@ -174,7 +162,7 @@ $$2+2$$ $22 and dollars$22 $$2+2$$
 <p><span data-math-style="display">2+2</span> $22 and dollars$22 <span data-math-style="display">2+2</span></p>
 
 --- end
---- case 22 options extension.math_dollars label-bytes 29 input-bytes 34 expected-bytes 77
+--- case 21 options extension.math_dollars label-bytes 29 input-bytes 34 expected-bytes 77
 math_dollars_inline_display#9
 --- input
 dollars$22 and $$a^2 + b^2 = c^2$$
@@ -182,21 +170,7 @@ dollars$22 and $$a^2 + b^2 = c^2$$
 <p>dollars$22 and <span data-math-style="display">a^2 + b^2 = c^2</span></p>
 
 --- end
---- case 23 options extension.math_dollars label-bytes 20 input-bytes 13 expected-bytes 56
-math_dollars_block#0
---- input
-$$
-2+2
-4+4
-$$
---- expected
-<p><span data-math-style="display">
-2+2
-4+4
-</span></p>
-
---- end
---- case 24 options extension.math_code label-bytes 18 input-bytes 7 expected-bytes 49
+--- case 22 options extension.math_code label-bytes 18 input-bytes 7 expected-bytes 49
 math_code_inline#0
 --- input
 $`2+2`$
@@ -204,7 +178,7 @@ $`2+2`$
 <p><code data-math-style="inline">2+2</code></p>
 
 --- end
---- case 25 options extension.math_code label-bytes 18 input-bytes 15 expected-bytes 57
+--- case 23 options extension.math_code label-bytes 18 input-bytes 15 expected-bytes 57
 math_code_inline#1
 --- input
 $22 and $`2+2`$
@@ -212,7 +186,7 @@ $22 and $`2+2`$
 <p>$22 and <code data-math-style="inline">2+2</code></p>
 
 --- end
---- case 26 options extension.math_code label-bytes 18 input-bytes 9 expected-bytes 51
+--- case 24 options extension.math_code label-bytes 18 input-bytes 9 expected-bytes 51
 math_code_inline#2
 --- input
 $`1+\$2`$
@@ -220,7 +194,7 @@ $`1+\$2`$
 <p><code data-math-style="inline">1+\$2</code></p>
 
 --- end
---- case 27 options extension.math_code label-bytes 18 input-bytes 25 expected-bytes 101
+--- case 25 options extension.math_code label-bytes 18 input-bytes 25 expected-bytes 101
 math_code_inline#3
 --- input
 $`22+1`$ and $`22 + a^2`$
@@ -228,7 +202,7 @@ $`22+1`$ and $`22 + a^2`$
 <p><code data-math-style="inline">22+1</code> and <code data-math-style="inline">22 + a^2</code></p>
 
 --- end
---- case 28 options extension.math_code label-bytes 18 input-bytes 34 expected-bytes 110
+--- case 26 options extension.math_code label-bytes 18 input-bytes 34 expected-bytes 110
 math_code_inline#4
 --- input
 $`2+2`$ $22 and dollars$22 $`2+2`$
@@ -236,7 +210,7 @@ $`2+2`$ $22 and dollars$22 $`2+2`$
 <p><code data-math-style="inline">2+2</code> $22 and dollars$22 <code data-math-style="inline">2+2</code></p>
 
 --- end
---- case 29 options extension.math_dollars label-bytes 17 input-bytes 19 expected-bytes 81
+--- case 27 options extension.math_dollars label-bytes 17 input-bytes 19 expected-bytes 81
 math_code_block#0
 --- input
 ```math
@@ -249,7 +223,7 @@ math_code_block#0
 </code></pre>
 
 --- end
---- case 30 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 5 expected-bytes 24
+--- case 28 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 5 expected-bytes 24
 math_unrecognized_syntax#0
 --- input
 `2+2`
@@ -257,7 +231,7 @@ math_unrecognized_syntax#0
 <p><code>2+2</code></p>
 
 --- end
---- case 31 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 16 expected-bytes 35
+--- case 29 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 16 expected-bytes 35
 math_unrecognized_syntax#1
 --- input
 test `2+2`$ test
@@ -265,7 +239,7 @@ test `2+2`$ test
 <p>test <code>2+2</code>$ test</p>
 
 --- end
---- case 32 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 19 expected-bytes 27
+--- case 30 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 19 expected-bytes 27
 math_unrecognized_syntax#2
 --- input
 $20,000 and $30,000
@@ -273,7 +247,7 @@ $20,000 and $30,000
 <p>$20,000 and $30,000</p>
 
 --- end
---- case 33 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 15 expected-bytes 23
+--- case 31 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 15 expected-bytes 23
 math_unrecognized_syntax#3
 --- input
 $20,000 in $USD
@@ -281,7 +255,7 @@ $20,000 in $USD
 <p>$20,000 in $USD</p>
 
 --- end
---- case 34 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 7 expected-bytes 15
+--- case 32 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 7 expected-bytes 15
 math_unrecognized_syntax#4
 --- input
 $ a^2 $
@@ -289,7 +263,7 @@ $ a^2 $
 <p>$ a^2 $</p>
 
 --- end
---- case 35 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 3 expected-bytes 11
+--- case 33 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 3 expected-bytes 11
 math_unrecognized_syntax#5
 --- input
 $
@@ -299,15 +273,7 @@ $
 $</p>
 
 --- end
---- case 36 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 3 expected-bytes 11
-math_unrecognized_syntax#6
---- input
-$$$
---- expected
-<p>$$$</p>
-
---- end
---- case 37 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 7 expected-bytes 26
+--- case 34 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 7 expected-bytes 26
 math_unrecognized_syntax#7
 --- input
 `$1+2$`
@@ -315,7 +281,7 @@ math_unrecognized_syntax#7
 <p><code>$1+2$</code></p>
 
 --- end
---- case 38 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 9 expected-bytes 28
+--- case 35 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 9 expected-bytes 28
 math_unrecognized_syntax#8
 --- input
 `$$1+2$$`
@@ -323,7 +289,7 @@ math_unrecognized_syntax#8
 <p><code>$$1+2$$</code></p>
 
 --- end
---- case 39 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 10 expected-bytes 29
+--- case 36 options extension.math_dollars,extension.math_code label-bytes 26 input-bytes 10 expected-bytes 29
 math_unrecognized_syntax#9
 --- input
 `$\$1+2$$`
@@ -331,7 +297,7 @@ math_unrecognized_syntax#9
 <p><code>$\$1+2$$</code></p>
 
 --- end
---- case 40 options extension.math_dollars,extension.math_code label-bytes 27 input-bytes 16 expected-bytes 35
+--- case 37 options extension.math_dollars,extension.math_code label-bytes 27 input-bytes 16 expected-bytes 35
 math_unrecognized_syntax#10
 --- input
 test $`2+2` test

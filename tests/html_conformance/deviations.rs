@@ -67,7 +67,8 @@ pub fn excerpt(input: &str) -> &str {
 /// or commonmark.js, which this crate follows, renders them otherwise. A case
 /// whose input reads as a construct only one side has (one this syntax drops,
 /// or one the oracle lacks, such as literal autolinks, wiki links, or
-/// frontmatter under a CommonMark oracle) is removed from the suite instead:
+/// frontmatter under a CommonMark oracle, or math blocks under comrak) is
+/// removed from the suite instead:
 /// the two outputs cannot be compared. So is a case whose oracle turns off a
 /// construct this syntax keeps (indented code, HTML blocks) and that
 /// commonmark.js, with the construct on, renders as this crate does.
@@ -75,9 +76,6 @@ pub const DEVIATIONS: &[Listed] = &[
     case("commonmark/gfm_table.cases", "-", 0x344b3ce2752a24d5, "| a |\n| - |\n| b |", "tables are part of the syntax; the oracle reads the rows as text"),
     case("commonmark/gfm_task_list_item.cases", "-", 0xa3f7f4ff52863012, "* [x] y.", "task list items are part of the syntax; the oracle reads `[x]` as text"),
     case("gfm/inline_footnotes.cases", "extension.inline_footnotes", 0x23538404ce8325cd, "Text^[note] should not parse.\n", "inline footnotes are part of the syntax; the oracle runs without footnotes"),
-    case("gfm/math.cases", "extension.math_dollars", 0xdf5d221a68b26090, "test $$\n2+2\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
-    case("gfm/math.cases", "extension.math_dollars", 0x2d7905f74cfccf51, "$$\n2+2\n4+4\n$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
-    case("gfm/math.cases", "extension.math_dollars,extension.math_code", 0xa118ba17bb1eb6c3, "$$$", "`$$` opens a math block; the GFM oracle reads it as inline display math"),
     case("commonmark/code_fenced.cases", "-", 0x8be7f99eb116458d, "  ```\n ", "an unclosed fence whose last line holds only whitespace and no line ending renders that line as an empty content line; the oracle renders the fence empty; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/fuzz.cases", "-", 0x9165948c43745101, "> ```\n", "a fence in a block quote that the end of input closes right after its opening line renders empty; the oracle renders one empty content line; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/fuzz.cases", "-", 0x5b4ae38f093b60d6, "- ```\n", "a fence in a list item that the end of input closes right after its opening line renders empty; the oracle renders one empty content line; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
