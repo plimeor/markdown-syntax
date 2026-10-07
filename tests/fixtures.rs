@@ -756,6 +756,18 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     ("\\`` `a`", "\\`` `a`\n"),
     ("\\` `a`", "\\` `a`\n"),
     ("$`a`$ <b c='`'> `d`", "$`a`$ <b c='`'> `d`\n"),
+    // ATX content ending in a closing-like run keeps a closing sequence.
+    ("# C # #", "# C # #\n"),
+    ("# # #", "# # #\n"),
+    ("## a #", "## a\n"),
+    // A quoted value's empty last line keeps its prefix.
+    ("> <!--\n>\n\nx", "> <!--\n>\n\nx\n"),
+    ("> [!NOTE]\n> <!--\n>\n\nx", "> [!NOTE]\n> <!--\n>\n\nx\n"),
+    // Footnote content opening with whitespace starts on the next line.
+    ("[^1]:\n\n        code", "[^1]:\n        code\n"),
+    ("[^1]:\n     <v>", "[^1]:\n     <v>\n"),
+    // A code span across a lazy delimiter-row line is one line.
+    ("> `|a\n|-|-|\nb`", "> `|a |-|-| b`\n"),
 ];
 
 /// Generated inputs of the read-back corpus, too long to list.

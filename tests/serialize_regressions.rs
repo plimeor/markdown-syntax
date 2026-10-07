@@ -553,7 +553,7 @@ mod recorded_spellings {
     }
 
     #[test]
-    fn a_trailing_hash_in_an_atx_heading_is_built_as_an_escape() {
+    fn a_trailing_hash_in_an_atx_heading_keeps_a_closing_sequence() {
         let heading = |children| {
             document(vec![Block::Heading(Heading {
                 meta: NodeMeta::default(),
@@ -566,7 +566,10 @@ mod recorded_spellings {
             rendered(&heading(vec![text("foo "), escape('#')])),
             "# foo \\#\n"
         );
-        assert_eq!(rendered(&heading(vec![text("foo #")])), "# foo #\n");
+        // A `#` run after a space would read as the closing sequence; one of
+        // its own after it keeps the run content.
+        assert_eq!(rendered(&heading(vec![text("foo #")])), "# foo # #\n");
+        assert_eq!(rendered(&heading(vec![text("foo#")])), "# foo#\n");
     }
 
     #[test]

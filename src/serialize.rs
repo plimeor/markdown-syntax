@@ -216,7 +216,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             Ok(if inner.is_empty() {
                 ">".into()
             } else {
-                prefix_lines(&inner, "> ")
+                quote_lines(&inner)
             })
         }
         Block::Alert(node) => write_alert(node, options),
@@ -230,11 +230,14 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
         Block::Definition(node) => Ok(write_definition(node)),
         Block::FootnoteDefinition(node) => {
             let inner = write_blocks(&node.children, options, Join::Gap, false)?;
-            Ok(format!(
-                "[^{}]: {}",
-                node.label,
-                indent_continuation(&inner)
-            ))
+            // Content opening with a space or a tab (indented code, say)
+            // starts on the line after the label, as in a list item, where
+            // the label's line would take that whitespace as its separator.
+            Ok(if inner.starts_with([' ', '\t']) {
+                format!("[^{}]:\n{}", node.label, prefix_lines(&inner, "    "))
+            } else {
+                format!("[^{}]: {}", node.label, indent_continuation(&inner))
+            })
         }
         Block::Table(node) => write_table(node),
         Block::MathBlock(node) => {
@@ -309,9 +312,20 @@ fn write_heading(node: &Heading) -> Result<String, SerializeError> {
     let hashes = "#".repeat(usize::from(node.depth));
     Ok(if content.is_empty() {
         hashes
+    } else if reads_as_closing_sequence(&content) {
+        // Content ending in what would read as the closing sequence keeps it
+        // by a closing sequence of its own.
+        format!("{hashes} {content} #")
     } else {
         format!("{hashes} {content}")
     })
+}
+
+/// Whether written ATX content ends in a `#` run that is all of it or follows
+/// a space or a tab, which a reader strips as the closing sequence.
+fn reads_as_closing_sequence(content: &str) -> bool {
+    let before = content.trim_end_matches('#');
+    before.len() < content.len() && (before.is_empty() || before.ends_with([' ', '\t']))
 }
 
 fn write_definition(node: &Definition) -> String {
@@ -360,9 +374,19 @@ fn write_alert(node: &Alert, options: &SerializeOptions) -> Result<String, Seria
     let inner = write_blocks(&node.children, options, Join::Gap, false)?;
     if !inner.is_empty() {
         output.push('\n');
-        output.push_str(&prefix_lines(&inner, "> "));
+        output.push_str(&quote_lines(&inner));
     }
     Ok(output)
+}
+
+/// `inner` with every line in the quote: an empty last line, which a value
+/// ending in a line ending holds, takes `>` too.
+fn quote_lines(inner: &str) -> String {
+    let mut output = prefix_lines(inner, "> ");
+    if inner.ends_with(['\n', '\r']) {
+        output.push('>');
+    }
+    output
 }
 
 fn alert_kind_name(kind: AlertKind) -> &'static str {

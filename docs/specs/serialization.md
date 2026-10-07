@@ -227,7 +227,11 @@ continuation line.
 
 #### Scenario: Code span across a lazy delimiter-row line
 - **WHEN** the document parsed from ``"> `|a\n|-|-|\nb`"`` is serialized
-- **THEN** `to_markdown()` returns ``"> `|a\n> |-|-|\n> b`\n"``, which reads back as a block quote holding a `Table`
+- **THEN** `to_markdown()` returns ``"> `|a |-|-| b`\n"``, which reads back as the same tree
+
+#### Scenario: HTML block ending in an empty line inside a quote
+- **WHEN** `parse("> <!--\n>\n\nx").document.to_markdown()` runs
+- **THEN** it returns `"> <!--\n>\n\nx\n"`: the HTML block's empty last line keeps its `>`
 
 ### Requirement: Heading soft breaks
 The serializer SHALL write a `SoftBreak` inside a heading as one space.
@@ -239,6 +243,19 @@ The serializer SHALL write a `SoftBreak` inside a heading as one space.
 #### Scenario: Hand-built ATX heading
 - **WHEN** a hand-built level-1 `Heading` holding `Text("a")`, a `SoftBreak`, and `Text("b")` is serialized
 - **THEN** `to_markdown()` returns `"# a b\n"`
+
+### Requirement: ATX content ending in a closing-like run
+The serializer SHALL write an ATX heading whose written content ends in a run
+of `#` that is all of the content or follows a space or a tab with a closing
+sequence ` #` after it, so the run reads back as content.
+
+#### Scenario: Heading ending in a hash
+- **WHEN** `parse("# C # #").document.to_markdown()` runs
+- **THEN** it returns `"# C # #\n"`, which reads back as a heading holding `Text("C #")`
+
+#### Scenario: Heading of hashes
+- **WHEN** a hand-built level-1 `Heading` holding `Text("#")` is serialized
+- **THEN** `to_markdown()` returns `"# # #\n"`, which reads back as the same tree
 
 ### Requirement: Values are encoded by rule
 The serializer SHALL write a value that a construct holds as raw text (a code
@@ -311,7 +328,9 @@ frontmatter or underline a setext heading; and SHALL start a list item's
 content on the line after its bullet when that content is a thematic break of
 the bullet's char or begins with one to three spaces or a tab; content that
 begins with indented code SHALL stay on the bullet's line after one space,
-since an item that starts empty cannot interrupt a paragraph. It SHALL number an
+since an item that starts empty cannot interrupt a paragraph. It SHALL start a
+footnote definition's content on the line after its label, indented four
+spaces, when that content begins with a space or a tab. It SHALL number an
 ordered list's items from the list's start, one up per item, and write an item
 whose number would exceed 999999999, the largest a 9-digit marker holds, with
 999999999.
@@ -319,6 +338,10 @@ whose number would exceed 999999999, the largest a 9-digit marker holds, with
 #### Scenario: Indented code opening a nested item
 - **WHEN** `parse("- a\n  -     x").document.to_markdown()` runs
 - **THEN** it returns `"- a\n  -     x\n"`, which reads back as the same tree
+
+#### Scenario: Footnote definition opening with indented code
+- **WHEN** `parse("[^1]:\n\n        code").document.to_markdown()` runs
+- **THEN** it returns `"[^1]:\n        code\n"`, which reads back as a `FootnoteDefinition` holding an indented `CodeBlock`
 
 #### Scenario: Item numbers at the marker limit
 - **WHEN** `parse("999999999. a\n1. b").document.to_markdown()` runs
