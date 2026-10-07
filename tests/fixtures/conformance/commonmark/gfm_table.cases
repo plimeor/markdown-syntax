@@ -1,19 +1,8 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: gfm_table
-count: 59
+count: 58
 
---- case 1 options - label-bytes 31 input-bytes 17 expected-bytes 24
-should ignore tables by default
---- input
-| a |
-| - |
-| b |
---- expected
-<p>| a |
-| - |
-| b |</p>
---- end
---- case 2 options gfm label-bytes 21 input-bytes 17 expected-bytes 94
+--- case 1 options gfm label-bytes 21 input-bytes 17 expected-bytes 94
 should support tables
 --- input
 | a |
@@ -33,28 +22,28 @@ should support tables
 </tbody>
 </table>
 --- end
---- case 3 options gfm label-bytes 63 input-bytes 5 expected-bytes 12
+--- case 2 options gfm label-bytes 63 input-bytes 5 expected-bytes 12
 should not support a table w/ the head row ending in an eof (1)
 --- input
 | a |
 --- expected
 <p>| a |</p>
 --- end
---- case 4 options gfm label-bytes 63 input-bytes 3 expected-bytes 10
+--- case 3 options gfm label-bytes 63 input-bytes 3 expected-bytes 10
 should not support a table w/ the head row ending in an eof (2)
 --- input
 | a
 --- expected
 <p>| a</p>
 --- end
---- case 5 options gfm label-bytes 63 input-bytes 3 expected-bytes 10
+--- case 4 options gfm label-bytes 63 input-bytes 3 expected-bytes 10
 should not support a table w/ the head row ending in an eof (3)
 --- input
 a |
 --- expected
 <p>a |</p>
 --- end
---- case 6 options gfm label-bytes 62 input-bytes 11 expected-bytes 55
+--- case 5 options gfm label-bytes 62 input-bytes 11 expected-bytes 55
 should support a table w/ a delimiter row ending in an eof (1)
 --- input
 | a |
@@ -68,7 +57,7 @@ should support a table w/ a delimiter row ending in an eof (1)
 </thead>
 </table>
 --- end
---- case 7 options gfm label-bytes 62 input-bytes 7 expected-bytes 55
+--- case 6 options gfm label-bytes 62 input-bytes 7 expected-bytes 55
 should support a table w/ a delimiter row ending in an eof (2)
 --- input
 | a
@@ -82,7 +71,7 @@ should support a table w/ a delimiter row ending in an eof (2)
 </thead>
 </table>
 --- end
---- case 8 options gfm label-bytes 57 input-bytes 11 expected-bytes 94
+--- case 7 options gfm label-bytes 57 input-bytes 11 expected-bytes 94
 should support a table w/ a body row ending in an eof (2)
 --- input
 | a
@@ -102,7 +91,7 @@ should support a table w/ a body row ending in an eof (2)
 </tbody>
 </table>
 --- end
---- case 9 options gfm label-bytes 57 input-bytes 11 expected-bytes 116
+--- case 8 options gfm label-bytes 57 input-bytes 11 expected-bytes 116
 should support a table w/ a body row ending in an eof (3)
 --- input
 a|b
@@ -124,7 +113,7 @@ c|d
 </tbody>
 </table>
 --- end
---- case 10 options gfm label-bytes 46 input-bytes 21 expected-bytes 94
+--- case 9 options gfm label-bytes 46 input-bytes 21 expected-bytes 94
 should support rows w/ trailing whitespace (1)
 --- input
 | a  
@@ -144,7 +133,7 @@ should support rows w/ trailing whitespace (1)
 </tbody>
 </table>
 --- end
---- case 11 options gfm label-bytes 46 input-bytes 12 expected-bytes 55
+--- case 10 options gfm label-bytes 46 input-bytes 12 expected-bytes 55
 should support rows w/ trailing whitespace (2)
 --- input
 | a | 
@@ -158,7 +147,7 @@ should support rows w/ trailing whitespace (2)
 </thead>
 </table>
 --- end
---- case 12 options gfm label-bytes 46 input-bytes 12 expected-bytes 55
+--- case 11 options gfm label-bytes 46 input-bytes 12 expected-bytes 55
 should support rows w/ trailing whitespace (3)
 --- input
 | a |
@@ -172,7 +161,7 @@ should support rows w/ trailing whitespace (3)
 </thead>
 </table>
 --- end
---- case 13 options gfm label-bytes 46 input-bytes 18 expected-bytes 94
+--- case 12 options gfm label-bytes 46 input-bytes 18 expected-bytes 94
 should support rows w/ trailing whitespace (4)
 --- input
 | a |
@@ -192,7 +181,7 @@ should support rows w/ trailing whitespace (4)
 </tbody>
 </table>
 --- end
---- case 14 options gfm label-bytes 39 input-bytes 10 expected-bytes 65
+--- case 13 options gfm label-bytes 39 input-bytes 10 expected-bytes 65
 should support empty first header cells
 --- input
 ||a|
@@ -207,7 +196,7 @@ should support empty first header cells
 </thead>
 </table>
 --- end
---- case 15 options gfm label-bytes 38 input-bytes 10 expected-bytes 65
+--- case 14 options gfm label-bytes 38 input-bytes 10 expected-bytes 65
 should support empty last header cells
 --- input
 |a||
@@ -222,7 +211,7 @@ should support empty last header cells
 </thead>
 </table>
 --- end
---- case 16 options gfm label-bytes 33 input-bytes 10 expected-bytes 76
+--- case 15 options gfm label-bytes 33 input-bytes 10 expected-bytes 76
 should support empty header cells
 --- input
 a||b
@@ -238,7 +227,7 @@ a||b
 </thead>
 </table>
 --- end
---- case 17 options gfm label-bytes 37 input-bytes 16 expected-bytes 115
+--- case 16 options gfm label-bytes 37 input-bytes 16 expected-bytes 115
 should support empty first body cells
 --- input
 |a|b|
@@ -260,7 +249,7 @@ should support empty first body cells
 </tbody>
 </table>
 --- end
---- case 18 options gfm label-bytes 36 input-bytes 16 expected-bytes 115
+--- case 17 options gfm label-bytes 36 input-bytes 16 expected-bytes 115
 should support empty last body cells
 --- input
 |a|b|
@@ -282,7 +271,7 @@ should support empty last body cells
 </tbody>
 </table>
 --- end
---- case 19 options gfm label-bytes 31 input-bytes 16 expected-bytes 137
+--- case 18 options gfm label-bytes 31 input-bytes 16 expected-bytes 137
 should support empty body cells
 --- input
 a|b|c
@@ -306,7 +295,7 @@ d||e
 </tbody>
 </table>
 --- end
---- case 20 options gfm label-bytes 68 input-bytes 80 expected-bytes 507
+--- case 19 options gfm label-bytes 68 input-bytes 80 expected-bytes 507
 should need any character other than a single pipe in the header row
 --- input
 :
@@ -406,7 +395,7 @@ b
 </table>
 
 --- end
---- case 21 options gfm label-bytes 40 input-bytes 48 expected-bytes 262
+--- case 20 options gfm label-bytes 40 input-bytes 48 expected-bytes 262
 should need a dash in the delimimter row
 --- input
 a
@@ -467,7 +456,7 @@ g
 </table>
 
 --- end
---- case 22 options gfm label-bytes 21 input-bytes 3 expected-bytes 10
+--- case 21 options gfm label-bytes 21 input-bytes 3 expected-bytes 10
 should need something
 --- input
 |
@@ -476,7 +465,7 @@ should need something
 <p>|
 |</p>
 --- end
---- case 23 options gfm label-bytes 35 input-bytes 15 expected-bytes 77
+--- case 22 options gfm label-bytes 35 input-bytes 15 expected-bytes 77
 should support a list after a table
 --- input
 | a |
@@ -494,7 +483,7 @@ should support a list after a table
 <li>b</li>
 </ul>
 --- end
---- case 24 options gfm label-bytes 43 input-bytes 13 expected-bytes 45
+--- case 23 options gfm label-bytes 43 input-bytes 13 expected-bytes 45
 should not support a lazy delimiter row (1)
 --- input
 > | a |
@@ -505,7 +494,7 @@ should not support a lazy delimiter row (1)
 | - |</p>
 </blockquote>
 --- end
---- case 25 options gfm label-bytes 43 input-bytes 17 expected-bytes 47
+--- case 24 options gfm label-bytes 43 input-bytes 17 expected-bytes 47
 should not support a lazy delimiter row (2)
 --- input
 > a
@@ -518,7 +507,7 @@ should not support a lazy delimiter row (2)
 | - |</p>
 </blockquote>
 --- end
---- case 26 options gfm label-bytes 43 input-bytes 13 expected-bytes 52
+--- case 25 options gfm label-bytes 43 input-bytes 13 expected-bytes 52
 should not support a piercing delimiter row
 --- input
 | a |
@@ -529,7 +518,7 @@ should not support a piercing delimiter row
 <p>| - |</p>
 </blockquote>
 --- end
---- case 27 options gfm label-bytes 38 input-bytes 14 expected-bytes 44
+--- case 26 options gfm label-bytes 38 input-bytes 14 expected-bytes 44
 should not support a lazy body row (2)
 --- input
 > a
@@ -542,7 +531,7 @@ should not support a lazy body row (2)
 |-</p>
 </blockquote>
 --- end
---- case 28 options gfm label-bytes 38 input-bytes 21 expected-bytes 95
+--- case 27 options gfm label-bytes 38 input-bytes 21 expected-bytes 95
 should not support a lazy body row (1)
 --- input
 > | a |
@@ -560,7 +549,7 @@ should not support a lazy body row (1)
 </blockquote>
 <p>| b |</p>
 --- end
---- case 29 options gfm label-bytes 38 input-bytes 25 expected-bytes 104
+--- case 28 options gfm label-bytes 38 input-bytes 25 expected-bytes 104
 should not support a lazy body row (2)
 --- input
 > a
@@ -580,7 +569,7 @@ should not support a lazy body row (2)
 </blockquote>
 <p>| c |</p>
 --- end
---- case 30 options gfm label-bytes 38 input-bytes 29 expected-bytes 134
+--- case 29 options gfm label-bytes 38 input-bytes 29 expected-bytes 134
 should not support a lazy body row (3)
 --- input
 > | A |
@@ -604,7 +593,7 @@ should not support a lazy body row (3)
 </blockquote>
 <p>| 2 |</p>
 --- end
---- case 31 options gfm label-bytes 64 input-bytes 14 expected-bytes 55
+--- case 30 options gfm label-bytes 64 input-bytes 14 expected-bytes 55
 should form a table if the delimiter row is indented w/ 3 spaces
 --- input
 | a |
@@ -618,7 +607,7 @@ should form a table if the delimiter row is indented w/ 3 spaces
 </thead>
 </table>
 --- end
---- case 32 options gfm label-bytes 68 input-bytes 15 expected-bytes 18
+--- case 31 options gfm label-bytes 68 input-bytes 15 expected-bytes 18
 should not form a table if the delimiter row is indented w/ 4 spaces
 --- input
 | a |
@@ -627,7 +616,7 @@ should not form a table if the delimiter row is indented w/ 4 spaces
 <p>| a |
 | - |</p>
 --- end
---- case 33 options gfm label-bytes 38 input-bytes 26 expected-bytes 102
+--- case 32 options gfm label-bytes 38 input-bytes 26 expected-bytes 102
 should be interrupted by a block quote
 --- input
 | a |
@@ -645,7 +634,7 @@ should be interrupted by a block quote
 <p>block quote?</p>
 </blockquote>
 --- end
---- case 34 options gfm label-bytes 46 input-bytes 13 expected-bytes 82
+--- case 33 options gfm label-bytes 46 input-bytes 13 expected-bytes 82
 should be interrupted by a block quote (empty)
 --- input
 | a |
@@ -662,7 +651,7 @@ should be interrupted by a block quote (empty)
 <blockquote>
 </blockquote>
 --- end
---- case 35 options gfm label-bytes 31 input-bytes 19 expected-bytes 81
+--- case 34 options gfm label-bytes 31 input-bytes 19 expected-bytes 81
 should be interrupted by a list
 --- input
 | a |
@@ -680,7 +669,7 @@ should be interrupted by a list
 <li>list?</li>
 </ul>
 --- end
---- case 36 options gfm label-bytes 39 input-bytes 13 expected-bytes 76
+--- case 35 options gfm label-bytes 39 input-bytes 13 expected-bytes 76
 should be interrupted by a list (empty)
 --- input
 | a |
@@ -698,7 +687,7 @@ should be interrupted by a list (empty)
 <li></li>
 </ul>
 --- end
---- case 37 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 36 input-bytes 26 expected-bytes 70
+--- case 36 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 36 input-bytes 26 expected-bytes 70
 should be interrupted by HTML (flow)
 --- input
 | a |
@@ -714,7 +703,7 @@ should be interrupted by HTML (flow)
 </table>
 <!-- HTML? -->
 --- end
---- case 38 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 18 expected-bytes 86
+--- case 37 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 18 expected-bytes 86
 should be interrupted by code (indented)
 --- input
 | a |
@@ -731,7 +720,7 @@ should be interrupted by code (indented)
 <pre><code>code?
 </code></pre>
 --- end
---- case 39 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 23 expected-bytes 107
+--- case 38 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 23 expected-bytes 107
 should be interrupted by code (fenced)
 --- input
 | a |
@@ -750,7 +739,7 @@ code?
 </code></pre>
 
 --- end
---- case 40 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 41 input-bytes 15 expected-bytes 62
+--- case 39 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 41 input-bytes 15 expected-bytes 62
 should be interrupted by a thematic break
 --- input
 | a |
@@ -766,7 +755,7 @@ should be interrupted by a thematic break
 </table>
 <hr />
 --- end
---- case 41 options gfm label-bytes 40 input-bytes 22 expected-bytes 73
+--- case 40 options gfm label-bytes 40 input-bytes 22 expected-bytes 73
 should be interrupted by a heading (ATX)
 --- input
 | a |
@@ -782,7 +771,7 @@ should be interrupted by a heading (ATX)
 </table>
 <h1>heading?</h1>
 --- end
---- case 42 options gfm label-bytes 49 input-bytes 21 expected-bytes 122
+--- case 41 options gfm label-bytes 49 input-bytes 21 expected-bytes 122
 should *not* be interrupted by a heading (setext)
 --- input
 | a |
@@ -806,7 +795,7 @@ heading
 </tbody>
 </table>
 --- end
---- case 43 options gfm label-bytes 106 input-bytes 23 expected-bytes 107
+--- case 42 options gfm label-bytes 106 input-bytes 23 expected-bytes 107
 should *not* be interrupted by a heading (setext), but interrupt if the underline is also a thematic break
 --- input
 | a |
@@ -828,7 +817,7 @@ heading
 </table>
 <hr />
 --- end
---- case 44 options gfm label-bytes 115 input-bytes 21 expected-bytes 121
+--- case 43 options gfm label-bytes 115 input-bytes 21 expected-bytes 121
 should *not* be interrupted by a heading (setext), but interrupt if the underline is also an empty list item bullet
 --- input
 | a |
@@ -852,7 +841,7 @@ heading
 <li></li>
 </ul>
 --- end
---- case 45 options gfm label-bytes 32 input-bytes 6 expected-bytes 78
+--- case 44 options gfm label-bytes 32 input-bytes 6 expected-bytes 78
 should support a single head row
 --- input
 a
@@ -868,7 +857,7 @@ b
 </thead>
 </table>
 --- end
---- case 46 options gfm label-bytes 37 input-bytes 15 expected-bytes 82
+--- case 45 options gfm label-bytes 37 input-bytes 15 expected-bytes 82
 should support a table in a container
 --- input
 > | a |
@@ -884,7 +873,7 @@ should support a table in a container
 </table>
 </blockquote>
 --- end
---- case 47 options gfm label-bytes 87 input-bytes 21 expected-bytes 95
+--- case 46 options gfm label-bytes 87 input-bytes 21 expected-bytes 95
 should not support a lazy body row if the head row and delimiter row are in a container
 --- input
 > | a |
@@ -902,7 +891,7 @@ should not support a lazy body row if the head row and delimiter row are in a co
 </blockquote>
 <p>| c |</p>
 --- end
---- case 48 options gfm label-bytes 97 input-bytes 21 expected-bytes 51
+--- case 47 options gfm label-bytes 97 input-bytes 21 expected-bytes 51
 should not support a lazy delimiter row if the head row and a further body row are in a container
 --- input
 > | a |
@@ -915,7 +904,7 @@ should not support a lazy delimiter row if the head row and a further body row a
 | c |</p>
 </blockquote>
 --- end
---- case 49 options gfm label-bytes 41 input-bytes 11 expected-bytes 132
+--- case 48 options gfm label-bytes 41 input-bytes 11 expected-bytes 132
 should prefer GFM tables over definitions
 --- input
 [
@@ -937,7 +926,7 @@ a
 </tbody>
 </table>
 --- end
---- case 50 options gfm label-bytes 34 input-bytes 575 expected-bytes 1374
+--- case 49 options gfm label-bytes 34 input-bytes 575 expected-bytes 1374
 should match alignment like GitHub
 --- input
 # Align
@@ -1125,7 +1114,7 @@ a
 </table>
 
 --- end
---- case 51 options gfm label-bytes 30 input-bytes 127 expected-bytes 365
+--- case 50 options gfm label-bytes 30 input-bytes 127 expected-bytes 365
 should match basic like GitHub
 --- input
 # Tables
@@ -1188,7 +1177,7 @@ should match basic like GitHub
 </table>
 
 --- end
---- case 52 options gfm label-bytes 35 input-bytes 469 expected-bytes 1235
+--- case 51 options gfm label-bytes 35 input-bytes 469 expected-bytes 1235
 should match containers like GitHub
 --- input
 # Tables in things
@@ -1380,7 +1369,7 @@ a
 </table>
 
 --- end
---- case 53 options gfm label-bytes 47 input-bytes 24 expected-bytes 117
+--- case 52 options gfm label-bytes 47 input-bytes 24 expected-bytes 117
 should match a double delimiter row like GitHub
 --- input
 | a |
@@ -1406,7 +1395,7 @@ should match a double delimiter row like GitHub
 </table>
 
 --- end
---- case 54 options gfm label-bytes 51 input-bytes 429 expected-bytes 1186
+--- case 53 options gfm label-bytes 51 input-bytes 429 expected-bytes 1186
 should match examples from the GFM spec like GitHub
 --- input
 # Examples from GFM
@@ -1584,7 +1573,7 @@ bar
 </table>
 
 --- end
---- case 55 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 431 expected-bytes 943
+--- case 54 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 431 expected-bytes 943
 should match grave accent like GitHub
 --- input
 # Grave accents
@@ -1708,7 +1697,7 @@ should match grave accent like GitHub
 <p><code>\|\\</code></p>
 
 --- end
---- case 56 options gfm label-bytes 31 input-bytes 112 expected-bytes 285
+--- case 55 options gfm label-bytes 31 input-bytes 112 expected-bytes 285
 should match indent like GitHub
 --- input
 # Code
@@ -1761,7 +1750,7 @@ a
 </code></pre>
 
 --- end
---- case 57 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 849 expected-bytes 3682
+--- case 56 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 849 expected-bytes 3682
 should match interrupt like GitHub
 --- input
 ## Blank line
@@ -2247,7 +2236,7 @@ b
 <hr />
 
 --- end
---- case 58 options gfm label-bytes 37 input-bytes 164 expected-bytes 353
+--- case 57 options gfm label-bytes 37 input-bytes 164 expected-bytes 353
 should match loose tables like GitHub
 --- input
 # Loose
@@ -2304,7 +2293,7 @@ a
 </table>
 
 --- end
---- case 59 options gfm label-bytes 38 input-bytes 290 expected-bytes 443
+--- case 58 options gfm label-bytes 38 input-bytes 290 expected-bytes 443
 should match loose escapes like GitHub
 --- input
 # Some more escapes

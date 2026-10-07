@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: list
-count: 91
+count: 88
 
 --- case 1 options - label-bytes 24 input-bytes 64 expected-bytes 122
 should support documents
@@ -1353,49 +1353,7 @@ should remove indent of code (fenced) in list (2 spaces)
 </li>
 </ul>
 --- end
---- case 85 options - label-bytes 56 input-bytes 15 expected-bytes 48
-should remove indent of code (fenced) in list (3 spaces)
---- input
-- ```
-   
-  ```
---- expected
-<ul>
-<li>
-<pre><code> 
-</code></pre>
-</li>
-</ul>
---- end
---- case 86 options - label-bytes 56 input-bytes 16 expected-bytes 49
-should remove indent of code (fenced) in list (4 spaces)
---- input
-- ```
-    
-  ```
---- expected
-<ul>
-<li>
-<pre><code>  
-</code></pre>
-</li>
-</ul>
---- end
---- case 87 options - label-bytes 53 input-bytes 13 expected-bytes 49
-should remove indent of code (fenced) in list (1 tab)
---- input
-- ```
-	
-  ```
---- expected
-<ul>
-<li>
-<pre><code>  
-</code></pre>
-</li>
-</ul>
---- end
---- case 88 options - label-bytes 49 input-bytes 5 expected-bytes 52
+--- case 85 options - label-bytes 49 input-bytes 5 expected-bytes 52
 should support complex nested and empty lists (1)
 --- input
 - +
@@ -1410,7 +1368,7 @@ should support complex nested and empty lists (1)
 <li></li>
 </ul>
 --- end
---- case 89 options - label-bytes 49 input-bytes 6 expected-bytes 52
+--- case 86 options - label-bytes 49 input-bytes 6 expected-bytes 52
 should support complex nested and empty lists (2)
 --- input
 - 1.
@@ -1425,7 +1383,7 @@ should support complex nested and empty lists (2)
 <li></li>
 </ul>
 --- end
---- case 90 options - label-bytes 49 input-bytes 9 expected-bytes 96
+--- case 87 options - label-bytes 49 input-bytes 9 expected-bytes 96
 should support complex nested and empty lists (3)
 --- input
 * - +
@@ -1448,7 +1406,7 @@ should support complex nested and empty lists (3)
 </li>
 </ul>
 --- end
---- case 91 options allow_dangerous_html,allow_dangerous_protocol label-bytes 54 input-bytes 17 expected-bytes 51
+--- case 88 options allow_dangerous_html,allow_dangerous_protocol label-bytes 54 input-bytes 17 expected-bytes 51
 should support the common list breaking comment method
 --- input
 * a

@@ -115,7 +115,7 @@ specification defines them.
 
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
-- **THEN** each output matches the expected HTML, or the case is in the bench's deviation list with the reason it differs; where commonmark.js renders a case otherwise, the output matches commonmark.js: blank lines inside a fence in a list item hold no whitespace past the item's indentation, and a fence a container ends right after its opening line is empty
+- **THEN** each output matches the expected HTML, or the case differs by a decision of this syntax and is checked, with HTML verified against a reference renderer or the decision, by `tests/syntax_decisions.rs`; where commonmark.js renders a case otherwise, the output matches commonmark.js: blank lines inside a fence in a list item hold no whitespace past the item's indentation, and a fence a container ends right after its opening line is empty
 
 ### Requirement: GFM blocks
 The parser SHALL recognize GFM tables, task list items, and alerts; an

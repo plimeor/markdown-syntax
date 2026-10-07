@@ -1,0 +1,178 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: literal_autolinks
+decision: Literal autolinks are part of the syntax, also inside text a CommonMark `<…>` leaves as text.
+count: 15
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 24 expected-bytes 70
+from commonmark/autolink.cases #11; verified: cmark-gfm, micromark
+--- input
+<http://foo.bar/baz bim>
+--- expected
+<p>&lt;<a href="http://foo.bar/baz">http://foo.bar/baz</a> bim&gt;</p>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 18 expected-bytes 60
+from commonmark/autolink.cases #18; verified: cmark-gfm, micromark
+--- input
+< http://foo.bar >
+--- expected
+<p>&lt; <a href="http://foo.bar">http://foo.bar</a> &gt;</p>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 18 expected-bytes 58
+from commonmark/autolink.cases #21; verified: cmark-gfm, micromark
+--- input
+http://example.com
+--- expected
+<p><a href="http://example.com">http://example.com</a></p>
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 19 expected-bytes 67
+from commonmark/autolink.cases #22; verified: cmark-gfm, micromark
+--- input
+foo@bar.example.com
+--- expected
+<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 72 expected-bytes 177
+from commonmark/autolink.cases #33; verified: cmark-gfm, micromark
+--- input
+<asd@0123456789012345678901234567890123456789012345678901234567890123.a>
+--- expected
+<p>&lt;<a href="mailto:asd@0123456789012345678901234567890123456789012345678901234567890123.a">asd@0123456789012345678901234567890123456789012345678901234567890123.a</a>&gt;</p>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 18 expected-bytes 69
+from commonmark/autolink.cases #36; verified: cmark-gfm, micromark
+--- input
+<asd@-example.com>
+--- expected
+<p>&lt;<a href="mailto:asd@-example.com">asd@-example.com</a>&gt;</p>
+--- end
+--- case 7 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 18 expected-bytes 69
+from commonmark/autolink.cases #39; verified: cmark-gfm, micromark
+--- input
+<asd@example-.com>
+--- expected
+<p>&lt;<a href="mailto:asd@example-.com">asd@example-.com</a>&gt;</p>
+--- end
+--- case 8 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 26 expected-bytes 72
+from commonmark/commonmark.cases #602; verified: cmark-gfm, micromark
+--- input
+<https://foo.bar/baz bim>
+
+--- expected
+<p>&lt;<a href="https://foo.bar/baz">https://foo.bar/baz</a> bim&gt;</p>
+--- end
+--- case 9 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 20 expected-bytes 62
+from commonmark/commonmark.cases #608; verified: cmark-gfm, micromark
+--- input
+< https://foo.bar >
+
+--- expected
+<p>&lt; <a href="https://foo.bar">https://foo.bar</a> &gt;</p>
+--- end
+--- case 10 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 20 expected-bytes 60
+from commonmark/commonmark.cases #611; verified: cmark-gfm, micromark
+--- input
+https://example.com
+
+--- expected
+<p><a href="https://example.com">https://example.com</a></p>
+--- end
+--- case 11 options allow_dangerous_html,allow_dangerous_protocol label-bytes 69 input-bytes 20 expected-bytes 67
+from commonmark/commonmark.cases #612; verified: cmark-gfm, micromark
+--- input
+foo@bar.example.com
+
+--- expected
+<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>
+--- end
+--- case 12 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 19 expected-bytes 60
+from commonmark/gfm_autolink_literal.cases #1; verified: cmark-gfm, micromark
+--- input
+https://example.com
+--- expected
+<p><a href="https://example.com">https://example.com</a></p>
+--- end
+--- case 13 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 15 expected-bytes 59
+from commonmark/gfm_autolink_literal.cases #2; verified: cmark-gfm, micromark
+--- input
+www.example.com
+--- expected
+<p><a href="http://www.example.com">www.example.com</a></p>
+--- end
+--- case 14 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 16 expected-bytes 61
+from commonmark/gfm_autolink_literal.cases #3; verified: cmark-gfm, micromark
+--- input
+user@example.com
+--- expected
+<p><a href="mailto:user@example.com">user@example.com</a></p>
+--- end
+--- case 15 options allow_dangerous_html,allow_dangerous_protocol,gfm_tagfilter label-bytes 103 input-bytes 897 expected-bytes 1220
+from commonmark/gfm_tagfilter.cases #6; markdown-rs oracle, and cmark-gfm for the literal autolink line
+--- input
+
+<title>
+
+<div title="<title>"></div>
+
+<span title="<title>"></span>
+
+<div><title></title></div>
+
+<span><title></title></span>
+
+<b><textarea></textarea></b>
+
+<script/src="#">
+
+<SCRIPT SRC=http://xss.rocks/xss.js></SCRIPT>
+
+<IMG SRC="javascript:alert('XSS');">
+
+<IMG SRC=javascript:alert('XSS')>
+
+<IMG SRC=`javascript:alert("RSnake says, 'XSS'")`>
+
+<IMG """><SCRIPT>alert("XSS")</SCRIPT>"\>
+
+<SCRIPT/XSS SRC="http://xss.rocks/xss.js"></SCRIPT>
+
+<BODY onload!#$%&()*~+-_.,:;?@[/|\]^`=alert("XSS")>
+
+<<SCRIPT>alert("XSS");//\<</SCRIPT>
+
+<SCRIPT SRC=http://xss.rocks/xss.js?< B >
+
+<SCRIPT SRC=//xss.rocks/.j>
+
+</TITLE><SCRIPT>alert("XSS");</SCRIPT>
+
+<STYLE>li {list-style-image: url("javascript:alert('XSS')");}</STYLE><UL><LI>XSS</br>
+
+javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/"/+/onmouseover=1/+/[*/[]/+alert(1)//'>
+
+<STYLE>@import'http://xss.rocks/xss.css';</STYLE>
+
+--- expected
+&lt;title>
+<div title="&lt;title>"></div>
+<p><span title="&lt;title>"></span></p>
+<div>&lt;title>&lt;/title></div>
+<p><span>&lt;title>&lt;/title></span></p>
+<p><b>&lt;textarea>&lt;/textarea></b></p>
+<p>&lt;script/src=&quot;#&quot;&gt;</p>
+&lt;SCRIPT SRC=http://xss.rocks/xss.js>&lt;/SCRIPT>
+<IMG SRC="javascript:alert('XSS');">
+<p>&lt;IMG SRC=javascript:alert('XSS')&gt;</p>
+<p>&lt;IMG SRC=<code>javascript:alert(&quot;RSnake says, 'XSS'&quot;)</code>&gt;</p>
+<p>&lt;IMG &quot;&quot;&quot;&gt;&lt;SCRIPT>alert(&quot;XSS&quot;)&lt;/SCRIPT>&quot;&gt;</p>
+<p>&lt;SCRIPT/XSS SRC=&quot;<a href="http://xss.rocks/xss.js%22%3E">http://xss.rocks/xss.js&quot;&gt;</a>&lt;/SCRIPT></p>
+<BODY onload!#$%&()*~+-_.,:;?@[/|\]^`=alert("XSS")>
+<p>&lt;&lt;SCRIPT>alert(&quot;XSS&quot;);//&lt;&lt;/SCRIPT></p>
+&lt;SCRIPT SRC=http://xss.rocks/xss.js?< B >
+
+&lt;SCRIPT SRC=//xss.rocks/.j>
+
+&lt;/TITLE>&lt;SCRIPT>alert("XSS");&lt;/SCRIPT>
+&lt;STYLE>li {list-style-image: url("javascript:alert('XSS')");}&lt;/STYLE><UL><LI>XSS</br>
+<p>javascript:/<em>--&gt;&lt;/title>&lt;/style>&lt;/textarea>&lt;/script>&lt;/xmp>&lt;svg/onload='+/&quot;/+/onmouseover=1/+/[</em>/[]/+alert(1)//'&gt;</p>
+&lt;STYLE>@import'http://xss.rocks/xss.css';&lt;/STYLE>
+--- end

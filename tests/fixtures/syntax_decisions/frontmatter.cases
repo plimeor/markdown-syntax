@@ -1,0 +1,58 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: frontmatter
+decision: Frontmatter is part of the syntax.
+count: 5
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 24 expected-bytes 23
+from commonmark/commonmark.cases #96; verified: micromark
+--- input
+---
+Foo
+---
+Bar
+---
+Baz
+
+--- expected
+<h2>Bar</h2>
+<p>Baz</p>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 8 expected-bytes 0
+from commonmark/commonmark.cases #98; verified: micromark
+--- input
+---
+---
+
+--- expected
+
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 22 expected-bytes 0
+from commonmark/frontmatter.cases #1; verified: micromark
+--- input
+---
+title: Jupyter
+---
+--- expected
+
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 23 expected-bytes 23
+from commonmark/heading_setext.cases #26; verified: micromark
+--- input
+---
+Foo
+---
+Bar
+---
+Baz
+--- expected
+<h2>Bar</h2>
+<p>Baz</p>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 7 expected-bytes 0
+from commonmark/heading_setext.cases #28; verified: micromark
+--- input
+---
+---
+--- expected
+
+--- end

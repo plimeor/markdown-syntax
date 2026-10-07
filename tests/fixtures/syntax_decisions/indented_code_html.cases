@@ -1,0 +1,52 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: indented_code_html
+decision: Indented code and HTML blocks are part of the syntax.
+count: 5
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 86 input-bytes 5 expected-bytes 26
+from commonmark/code_indented.cases #19; verified: cmark-gfm, commonmark.js, micromark
+--- input
+    a
+--- expected
+<pre><code>a
+</code></pre>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 86 input-bytes 13 expected-bytes 34
+from commonmark/code_indented.cases #23; verified: cmark-gfm, commonmark.js, micromark
+--- input
+```
+a
+    ```
+--- expected
+<pre><code>a
+    ```
+</code></pre>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 82 input-bytes 15 expected-bytes 18
+from commonmark/gfm_table.cases #33; verified: cmark-gfm, commonmark.js, micromark
+--- input
+| a |
+    | - |
+--- expected
+<p>| a |
+| - |</p>
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 82 input-bytes 26 expected-bytes 42
+from commonmark/gfm_table.cases #51; verified: cmark-gfm, commonmark.js, micromark
+--- input
+    | a |
+	| - |
+    | b |
+--- expected
+<pre><code>| a |
+| - |
+| b |
+</code></pre>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 81 input-bytes 3 expected-bytes 3
+from commonmark/html_flow.cases #3; verified: cmark-gfm, commonmark.js, micromark
+--- input
+<x>
+--- expected
+<x>
+--- end

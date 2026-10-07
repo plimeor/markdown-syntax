@@ -1,0 +1,157 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: wikilinks
+decision: Wiki links: the title follows the pipe, and a wiki link wins over link and reference syntax.
+count: 15
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 150 input-bytes 27 expected-bytes 109
+from commonmark/commonmark.cases #548; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[[foo]]]
+
+[[[foo]]]: /url
+
+--- expected
+<p>[<a href="foo" data-wikilink="true">foo</a>]</p>
+<p>[<a href="foo" data-wikilink="true">foo</a>]: /url</p>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 150 input-bytes 41 expected-bytes 63
+from commonmark/commonmark.cases #559; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[*foo* bar]]
+
+[*foo* bar]: /url "title"
+
+--- expected
+<p><a href="*foo*%20bar" data-wikilink="true">*foo* bar</a></p>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 150 input-bytes 32 expected-bytes 150
+from commonmark/commonmark.cases #590; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+![[foo]]
+
+[[foo]]: /url "title"
+
+--- expected
+<p><a href="foo" data-wikilink="true" data-wikilink-embed="true">foo</a></p>
+<p><a href="foo" data-wikilink="true">foo</a>: /url &quot;title&quot;</p>
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 144 input-bytes 31 expected-bytes 150
+from commonmark/image.cases #20; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[foo]]: /url "title"
+
+![[foo]]
+--- expected
+<p><a href="foo" data-wikilink="true">foo</a>: /url &quot;title&quot;</p>
+<p><a href="foo" data-wikilink="true" data-wikilink-embed="true">foo</a></p>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 153 input-bytes 26 expected-bytes 109
+from commonmark/link_reference.cases #22; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[[foo]]]: /url
+
+[[[foo]]]
+--- expected
+<p>[<a href="foo" data-wikilink="true">foo</a>]: /url</p>
+<p>[<a href="foo" data-wikilink="true">foo</a>]</p>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 153 input-bytes 40 expected-bytes 63
+from commonmark/link_reference.cases #32; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[*foo* bar]: /url "title"
+
+[[*foo* bar]]
+--- expected
+<p><a href="*foo*%20bar" data-wikilink="true">*foo* bar</a></p>
+--- end
+--- case 7 options allow_dangerous_html,allow_dangerous_protocol label-bytes 164 input-bytes 19 expected-bytes 73
+from gfm/autolink.cases #16, gfm/autolink.cases #20; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[https://foo.com]]
+--- expected
+<p><a href="https://foo.com" data-wikilink="true">https://foo.com</a></p>
+--- end
+--- case 8 options allow_dangerous_html,allow_dangerous_protocol label-bytes 164 input-bytes 23 expected-bytes 61
+from gfm/autolink.cases #17, gfm/autolink.cases #21; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[Foo|https://foo.com]]
+--- expected
+<p><a href="Foo" data-wikilink="true">https://foo.com</a></p>
+--- end
+--- case 9 options allow_dangerous_html,allow_dangerous_protocol label-bytes 140 input-bytes 44 expected-bytes 84
+from gfm/autolink.cases #54; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[Check www.example.com|http://example.com]]
+--- expected
+<p><a href="Check%20www.example.com" data-wikilink="true">http://example.com</a></p>
+--- end
+--- case 10 options allow_dangerous_html,allow_dangerous_protocol label-bytes 140 input-bytes 60 expected-bytes 99
+from gfm/wikilinks.cases #2; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+This is [[a &lt;link|&lt;script&gt;alert(0)&lt;/script&gt;]]
+--- expected
+<p>This is <a href="a%20%3Clink" data-wikilink="true">&lt;script&gt;alert(0)&lt;/script&gt;</a></p>
+--- end
+--- case 11 options allow_dangerous_html,allow_dangerous_protocol label-bytes 140 input-bytes 91 expected-bytes 154
+from gfm/wikilinks.cases #4; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[a|http:'"injected=attribute&gt;&lt;img/src="0"onerror="alert(0)"&gt;https://example.com]]
+--- expected
+<p><a href="a" data-wikilink="true">http:'&quot;injected=attribute&gt;&lt;img/src=&quot;0&quot;onerror=&quot;alert(0)&quot;&gt;https://example.com</a></p>
+--- end
+--- case 12 options allow_dangerous_html,allow_dangerous_protocol label-bytes 140 input-bytes 153 expected-bytes 206
+from gfm/wikilinks.cases #6; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+<i>[[a|'"&gt;&lt;svg&gt;&lt;i/class=gl-show-field-errors&gt;&lt;input/title="&lt;script&gt;alert(0)&lt;/script&gt;"/&gt;&lt;/svg&gt;https://example.com]]
+--- expected
+<p><i><a href="a" data-wikilink="true">'&quot;&gt;&lt;svg&gt;&lt;i/class=gl-show-field-errors&gt;&lt;input/title=&quot;&lt;script&gt;alert(0)&lt;/script&gt;&quot;/&gt;&lt;/svg&gt;https://example.com</a></p>
+--- end
+--- case 13 options allow_dangerous_html,allow_dangerous_protocol label-bytes 189 input-bytes 22 expected-bytes 79
+from gfm/wikilinks.cases #7, gfm/wikilinks.cases #8, gfm/wikilinks.cases #14; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+[[http://example.com]]
+--- expected
+<p><a href="http://example.com" data-wikilink="true">http://example.com</a></p>
+--- end
+--- case 14 options allow_dangerous_html,allow_dangerous_protocol label-bytes 141 input-bytes 36 expected-bytes 140
+from gfm/wikilinks.cases #10; decision 0007: `[[…]]` is a wiki link, its title follows the pipe, and it wins over a defined reference label
+--- input
+| header  |
+| ------- |
+| [[url]] |
+
+--- expected
+<table>
+<thead>
+<tr>
+<th>header</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="url" data-wikilink="true">url</a></td>
+</tr>
+</tbody>
+</table>
+--- end
+--- case 15 options allow_dangerous_html,allow_dangerous_protocol label-bytes 60 input-bytes 47 expected-bytes 110
+from gfm/wikilinks.cases #12; verified: cmark-gfm, micromark
+--- input
+| header  |
+| ------- |
+| [[link label|url]] |
+
+--- expected
+<table>
+<thead>
+<tr>
+<th>header</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[[link label</td>
+</tr>
+</tbody>
+</table>
+--- end

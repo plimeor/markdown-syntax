@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: inline_footnotes
-count: 29
+count: 28
 
 --- case 1 options extension.footnotes,extension.inline_footnotes label-bytes 21 input-bytes 59 expected-bytes 414
 basic_inline_footnote
@@ -133,16 +133,7 @@ Text^[
 ]more.</p>
 
 --- end
---- case 10 options extension.inline_footnotes label-bytes 41 input-bytes 30 expected-bytes 37
-inline_footnote_without_footnotes_enabled
---- input
-Text^[note] should not parse.
-
---- expected
-<p>Text^[note] should not parse.</p>
-
---- end
---- case 11 options extension.footnotes,extension.inline_footnotes label-bytes 25 input-bytes 27 expected-bytes 393
+--- case 10 options extension.footnotes,extension.inline_footnotes label-bytes 25 input-bytes 27 expected-bytes 393
 inline_footnote_with_code
 --- input
 Text^[With `code` inline].
@@ -158,7 +149,7 @@ Text^[With `code` inline].
 </section>
 
 --- end
---- case 12 options extension.footnotes,extension.inline_footnotes label-bytes 25 input-bytes 135 expected-bytes 490
+--- case 11 options extension.footnotes,extension.inline_footnotes label-bytes 25 input-bytes 135 expected-bytes 490
 inline_footnote_multiline
 --- input
 Here is an inline note.^[Inline notes are easier to write, since
@@ -178,7 +169,7 @@ note. <a href="#fnref-__inline_1" class="footnote-backref" data-footnote-backref
 </section>
 
 --- end
---- case 13 options extension.footnotes,extension.inline_footnotes label-bytes 24 input-bytes 39 expected-bytes 393
+--- case 12 options extension.footnotes,extension.inline_footnotes label-bytes 24 input-bytes 39 expected-bytes 393
 escaped_caret_not_parsed
 --- input
 Escaped: \^[not a note]. Real: ^[yes].
@@ -194,7 +185,7 @@ Escaped: \^[not a note]. Real: ^[yes].
 </section>
 
 --- end
---- case 14 options extension.footnotes,extension.inline_footnotes label-bytes 36 input-bytes 20 expected-bytes 27
+--- case 13 options extension.footnotes,extension.inline_footnotes label-bytes 36 input-bytes 20 expected-bytes 27
 whitespace_between_caret_and_bracket
 --- input
 Text^ [not a note].
@@ -203,7 +194,7 @@ Text^ [not a note].
 <p>Text^ [not a note].</p>
 
 --- end
---- case 15 options extension.footnotes,extension.inline_footnotes label-bytes 27 input-bytes 31 expected-bytes 385
+--- case 14 options extension.footnotes,extension.inline_footnotes label-bytes 27 input-bytes 31 expected-bytes 385
 escaped_bracket_inside_body
 --- input
 A ^[square bracket \] inside].
@@ -219,7 +210,7 @@ A ^[square bracket \] inside].
 </section>
 
 --- end
---- case 16 options extension.footnotes,extension.inline_footnotes label-bytes 23 input-bytes 22 expected-bytes 377
+--- case 15 options extension.footnotes,extension.inline_footnotes label-bytes 23 input-bytes 22 expected-bytes 377
 caret_in_other_contexts
 --- input
 2^32 is big. ^[note].
@@ -235,7 +226,7 @@ caret_in_other_contexts
 </section>
 
 --- end
---- case 17 options extension.footnotes,extension.inline_footnotes label-bytes 27 input-bytes 25 expected-bytes 391
+--- case 16 options extension.footnotes,extension.inline_footnotes label-bytes 27 input-bytes 25 expected-bytes 391
 inline_code_protects_marker
 --- input
 `^[nope]` and yes ^[ok].
@@ -251,7 +242,7 @@ inline_code_protects_marker
 </section>
 
 --- end
---- case 18 options extension.footnotes,extension.inline_footnotes label-bytes 29 input-bytes 15 expected-bytes 653
+--- case 17 options extension.footnotes,extension.inline_footnotes label-bytes 29 input-bytes 15 expected-bytes 653
 back_to_back_inline_footnotes
 --- input
 A^[one]^[two].
@@ -270,7 +261,7 @@ A^[one]^[two].
 </section>
 
 --- end
---- case 19 options extension.footnotes,extension.inline_footnotes label-bytes 21 input-bytes 17 expected-bytes 372
+--- case 18 options extension.footnotes,extension.inline_footnotes label-bytes 21 input-bytes 17 expected-bytes 372
 no_surrounding_spaces
 --- input
 word^[tight]word
@@ -286,7 +277,7 @@ word^[tight]word
 </section>
 
 --- end
---- case 20 options extension.footnotes,extension.inline_footnotes label-bytes 18 input-bytes 17 expected-bytes 372
+--- case 19 options extension.footnotes,extension.inline_footnotes label-bytes 18 input-bytes 17 expected-bytes 372
 at_paragraph_start
 --- input
 ^[start] begins.
@@ -302,7 +293,7 @@ at_paragraph_start
 </section>
 
 --- end
---- case 21 options extension.footnotes,extension.inline_footnotes label-bytes 16 input-bytes 17 expected-bytes 372
+--- case 20 options extension.footnotes,extension.inline_footnotes label-bytes 16 input-bytes 17 expected-bytes 372
 at_paragraph_end
 --- input
 ends here ^[fin]
@@ -318,7 +309,7 @@ ends here ^[fin]
 </section>
 
 --- end
---- case 22 options extension.footnotes,extension.inline_footnotes label-bytes 15 input-bytes 20 expected-bytes 382
+--- case 21 options extension.footnotes,extension.inline_footnotes label-bytes 15 input-bytes 20 expected-bytes 382
 inside_emphasis
 --- input
 *emph ^[note] text*
@@ -334,7 +325,7 @@ inside_emphasis
 </section>
 
 --- end
---- case 23 options extension.footnotes,extension.inline_footnotes label-bytes 32 input-bytes 33 expected-bytes 671
+--- case 22 options extension.footnotes,extension.inline_footnotes label-bytes 32 input-bytes 33 expected-bytes 671
 nested_inline_footnote_supported
 --- input
 A ^[outer and ^[inner] literal].
@@ -353,7 +344,7 @@ A ^[outer and ^[inner] literal].
 </section>
 
 --- end
---- case 24 options extension.footnotes,extension.inline_footnotes label-bytes 10 input-bytes 26 expected-bytes 397
+--- case 23 options extension.footnotes,extension.inline_footnotes label-bytes 10 input-bytes 26 expected-bytes 397
 with_image
 --- input
 X ^[see ![alt](img.png)].
@@ -369,7 +360,7 @@ X ^[see ![alt](img.png)].
 </section>
 
 --- end
---- case 25 options extension.footnotes,extension.inline_footnotes label-bytes 22 input-bytes 26 expected-bytes 381
+--- case 24 options extension.footnotes,extension.inline_footnotes label-bytes 22 input-bytes 26 expected-bytes 381
 with_unicode_and_emoji
 --- input
 X ^[π ≈ 3.14159 😊].
@@ -385,7 +376,7 @@ X ^[π ≈ 3.14159 😊].
 </section>
 
 --- end
---- case 26 options extension.footnotes,extension.inline_footnotes label-bytes 12 input-bytes 16 expected-bytes 389
+--- case 25 options extension.footnotes,extension.inline_footnotes label-bytes 12 input-bytes 16 expected-bytes 389
 in_list_item
 --- input
 - a ^[note]
@@ -405,7 +396,7 @@ in_list_item
 </section>
 
 --- end
---- case 27 options extension.footnotes,extension.inline_footnotes label-bytes 13 input-bytes 14 expected-bytes 394
+--- case 26 options extension.footnotes,extension.inline_footnotes label-bytes 13 input-bytes 14 expected-bytes 394
 in_blockquote
 --- input
 > quote ^[q].
@@ -423,7 +414,7 @@ in_blockquote
 </section>
 
 --- end
---- case 28 options extension.footnotes,extension.inline_footnotes label-bytes 10 input-bytes 12 expected-bytes 367
+--- case 27 options extension.footnotes,extension.inline_footnotes label-bytes 10 input-bytes 12 expected-bytes 367
 in_heading
 --- input
 # H ^[note]
@@ -439,7 +430,7 @@ in_heading
 </section>
 
 --- end
---- case 29 options extension.footnotes,extension.inline_footnotes,extension.table label-bytes 13 input-bytes 26 expected-bytes 451
+--- case 28 options extension.footnotes,extension.inline_footnotes,extension.table label-bytes 13 input-bytes 26 expected-bytes 451
 in_table_cell
 --- input
 | H |

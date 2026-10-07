@@ -49,7 +49,7 @@ spans, links, and emphasis.
 
 #### Scenario: CommonMark oracle cases
 - **WHEN** the inline cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
-- **THEN** each output matches the expected HTML, or the case is in the bench's deviation list with the reason it differs
+- **THEN** each output matches the expected HTML, or the case differs by a decision of this syntax and is checked, with HTML verified against a reference renderer or the decision, by `tests/syntax_decisions.rs`
 
 ### Requirement: Extension marks
 The parser SHALL read `==x==` as `Mark`, parsing its content as inline content;
@@ -189,6 +189,10 @@ still links there.
 #### Scenario: URL after an open bracket
 - **WHEN** `"[https://foo.com]"` and `"[a [b](c) https://x.y]"` are parsed with `parse`
 - **THEN** neither holds an `Autolink`: each URL is text
+
+#### Scenario: Bracketed IPv6 host
+- **WHEN** `"scoped https://[fe80::1ff:fe23:4567:890a%25eth2]"` is parsed with `parse`
+- **THEN** the paragraph holds only text
 
 #### Scenario: Email after an open bracket
 - **WHEN** `"[a@b.com]"` is parsed with `parse`

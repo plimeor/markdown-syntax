@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: gfm_autolink_literal
-count: 57
+count: 51
 
 --- case 1 options gfm label-bytes 39 input-bytes 19 expected-bytes 60
 should support protocol urls if enabled
@@ -306,50 +306,7 @@ a www.example.com& b
 <p>a <a href="http://www.example.com&amp;">www.example.com&amp;</a> b</p>
 
 --- end
---- case 34 options gfm label-bytes 96 input-bytes 299 expected-bytes 676
-should match interplay with brackets, links, and images, like GitHub does (but without the bugs)
---- input
-
-[ www.example.com
-
-[ https://example.com
-
-[ contact@example.com
-
-[ www.example.com ]
-
-[ https://example.com ]
-
-[ contact@example.com ]
-
-[ www.example.com ](#)
-
-[ https://example.com ](#)
-
-[ contact@example.com ](#)
-
-![ www.example.com ](#)
-
-![ https://example.com ](#)
-
-![ contact@example.com ](#)
-
---- expected
-<p>[ <a href="http://www.example.com">www.example.com</a></p>
-<p>[ <a href="https://example.com">https://example.com</a></p>
-<p>[ <a href="mailto:contact@example.com">contact@example.com</a></p>
-<p>[ <a href="http://www.example.com">www.example.com</a> ]</p>
-<p>[ <a href="https://example.com">https://example.com</a> ]</p>
-<p>[ <a href="mailto:contact@example.com">contact@example.com</a> ]</p>
-<p><a href="#"> www.example.com </a></p>
-<p><a href="#"> https://example.com </a></p>
-<p><a href="#"> contact@example.com </a></p>
-<p><img src="#" alt=" www.example.com " /></p>
-<p><img src="#" alt=" https://example.com " /></p>
-<p><img src="#" alt=" contact@example.com " /></p>
-
---- end
---- case 35 options gfm label-bytes 36 input-bytes 434 expected-bytes 1206
+--- case 34 options gfm label-bytes 36 input-bytes 434 expected-bytes 1206
 should match parens like GitHub does
 --- input
 
@@ -395,7 +352,7 @@ www.example.com/?q=a(business)))
 <p>(<a href="http://www.example.com/?q=a(business)">www.example.com/?q=a(business)</a>&quot;.</p>
 
 --- end
---- case 36 options gfm label-bytes 34 input-bytes 1749 expected-bytes 3674
+--- case 35 options gfm label-bytes 34 input-bytes 1749 expected-bytes 3674
 should match base like GitHub does
 --- input
 
@@ -582,323 +539,7 @@ Can contain an underscore followed by a period: aaa@a.b_.c
 <p><a href="">link</a> <a href="http://autolink">http://autolink</a> should still be expanded.</p>
 
 --- end
---- case 37 options gfm label-bytes 67 input-bytes 299 expected-bytes 942
-should match brackets like GitHub does (except for the bracket bug)
---- input
-H0.
-
-[https://a.com&copy;b
-
-[www.a.com&copy;b
-
-H1.
-
-[]https://a.com&copy;b
-
-[]www.a.com&copy;b
-
-H2.
-
-[] https://a.com&copy;b
-
-[] www.a.com&copy;b
-
-H3.
-
-[[https://a.com&copy;b
-
-[[www.a.com&copy;b
-
-H4.
-
-[[]https://a.com&copy;b
-
-[[]www.a.com&copy;b
-
-H5.
-
-[[]]https://a.com&copy;b
-
-[[]]www.a.com&copy;b
-
---- expected
-<p>H0.</p>
-<p>[<a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-<p>H1.</p>
-<p>[]<a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[]<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-<p>H2.</p>
-<p>[] <a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[] <a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-<p>H3.</p>
-<p>[[<a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[[<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-<p>H4.</p>
-<p>[[]<a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[[]<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-<p>H5.</p>
-<p>[[]]<a href="https://a.com&amp;copy;b">https://a.com&amp;copy;b</a></p>
-<p>[[]]<a href="http://www.a.com&amp;copy;b">www.a.com&amp;copy;b</a></p>
-
---- end
---- case 38 options gfm label-bytes 95 input-bytes 515 expected-bytes 1189
-should match autolink literals combined w/ images like GitHub does (except for the bracket bug)
---- input
-Image start.
-
-![https://a.com
-
-![http://a.com
-
-![www.a.com
-
-![a@b.c
-
-Image start and label end.
-
-![https://a.com]
-
-![http://a.com]
-
-![www.a.com]
-
-![a@b.c]
-
-Image label with reference (note: GH cleans hashes here, but we keep them in).
-
-![https://a.com][x]
-
-![http://a.com][x]
-
-![www.a.com][x]
-
-![a@b.c][x]
-
-[x]: #
-
-Image label with resource.
-
-![https://a.com]()
-
-![http://a.com]()
-
-![www.a.com]()
-
-![a@b.c]()
-
-Autolink literal after image.
-
-![a]() https://a.com
-
-![a]() http://a.com
-
-![a]() www.a.com
-
-![a]() a@b.c
-
---- expected
-<p>Image start.</p>
-<p>![<a href="https://a.com">https://a.com</a></p>
-<p>![<a href="http://a.com">http://a.com</a></p>
-<p>![<a href="http://www.a.com">www.a.com</a></p>
-<p>![<a href="mailto:a@b.c">a@b.c</a></p>
-<p>Image start and label end.</p>
-<p>![<a href="https://a.com">https://a.com</a>]</p>
-<p>![<a href="http://a.com">http://a.com</a>]</p>
-<p>![<a href="http://www.a.com">www.a.com</a>]</p>
-<p>![<a href="mailto:a@b.c">a@b.c</a>]</p>
-<p>Image label with reference (note: GH cleans hashes here, but we keep them in).</p>
-<p><img src="#" alt="https://a.com" /></p>
-<p><img src="#" alt="http://a.com" /></p>
-<p><img src="#" alt="www.a.com" /></p>
-<p><img src="#" alt="a@b.c" /></p>
-<p>Image label with resource.</p>
-<p><img src="" alt="https://a.com" /></p>
-<p><img src="" alt="http://a.com" /></p>
-<p><img src="" alt="www.a.com" /></p>
-<p><img src="" alt="a@b.c" /></p>
-<p>Autolink literal after image.</p>
-<p><img src="" alt="a" /> <a href="https://a.com">https://a.com</a></p>
-<p><img src="" alt="a" /> <a href="http://a.com">http://a.com</a></p>
-<p><img src="" alt="a" /> <a href="http://www.a.com">www.a.com</a></p>
-<p><img src="" alt="a" /> <a href="mailto:a@b.c">a@b.c</a></p>
-
---- end
---- case 39 options gfm label-bytes 94 input-bytes 1060 expected-bytes 2627
-should match autolink literals combined w/ links like GitHub does (except for the bracket bug)
---- input
-Link start.
-
-[https://a.com
-
-[http://a.com
-
-[www.a.com
-
-[a@b.c
-
-Label end.
-
-https://a.com]
-
-http://a.com]
-
-www.a.com]
-
-a@b.c]
-
-Link start and label end.
-
-[https://a.com]
-
-[http://a.com]
-
-[www.a.com]
-
-[a@b.c]
-
-What naïvely seems like a label end (A).
-
-https://a.com`]`
-
-http://a.com`]`
-
-www.a.com`]`
-
-a@b.c`]`
-
-Link start and what naïvely seems like a balanced brace (B).
-
-[https://a.com`]`
-
-[http://a.com`]`
-
-[www.a.com`]`
-
-[a@b.c`]`
-
-What naïvely seems like a label end (C).
-
-https://a.com `]`
-
-http://a.com `]`
-
-www.a.com `]`
-
-a@b.c `]`
-
-Link start and what naïvely seems like a balanced brace (D).
-
-[https://a.com `]`
-
-[http://a.com `]`
-
-[www.a.com `]`
-
-[a@b.c `]`
-
-Link label with reference.
-
-[https://a.com][x]
-
-[http://a.com][x]
-
-[www.a.com][x]
-
-[a@b.c][x]
-
-[x]: #
-
-Link label with resource.
-
-[https://a.com]()
-
-[http://a.com]()
-
-[www.a.com]()
-
-[a@b.c]()
-
-More in link.
-
-[a https://b.com c]()
-
-[a http://b.com c]()
-
-[a www.b.com c]()
-
-[a b@c.d e]()
-
-Autolink literal after link.
-
-[a]() https://a.com
-
-[a]() http://a.com
-
-[a]() www.a.com
-
-[a]() a@b.c
-
---- expected
-<p>Link start.</p>
-<p>[<a href="https://a.com">https://a.com</a></p>
-<p>[<a href="http://a.com">http://a.com</a></p>
-<p>[<a href="http://www.a.com">www.a.com</a></p>
-<p>[<a href="mailto:a@b.c">a@b.c</a></p>
-<p>Label end.</p>
-<p><a href="https://a.com">https://a.com</a>]</p>
-<p><a href="http://a.com">http://a.com</a>]</p>
-<p><a href="http://www.a.com">www.a.com</a>]</p>
-<p><a href="mailto:a@b.c">a@b.c</a>]</p>
-<p>Link start and label end.</p>
-<p>[<a href="https://a.com">https://a.com</a>]</p>
-<p>[<a href="http://a.com">http://a.com</a>]</p>
-<p>[<a href="http://www.a.com">www.a.com</a>]</p>
-<p>[<a href="mailto:a@b.c">a@b.c</a>]</p>
-<p>What naïvely seems like a label end (A).</p>
-<p><a href="https://a.com%60%5D%60">https://a.com`]`</a></p>
-<p><a href="http://a.com%60%5D%60">http://a.com`]`</a></p>
-<p><a href="http://www.a.com%60%5D%60">www.a.com`]`</a></p>
-<p><a href="mailto:a@b.c">a@b.c</a><code>]</code></p>
-<p>Link start and what naïvely seems like a balanced brace (B).</p>
-<p>[<a href="https://a.com%60%5D%60">https://a.com`]`</a></p>
-<p>[<a href="http://a.com%60%5D%60">http://a.com`]`</a></p>
-<p>[<a href="http://www.a.com%60%5D%60">www.a.com`]`</a></p>
-<p>[<a href="mailto:a@b.c">a@b.c</a><code>]</code></p>
-<p>What naïvely seems like a label end (C).</p>
-<p><a href="https://a.com">https://a.com</a> <code>]</code></p>
-<p><a href="http://a.com">http://a.com</a> <code>]</code></p>
-<p><a href="http://www.a.com">www.a.com</a> <code>]</code></p>
-<p><a href="mailto:a@b.c">a@b.c</a> <code>]</code></p>
-<p>Link start and what naïvely seems like a balanced brace (D).</p>
-<p>[<a href="https://a.com">https://a.com</a> <code>]</code></p>
-<p>[<a href="http://a.com">http://a.com</a> <code>]</code></p>
-<p>[<a href="http://www.a.com">www.a.com</a> <code>]</code></p>
-<p>[<a href="mailto:a@b.c">a@b.c</a> <code>]</code></p>
-<p>Link label with reference.</p>
-<p><a href="#">https://a.com</a></p>
-<p><a href="#">http://a.com</a></p>
-<p><a href="#">www.a.com</a></p>
-<p><a href="#">a@b.c</a></p>
-<p>Link label with resource.</p>
-<p><a href="">https://a.com</a></p>
-<p><a href="">http://a.com</a></p>
-<p><a href="">www.a.com</a></p>
-<p><a href="">a@b.c</a></p>
-<p>More in link.</p>
-<p><a href="">a https://b.com c</a></p>
-<p><a href="">a http://b.com c</a></p>
-<p><a href="">a www.b.com c</a></p>
-<p><a href="">a b@c.d e</a></p>
-<p>Autolink literal after link.</p>
-<p><a href="">a</a> <a href="https://a.com">https://a.com</a></p>
-<p><a href="">a</a> <a href="http://a.com">http://a.com</a></p>
-<p><a href="">a</a> <a href="http://www.a.com">www.a.com</a></p>
-<p><a href="">a</a> <a href="mailto:a@b.c">a@b.c</a></p>
-
---- end
---- case 40 options gfm label-bytes 93 input-bytes 374 expected-bytes 1892
+--- case 36 options gfm label-bytes 93 input-bytes 374 expected-bytes 1892
 should match “character references (named)” like GitHub does (except for the bracket bug)
 --- input
 # “character reference”
@@ -1009,7 +650,7 @@ www.a&b~
 <p><a href="http://www.a&amp;b">www.a&amp;b</a>~</p>
 
 --- end
---- case 41 options gfm label-bytes 95 input-bytes 442 expected-bytes 2034
+--- case 37 options gfm label-bytes 95 input-bytes 442 expected-bytes 2034
 should match “character references (numeric)” like GitHub does (except for the bracket bug)
 --- input
 # “character reference”
@@ -1120,7 +761,7 @@ www.a&#35~
 <p><a href="http://www.a&amp;#35">www.a&amp;#35</a>~</p>
 
 --- end
---- case 42 options gfm label-bytes 46 input-bytes 269 expected-bytes 443
+--- case 38 options gfm label-bytes 46 input-bytes 269 expected-bytes 443
 should match email TLD digits like GitHub does
 --- input
 a@0.0
@@ -1171,7 +812,7 @@ react@0.0.0-experimental-aae83a4b9
 <p>[ react@0.0.0-experimental-aae83a4b9</p>
 
 --- end
---- case 43 options gfm label-bytes 54 input-bytes 396 expected-bytes 1444
+--- case 39 options gfm label-bytes 54 input-bytes 396 expected-bytes 1444
 should match protocol domain continue like GitHub does
 --- input
 # httpshhh? (2)
@@ -1282,7 +923,7 @@ http://a~
 <p><a href="http://a">http://a</a>~</p>
 
 --- end
---- case 44 options gfm label-bytes 51 input-bytes 362 expected-bytes 588
+--- case 40 options gfm label-bytes 51 input-bytes 362 expected-bytes 588
 should match protocol domain start like GitHub does
 --- input
 # httpshhh? (1)
@@ -1393,7 +1034,7 @@ http://~
 <p>http://~</p>
 
 --- end
---- case 45 options gfm label-bytes 52 input-bytes 464 expected-bytes 1580
+--- case 41 options gfm label-bytes 52 input-bytes 464 expected-bytes 1580
 should match protocol path continue like GitHub does
 --- input
 # httpshhh? (4)
@@ -1504,7 +1145,7 @@ http://a/b~
 <p><a href="http://a/b">http://a/b</a>~</p>
 
 --- end
---- case 46 options gfm label-bytes 49 input-bytes 430 expected-bytes 1512
+--- case 42 options gfm label-bytes 49 input-bytes 430 expected-bytes 1512
 should match protocol path start like GitHub does
 --- input
 # httpshhh? (3)
@@ -1615,31 +1256,7 @@ http://a/~
 <p><a href="http://a/">http://a/</a>~</p>
 
 --- end
---- case 47 options gfm label-bytes 70 input-bytes 158 expected-bytes 348
-should match links, autolink literals, and characters like GitHub does
---- input
-[www.example.com/a&copy;](#)
-
-www.example.com/a&copy;
-
-[www.example.com/a&bogus;](#)
-
-www.example.com/a&bogus;
-
-[www.example.com/a\.](#)
-
-www.example.com/a\.
-
---- expected
-<p><a href="#">www.example.com/a©</a></p>
-<p><a href="http://www.example.com/a">www.example.com/a</a>©</p>
-<p><a href="#">www.example.com/a&amp;bogus;</a></p>
-<p><a href="http://www.example.com/a">www.example.com/a</a>&amp;bogus;</p>
-<p><a href="#">www.example.com/a\.</a></p>
-<p><a href="http://www.example.com/a%5C">www.example.com/a\</a>.</p>
-
---- end
---- case 48 options gfm label-bytes 78 input-bytes 442 expected-bytes 2028
+--- case 43 options gfm label-bytes 78 input-bytes 442 expected-bytes 2028
 should match character reference-like (named) things in paths like GitHub does
 --- input
 # “character reference”
@@ -1750,7 +1367,7 @@ www.a/b&c~
 <p><a href="http://www.a/b&amp;c">www.a/b&amp;c</a>~</p>
 
 --- end
---- case 49 options gfm label-bytes 80 input-bytes 510 expected-bytes 2170
+--- case 44 options gfm label-bytes 80 input-bytes 510 expected-bytes 2170
 should match character reference-like (numeric) things in paths like GitHub does
 --- input
 # “character reference”
@@ -1861,7 +1478,7 @@ www.a/b&#35~
 <p><a href="http://www.a/b&amp;#35">www.a/b&amp;#35</a>~</p>
 
 --- end
---- case 50 options gfm label-bytes 75 input-bytes 457 expected-bytes 959
+--- case 45 options gfm label-bytes 75 input-bytes 457 expected-bytes 959
 should match path or link end like GitHub does (except for the bracket bug)
 --- input
 In autolink literal path or link end?
@@ -1930,7 +1547,7 @@ www.a.com#d]()
 <p><a href="http://www.a.com#d">www.a.com#d</a>]()</p>
 
 --- end
---- case 51 options gfm label-bytes 48 input-bytes 2247 expected-bytes 4297
+--- case 46 options gfm label-bytes 48 input-bytes 2247 expected-bytes 4297
 should match previous (complex) like GitHub does
 --- input
 Last non-markdown ASCII whitespace (FF): noreply@example.com, http://example.com, https://example.com, www.example.com
@@ -2002,132 +1619,7 @@ Some more non-ascii: 🤷‍noreply@example.com, 🤷‍http://example.com, 🤷
 <p>Some more non-ascii: 🤷‍<a href="mailto:noreply@example.com">noreply@example.com</a>, 🤷‍<a href="http://example.com">http://example.com</a>, 🤷‍<a href="https://example.com">https://example.com</a>, 🤷‍www.example.com</p>
 
 --- end
---- case 52 options gfm label-bytes 38 input-bytes 1442 expected-bytes 3083
-should match previous like GitHub does
---- input
-# HTTP
-
-https://a.b can start after EOF
-
-Can start after EOL:
-https://a.b
-
-Can start after tab:	https://a.b.
-
-Can start after space: https://a.b.
-
-Can start after left paren (https://a.b.
-
-Can start after asterisk *https://a.b.
-
-Can start after underscore *_https://a.b.
-
-Can start after tilde ~https://a.b.
-
-# www
-
-www.a.b can start after EOF
-
-Can start after EOL:
-www.a.b
-
-Can start after tab:	www.a.b.
-
-Can start after space: www.a.b.
-
-Can start after left paren (www.a.b.
-
-Can start after asterisk *www.a.b.
-
-Can start after underscore *_www.a.b.
-
-Can start after tilde ~www.a.b.
-
-# Email
-
-## Correct character before
-
-a@b.c can start after EOF
-
-Can start after EOL:
-a@b.c
-
-Can start after tab:	a@b.c.
-
-Can start after space: a@b.c.
-
-Can start after left paren(a@b.c.
-
-Can start after asterisk*a@b.c.
-
-While theoretically it’s possible to start at an underscore, that underscore
-is part of the email, so it’s in fact part of the link: _a@b.c.
-
-Can start after tilde~a@b.c.
-
-## Others characters before
-
-While other characters before the email aren’t allowed by GFM, they work on
-github.com: !a@b.c, "a@b.c, #a@b.c, $a@b.c, &a@b.c, 'a@b.c, )a@b.c, +a@b.c,
-,a@b.c, -a@b.c, .a@b.c, /a@b.c, :a@b.c, ;a@b.c, <a@b.c, =a@b.c, >a@b.c, ?a@b.c,
-@a@b.c, \a@b.c, ]a@b.c, ^a@b.c, `a@b.c, {a@b.c, }a@b.c.
-
-## Commas
-
-See `https://github.com/remarkjs/remark/discussions/678`.
-
-,https://github.com
-
-[ ,https://github.com
-
-[asd] ,https://github.com
-
---- expected
-<h1>HTTP</h1>
-<p><a href="https://a.b">https://a.b</a> can start after EOF</p>
-<p>Can start after EOL:
-<a href="https://a.b">https://a.b</a></p>
-<p>Can start after tab:	<a href="https://a.b">https://a.b</a>.</p>
-<p>Can start after space: <a href="https://a.b">https://a.b</a>.</p>
-<p>Can start after left paren (<a href="https://a.b">https://a.b</a>.</p>
-<p>Can start after asterisk *<a href="https://a.b">https://a.b</a>.</p>
-<p>Can start after underscore *_<a href="https://a.b">https://a.b</a>.</p>
-<p>Can start after tilde ~<a href="https://a.b">https://a.b</a>.</p>
-<h1>www</h1>
-<p><a href="http://www.a.b">www.a.b</a> can start after EOF</p>
-<p>Can start after EOL:
-<a href="http://www.a.b">www.a.b</a></p>
-<p>Can start after tab:	<a href="http://www.a.b">www.a.b</a>.</p>
-<p>Can start after space: <a href="http://www.a.b">www.a.b</a>.</p>
-<p>Can start after left paren (<a href="http://www.a.b">www.a.b</a>.</p>
-<p>Can start after asterisk *<a href="http://www.a.b">www.a.b</a>.</p>
-<p>Can start after underscore *_<a href="http://www.a.b">www.a.b</a>.</p>
-<p>Can start after tilde ~<a href="http://www.a.b">www.a.b</a>.</p>
-<h1>Email</h1>
-<h2>Correct character before</h2>
-<p><a href="mailto:a@b.c">a@b.c</a> can start after EOF</p>
-<p>Can start after EOL:
-<a href="mailto:a@b.c">a@b.c</a></p>
-<p>Can start after tab:	<a href="mailto:a@b.c">a@b.c</a>.</p>
-<p>Can start after space: <a href="mailto:a@b.c">a@b.c</a>.</p>
-<p>Can start after left paren(<a href="mailto:a@b.c">a@b.c</a>.</p>
-<p>Can start after asterisk*<a href="mailto:a@b.c">a@b.c</a>.</p>
-<p>While theoretically it’s possible to start at an underscore, that underscore
-is part of the email, so it’s in fact part of the link: <a href="mailto:_a@b.c">_a@b.c</a>.</p>
-<p>Can start after tilde~<a href="mailto:a@b.c">a@b.c</a>.</p>
-<h2>Others characters before</h2>
-<p>While other characters before the email aren’t allowed by GFM, they work on
-github.com: !<a href="mailto:a@b.c">a@b.c</a>, &quot;<a href="mailto:a@b.c">a@b.c</a>, #<a href="mailto:a@b.c">a@b.c</a>, $<a href="mailto:a@b.c">a@b.c</a>, &amp;<a href="mailto:a@b.c">a@b.c</a>, '<a href="mailto:a@b.c">a@b.c</a>, )<a href="mailto:a@b.c">a@b.c</a>, <a href="mailto:+a@b.c">+a@b.c</a>,
-,<a href="mailto:a@b.c">a@b.c</a>, <a href="mailto:-a@b.c">-a@b.c</a>, <a href="mailto:.a@b.c">.a@b.c</a>, /a@b.c, :<a href="mailto:a@b.c">a@b.c</a>, ;<a href="mailto:a@b.c">a@b.c</a>, &lt;<a href="mailto:a@b.c">a@b.c</a>, =<a href="mailto:a@b.c">a@b.c</a>, &gt;<a href="mailto:a@b.c">a@b.c</a>, ?<a href="mailto:a@b.c">a@b.c</a>,
-@<a href="mailto:a@b.c">a@b.c</a>, \<a href="mailto:a@b.c">a@b.c</a>, ]<a href="mailto:a@b.c">a@b.c</a>, ^<a href="mailto:a@b.c">a@b.c</a>, `<a href="mailto:a@b.c">a@b.c</a>, {<a href="mailto:a@b.c">a@b.c</a>, }<a href="mailto:a@b.c">a@b.c</a>.</p>
-<h2>Commas</h2>
-<p>See <code>https://github.com/remarkjs/remark/discussions/678</code>.</p>
-<p>,<a href="https://github.com">https://github.com</a></p>
-<p>[ ,<a href="https://github.com">https://github.com</a></p>
-<p>[asd] ,<a href="https://github.com">https://github.com</a></p>
-
---- end
---- case 53 options gfm label-bytes 80 input-bytes 289 expected-bytes 1473
+--- case 47 options gfm label-bytes 80 input-bytes 289 expected-bytes 1473
 should match www (domain continue) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf 2?
@@ -2238,7 +1730,7 @@ www.a~
 <p><a href="http://www.a">www.a</a>~</p>
 
 --- end
---- case 54 options gfm label-bytes 75 input-bytes 323 expected-bytes 1525
+--- case 48 options gfm label-bytes 75 input-bytes 323 expected-bytes 1525
 should match www (domain dot) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf 5?
@@ -2349,7 +1841,7 @@ www.a.~
 <p><a href="http://www.a">www.a</a>.~</p>
 
 --- end
---- case 55 options gfm label-bytes 48 input-bytes 253 expected-bytes 1362
+--- case 49 options gfm label-bytes 48 input-bytes 253 expected-bytes 1362
 should match www (domain start) like GitHub does
 --- input
 # wwwtf?
@@ -2460,7 +1952,7 @@ www.~
 <p><a href="http://www">www</a>.~</p>
 
 --- end
---- case 56 options gfm label-bytes 78 input-bytes 359 expected-bytes 1611
+--- case 50 options gfm label-bytes 78 input-bytes 359 expected-bytes 1611
 should match www (path continue) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf? (4)
@@ -2571,7 +2063,7 @@ www.a/b~
 <p><a href="http://www.a/b">www.a/b</a>~</p>
 
 --- end
---- case 57 options gfm label-bytes 75 input-bytes 325 expected-bytes 1543
+--- case 51 options gfm label-bytes 75 input-bytes 325 expected-bytes 1543
 should match www (path start) like GitHub does (except for the bracket bug)
 --- input
 # wwwtf? (3)

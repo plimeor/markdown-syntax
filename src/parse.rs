@@ -4732,8 +4732,8 @@ fn parse_literal_autolink(
         if !literal_scheme_prefix_ok(input, index) {
             return None;
         }
-        // A non-empty domain or bracketed IPv6 host is additionally required,
-        // so `http://`, `http://#`, `http://$` are not links.
+        // A non-empty domain is additionally required, so `http://`,
+        // `http://#`, `http://$`, and a bracketed IPv6 host are not links.
         if !http_literal_host_ok(&input[index + scheme_len..]) {
             return None;
         }
@@ -4807,9 +4807,6 @@ fn literal_starts_line(input: &str, index: usize) -> bool {
 }
 
 fn http_literal_host_ok(host: &str) -> bool {
-    if host.starts_with('[') {
-        return bracketed_ipv6_host_end(host).is_some();
-    }
     match host.chars().next() {
         Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => check_domain(host, true),
         Some(char) if !char.is_ascii() && is_valid_hostchar(source_char(char)) => {
@@ -4817,11 +4814,6 @@ fn http_literal_host_ok(host: &str) -> bool {
         }
         _ => false,
     }
-}
-
-fn bracketed_ipv6_host_end(host: &str) -> Option<usize> {
-    let close = host.find(']')?;
-    (close > 1).then_some(close + 1)
 }
 
 // Port of cmark-gfm `is_valid_hostchar`: a host char is valid when it is not a

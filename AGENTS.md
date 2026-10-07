@@ -62,6 +62,12 @@ file also runs quickly as plain `cargo test --test <name>`.
   `cargo test --profile ci --features html --test html_conformance -- --nocapture`.
   It fails only when an entry in `tests/html_conformance/deviations.rs` names
   no case, names a case twice, or names a case that now passes.
+- An oracle case that differs by decision of this syntax (a construct the
+  syntax drops, one the oracle lacks or turns off, or a rule shared with
+  another reference renderer) leaves the bench. Its input moves to
+  `tests/fixtures/syntax_decisions/`, with HTML verified against a reference
+  renderer (cmark-gfm, commonmark.js, micromark) or the decision, and
+  `tests/syntax_decisions.rs` checks it exactly.
 - Parse and serialize tests are split by flow, each with one oracle:
   Markdown → AST (`.ast` goldens, `tests/fixtures.rs`); AST → Markdown
   (hand-built trees, exact output, `tests/serialize_regressions.rs`);
