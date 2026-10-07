@@ -79,8 +79,10 @@ sits in a table cell or a directive label:
 - Inline content: a `Text` holding a line ending; a `SoftBreak`, or a
   `LineBreak` of trailing spaces, right after a `SoftBreak` or a `LineBreak`,
   which leaves an empty line; two adjacent `Delete`s, written `~~a~~~~b~~`.
-- `Emphasis`, `Strong`, `Delete`, and `Mark`: no children, or content that
-  starts or ends with a space, a tab, a `SoftBreak`, or a `LineBreak`; an
+- `Emphasis`, `Strong`, `Delete`, and `Mark`: no children; content that
+  starts with a space, a tab, a `SoftBreak`, or a `LineBreak` of trailing
+  spaces, or that ends with a space, a tab, a `SoftBreak`, or a `LineBreak`;
+  an
   `Emphasis` or a `Strong` whose only child is an `Emphasis` with the same
   delimiter (written `**a**` or `***a***`), a `Delete` whose only child is a
   `Delete`, and a `Mark` whose only child is a `Mark`.

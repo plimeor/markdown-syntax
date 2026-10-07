@@ -309,10 +309,16 @@ The serializer SHALL write a dash thematic break as `- - -` when it opens the
 document or directly follows a paragraph line, where `---` would open
 frontmatter or underline a setext heading; and SHALL start a list item's
 content on the line after its bullet when that content is a thematic break of
-the bullet's char or begins with a space or a tab. It SHALL number an
+the bullet's char or begins with one to three spaces or a tab; content that
+begins with indented code SHALL stay on the bullet's line after one space,
+since an item that starts empty cannot interrupt a paragraph. It SHALL number an
 ordered list's items from the list's start, one up per item, and write an item
 whose number would exceed 999999999, the largest a 9-digit marker holds, with
 999999999.
+
+#### Scenario: Indented code opening a nested item
+- **WHEN** `parse("- a\n  -     x").document.to_markdown()` runs
+- **THEN** it returns `"- a\n  -     x\n"`, which reads back as the same tree
 
 #### Scenario: Item numbers at the marker limit
 - **WHEN** `parse("999999999. a\n1. b").document.to_markdown()` runs
@@ -337,7 +343,13 @@ whose number would exceed 999999999, the largest a 9-digit marker holds, with
 ### Requirement: Links and autolinks written in their recorded form
 The serializer SHALL write a literal `Autolink` as its text, an angle-bracket
 `Autolink` as `<` and its text and `>`, and a `Link` as
-`[text](destination "title")`.
+`[text](destination "title")`. It SHALL write a full reference as its text
+and then its label, and a shortcut or collapsed reference as its label as
+written, which is both its text and its key.
+
+#### Scenario: Shortcut reference holding a code span
+- **WHEN** ``parse("[`` a ``]\n\n[`` a ``]: /u").document.to_markdown()`` runs
+- **THEN** it returns ``"[`` a ``]\n\n[`` a ``]: /u\n"``, whose reference still names the definition
 
 #### Scenario: Literal URL
 - **WHEN** `parse("see http://a.b").document.to_markdown()` runs

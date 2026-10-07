@@ -469,8 +469,12 @@ fn write_list(
                     if thematic_break_char(*marker) == marker_char
             );
         // Spaces or a tab opening the item's content would read as padding
-        // after the marker, so that content starts on the next line.
-        let opens_with_whitespace = inner.starts_with([' ', '\t']);
+        // after the marker, so that content starts on the next line. Four
+        // spaces or more open indented code, which the marker line holds
+        // after one space: an item that starts empty cannot interrupt a
+        // paragraph.
+        let opens_indented_code = inner.starts_with("    ");
+        let opens_with_whitespace = !opens_indented_code && inner.starts_with([' ', '\t']);
         if loose_single {
             output.push_str(marker.trim_end());
             output.push_str("\n\n");
@@ -830,12 +834,10 @@ fn write_inline(
             });
         }
         Inline::LinkReference(node) => {
-            write_span(out, "[", &node.children, "]", context)?;
-            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label));
+            write_reference(out, "[", &node.children, node.kind, &node.label, context)?;
         }
         Inline::ImageReference(node) => {
-            write_span(out, "![", &node.alt, "]", context)?;
-            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label));
+            write_reference(out, "![", &node.alt, node.kind, &node.label, context)?;
         }
         Inline::Html(node) => out.push_opaque(|out| out.push_str(&node.value)),
         Inline::SoftBreak(_) if context.heading => out.push(' '),
@@ -922,6 +924,30 @@ fn write_resource(
 }
 
 /// What follows a reference's text: nothing, `[]`, or `[label]`.
+/// A reference link or image. A full reference writes its text and then its
+/// label; a shortcut or collapsed one writes its label as written, which is
+/// both its text and its key, so the text it reads back as matches the
+/// definition it names.
+fn write_reference(
+    out: &mut InlineOut,
+    open: &str,
+    children: &[Inline],
+    kind: ReferenceKind,
+    label: &str,
+    context: Context,
+) -> Result<(), SerializeError> {
+    match kind {
+        ReferenceKind::Full => write_span(out, open, children, "]", context)?,
+        ReferenceKind::Shortcut | ReferenceKind::Collapsed => {
+            out.push_str(open);
+            out.push_str(label);
+            out.push(']');
+        }
+    }
+    out.push_opaque(|out| write_reference_kind(out, kind, label));
+    Ok(())
+}
+
 fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str) {
     match kind {
         ReferenceKind::Shortcut => {}

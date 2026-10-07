@@ -713,6 +713,9 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
         "Foo *bar baz*\n=============\n",
     ),
     ("- a\n  - ---", "- a\n  - - -\n"),
+    // Indented code opening a nested item stays on the marker line.
+    ("- a\n  -     x", "- a\n  -     x\n"),
+    ("1. a\n   1.     x\n          y", "1. a\n   1.     x\n          y\n"),
     // Later item numbers stop at the largest a marker can hold.
     ("999999999. a\n1. b", "999999999. a\n999999999. b\n"),
     ("999999998) a\n1) b\n1) c", "999999998) a\n999999999) b\n999999999) c\n"),
@@ -734,6 +737,13 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     ("[o]:&#x20;", "[o]: &#x20;\n"),
     ("<!--\n\n", "<!--\n\n"),
     ("<div>\n  a  \n</div>", "<div>\n  a  \n</div>\n"),
+    // A shortcut or collapsed reference writes its label as written.
+    ("[`` a ``]\n\n[`` a ``]: /u", "[`` a ``]\n\n[`` a ``]: /u\n"),
+    ("[`` a ``][]\n\n[`` a ``]: /u", "[`` a ``][]\n\n[`` a ``]: /u\n"),
+    ("![*a*]\n\n[*a*]: /u", "![*a*]\n\n[*a*]: /u\n"),
+    // An emphasis-like span may open with a backslash break.
+    ("*\\\na*", "*\\\na*\n"),
+    ("~~\\\na~~", "~~\\\na~~\n"),
     // Code spans written from their value.
     ("``\nfoo\nbar\n``", "`foo bar`\n"),
     ("`` a`b ``", "``a`b``\n"),

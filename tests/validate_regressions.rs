@@ -1405,3 +1405,44 @@ mod written_shapes {
         assert!(valid(&parsed("    a\n    \n    b\n\n")));
     }
 }
+
+mod emphasis_edges {
+    use markdown_syntax::*;
+
+    fn emphasis_opening_with(kind: LineBreakKind) -> Document {
+        let emphasis = Emphasis {
+            meta: NodeMeta::default(),
+            delimiter: EmphasisDelimiter::Asterisk,
+            children: vec![
+                Inline::LineBreak(LineBreak {
+                    meta: NodeMeta::default(),
+                    kind,
+                }),
+                Text::from("a").into(),
+            ],
+        };
+        Document {
+            meta: NodeMeta::default(),
+            children: vec![Paragraph::new([Inline::Emphasis(emphasis)]).into()],
+        }
+    }
+
+    #[test]
+    fn an_emphasis_may_open_with_a_backslash_break() {
+        // `*` before `\` is followed by punctuation, which opens it at the
+        // start of a paragraph: `*\` + line ending + `a*` parses to this tree.
+        let document = emphasis_opening_with(LineBreakKind::Backslash);
+        assert_eq!(document.validate(), Vec::new());
+        assert_eq!(document.to_markdown().unwrap(), "*\\\na*\n");
+    }
+
+    #[test]
+    fn an_emphasis_cannot_open_with_a_break_of_trailing_spaces() {
+        let document = emphasis_opening_with(LineBreakKind::Spaces);
+        assert_eq!(document.validate().len(), 1);
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+    }
+}

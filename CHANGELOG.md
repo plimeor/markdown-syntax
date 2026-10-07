@@ -108,7 +108,8 @@ with struct literals, or compares canonical output needs these updates.
 - **New validation rejections.** `validate` reports, and `to_markdown` and
   `to_html` return `InvalidDocument` for:
   - an empty `Emphasis`, `Strong`, `Delete`, or `Mark`, or one whose content
-    starts or ends with a space, a tab, a soft break, or a hard break;
+    starts with a space, a tab, a soft break, or a hard break of trailing
+    spaces, or ends with a space, a tab, a soft break, or a hard break;
   - a `Link`, `Autolink`, `LinkReference`, or `WikiLink` inside the text of
     a `Link` or `LinkReference`;
   - an `Autolink` whose text is not exactly one autolink of its form;

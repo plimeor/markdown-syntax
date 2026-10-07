@@ -717,11 +717,14 @@ fn validate_emphasis_container(node: &Inline, diagnostics: &mut Vec<Diagnostic>)
     validate_inlines(children, diagnostics);
 }
 
-/// Whether inline content starts with a space, a tab, or a line break.
+/// Whether inline content starts with a space, a tab, or a line break other
+/// than a backslash break: a delimiter run before `\` is followed by
+/// punctuation, which may open it as the characters before it allow.
 fn starts_with_whitespace(inlines: &[Inline]) -> bool {
     match inlines.first() {
         Some(Inline::Text(text)) => text.value.starts_with([' ', '\t']),
-        Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => true,
+        Some(Inline::SoftBreak(_)) => true,
+        Some(Inline::LineBreak(node)) => node.kind == LineBreakKind::Spaces,
         _ => false,
     }
 }
