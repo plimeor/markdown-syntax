@@ -1,10 +1,10 @@
 Document
   Paragraph
     Text "*"
-    Link destination=/uri title=none
+    Link form=inline destination=/uri title=none
       Text "foo*"
   Paragraph
-    Link destination=baz* title=none
+    Link form=inline destination=baz* title=none
       Text "foo *bar"
   Paragraph
     Text "[foo "
@@ -14,5 +14,5 @@ Document
     Code value="](/uri)" raw="](/uri)" fence=1
   Paragraph
     Text "[foo"
-    Link destination=http://example.com/?search=](uri) title=none
+    Link form=angle destination=http://example.com/?search=](uri) title=none
       Text "http://example.com/?search=](uri)"

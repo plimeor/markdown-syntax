@@ -4,10 +4,10 @@ Read `docs/overview.md` before starting work.
 
 ## Identity
 
-- A single `no_std + alloc` Rust crate at the repo root. Parses Markdown → AST
-  and serializes AST → canonical Markdown. Raw HTML and MDX are represented
-  only as Markdown syntax nodes; HTML rendering and sanitization stay out of
-  the default build.
+- A single `no_std + alloc` Rust crate at the repo root. Parses one fixed
+  Markdown syntax → AST and serializes AST → canonical Markdown. Raw HTML is
+  represented only as Markdown syntax nodes; HTML rendering and sanitization
+  stay out of the default build.
 - Hard invariants (do not break without an explicit decision): empty default
   features (`[features] default = []`), zero runtime dependencies, `#![no_std]`
   (+ `extern crate alloc`), MSRV 1.82. The default build surface stays

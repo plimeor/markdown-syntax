@@ -7,7 +7,7 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use markdown_syntax::{parse, Block, Document, Inline, SyntaxOptions};
+use markdown_syntax::{parse, Block, Document, Inline};
 
 /// Generous for an unoptimized build; every input below parses in
 /// milliseconds when parsing is linear.
@@ -31,18 +31,13 @@ const STACK_BYTES: usize = 2 << 20;
 /// Parses `input` on a small-stack thread, serializes and validates the
 /// result there, and returns the document.
 fn parse_bounded(name: &str, input: String) -> Document {
-    parse_bounded_with(name, input, SyntaxOptions::default())
-}
-
-/// `parse_bounded` under `options`.
-fn parse_bounded_with(name: &str, input: String, options: SyntaxOptions) -> Document {
     let thread_name = name.to_owned();
     let document = std::thread::Builder::new()
         .name(thread_name)
         .stack_size(STACK_BYTES)
         .spawn(move || {
             let started = Instant::now();
-            let document = options.parse(&input).document;
+            let document = parse(&input).document;
             let _ = document.to_markdown();
             let _ = document.validate();
             (document, started.elapsed())
@@ -84,8 +79,6 @@ fn inline_depth(nodes: &[Inline]) -> usize {
                     | Inline::Math(_)
                     | Inline::FootnoteReference(_)
                     | Inline::WikiLink(_)
-                    | Inline::MdxExpression(_)
-                    | Inline::MdxJsx(_)
             );
             if container {
                 deepest = deepest.max(depth + 1);
@@ -282,7 +275,7 @@ fn inline_nesting_stops_at_the_limit() {
 }
 
 #[test]
-fn mdx_jsx_and_expressions_parse_in_bounded_time() {
+fn jsx_and_expression_shaped_inputs_parse_in_bounded_time() {
     let _serial = one_at_a_time();
     let distinct = |close: bool| -> String {
         let mut input: String = (0..20_000).map(|tag| format!("<A{tag}>\n")).collect();
@@ -318,7 +311,7 @@ fn mdx_jsx_and_expressions_parse_in_bounded_time() {
         ),
         ("declarations without raw HTML", "<!X".repeat(30_000) + ">"),
     ] {
-        parse_bounded_with(name, input, SyntaxOptions::mdx());
+        parse_bounded(name, input);
     }
 }
 
@@ -376,7 +369,7 @@ fn emphasis_inside_marks_shares_the_inline_limit() {
 }
 
 #[test]
-fn tilde_closers_with_subscripts_parse_in_bounded_time() {
+fn tilde_closers_parse_in_bounded_time() {
     let _serial = one_at_a_time();
     let input = "*a ".repeat(50_000) + &" ~b~~ ".repeat(50_000);
     parse_bounded("tilde closers", input);
@@ -429,9 +422,9 @@ fn assert_linear_growth(name: &str, n: usize, run: impl Fn(usize) -> Duration) {
     );
 }
 
-fn time_parse(input: &str, options: SyntaxOptions) -> Duration {
+fn time_parse(input: &str) -> Duration {
     let started = Instant::now();
-    let _ = options.parse(input);
+    let _ = parse(input);
     started.elapsed()
 }
 
@@ -447,28 +440,28 @@ fn parsing_grows_linearly_with_lines_and_diagnostics() {
     // Each malformed opener's diagnostic runs to the end of the paragraph;
     // translating it must not walk the lines after it.
     for line in [" x :a{\n", "> x :a{ \n"] {
-        assert_linear_growth(line, 8_000, |n| {
-            time_parse(&line.repeat(n), SyntaxOptions::default())
-        });
+        assert_linear_growth(line, 8_000, |n| time_parse(&line.repeat(n)));
     }
     let quote_prefix = "> ".repeat(30);
     assert_linear_growth("long nested block quote", 500, |n| {
         let quoted: String = (0..n)
             .map(|line| format!("{quote_prefix}line {line} *a* [b](u)\r\n"))
             .collect();
-        time_parse(&quoted, SyntaxOptions::default())
+        time_parse(&quoted)
     });
 }
 
 #[test]
 fn block_containers_grow_linearly_with_their_lines() {
     let _serial = one_at_a_time();
-    // A description's details continue with lazy lines.
-    assert_linear_growth("long description details", 2_000, |n| {
-        time_parse(
-            &(String::from("a\n: b\n") + &"c\n".repeat(n)),
-            SyntaxOptions::default(),
-        )
+    // A paragraph after a `:` line continues with lazy lines, as it did when
+    // the line opened description details, and so does a footnote
+    // definition's paragraph.
+    assert_linear_growth("long footnote definition", 2_000, |n| {
+        time_parse(&(String::from("[^1]: b\n") + &"c\n".repeat(n)))
+    });
+    assert_linear_growth("long former description details", 2_000, |n| {
+        time_parse(&(String::from("a\n: b\n") + &"c\n".repeat(n)))
     });
     // Each line passes the same nested containers.
     let prefix = "> - ".repeat(8);
@@ -493,50 +486,39 @@ fn open_definitions_and_terms_grow_linearly() {
     for name in ["open title", "open title before pipes"] {
         assert_linear_growth(name, 2_000, |n| {
             let line = if name == "open title" { "\nx" } else { "\n|x" };
-            time_parse(
-                &(String::from("[a]: /u \"") + &line.repeat(n)),
-                SyntaxOptions::gfm(),
-            )
+            time_parse(&(String::from("[a]: /u \"") + &line.repeat(n)))
         });
     }
     // An unclosed label before lines a table delimiter row could follow.
     assert_linear_growth("open label before pipes", 2_000, |n| {
-        time_parse(
-            &(format!("[{}", "a".repeat(85)) + &"\n|x".repeat(n)),
-            SyntaxOptions::gfm(),
-        )
+        time_parse(&(format!("[{}", "a".repeat(85)) + &"\n|x".repeat(n)))
     });
-    // Description markers after a long paragraph that is no term.
+    // Former description markers after a long paragraph.
     assert_linear_growth("markers after a long paragraph", 2_000, |n| {
-        time_parse(
-            &("a\n".repeat(n) + "    b\n" + &"~ x\n".repeat(n)),
-            SyntaxOptions::default(),
-        )
+        time_parse(&("a\n".repeat(n) + "    b\n" + &"~ x\n".repeat(n)))
     });
-    // Quoted MDX expression openers before list items.
+    // Quoted former MDX expression openers before list items.
     assert_linear_growth("quoted expression openers", 1_000, |n| {
-        time_parse(&"> {\n- a\n".repeat(n), SyntaxOptions::mdx())
+        time_parse(&"> {\n- a\n".repeat(n))
     });
 }
 
 #[test]
-fn serialization_grows_linearly_with_definitions_and_layouts() {
+fn serialization_grows_linearly_with_definitions_and_lists() {
     let _serial = one_at_a_time();
-    // Every block reads back with the labels the document knows.
     assert_linear_growth("definitions before paragraphs", 500, |n| {
         let mut input: String = (0..n).map(|i| format!("[a{i}]: /u{i}\n")).collect();
         input.push('\n');
         input.push_str(&"plain words here\n\n".repeat(n));
         time_serialize(&parse(&input).document)
     });
-    // Each list needs a layout alternative of its own.
     assert_linear_growth("lists that need a layout", 100, |n| {
         time_serialize(&parse(&"-\n  ---\n\nx\n\n".repeat(n)).document)
     });
     assert_linear_growth("items that need a layout", 100, |n| {
         time_serialize(&parse(&"-\n  ---\n".repeat(n)).document)
     });
-    // Groups of abutting runs, each needing a delimiter switch.
+    // Groups of abutting runs.
     assert_linear_growth("abutting run groups", 250, |n| {
         time_serialize(&parse(&"***b_*_b_* ".repeat(n)).document)
     });
@@ -672,11 +654,11 @@ fn nested_list_depth_grows_time_linearly() {
 }
 
 #[test]
-fn nested_emphasis_that_does_not_read_back_serializes_in_bounded_time() {
+fn nested_emphasis_with_abutting_tildes_serializes_in_bounded_time() {
     let _serial = one_at_a_time();
-    // A paragraph that reads back only after its delimiter choices and edge
-    // encodings are tried, nested sixteen deep, serializes within the
-    // scenario's bound rather than the shared limit.
+    // Emphasis and a mark nested sixteen deep, with tildes and a reference
+    // at its end, serializes within the scenario's bound rather than the
+    // shared limit.
     let input = format!(
         "{}==b {}x{} c=={} ://~&mp;~",
         "*a ".repeat(16),
@@ -684,7 +666,7 @@ fn nested_emphasis_that_does_not_read_back_serializes_in_bounded_time() {
         " a*".repeat(6),
         " d*".repeat(16)
     );
-    let document = parse_bounded("nested emphasis with every delimiter choice", input);
+    let document = parse_bounded("nested emphasis with abutting tildes", input);
     let started = Instant::now();
     let _ = document.to_markdown();
     assert!(

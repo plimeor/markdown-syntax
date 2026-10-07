@@ -134,38 +134,19 @@ mod review_validate {
         let empty_containers = [
             Inline::Emphasis(Emphasis {
                 meta: NodeMeta::default(),
+                delimiter: EmphasisDelimiter::Asterisk,
                 children: vec![],
             }),
             Inline::Strong(Strong {
                 meta: NodeMeta::default(),
-                children: vec![],
-            }),
-            Inline::Underline(Underline {
-                meta: NodeMeta::default(),
+                delimiter: EmphasisDelimiter::Asterisk,
                 children: vec![],
             }),
             Inline::Delete(Delete {
                 meta: NodeMeta::default(),
-                marker: DeleteMarker::DoubleTilde,
-                children: vec![],
-            }),
-            Inline::Insert(Insert {
-                meta: NodeMeta::default(),
                 children: vec![],
             }),
             Inline::Mark(Mark {
-                meta: NodeMeta::default(),
-                children: vec![],
-            }),
-            Inline::Subscript(Subscript {
-                meta: NodeMeta::default(),
-                children: vec![],
-            }),
-            Inline::Superscript(Superscript {
-                meta: NodeMeta::default(),
-                children: vec![],
-            }),
-            Inline::Spoiler(Spoiler {
                 meta: NodeMeta::default(),
                 children: vec![],
             }),
@@ -181,6 +162,7 @@ mod review_validate {
 
         let bad = paragraph(vec![Inline::Emphasis(Emphasis {
             meta: NodeMeta::default(),
+            delimiter: EmphasisDelimiter::Asterisk,
             children: vec![],
         })]);
         assert!(matches!(
@@ -190,6 +172,7 @@ mod review_validate {
 
         let good = paragraph(vec![Inline::Emphasis(Emphasis {
             meta: NodeMeta::default(),
+            delimiter: EmphasisDelimiter::Asterisk,
             children: vec![text("a")],
         })]);
         assert!(good.validate().is_empty());
@@ -213,13 +196,14 @@ mod review_validate {
         assert!(good.validate().is_empty());
     }
 
-    // SR8 — a link whose text no angle-bracket autolink can write is valid and
-    // is written as an inline link that reads back as the same link.
+    // SR8 — an inline link whose text is an address is valid and is written
+    // as an inline link that reads back as the same link.
     #[test]
-    fn sr8_link_text_that_no_angle_bracket_autolink_can_write_is_valid() {
+    fn sr8_inline_link_whose_text_is_an_address_is_valid() {
         let link = |destination: &str, text: &str| {
             paragraph(vec![Inline::Link(Link {
                 meta: NodeMeta::default(),
+                form: LinkForm::Inline,
                 destination: destination.into(),
                 destination_kind: LinkDestinationKind::Bare,
                 title: None,
@@ -240,14 +224,15 @@ mod review_validate {
             format!("{:?}", crate::normalize::normalized(&document.children)),
         );
 
-        let angle = link(
+        // An inline link is written inline even when its text is its URL.
+        let inline = link(
             "https://example.com/path?q=1",
             "https://example.com/path?q=1",
         );
-        assert!(angle.validate().is_empty());
+        assert!(inline.validate().is_empty());
         assert_eq!(
-            angle.to_markdown().expect("document serializes"),
-            "<https://example.com/path?q=1>\n"
+            inline.to_markdown().expect("document serializes"),
+            "[https://example.com/path?q=1](https://example.com/path?q=1)\n"
         );
     }
 
@@ -422,6 +407,7 @@ mod review_validate {
         // keep from closing, so it may not end with one.
         let bad = paragraph(vec![Inline::Emphasis(Emphasis {
             meta: NodeMeta::default(),
+            delimiter: EmphasisDelimiter::Asterisk,
             children: vec![
                 text("foo"),
                 Inline::LineBreak(LineBreak {
@@ -431,5 +417,206 @@ mod review_validate {
             ],
         })]);
         assert!(!bad.validate().is_empty());
+    }
+
+    fn invalid(document: &Document) -> bool {
+        !document.validate().is_empty()
+            && matches!(
+                document.to_markdown(),
+                Err(SerializeError::InvalidDocument(_))
+            )
+    }
+
+    fn emphasis(children: Vec<Inline>) -> Inline {
+        Inline::Emphasis(Emphasis {
+            meta: NodeMeta::default(),
+            delimiter: EmphasisDelimiter::Asterisk,
+            children,
+        })
+    }
+
+    #[test]
+    fn emphasis_like_content_with_whitespace_at_an_edge_is_invalid() {
+        let soft_break = || {
+            Inline::SoftBreak(SoftBreak {
+                meta: NodeMeta::default(),
+            })
+        };
+        for children in [
+            vec![text("a ")],
+            vec![text(" a")],
+            vec![text("\ta")],
+            vec![soft_break(), text("a")],
+            vec![text("a"), soft_break()],
+        ] {
+            assert!(invalid(&paragraph(vec![emphasis(children.clone())])));
+            assert!(invalid(&paragraph(vec![Inline::Mark(Mark {
+                meta: NodeMeta::default(),
+                children,
+            })])));
+        }
+        // Whitespace inside the content, or written as a reference, is valid.
+        assert!(paragraph(vec![emphasis(vec![text("a b")])])
+            .validate()
+            .is_empty());
+        let reference = Inline::CharacterReference(CharacterReference {
+            meta: NodeMeta::default(),
+            reference: "&#x20;".into(),
+            value: " ".into(),
+        });
+        assert!(paragraph(vec![emphasis(vec![text("a"), reference])])
+            .validate()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_link_inside_link_text_is_invalid() {
+        let inner = Inline::Link(Link::new("v", [Text::from("b")]));
+        let nested = Inline::Link(Link::new("u", [text("a "), emphasis(vec![inner])]));
+        assert!(invalid(&paragraph(vec![nested])));
+
+        let wikilink = Inline::WikiLink(WikiLink {
+            meta: NodeMeta::default(),
+            target: "b".into(),
+            label: "b".into(),
+            embed: false,
+        });
+        let reference = Inline::LinkReference(LinkReference {
+            meta: NodeMeta::default(),
+            identifier: "a".into(),
+            label: "a".into(),
+            kind: ReferenceKind::Full,
+            children: vec![wikilink],
+        });
+        assert!(invalid(&paragraph(vec![reference])));
+
+        // A link inside image alt text is valid.
+        let image = Inline::Image(Image {
+            meta: NodeMeta::default(),
+            destination: "i".into(),
+            destination_kind: LinkDestinationKind::Bare,
+            title: None,
+            title_kind: None,
+            alt: vec![Inline::Link(Link::new("v", [Text::from("b")]))],
+        });
+        assert!(paragraph(vec![image]).validate().is_empty());
+    }
+
+    #[test]
+    fn an_autolink_form_that_does_not_fit_its_content_is_invalid() {
+        let link = |form, destination: &str, text: &str| {
+            let mut link = Link::new(destination, [Text::from(text)]);
+            link.form = form;
+            paragraph(vec![Inline::Link(link)])
+        };
+        assert!(invalid(&link(LinkForm::LiteralAutolink, "http://a.b", "x")));
+        assert!(invalid(&link(
+            LinkForm::LiteralAutolink,
+            "http://a.b",
+            "a.b"
+        )));
+        assert!(invalid(&link(
+            LinkForm::LiteralAutolink,
+            "mailto:a.b",
+            "a.b"
+        )));
+        assert!(invalid(&link(LinkForm::AngleAutolink, "http://a.b", "a b")));
+        let mut titled = Link::new("http://a.b", [Text::from("http://a.b")]);
+        titled.form = LinkForm::AngleAutolink;
+        titled.title = Some("t".into());
+        titled.title_kind = Some(LinkTitleKind::DoubleQuote);
+        assert!(invalid(&paragraph(vec![Inline::Link(titled)])));
+
+        for (form, destination, text) in [
+            (LinkForm::LiteralAutolink, "http://a.b", "http://a.b"),
+            (LinkForm::LiteralAutolink, "http://www.a.b", "www.a.b"),
+            (LinkForm::LiteralAutolink, "mailto:a@b.c", "a@b.c"),
+            (LinkForm::AngleAutolink, "mailto:a@b.c", "a@b.c"),
+            (LinkForm::AngleAutolink, "irc://a", "irc://a"),
+        ] {
+            let document = link(form, destination, text);
+            assert!(document.validate().is_empty(), "{destination}");
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    crate::normalize::normalized(&parse(&markdown).document.children)
+                ),
+                format!("{:?}", crate::normalize::normalized(&document.children)),
+                "{markdown:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn adjacent_lists_with_one_marker_are_invalid() {
+        let item = || ListItem {
+            meta: NodeMeta::default(),
+            checked: None,
+            children: vec![Paragraph::new([Text::from("a")]).into()],
+        };
+        let list = |ordered: bool, delimiter| {
+            Block::List(List {
+                meta: NodeMeta::default(),
+                ordered,
+                start: ordered.then_some(1),
+                delimiter,
+                tight: true,
+                children: vec![item()],
+            })
+        };
+        let document = |first, second| Document {
+            meta: NodeMeta::default(),
+            children: vec![first, second],
+        };
+        assert!(invalid(&document(
+            list(false, ListDelimiter::Dash),
+            list(false, ListDelimiter::Dash)
+        )));
+        assert!(invalid(&document(
+            list(true, ListDelimiter::Paren),
+            list(true, ListDelimiter::Paren)
+        )));
+        let quoted = Document {
+            meta: NodeMeta::default(),
+            children: vec![Block::BlockQuote(BlockQuote {
+                meta: NodeMeta::default(),
+                children: vec![
+                    list(false, ListDelimiter::Plus),
+                    list(false, ListDelimiter::Plus),
+                ],
+            })],
+        };
+        assert!(invalid(&quoted));
+        assert!(document(
+            list(false, ListDelimiter::Dash),
+            list(false, ListDelimiter::Plus)
+        )
+        .validate()
+        .is_empty());
+        assert!(document(
+            list(false, ListDelimiter::Dash),
+            list(true, ListDelimiter::Period)
+        )
+        .validate()
+        .is_empty());
+    }
+
+    #[test]
+    fn directive_names_are_runs_of_letters_joined_by_dashes() {
+        let directive = |name: &str| {
+            paragraph(vec![Inline::TextDirective(TextDirective {
+                meta: NodeMeta::default(),
+                name: name.into(),
+                label: vec![],
+                attributes: vec![],
+            })])
+        };
+        for name in ["h1", "my_note", "a--b", "-a", "a-", "1a", ""] {
+            assert!(invalid(&directive(name)), "{name}");
+        }
+        for name in ["a", "note", "my-note", "A-b-C"] {
+            assert!(directive(name).validate().is_empty(), "{name}");
+        }
     }
 }

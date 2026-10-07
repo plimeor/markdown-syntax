@@ -1,9 +1,9 @@
 Document
   Paragraph
     Text "This "
-    WikiLink target="https://example.org" label="title" order=after
+    WikiLink target="https://example.org" label="title"
     Text " and "
-    WikiLink target="Name [of] page" label="Name [of] page" order=after
+    WikiLink target="Name [of] page" label="Name [of] page"
     Text "."
   Table
     Alignments none
@@ -12,4 +12,4 @@ Document
         Text "header"
     Row
       Cell
-        WikiLink target="url" label="url" order=after
+        WikiLink target="url" label="url"

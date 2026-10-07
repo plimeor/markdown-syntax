@@ -1,7 +1,7 @@
 Document
   Paragraph
     Text "This "
-    WikiLink target="https://example.org" label="title" order=before
+    WikiLink target="title" label="https://example.org"
     Text " and "
-    WikiLink target="Name of page" label="Name of page" order=before
+    WikiLink target="Name of page" label="Name of page"
     Text "."

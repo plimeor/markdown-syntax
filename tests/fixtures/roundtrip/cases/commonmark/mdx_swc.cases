@@ -4,21 +4,20 @@ commit: 1506572
 source: upstream-tests/mdx_swc.rs
 role: upstream-input
 count: 5
-profiles: mdx
 
---- case 1 profile mdx bytes 5
+--- case 1 bytes 5
 {'}'}
 --- end
---- case 2 profile mdx bytes 9
+--- case 2 bytes 9
 a {'}'} b
 --- end
---- case 3 profile mdx bytes 17
+--- case 3 bytes 17
 <a {...a/*}*/} />
 --- end
---- case 4 profile mdx bytes 13
+--- case 4 bytes 13
 <a b={'}'} />
 --- end
---- case 5 profile mdx bytes 34
+--- case 5 bytes 34
 import a from 'b'
 
 export {a}

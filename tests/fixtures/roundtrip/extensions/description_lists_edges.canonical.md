@@ -1,5 +1,5 @@
 apple
-: red fruit
+~ red fruit
 multi
 line
 : first

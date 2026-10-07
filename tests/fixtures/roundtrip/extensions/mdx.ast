@@ -1,5 +1,6 @@
 Document
-  MdxEsm "import X from './x'"
-  MdxJsx "<X value={1} />"
-  MdxExpression "1 + 1"
-
+  Paragraph
+    Text "import X from './x'"
+  HtmlBlock "<X value={1} />"
+  Paragraph
+    Text "{1 + 1}"

@@ -1,23 +1,23 @@
 Document
   Paragraph
-    Link destination=foo(and(bar)) title="paren title"
+    Link form=inline destination=foo(and(bar)) title="paren title"
       Text "paren"
     SoftBreak
-    Link destination=foo)bar title="single title"
+    Link form=inline destination=foo)bar title="single title"
       Text "escaped"
     SoftBreak
-    Link destination=foo bar (baz) title="paren title"
+    Link form=inline destination=foo bar (baz) title="paren title"
       Text "angle"
     SoftBreak
     Image destination=img(1).png title="image title"
       Text "image "
-      Emphasis
+      Emphasis delimiter=*
         Text "alt"
     SoftBreak
-    Link destination= title="empty title"
+    Link form=inline destination= title="empty title"
       Text "empty"
     SoftBreak
-    Link destination=/url title="wrapped title"
+    Link form=inline destination=/url title="wrapped title"
       Text "wrapped"
   Paragraph
     Text "[blank](/url"

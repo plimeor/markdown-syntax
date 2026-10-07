@@ -11,7 +11,7 @@ A `no_std + alloc` Rust crate that parses Markdown source into an owned AST and 
 
 - **AST-first** — `parse` returns an owned enum tree over `alloc`; the output verbs live on the `Document` you hold.
 - **Tolerant** — problems are collected as diagnostics, never thrown; `parse` is infallible.
-- **Maximal default dialect** — GFM + footnotes + math + frontmatter + wikilinks + directives + extra inline marks, out of the box.
+- **One syntax** — CommonMark + GFM + footnotes + alerts + math + frontmatter + wikilinks + directives + `==` highlight + shortcodes, with nothing to configure.
 - **Lean core** — zero runtime dependencies, `no_std + alloc`, MSRV 1.82.
 
 ## Install
@@ -52,52 +52,13 @@ assert_eq!(markdown, "# Title\n\nHello *world*.\n");
 
 ## Common tasks
 
-`parse` is the one obvious path. When you need to narrow the dialect, read diagnostics, walk the tree, or render HTML, each task is one small snippet below.
+`parse` is the one way in. When you need to read diagnostics, walk the tree, or render HTML, each task is one small snippet below.
 
-- [Pick a dialect (presets)](#pick-a-dialect-presets)
-- [Tune one construct (builder)](#tune-one-construct-builder)
 - [Walk the AST](#walk-the-ast)
-- [Handle diagnostics (tolerant vs strict)](#handle-diagnostics-tolerant-vs-strict)
+- [Handle diagnostics](#handle-diagnostics)
 - [Customize serialization](#customize-serialization)
 - [Source positions (optional)](#source-positions-optional)
 - [Build an AST by hand](#build-an-ast-by-hand)
-
-### Pick a dialect (presets)
-
-```rust
-use markdown_syntax::SyntaxOptions;
-
-// Named presets each build a `SyntaxOptions`; call `.parse` to run them.
-let cm = SyntaxOptions::commonmark().parse("~~kept literal~~");
-let gfm = SyntaxOptions::gfm().parse("~~done~~ and https://example.com");
-let mdx = SyntaxOptions::mdx().parse("<Component/>\n\ntext");
-
-// `parse(input)` is exactly `SyntaxOptions::default().parse(input)` — the
-// maximal non-MDX dialect.
-let default = SyntaxOptions::default().parse("H~2~O and x^2^");
-let _ = (cm, gfm, mdx, default);
-```
-
-`commonmark` / `gfm` / `mdx` are the named presets; `default` == the maximal non-MDX dialect, and `parse(input)` is sugar for `SyntaxOptions::default().parse(input)`. See [`SyntaxOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.SyntaxOptions.html).
-
-### Tune one construct (builder)
-
-```rust
-use markdown_syntax::{SyntaxOptions, Construct, WikiLinkOrder};
-
-// Tune a preset with the typo-proof `Construct` builder (grouped constructs
-// such as `Math`, `Footnotes`, `Directives` flip every flag in the group).
-let no_math = SyntaxOptions::default().disable(Construct::Math).parse("price $5");
-
-let with_wikilinks = SyntaxOptions::commonmark()
-    .enable(Construct::Strikethrough)
-    .enable(Construct::Wikilinks(WikiLinkOrder::TitleAfterPipe))
-    .parse("~~old~~ see [[target|label]]");
-
-let _ = (no_math, with_wikilinks);
-```
-
-[`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) is a typo-proof front door over the full [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) flag set. Grouped constructs (`Math`, `Footnotes`, `Directives`) flip a whole family at once, `HtmlContainers` recognizes Markdown-compatible HTML containers, and `Wikilinks` is the one parameterized variant.
 
 ### Walk the AST
 
@@ -120,26 +81,18 @@ for block in &document.children {
 
 `document.children` is a `Vec<Block>`; block content (like `Paragraph.children`) is a `Vec<Inline>`. See the [`ast`](https://docs.rs/markdown-syntax/latest/markdown_syntax/ast/index.html) module, [`Block`](https://docs.rs/markdown-syntax/latest/markdown_syntax/ast/enum.Block.html), and [`Inline`](https://docs.rs/markdown-syntax/latest/markdown_syntax/ast/enum.Inline.html).
 
-### Handle diagnostics (tolerant vs strict)
+### Handle diagnostics
 
 ```rust
-use markdown_syntax::{SyntaxOptions, DiagnosticSeverity, ParseStrictError};
+use markdown_syntax::{parse, DiagnosticSeverity};
 
-// Tolerant parse: problems are collected, never thrown.
-let output = SyntaxOptions::default().parse(":::note\nunclosed container");
+// Problems are collected, never thrown.
+let output = parse(":::note\nunclosed container");
 for diagnostic in &output.diagnostics {
     let _ = (diagnostic.severity, diagnostic.code, diagnostic.span, &diagnostic.message);
     if diagnostic.severity == DiagnosticSeverity::Error {
         // handle an error-severity diagnostic
     }
-}
-
-// `parse_strict` promotes any error-severity diagnostic (or a config conflict)
-// to a hard `Err`.
-match SyntaxOptions::default().parse_strict("# clean input") {
-    Ok(out) => assert!(out.diagnostics.iter().all(|d| d.severity != DiagnosticSeverity::Error)),
-    Err(ParseStrictError::Config(_)) => {}
-    Err(ParseStrictError::Diagnostic(_)) => {}
 }
 ```
 
@@ -148,7 +101,7 @@ match SyntaxOptions::default().parse_strict("# clean input") {
 ### Customize serialization
 
 ```rust
-use markdown_syntax::{parse, LineEnding, SerializeOptions, SyntaxOptions};
+use markdown_syntax::{parse, LineEnding, SerializeOptions};
 
 // `SerializeOptions` is #[non_exhaustive]: mutate a default rather than using a
 // struct literal.
@@ -159,20 +112,16 @@ options.final_newline = false;
 let markdown = parse("# Title").document.to_markdown_with(&options)?;
 assert_eq!(markdown, "# Title");
 
-// The output reads back as the same tree under `options.syntax`, the maximal
-// dialect by default: `==` marks a highlight there, so text holding it is
-// escaped, while CommonMark leaves it as it is.
-let text = SyntaxOptions::commonmark().parse("a ==b== c").document;
-assert_eq!(text.to_markdown()?, "a \\=\\=b\\=\\= c\n");
-let mut commonmark = SerializeOptions::default();
-commonmark.syntax = SyntaxOptions::commonmark();
-assert_eq!(text.to_markdown_with(&commonmark)?, "a ==b== c\n");
+// Each node is written in the spelling it records: `_` emphasis stays `_`,
+// an escape stays an escape, and a literal autolink stays bare.
+let document = parse("_a_ \\*b\\* https://example.com").document;
+assert_eq!(document.to_markdown()?, "_a_ \\*b\\* https://example.com\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 
 Because `SerializeOptions` is `#[non_exhaustive]`, external code cannot struct-literal-construct it (even with `..Default::default()`, E0639) — mutate a `default()` instead.
 
-The serializer escapes only what a parse of its own output reads as syntax, so the canonical output stays close to what an author writes. A hand-built tree that no Markdown reads back as — a link inside a link, say — returns `SerializeError::Unrepresentable` with a diagnostic naming the node.
+The serializer only renders: it writes text, escapes, and character references as the AST records them and never parses its own output. A hand-built `Text("*a*")` is written `*a*`, which reads back as emphasis; build literal punctuation with `Escape` nodes instead. A hand-built tree that no Markdown can express — a link inside a link, say — fails validation, and `to_markdown` returns `SerializeError::InvalidDocument` with the diagnostics.
 
 ### Source positions (optional)
 
@@ -214,6 +163,14 @@ let document = Document {
 // Hand-built nodes carry no span.
 assert_eq!(document.children[0].span(), None);
 assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
+
+// Text is written as it is; `Escape` writes a literal punctuation char.
+let escape = |value| Inline::from(Escape { meta: NodeMeta::default(), value });
+let literal = Document {
+    meta: NodeMeta::default(),
+    children: vec![Paragraph::new([escape('*'), Text::from("a").into(), escape('*')]).into()],
+};
+assert_eq!(literal.to_markdown().unwrap(), "\\*a\\*\n");
 ```
 
 ## HTML rendering (opt-in)
@@ -244,16 +201,18 @@ let _ = document.to_html_with(&options);
 
 See [`HtmlOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/html/struct.HtmlOptions.html). docs.rs builds with the `html` feature enabled, so the renderer's API is fully documented there.
 
-## Dialects & constructs reference
+## Syntax reference
 
-| Preset | `.parse` builder | Membership note |
-| --- | --- | --- |
-| `commonmark` | `SyntaxOptions::commonmark()` | CommonMark core only |
-| `gfm` | `SyntaxOptions::gfm()` | CommonMark + tables, task lists, strikethrough, autolinks, footnotes |
-| `mdx` | `SyntaxOptions::mdx()` | MDX JSX/expressions/ESM on; raw HTML off |
-| `default` (== max) | `SyntaxOptions::default()` / `parse` | Maximal non-MDX dialect, including Markdown-compatible HTML containers (see below) |
+`parse` recognizes one fixed syntax:
 
-`underline` (`__text__`) is **off** in `default` because it would override CommonMark strong; **MDX is off** by default and conflicts with raw HTML; wikilinks default to title-after-pipe. For the full `Construct` and `Constructs` surface, see [`Construct`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/enum.Construct.html) and [`Constructs`](https://docs.rs/markdown-syntax/latest/markdown_syntax/options/struct.Constructs.html) on docs.rs.
+| Family | Constructs |
+| --- | --- |
+| CommonMark | everything, including raw HTML and indented code |
+| GFM | tables, task list items, `~~` strikethrough, literal autolinks (`http://`, `https://`, `www.`, emails, `mailto:`, `xmpp:`), alerts |
+| Footnotes | `[^id]` references and definitions, inline `^[note]` |
+| Extensions | frontmatter (`---` / `+++`), inline and block math, wikilinks (`[[target\|title]]`, embeds `![[x]]`), `==` highlight, gemoji shortcodes (`:tada:`), `:name` / `::name` / `:::name` directives, `<details>` HTML containers |
+
+Where one node has more than one spelling, the parse records it: `Emphasis` and `Strong` record `*` or `_`, and `Link` records an inline link, an angle-bracket autolink, or a literal autolink.
 
 Cargo features:
 
@@ -271,9 +230,9 @@ Cargo features:
 
 ## Scope & limitations
 
-In scope — the maximal default dialect: GFM (tables, task lists, strikethrough, literal/relaxed autolinks, alerts), footnotes (incl. inline), inline + block math, frontmatter (`---` / `+++`), wikilinks (title-after-pipe default), the extra inline marks (insert `++`, highlight `==`, subscript `~`, superscript `^`, spoiler `||`, shortcodes `:tada:`), description lists, Markdown-compatible HTML containers (`details` / `summary`), and the `:name` / `::name` / `:::name` directive family.
+In scope — the one syntax in the [syntax reference](#syntax-reference). Subscript, superscript, insert, spoiler, underline, description lists, and MDX are not recognized: `__a__` is strong, and the rest stay text or raw HTML.
 
-Not in the default build: HTML rendering or sanitization, MDX evaluation, syntax highlighting, and byte-for-byte preservation of the source's authoring style. Directives (`:name` / `::name` / `:::name`) are their own family and are never MDX.
+Not in the default build: HTML rendering or sanitization, syntax highlighting, and byte-for-byte preservation of the source's authoring style. Directives (`:name` / `::name` / `:::name`) are their own family and are never MDX.
 
 Parsing, serialization, HTML rendering, and validation take linear time and bounded stack on any input; nesting past fixed limits stays literal text.
 

@@ -1,6 +1,6 @@
 import a from 'b'
 export {
-  a
+a
 } from 'b'
 
 export var c = 1

@@ -70,7 +70,7 @@ Document
   CodeBlock kind=indented info=none
     Value "\\[\\]"
   Paragraph
-    Link destination=/bar* title="ti*tle"
+    Link form=inline destination=/bar* title="ti*tle"
       Text "foo"
   Definition label=bar destination=/bar* title="ti*tle"
   Paragraph

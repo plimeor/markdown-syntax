@@ -8,67 +8,124 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Migration
 
-This release changes the AST, the parse of block structure, and the
-serializer's output. Code that matches on the AST or compares canonical
-output needs these updates.
+This release reads one fixed Markdown syntax, records in the AST the spelling
+a node was written with, writes Markdown by fixed rules, and rebuilds block
+parsing. Code that configures the parser, matches on the AST, builds nodes
+with struct literals, or compares canonical output needs these updates.
 
+- **One syntax, one entry point.** `parse(input)` is the only way to parse.
+  It reads CommonMark with raw HTML and indented code, `<details>` HTML
+  containers, GFM tables, task list items, literal autolinks, and `~~`
+  strikethrough, footnotes and inline footnotes `^[…]`, GitHub alerts,
+  frontmatter, gemoji shortcodes, `==` highlight, wiki links (title after the
+  pipe), math, and directives. The `options` module is removed, with
+  `SyntaxOptions` and its presets, `Constructs`, `Construct`, `ParseOptions`,
+  `WikiLinkOrder`, `SyntaxConfigError`, `SyntaxOptions::parse`,
+  `parse_strict`, and `ParseStrictError`.
+- **Removed constructs.** Subscript, superscript, insert, spoiler, underline,
+  description lists, single-tilde strikethrough, non-HTTP and scheme-less
+  literal autolinks, and MDX ESM, JSX, and expressions are not recognized.
+  Their source reads as the one syntax reads it: `H~2~O`, `x^2^`, `++a++`,
+  `||b||`, and `~a~` are text, `__a__` is strong, `Term` followed by
+  `: Detail` is one paragraph, `import x` and `{x}` are paragraphs, and
+  `<X />` is raw HTML.
+- **Removed AST items.** `Block::DescriptionList` with `DescriptionList`,
+  `DescriptionItem`, and `DescriptionDetails`; `Block::MdxEsm`,
+  `Block::MdxExpression`, and `Block::MdxJsx` with their node types;
+  `Inline::Underline`, `Inline::Insert`, `Inline::Subscript`,
+  `Inline::Superscript`, `Inline::Spoiler`, `Inline::MdxExpression`, and
+  `Inline::MdxJsx` with their node types; `Delete.marker` with
+  `DeleteMarker`; and `WikiLink.label_order` with `WikiLinkLabelOrder`.
+- **Removed diagnostic codes.** `DiagnosticCode::StrictParse` and
+  `DiagnosticCode::InvalidMdx`.
+- **New diagnostic code.** `DiagnosticCode::InvalidDirectiveAttribute` warns
+  about a directive attribute without a valid name, which is dropped.
+- **Recorded spellings.** `Emphasis` and `Strong` gain
+  `delimiter: EmphasisDelimiter` (`Asterisk` or `Underscore`), and `Link`
+  gains `form: LinkForm` (`Inline`, `AngleAutolink`, or `LiteralAutolink`).
+  The parser fills them from the source; `Link::new` records an inline link,
+  and both types default to `*` and an inline link. Struct literals of these
+  nodes need the new field.
 - **Autolinks are links.** `Inline::Autolink` and `AutolinkKind` are removed.
   Literal autolinks (`https://a.b`, `www.a.b`, `a@b.c`), angle-bracket
   autolinks (`<https://a.b>`), and links whose text equals their URL are all
-  `Link` nodes whose one child is a `Text` holding the URL as written. Such a
-  link is written `<url>` when that reads back, and `[text](url)` otherwise
-  (`www.a.b` → `[www.a.b](http://www.a.b)`).
+  `Link` nodes whose one child is a `Text` holding the URL as written, and
+  each is written back in the form its `form` records.
 - **Escapes and character references are always nodes.**
   `ParseOptions::preserve_character_escapes` and
-  `ParseOptions::preserve_character_references` are removed: the parser
-  always produces `Inline::Escape` and `Inline::CharacterReference`, and the
-  serializer writes them as recorded. In a table cell, `\|` is an
-  `Escape('|')` in text and `|` inside a raw-text construct.
+  `ParseOptions::preserve_character_references` are removed with
+  `ParseOptions`: the parser always produces `Inline::Escape` and
+  `Inline::CharacterReference`. In a table cell, `\|` is an `Escape('|')` in
+  text and `|` inside a raw-text construct.
+- **Precedence changes.**
+  - Literal autolinks take the strict GFM extents and schemes (`http://`,
+    `https://`, `www.`, emails, `mailto:`, `xmpp:`); a bare URL with any
+    other scheme stays text. A literal autolink ends at Unicode whitespace,
+    `<`, a non-ASCII punctuation or symbol char (`，`, `。`, `、`), or `[[`.
+    `parse` no longer panics on a no-break space before an email-like run.
+  - A directive name is one or more runs of ASCII letters joined by single
+    `-`, in all three directive forms. A text directive forms only when its
+    name is followed by `[`, `{`, a space, a tab, or a line ending, or ends
+    the inline content, so `:noreply@x.com` is an email link and
+    `:www.x.com` is text. A directive whose name breaks the rule is text:
+    `:h1[x]` silently, and a leaf or container opener such as `::my_note`
+    with `DiagnosticCode::InvalidDirectiveName`.
+  - A wiki link's content holds no unescaped `[` or `]`, so `[[[foo]]]` is
+    `[`, a wiki link, and `]`. A wiki link still wins over a defined
+    reference label.
+  - Table rows split at every unescaped `|`, including one inside a code
+    span.
 - **Wiki embeds.** `WikiLink` gains `embed: bool`: `![[x]]` is an embed and
   `\![[x]]` is an escaped `!` before a plain wiki link. The HTML renderer
   marks an embed with `data-wikilink-embed="true"`.
 - **Shortcodes come from gemoji.** A shortcode needs a name in the pinned
   github/gemoji v4.1.0 table and no letter or digit directly outside either
   colon, so clock times and `a:b:c` stay text. A `:word:` outside the table
-  stays text too: a text directive's name followed by a `:` opens no
-  directive. `Shortcode::glyph()` returns the emoji, validation rejects a
-  name outside the table, and the HTML renderer writes the glyph.
-- **Serialization reads its output back.** `SerializeOptions` gains
-  `syntax: SyntaxOptions`, the dialect the output is read back under (the
-  maximal dialect by default). Set it to the preset you parse with: a
-  CommonMark parse of `a ==b== c` otherwise writes `a \=\=b\=\= c`, since
-  the maximal dialect reads `==` as highlight.
-  `SerializeError::Unrepresentable` is returned, with
-  `DiagnosticCode::Unrepresentable`, when no Markdown the serializer can
-  write reads back as the same tree; an exhaustive `match` on
-  `SerializeError` needs an arm for it.
-- **New diagnostic codes.** `DiagnosticCode::InvalidDirectiveAttribute`
-  warns about a directive attribute without a valid name, which is dropped;
-  `DiagnosticCode::Unrepresentable` names the node serialization cannot
-  write.
-- **Canonical output changes.** Only what a parse reads as syntax is
-  escaped:
-  - an unpaired delimiter stays raw (`x_y_`, not `x_y\_`);
-  - a pipe ending a setext heading stays raw (`a |`, not `a \|`);
-  - brackets that form no reference stay raw (`[x]` when nothing defines
-    `x`);
-  - a delimiter run the parse uses is escaped whole (`\=\=a\=\=`);
-  - emphasis and strong take `*` unless that does not read back
-    (`***(a b)\_.***\*#`, was `_**(a b)\_.**_\*#`);
-  - an invalid character reference such as `&unknown;` stays raw;
-  - a nested list is indented only when the block after it would join its
-    last item, and a list marker override yields where two adjacent lists
-    would read as one.
+  stays text too. `Shortcode::glyph()` returns the emoji, validation rejects
+  a name outside the table, and the HTML renderer writes the glyph.
+- **New validation rejections.** `validate` reports, and `to_markdown` and
+  `to_html` return `InvalidDocument` for:
+  - an empty `Emphasis`, `Strong`, `Delete`, or `Mark`, or one whose content
+    starts or ends with a space, a tab, a soft break, or a hard break;
+  - a `Link`, `LinkReference`, or `WikiLink` inside the text of a `Link` or
+    `LinkReference`;
+  - a `Link` recorded as an autolink whose content is not one `Text` that
+    such an autolink writes for its destination, or that has a title;
+  - two adjacent lists in one container with the same marker, both ordered
+    or both unordered;
+  - a directive name outside the name rule.
+- **The serializer only renders.** It writes each node in the spelling the
+  AST records, or else by one fixed rule, and never parses its output: when
+  the output would read back as a different tree, it is still returned.
+  Text is written as it is, each `Escape` as a backslash and its char, and
+  each `CharacterReference` as written; the serializer adds no escape of its
+  own. A hand-built `Text("*a*")` is written `*a*`, which reads back as
+  emphasis: build literal punctuation with `Escape` nodes.
+- **Canonical output changes.**
+  - Recorded spellings come back as written: `_a_ __b__`, `a\.b \#tag`,
+    `&#35;tag &amp; x`, `www.a.b`, `a@b.c`, `<http://a.b>`, and
+    `[http://a.b](http://a.b)` are each written as they were parsed.
+  - Unpaired delimiters stay raw: `x_y_ a*b x^2 ~5`.
+  - Every line inside a block quote, alert, list item, or footnote
+    definition takes its container's full prefix, a lazy continuation line
+    included (`> a\nb` → `> a\n> b`).
+  - A soft break inside a heading is written as a space (`a\nb\n===` →
+    `a b\n===`).
+  - A dash thematic break that opens the document or follows a paragraph
+    line is written `- - -`; a list item whose content is a thematic break
+    of its bullet's char, or begins with a space or a tab, starts that
+    content on the line after the bullet.
+  - A list marker override yields where the list before it in the same
+    container is written with the same marker.
 - **Block structure follows CommonMark's algorithm.** Block quotes, list
-  items, container directives, footnote definitions, HTML containers,
-  description details, and alerts are read in one pass over a stack of open
-  blocks, matching commonmark.js on the cases plimeor/markdown-syntax#11
-  lists. A task item's checkbox is part of its marker, so its paragraph
-  starts after it. `::name text` is a paragraph; a leaf directive stands alone
-  on its line.
+  items, container directives, footnote definitions, HTML containers, and
+  alerts are read in one pass over a stack of open blocks, matching
+  commonmark.js on the cases plimeor/markdown-syntax#11 lists. A task item's
+  checkbox is part of its marker, so its paragraph starts after it.
+  `::name text` is a paragraph; a leaf directive stands alone on its line.
 - **Block parse changes that move the AST of existing input:**
-  - footnote definitions, directive openers, math fences, and description
-    details open only up to three columns in;
+  - footnote definitions, directive openers, and math fences open only up to
+    three columns in;
   - a container directive's closing fence closes the innermost open one,
     and its last child's span ends after its line ending;
   - footnote definitions and alert paragraphs take lazy continuation lines;
@@ -79,11 +136,6 @@ output needs these updates.
     indentation;
   - an alert's marker line keeps a following indented line from starting
     indented code, as a paragraph line does.
-- **Literal autolinks end earlier.** A literal or relaxed-scheme autolink
-  ends at Unicode whitespace, `<`, a non-ASCII punctuation or symbol char
-  (`，`, `。`, `、`), or, with wikilinks on, `[[`. `parse` no longer panics on
-  a no-break space before an email-like run.
-- **A `_` run gets no strikethrough bonus** beside a `~`: `d_~_` is text.
 
 ## [0.3.0](https://github.com/plimeor/markdown-syntax/compare/v0.2.0...v0.3.0) - 2026-10-05
 

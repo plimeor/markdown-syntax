@@ -1,9 +1,9 @@
 //! Shared, dependency-free types for the AST→HTML conformance bench.
 //!
 //! These are the FROZEN interface between the extractor and runner/report. The
-//! extractor produces [`OracleTuple`]s; the runner maps each tuple's captured
-//! option tokens to parse [`markdown_syntax::SyntaxOptions`] plus public
-//! [`markdown_syntax::HtmlOptions`].
+//! extractor produces [`OracleTuple`]s; the runner parses each input with
+//! `markdown_syntax::parse` and maps the tuple's captured render option tokens
+//! to public [`markdown_syntax::HtmlOptions`].
 //!
 //! The bench renders ONE convention (GFM). The only spec-layer split that
 //! survives is the suite [`Category`] (commonmark vs gfm), kept purely so a
@@ -26,6 +26,8 @@ pub enum Category {
 pub struct OracleTuple {
     /// Suite-relative path of the `.cases` file this came from (for reporting).
     pub source_file: &'static str,
+    /// The case's number in its file.
+    pub index: usize,
     /// Suite-layer category, derived from the fixture subdirectory.
     pub category: Category,
     /// Human label (CommonMark 3rd assert arg, or synthesized `fn`+index).
@@ -37,6 +39,7 @@ pub struct OracleTuple {
     /// Raw option identifiers captured at the call site, e.g.
     /// `"allow_dangerous_html"`, `"Options::gfm"`, `"extension.table"`,
     /// `"render.unsafe_"`, `"ParseOptions::mdx"`, `"closure"`, `"math"`.
-    /// The runner interprets these into parse options + [`markdown_syntax::HtmlOptions`].
+    /// The runner interprets the render tokens into [`markdown_syntax::HtmlOptions`];
+    /// parse tokens are kept as recorded and have no effect.
     pub option_tokens: Vec<String>,
 }

@@ -10,7 +10,7 @@ Document
   HtmlBlock "<div/>"
   HtmlBlock "<div>\n*foo*"
   Paragraph
-    Emphasis
+    Emphasis delimiter=*
       Text "bar"
   HtmlBlock "<div *???-&&&-<---\n*raw*"
   Paragraph

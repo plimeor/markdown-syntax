@@ -1,5 +1,17 @@
 Document
-  MdxEsm "import a from 'b'\nexport {\n  a\n} from 'b'"
-  MdxEsm "export var c = 1\n// comment\n/* block */"
+  Paragraph
+    Text "import a from 'b'"
+    SoftBreak
+    Text "export {"
+    SoftBreak
+    Text "a"
+    SoftBreak
+    Text "} from 'b'"
+  Paragraph
+    Text "export var c = 1"
+    SoftBreak
+    Text "// comment"
+    SoftBreak
+    Text "/* block */"
   Heading depth=1 kind=atx
     Text "After"

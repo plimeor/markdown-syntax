@@ -43,13 +43,6 @@ fn collect_defs(blocks: &[Block], out: &mut BTreeMap<String, Definition>) {
                     collect_defs(&item.children, out);
                 }
             }
-            Block::DescriptionList(dl) => {
-                for item in &dl.children {
-                    for details in &item.details {
-                        collect_defs(&details.children, out);
-                    }
-                }
-            }
             Block::FootnoteDefinition(fd) => collect_defs(&fd.children, out),
             Block::HtmlContainer(container) => {
                 if let HtmlContainerContent::Blocks(children) = &container.content {
@@ -103,13 +96,8 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::Math(m) => out.push_str(&m.value),
             Inline::Emphasis(n) => flatten_into(&n.children, out),
             Inline::Strong(n) => flatten_into(&n.children, out),
-            Inline::Underline(n) => flatten_into(&n.children, out),
             Inline::Delete(n) => flatten_into(&n.children, out),
-            Inline::Insert(n) => flatten_into(&n.children, out),
             Inline::Mark(n) => flatten_into(&n.children, out),
-            Inline::Subscript(n) => flatten_into(&n.children, out),
-            Inline::Superscript(n) => flatten_into(&n.children, out),
-            Inline::Spoiler(n) => flatten_into(&n.children, out),
             Inline::Link(n) => flatten_into(&n.children, out),
             Inline::LinkReference(n) => flatten_into(&n.children, out),
             Inline::Image(n) => flatten_into(&n.alt, out),
@@ -129,8 +117,6 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             },
             Inline::FootnoteReference(_) => {}
             Inline::TextDirective(d) => flatten_into(&d.label, out),
-            Inline::MdxExpression(_) => {}
-            Inline::MdxJsx(_) => {}
         }
     }
 }

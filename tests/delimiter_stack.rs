@@ -1,6 +1,7 @@
-//! Emphasis-like marks (`*`, `_`, `~~`, `~`, `^`, `++`, `==`, `||`, underline
-//! `__`) pair on one delimiter stack: closers are taken in source order, and
-//! marks that do not cross nest as written.
+//! Emphasis-like marks (`*`, `_`, `~~`, `==`) pair on one delimiter stack:
+//! closers are taken in source order, and marks that do not cross nest as
+//! written. Inputs written for the removed marks (`~`, `^`, `++`, `||`,
+//! underline `__`) pin that those runs stay text.
 
 use markdown_syntax::prelude::*;
 
@@ -30,15 +31,11 @@ fn shape(inlines: &[Inline]) -> String {
             }
             Inline::Emphasis(node) => ("Emphasis", &node.children),
             Inline::Strong(node) => ("Strong", &node.children),
-            Inline::Underline(node) => ("Underline", &node.children),
             Inline::Delete(node) => ("Delete", &node.children),
-            Inline::Insert(node) => ("Insert", &node.children),
             Inline::Mark(node) => ("Mark", &node.children),
-            Inline::Spoiler(node) => ("Spoiler", &node.children),
-            Inline::Subscript(node) => ("Subscript", &node.children),
-            Inline::Superscript(node) => ("Superscript", &node.children),
             Inline::Link(node) => ("Link", &node.children),
             Inline::Image(node) => ("Image", &node.alt),
+            Inline::InlineFootnote(node) => ("InlineFootnote", &node.children),
             other => panic!("unexpected inline {other:?}"),
         };
         out.push_str(kind);
@@ -49,8 +46,8 @@ fn shape(inlines: &[Inline]) -> String {
     out
 }
 
-fn parsed(options: &SyntaxOptions, markdown: &str) -> String {
-    match options.parse(markdown).document.children.as_slice() {
+fn parsed(markdown: &str) -> String {
+    match parse(markdown).document.children.as_slice() {
         [Block::Paragraph(paragraph)] => shape(&paragraph.children),
         other => panic!("expected one paragraph, got {other:?}"),
     }
@@ -58,86 +55,66 @@ fn parsed(options: &SyntaxOptions, markdown: &str) -> String {
 
 #[test]
 fn strong_closes_before_a_highlight() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "**a ==b** c=="),
-        r#"Strong["a ==b"]" c==""#
-    );
+    assert_eq!(parsed("**a ==b** c=="), r#"Strong["a ==b"]" c==""#);
 }
 
 #[test]
 fn emphasis_closes_before_an_insert() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "*a ++b* c++"),
-        r#"Emphasis["a ++b"]" c++""#
-    );
+    assert_eq!(parsed("*a ++b* c++"), r#"Emphasis["a ++b"]" c++""#);
 }
 
 #[test]
 fn highlight_closes_before_strong() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "==a **b== c**"),
-        r#"Mark["a **b"]" c**""#
-    );
+    assert_eq!(parsed("==a **b== c**"), r#"Mark["a **b"]" c**""#);
 }
 
 #[test]
 fn marks_that_do_not_cross_nest_as_written() {
+    assert_eq!(parsed("==a *b* c=="), r#"Mark["a "Emphasis["b"]" c"]"#);
     assert_eq!(
-        parsed(&SyntaxOptions::default(), "==a *b* c=="),
-        r#"Mark["a "Emphasis["b"]" c"]"#
-    );
-    assert_eq!(
-        parsed(
-            &SyntaxOptions::default(),
-            "*a ||b ~~c ^d^ e~~ f|| ++g ~h~ i++ j*"
-        ),
-        r#"Emphasis["a "Spoiler["b "Delete["c "Superscript["d"]" e"]" f"]" "Insert["g "Subscript["h"]" i"]" j"]"#
+        parsed("*a ||b ~~c ^d^ e~~ f|| ++g ~h~ i++ j*"),
+        r#"Emphasis["a ||b "Delete["c ^d^ e"]" f|| ++g ~h~ i++ j"]"#
     );
 }
 
 #[test]
 fn emphasis_right_inside_a_mark_stays_inside_it() {
-    // The `*` touching `~~` could also close the outer `*`; inside the spoiler
-    // it opens, as in the spoiler's content read on its own.
+    // The `*` touching `~~` could also close the outer `*`; inside the mark
+    // it opens, as in the mark's content read on its own.
     assert_eq!(
-        parsed(&SyntaxOptions::default(), "*a ||~~*b*~~|| c*"),
-        r#"Emphasis["a "Spoiler[Delete[Emphasis["b"]]]" c"]"#
+        parsed("*a ==~~*b*~~== c*"),
+        r#"Emphasis["a "Mark[Delete[Emphasis["b"]]]" c"]"#
     );
+    // Without a mark around it, the `*` after `~~` closes the outer `*`.
     assert_eq!(
-        parsed(&SyntaxOptions::default(), "~ **a*~"),
-        r#"Subscript[" *"Emphasis["a"]]"#
+        parsed("*a ||~~*b*~~|| c*"),
+        r#"Emphasis["a ||~~"]"b"Emphasis["~~|| c"]"#
+    );
+    assert_eq!(parsed("~ **a*~"), r#""~ **a*~""#);
+}
+
+#[test]
+fn double_underscore_is_strong() {
+    assert_eq!(parsed("a __b__ c"), r#""a "Strong["b"]" c""#);
+    assert_eq!(parsed("___a___"), r#"Emphasis[Strong["a"]]"#);
+    assert_eq!(
+        parsed("__a ~~__b__~~ c__"),
+        r#"Strong["a "Delete[Strong["b"]]" c"]"#
     );
 }
 
 #[test]
-fn underline_follows_underscore_strong() {
-    let underline = SyntaxOptions::default().enable(Construct::Underline);
-    assert_eq!(parsed(&underline, "a __b__ c"), r#""a "Underline["b"]" c""#);
-    assert_eq!(parsed(&underline, "___a___"), r#"Emphasis[Underline["a"]]"#);
-    assert_eq!(
-        parsed(&underline, "__a ~~__b__~~ c__"),
-        r#"Underline["a "Delete[Underline["b"]]" c"]"#
-    );
-}
-
-#[test]
-fn subscript_and_superscript_close_at_the_first_marker_on_their_line() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "~a ~b~"),
-        r#"Subscript["a "]"b~""#
-    );
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "^^a^"),
-        r#""^"Superscript["a"]"#
-    );
-    assert_eq!(parsed(&SyntaxOptions::default(), "^a\nb^"), r#""^a"/"b^""#);
+fn single_tildes_and_carets_stay_text() {
+    assert_eq!(parsed("~a ~b~"), r#""~a ~b~""#);
+    assert_eq!(parsed("^^a^"), r#""^^a^""#);
+    assert_eq!(parsed("^a\nb^"), r#""^a"/"b^""#);
 }
 
 #[test]
 fn deeply_nested_highlights_stop_at_32_levels() {
     let depth = 40;
     let markdown = format!("{}x{}", "==a ".repeat(depth), " b==".repeat(depth));
-    let shape = parsed(&SyntaxOptions::default(), &markdown);
+    let shape = parsed(&markdown);
     assert_eq!(shape.matches("Mark[").count(), 32, "{shape}");
 }
 
@@ -145,39 +122,27 @@ fn deeply_nested_highlights_stop_at_32_levels() {
 fn deep_emphasis_stops_at_16_levels() {
     let depth = 20;
     let markdown = format!("{}x{}", "*a ".repeat(depth), " b*".repeat(depth));
-    let shape = parsed(&SyntaxOptions::default(), &markdown);
+    let shape = parsed(&markdown);
     assert_eq!(shape.matches("Emphasis[").count(), 16, "{shape}");
 }
 
 #[test]
 fn code_spans_bind_tighter_than_marks() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "^a `^` b^"),
-        r#"Superscript["a "Code("^")" b"]"#
-    );
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "==a `b== c` d=="),
-        r#"Mark["a "Code("b== c")" d"]"#
-    );
+    assert_eq!(parsed("^a `^` b^"), r#""^a "Code("^")" b^""#);
+    assert_eq!(parsed("==a `b== c` d=="), r#"Mark["a "Code("b== c")" d"]"#);
 }
 
 #[test]
 fn a_mark_opened_inside_a_link_stays_inside_it() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "[a ==b](u) c=="),
-        r#"Link["a ==b"]" c==""#
-    );
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "*[foo*](/u)"),
-        r#""*"Link["foo*"]"#
-    );
+    assert_eq!(parsed("[a ==b](u) c=="), r#"Link["a ==b"]" c==""#);
+    assert_eq!(parsed("*[foo*](/u)"), r#""*"Link["foo*"]"#);
 }
 
 #[test]
 fn deeply_nested_images_stop_at_32_levels() {
     let depth = 40;
     let markdown = format!("{}x{}", "![".repeat(depth), "](u)".repeat(depth));
-    let document = SyntaxOptions::default().parse(&markdown).document;
+    let document = parse(&markdown).document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
@@ -192,43 +157,34 @@ fn deeply_nested_images_stop_at_32_levels() {
 
 #[test]
 fn links_resolve_at_the_innermost_bracket() {
+    assert_eq!(parsed("[a [b](u) c](v)"), r#""[a "Link["b"]" c](v)""#);
+    assert_eq!(parsed("![a [b](u) c](v)"), r#"Image["a "Link["b"]" c"]"#);
+}
+
+#[test]
+fn an_unclosed_inline_footnote_stays_text() {
+    assert_eq!(parsed("^a ^[b"), r#""^a ^[b""#);
+}
+
+#[test]
+fn a_caret_before_a_bracket_opens_an_inline_footnote() {
     assert_eq!(
-        parsed(&SyntaxOptions::commonmark(), "[a [b](u) c](v)"),
-        r#""[a "Link["b"]" c](v)""#
-    );
-    assert_eq!(
-        parsed(&SyntaxOptions::commonmark(), "![a [b](u) c](v)"),
-        r#"Image["a "Link["b"]" c"]"#
+        parsed("a^b^[link](u)"),
+        r#""a^b"InlineFootnote["link"]"(u)""#
     );
 }
 
 #[test]
-fn an_unclosed_inline_footnote_leaves_its_caret_to_close_a_superscript() {
+fn a_caret_inside_emphasis_stays_text() {
     assert_eq!(
-        parsed(&SyntaxOptions::default(), "^a ^[b"),
-        r#"Superscript["a "]"[b""#
+        parsed("*a ^b* ^[x]"),
+        r#"Emphasis["a ^b"]" "InlineFootnote["x"]"#
     );
 }
 
 #[test]
-fn a_caret_closes_a_waiting_superscript_before_a_bracket() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "a^b^[link](u)"),
-        r#""a"Superscript["b"]Link["link"]"#
-    );
-}
-
-#[test]
-fn a_superscript_dropped_by_a_crossing_mark_leaves_its_caret_as_text() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "*a ^b* ^[x]"),
-        r#"Emphasis["a ^b"]" ^[x]""#
-    );
-}
-
-#[test]
-fn a_caret_right_after_a_superscript_opener_opens_an_inline_footnote() {
-    let document = SyntaxOptions::default().parse("a ^^[x] b").document;
+fn a_caret_right_after_a_caret_opens_an_inline_footnote() {
+    let document = parse("a ^^[x] b").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
@@ -244,9 +200,7 @@ fn a_caret_right_after_a_superscript_opener_opens_an_inline_footnote() {
 
 #[test]
 fn an_unclosed_reference_label_leaves_a_shortcut_reference() {
-    let document = SyntaxOptions::commonmark()
-        .parse("[foo][bar\n\n[foo]: /u")
-        .document;
+    let document = parse("[foo][bar\n\n[foo]: /u").document;
     let Some(Block::Paragraph(paragraph)) = document.children.first() else {
         panic!("expected a paragraph");
     };
@@ -260,34 +214,29 @@ fn an_unclosed_reference_label_leaves_a_shortcut_reference() {
 
 #[test]
 fn a_long_closing_run_reopens_with_what_it_has_left() {
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "*x ++a++++* b++"),
-        r#""*x "Insert["a"]Insert["* b"]"#
-    );
-    assert_eq!(
-        parsed(&SyntaxOptions::default(), "*x ||a||||* b||"),
-        r#""*x "Spoiler["a"]Spoiler["* b"]"#
-    );
+    assert_eq!(parsed("*x ==a====* b=="), r#""*x "Mark["a"]Mark["* b"]"#);
+    assert_eq!(parsed("*x ++a++++* b++"), r#"Emphasis["x ++a++++"]" b++""#);
+    assert_eq!(parsed("*x ||a||||* b||"), r#"Emphasis["x ||a||||"]" b||""#);
 }
 
 #[test]
-fn underline_spans_cover_their_own_delimiters() {
-    let underline = SyntaxOptions::default().enable(Construct::Underline);
-    let document = underline.parse("___a_ b__").document;
+fn underscore_spans_cover_their_own_delimiters() {
+    let document = parse("___a_ b__").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
-    let [Inline::Underline(node)] = paragraph.children.as_slice() else {
-        panic!("expected one underline, got {:?}", paragraph.children);
+    let [Inline::Strong(node)] = paragraph.children.as_slice() else {
+        panic!("expected one strong, got {:?}", paragraph.children);
     };
     assert_eq!(node.meta.span, Some(Span::new(0, 9)));
+    assert_eq!(node.children[0].span(), Some(Span::new(2, 5)));
 }
 
 #[test]
 fn brackets_past_the_limit_close_as_text() {
     let depth = 40;
     let markdown = format!("{}x{}", "![".repeat(depth), "](u)".repeat(depth));
-    let document = SyntaxOptions::default().parse(&markdown).document;
+    let document = parse(&markdown).document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
@@ -299,23 +248,23 @@ fn brackets_past_the_limit_close_as_text() {
 
 #[test]
 fn a_wikilink_after_a_bang_is_an_embed_and_wins_over_the_image() {
-    let document = SyntaxOptions::default().parse("![[a]b]]").document;
+    let document = parse("![[a\\]b]]").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
     assert!(
         matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
-            if link.embed && link.target == "a]b" && link.meta.span == Some(Span::new(0, 8))),
+            if link.embed && link.target == "a]b" && link.meta.span == Some(Span::new(0, 9))),
         "{:?}",
         paragraph.children
     );
+    // An unescaped bracket in the content leaves no wikilink.
+    assert_eq!(parsed("![[a]b]]"), r#""![[a]b]]""#);
 }
 
 #[test]
 fn a_link_inside_a_directive_label_inside_a_mark_keeps_links_from_nesting() {
-    let document = SyntaxOptions::default()
-        .parse("[x :d[==[b](u)==] y](v)")
-        .document;
+    let document = parse("[x :d[==[b](u)==] y](v)").document;
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("expected one paragraph");
     };
@@ -331,59 +280,33 @@ fn a_link_inside_a_directive_label_inside_a_mark_keeps_links_from_nesting() {
 
 #[test]
 fn an_escaped_dot_after_a_bracket_is_an_escape() {
-    let mut gfm = SyntaxOptions::gfm();
-    gfm.constructs.relaxed_autolinks = false;
-    assert_eq!(parsed(&gfm, "[www. \\. x"), r#""[www. "\." x""#);
+    assert_eq!(parsed("[www. \\. x"), r#""[www. "\." x""#);
 }
 
 #[test]
 fn delimiters_past_the_limit_stay_in_the_output() {
     let input = String::from("++") + &"==a ".repeat(32) + "x" + &" b==".repeat(32) + "++++c++";
-    let markdown = SyntaxOptions::default()
-        .parse(&input)
-        .document
-        .to_markdown()
-        .unwrap();
+    let markdown = parse(&input).document.to_markdown().unwrap();
     assert_eq!(markdown.matches('+').count(), input.matches('+').count());
-
-    let underline = SyntaxOptions::default().enable(Construct::Underline);
     let input = String::from("___") + &"*".repeat(32) + "x" + &"*".repeat(32) + "_ b__";
-    let markdown = underline.parse(&input).document.to_markdown().unwrap();
+    let markdown = parse(&input).document.to_markdown().unwrap();
     assert_eq!(markdown.matches('_').count(), input.matches('_').count());
 }
 
 #[test]
-fn an_image_whose_label_cannot_close_yields_to_an_embed() {
-    let document = SyntaxOptions::default().parse("![[a[b]]").document;
-    let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
-        panic!("expected one paragraph");
-    };
-    assert!(
-        matches!(paragraph.children.as_slice(), [Inline::WikiLink(link)]
-            if link.embed && link.target == "a[b"),
-        "{:?}",
-        paragraph.children
-    );
+fn a_bracket_inside_an_embed_leaves_text() {
+    assert_eq!(parsed("![[a[b]]"), r#""![[a[b]]""#);
 }
 
 #[test]
 fn the_rule_of_three_counts_whole_delimiter_runs() {
-    let commonmark = SyntaxOptions::commonmark();
-    assert_eq!(
-        parsed(&commonmark, "*a***b*"),
-        r#"Emphasis["a"]"*"Emphasis["b"]"#
-    );
-    assert_eq!(
-        parsed(&commonmark, "***a*a*a"),
-        r#""*"Emphasis[Emphasis["a"]"a"]"a""#
-    );
+    assert_eq!(parsed("*a***b*"), r#"Emphasis["a"]"*"Emphasis["b"]"#);
+    assert_eq!(parsed("***a*a*a"), r#""*"Emphasis[Emphasis["a"]"a"]"a""#);
 }
 
 #[test]
 fn an_image_whose_resource_is_invalid_falls_back_to_a_shortcut_reference() {
-    let document = SyntaxOptions::commonmark()
-        .parse("![foo](a b)\n\n[foo]: /u")
-        .document;
+    let document = parse("![foo](a b)\n\n[foo]: /u").document;
     let Some(Block::Paragraph(paragraph)) = document.children.first() else {
         panic!("expected a paragraph");
     };
@@ -397,9 +320,8 @@ fn an_image_whose_resource_is_invalid_falls_back_to_a_shortcut_reference() {
 
 #[test]
 fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
-    let commonmark = SyntaxOptions::commonmark();
     for source in ["\u{ab}_**]**_", "\u{20ac}_**]**_", "\0_**]**_"] {
-        let shape = parsed(&commonmark, source);
+        let shape = parsed(source);
         assert!(
             shape.ends_with(r#"Emphasis[Strong["]"]]"#),
             "{source:?}: {shape}"
@@ -409,17 +331,13 @@ fn an_underscore_after_unicode_punctuation_opens_as_after_ascii_punctuation() {
 
 #[test]
 fn an_escaped_backslash_before_a_line_ending_is_no_hard_break() {
-    assert_eq!(
-        parsed(&SyntaxOptions::commonmark(), "a\\\\\nb"),
-        r#""a"\\/"b""#
-    );
+    assert_eq!(parsed("a\\\\\nb"), r#""a"\\/"b""#);
 }
 
 #[test]
 fn a_bare_destination_ends_at_a_space_inside_parentheses() {
-    let commonmark = SyntaxOptions::commonmark();
-    assert_eq!(parsed(&commonmark, "[a](( ))"), r#""[a](( ))""#);
-    let blocks = commonmark.parse("[o]:(a b)\n\n[o]").document.children;
+    assert_eq!(parsed("[a](( ))"), r#""[a](( ))""#);
+    let blocks = parse("[o]:(a b)\n\n[o]").document.children;
     assert!(
         !blocks
             .iter()
@@ -430,21 +348,18 @@ fn a_bare_destination_ends_at_a_space_inside_parentheses() {
 
 #[test]
 fn a_footnote_label_holds_no_unescaped_bracket() {
-    let options = SyntaxOptions::default();
     for source in ["^*[^[^]]", "[^a[b]", "[^a[b]: x\n\n[^a[b]"] {
-        let debug = format!("{:?}", options.parse(source).document.children);
+        let debug = format!("{:?}", parse(source).document.children);
         assert!(!debug.contains("FootnoteReference"), "{source:?}: {debug}");
         assert!(!debug.contains("FootnoteDefinition"), "{source:?}: {debug}");
     }
-    let debug = format!("{:?}", options.parse("[^a\\[b]").document.children);
+    let debug = format!("{:?}", parse("[^a\\[b]").document.children);
     assert!(debug.contains("FootnoteReference"), "{debug}");
 }
 
 #[test]
 fn an_angle_autolink_holds_whitespace_other_than_a_space() {
-    let document = SyntaxOptions::commonmark()
-        .parse("<http://a\u{a0}b>")
-        .document;
+    let document = parse("<http://a\u{a0}b>").document;
     let debug = format!("{:?}", document.children);
     assert!(
         debug.contains("destination: \"http://a\\u{a0}b\""),
@@ -456,10 +371,7 @@ fn an_angle_autolink_holds_whitespace_other_than_a_space() {
 
 #[test]
 fn a_referenced_space_makes_no_hard_break() {
-    let blocks = SyntaxOptions::commonmark()
-        .parse("a&#x20; \nb")
-        .document
-        .children;
+    let blocks = parse("a&#x20; \nb").document.children;
     let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
         panic!("{blocks:?}");
     };
@@ -475,10 +387,7 @@ fn a_referenced_space_makes_no_hard_break() {
 
 #[test]
 fn a_processing_instruction_closes_after_its_opener() {
-    let blocks = SyntaxOptions::commonmark()
-        .parse("a<?> b")
-        .document
-        .children;
+    let blocks = parse("a<?> b").document.children;
     let debug = format!("{blocks:?}");
     assert!(!debug.contains("Html"), "{debug}");
 }

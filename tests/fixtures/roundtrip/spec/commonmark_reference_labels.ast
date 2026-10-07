@@ -12,7 +12,7 @@ Document
       Text "entity"
     Text "."
     SoftBreak
-    Link destination=/nested title=none
+    Link form=inline destination=/nested title=none
       Text "nested [label]"
     SoftBreak
     Image destination=/img title=none

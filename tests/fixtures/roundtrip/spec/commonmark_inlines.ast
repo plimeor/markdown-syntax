@@ -5,25 +5,25 @@ Document
     Text " text with "
     Code value="code" raw="code" fence=1
     Text " and "
-    Strong
+    Strong delimiter=*
       Text "strong "
-      Emphasis
+      Emphasis delimiter=*
         Text "em"
       Text " text"
     Text "."
     SoftBreak
-    Emphasis
+    Emphasis delimiter=_
       Text "under"
     Text " and "
-    Strong
+    Strong delimiter=_
       Text "strong under"
     Text " but foo_bar stays."
     SoftBreak
     Text "Autolink "
-    Link destination=https://example.com title=none
+    Link form=angle destination=https://example.com title=none
       Text "https://example.com"
     Text " and email "
-    Link destination=mailto:a@example.com title=none
+    Link form=angle destination=mailto:a@example.com title=none
       Text "a@example.com"
     Text "."
     SoftBreak
@@ -33,5 +33,5 @@ Document
     SoftBreak
     Image destination=image.png title=none
       Text "alt "
-      Emphasis
+      Emphasis delimiter=*
         Text "text"

@@ -4,9 +4,8 @@ commit: 1506572
 source: upstream-tests/fuzz.rs
 role: upstream-input
 count: 18
-profiles: commonmark,gfm
 
---- case 1 profile commonmark bytes 9
+--- case 1 bytes 9
 [
 ~
 a
@@ -14,62 +13,62 @@ a
 
 
 --- end
---- case 2 profile gfm bytes 11
+--- case 2 bytes 11
 a@b.c+d@e.f
 --- end
---- case 3 profile commonmark bytes 11
+--- case 3 bytes 11
     x
 *    
 --- end
---- case 4 profile commonmark bytes 13
+--- case 4 bytes 13
     a
 *     b
 --- end
---- case 5 profile commonmark bytes 4
+--- case 5 bytes 4
 a * 
 --- end
---- case 6 profile commonmark bytes 3
+--- case 6 bytes 3
 _  
 --- end
---- case 7 profile gfm bytes 4
+--- case 7 bytes 4
 a ~ 
 --- end
---- case 8 profile commonmark bytes 13
+--- case 8 bytes 13
 123456789. ok
 --- end
---- case 9 profile commonmark bytes 6
+--- case 9 bytes 6
 > ```
 
 --- end
---- case 10 profile commonmark bytes 6
+--- case 10 bytes 6
 - ```
 
 --- end
---- case 11 profile gfm bytes 6
+--- case 11 bytes 6
 > x
 ``
 --- end
---- case 12 profile gfm bytes 7
+--- case 12 bytes 7
 a	b@c.d
 --- end
---- case 13 profile gfm bytes 8
+--- case 13 bytes 8
 aa	b@c.d
 --- end
---- case 14 profile gfm bytes 9
+--- case 14 bytes 9
 aaa	b@c.d
 --- end
---- case 15 profile gfm bytes 10
+--- case 15 bytes 10
 aaaa	b@c.d
 --- end
---- case 16 profile gfm bytes 20
+--- case 16 bytes 20
 | a |
 | - |
 | www.a|
 --- end
---- case 17 profile gfm bytes 11
+--- case 17 bytes 11
 [*]() [*]()
 --- end
---- case 18 profile commonmark bytes 7
+--- case 18 bytes 7
 * [ ]
 a
 --- end

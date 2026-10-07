@@ -4,9 +4,8 @@ commit: d2da7a0
 source: upstream-tests/core.rs
 role: upstream-input
 count: 6
-profiles: commonmark
 
---- case 1 profile commonmark bytes 52
+--- case 1 bytes 52
 My **document**.
 
 It's mine.
@@ -18,23 +17,23 @@ It's mine.
 Okay.
 
 --- end
---- case 2 profile commonmark bytes 32
+--- case 2 bytes 32
 ``` rust yum
 fn main<'a>();
 ```
 
 --- end
---- case 3 profile commonmark bytes 17
+--- case 3 bytes 17
 2. Hello.
 3. Hi.
 
 --- end
---- case 4 profile commonmark bytes 15
+--- case 4 bytes 15
 - Hello.
 - Hi.
 
 --- end
---- case 5 profile commonmark bytes 28
+--- case 5 bytes 28
 ---
 
 - - -
@@ -43,7 +42,7 @@ fn main<'a>();
 _        _   _
 
 --- end
---- case 6 profile commonmark bytes 27
+--- case 6 bytes 27
 # h1
 foo
 ## h2

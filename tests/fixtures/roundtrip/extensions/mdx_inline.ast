@@ -1,9 +1,5 @@
 Document
   Paragraph
-    Text "A "
-    MdxExpression "a ? {b: '}'} : c"
-    Text " value."
+    Text "A {a ? {b: '}'} : c} value."
     SoftBreak
-    Text "Comment "
-    MdxExpression "/* } */ ok"
-    Text " done."
+    Text "Comment {/* } */ ok} done."

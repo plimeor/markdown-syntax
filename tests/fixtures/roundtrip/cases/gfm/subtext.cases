@@ -4,9 +4,8 @@ commit: d2da7a0
 source: upstream-tests/subtext.rs
 role: upstream-input
 count: 1
-profiles: commonmark
 
---- case 1 profile commonmark bytes 16
+--- case 1 bytes 16
 -# Some Subtext
 
 --- end

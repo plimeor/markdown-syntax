@@ -18,7 +18,7 @@ Document
       Cell
         Code value="a|b" raw="a|b" fence=1
       Cell
-        Link destination=https://example.com title=none
+        Link form=inline destination=https://example.com title=none
           Text "p"
           Escape "|"
           Text "q"

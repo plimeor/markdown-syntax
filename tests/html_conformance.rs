@@ -4,7 +4,7 @@
 //!
 //! This harness uses the crate's opt-in public HTML renderer purely to MEASURE
 //! how faithfully the parser's AST reflects CommonMark/GFM semantics, by
-//! comparing `parse(input) → to_html_with_options(AST) → HTML` against this
+//! comparing `parse(input) → to_html_with(AST) → HTML` against this
 //! bench's own conformance suite under
 //! `tests/fixtures/conformance/<category>/<source>.cases`.
 //!
@@ -16,8 +16,9 @@
 //!   - `types`      — frozen shared types (OracleTuple, Category, …)
 //!   - `normalizer` — faithful port of CommonMark `normalize.py`
 //!   - `extractor`  — reads (input, expected_html, options) cases from our suite fixtures
-//!   - `runner`     — maps each case's options → parse+public render+compare
-//!   - `report`     — pass/fail/skip tallies, headline %, failure dump
+//!   - `runner`     — parses each case and maps its render options → public render+compare
+//!   - `report`     — pass/fail tallies, headline %, deviation report, failure dump
+//!   - `deviations` — the cases that differ from their oracle by design, with reasons
 
 #![allow(dead_code)]
 
@@ -35,6 +36,9 @@ mod runner;
 
 #[path = "html_conformance/report.rs"]
 mod report;
+
+#[path = "html_conformance/deviations.rs"]
+mod deviations;
 
 /// Snapshot-integrity check: our CommonMark-spec source fixture must carry
 /// exactly 652 cases (the snapshot of the upstream CommonMark spec corpus).

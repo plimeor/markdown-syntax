@@ -46,8 +46,6 @@ pub enum Block {
     Alert(Alert),
     /// A bullet or ordered list.
     List(List),
-    /// A description / definition list (term + details).
-    DescriptionList(DescriptionList),
     /// A fenced (```` ``` ````) or indented code block.
     CodeBlock(CodeBlock),
     /// A raw HTML block.
@@ -64,15 +62,9 @@ pub enum Block {
     MathBlock(MathBlock),
     /// A leading frontmatter block (`---` YAML or `+++` TOML).
     Frontmatter(Frontmatter),
-    /// An MDX ESM block (`import`/`export` statements).
-    MdxEsm(MdxEsm),
-    /// A block-level MDX expression: `{ … }`.
-    MdxExpression(MdxExpression),
-    /// A block-level MDX JSX element.
-    MdxJsx(MdxJsx),
-    /// A leaf directive: `::name[label]{attrs}` (distinct from MDX).
+    /// A leaf directive: `::name[label]{attrs}`.
     LeafDirective(LeafDirective),
-    /// A container directive: `:::name … :::` (distinct from MDX).
+    /// A container directive: `:::name … :::`.
     ContainerDirective(ContainerDirective),
 }
 
@@ -204,38 +196,6 @@ pub struct ListItem {
     /// Task-list state: `Some(true)` for `[x]`, `Some(false)` for `[ ]`, `None` otherwise.
     pub checked: Option<bool>,
     /// The item's block content.
-    pub children: Vec<Block>,
-}
-
-/// A description / definition list of term + details pairs.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionList {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// `true` if the list is tight (no blank lines between items).
-    pub tight: bool,
-    /// The list's term/details items.
-    pub children: Vec<DescriptionItem>,
-}
-
-/// One entry of a [`DescriptionList`]: a term and its detail blocks. Source: a
-/// term line followed by `: details` lines.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionItem {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The term's inline content.
-    pub term: Vec<Inline>,
-    /// The detail group(s) attached to this term.
-    pub details: Vec<DescriptionDetails>,
-}
-
-/// The details (`: …`) attached to a [`DescriptionItem`]'s term.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionDetails {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The details' block content.
     pub children: Vec<Block>,
 }
 
@@ -422,35 +382,7 @@ pub enum FrontmatterKind {
     Toml,
 }
 
-/// An MDX ESM block: top-level `import`/`export` statements (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxEsm {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal ESM source.
-    pub value: String,
-}
-
-/// A block-level MDX expression: `{ … }` (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxExpression {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal expression source (between the braces).
-    pub value: String,
-}
-
-/// A block-level MDX JSX element (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxJsx {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal JSX source.
-    pub value: String,
-}
-
-/// A leaf directive. Source: `::name[label]{attrs}` (a directive feature,
-/// not MDX).
+/// A leaf directive. Source: `::name[label]{attrs}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeafDirective {
     /// Node metadata (source span).
@@ -463,8 +395,7 @@ pub struct LeafDirective {
     pub attributes: Vec<DirectiveAttribute>,
 }
 
-/// A container directive. Source: `:::name[label]{attrs}` … `:::` (a directive
-/// feature, not MDX).
+/// A container directive. Source: `:::name[label]{attrs}` … `:::`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContainerDirective {
     /// Node metadata (source span).
@@ -492,20 +423,10 @@ pub enum Inline {
     Emphasis(Emphasis),
     /// Strong emphasis: `**text**` or `__text__`.
     Strong(Strong),
-    /// Underline: `__text__`/`___text___` (underscore extension).
-    Underline(Underline),
     /// Strikethrough: `~~text~~`.
     Delete(Delete),
-    /// A CriticMarkup-style insertion: `++text++`.
-    Insert(Insert),
     /// A highlight / "mark" span: `==text==`.
     Mark(Mark),
-    /// Subscript: `~x~`.
-    Subscript(Subscript),
-    /// Superscript: `^x^`.
-    Superscript(Superscript),
-    /// A spoiler span: `||text||`.
-    Spoiler(Spoiler),
     /// An emoji-style shortcode: `:name:`.
     Shortcode(Shortcode),
     /// An inline code span: `` `code` ``.
@@ -532,11 +453,7 @@ pub enum Inline {
     InlineFootnote(InlineFootnote),
     /// A wiki link: `[[target|label]]`.
     WikiLink(WikiLink),
-    /// An inline MDX expression: `{ … }` (distinct from directives).
-    MdxExpression(MdxExpressionInline),
-    /// An inline MDX JSX element (distinct from directives).
-    MdxJsx(MdxJsxInline),
-    /// A text directive: `:name[label]{attrs}` (distinct from MDX).
+    /// A text directive: `:name[label]{attrs}`.
     TextDirective(TextDirective),
 }
 
@@ -574,6 +491,8 @@ pub struct CharacterReference {
 pub struct Emphasis {
     /// Node metadata (source span).
     pub meta: NodeMeta,
+    /// The delimiter the span was written with.
+    pub delimiter: EmphasisDelimiter,
     /// The emphasized inline content.
     pub children: Vec<Inline>,
 }
@@ -583,45 +502,28 @@ pub struct Emphasis {
 pub struct Strong {
     /// Node metadata (source span).
     pub meta: NodeMeta,
+    /// The delimiter the span was written with.
+    pub delimiter: EmphasisDelimiter,
     /// The strongly-emphasized inline content.
     pub children: Vec<Inline>,
 }
 
-/// Underline (underscore extension): `__text__` or `___text___`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Underline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The underlined inline content.
-    pub children: Vec<Inline>,
+/// The delimiter character of an [`Emphasis`] or [`Strong`] span.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EmphasisDelimiter {
+    /// `*text*` / `**text**`.
+    #[default]
+    Asterisk,
+    /// `_text_` / `__text__`.
+    Underscore,
 }
 
-/// Strikethrough: `~~text~~` (or single `~text~` when single-tilde is enabled).
+/// Strikethrough: `~~text~~`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Delete {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// Whether the span used one or two tildes.
-    pub marker: DeleteMarker,
     /// The struck-through inline content.
-    pub children: Vec<Inline>,
-}
-
-/// Which tilde run delimited a [`Delete`] span.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeleteMarker {
-    /// Single-tilde strikethrough: `~text~`.
-    SingleTilde,
-    /// Double-tilde strikethrough: `~~text~~`.
-    DoubleTilde,
-}
-
-/// A CriticMarkup-style insertion: `++text++`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Insert {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The inserted inline content.
     pub children: Vec<Inline>,
 }
 
@@ -631,33 +533,6 @@ pub struct Mark {
     /// Node metadata (source span).
     pub meta: NodeMeta,
     /// The highlighted inline content.
-    pub children: Vec<Inline>,
-}
-
-/// Subscript: `~x~`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Subscript {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The subscripted inline content.
-    pub children: Vec<Inline>,
-}
-
-/// Superscript: `^x^`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Superscript {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The superscripted inline content.
-    pub children: Vec<Inline>,
-}
-
-/// A spoiler span: `||text||`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Spoiler {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The hidden inline content.
     pub children: Vec<Inline>,
 }
 
@@ -685,11 +560,14 @@ pub struct CodeInline {
 
 /// An inline link: `[text](destination "title")`. An autolink, `<url>` or a
 /// bare literal URL or email, is a `Link` whose one child is a `Text` holding
-/// the URL as written, with no title.
+/// the URL as written, with no title; [`Link::form`] records which of the
+/// three was written.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     /// Node metadata (source span).
     pub meta: NodeMeta,
+    /// How the link was written.
+    pub form: LinkForm,
     /// The link target URL.
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
@@ -700,6 +578,18 @@ pub struct Link {
     pub title_kind: Option<LinkTitleKind>,
     /// The link's inline content (the visible text).
     pub children: Vec<Inline>,
+}
+
+/// How a [`Link`] was written.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LinkForm {
+    /// `[text](destination "title")`.
+    #[default]
+    Inline,
+    /// An angle-bracket autolink: `<https://example.com>`.
+    AngleAutolink,
+    /// A GFM literal autolink: a bare `https://…`, `www.…`, or email address.
+    LiteralAutolink,
 }
 
 /// An inline image: `![alt](destination "title")`.
@@ -870,41 +760,11 @@ pub struct WikiLink {
     pub target: String,
     /// The visible label.
     pub label: String,
-    /// Whether the label appeared before or after the `|` in the source.
-    pub label_order: WikiLinkLabelOrder,
     /// Whether a `!` directly before the `[[` marks the link as an embed.
     pub embed: bool,
 }
 
-/// Whether a [`WikiLink`]'s label preceded or followed the `|` separator.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WikiLinkLabelOrder {
-    /// Target then label: `[[target|label]]`.
-    AfterPipe,
-    /// Label then target: `[[label|target]]`.
-    BeforePipe,
-}
-
-/// An inline MDX expression: `{ … }` (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxExpressionInline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal expression source (between the braces).
-    pub value: String,
-}
-
-/// An inline MDX JSX element (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxJsxInline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal JSX source.
-    pub value: String,
-}
-
-/// A text directive. Source: `:name[label]{attrs}` (a directive feature,
-/// not MDX).
+/// A text directive. Source: `:name[label]{attrs}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextDirective {
     /// Node metadata (source span).
@@ -970,7 +830,6 @@ impl_meta_accessors!(Block {
     BlockQuote,
     Alert,
     List,
-    DescriptionList,
     CodeBlock,
     HtmlBlock,
     HtmlContainer,
@@ -979,21 +838,17 @@ impl_meta_accessors!(Block {
     Table,
     MathBlock,
     Frontmatter,
-    MdxEsm,
-    MdxExpression,
-    MdxJsx,
     LeafDirective,
     ContainerDirective,
 });
 
 impl_from_variants!(Block {
     Paragraph(Paragraph), Heading(Heading), ThematicBreak(ThematicBreak),
-    BlockQuote(BlockQuote), Alert(Alert), List(List), DescriptionList(DescriptionList),
+    BlockQuote(BlockQuote), Alert(Alert), List(List),
     CodeBlock(CodeBlock), HtmlBlock(HtmlBlock), Definition(Definition),
     HtmlContainer(HtmlContainer),
     FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
-    Frontmatter(Frontmatter), MdxEsm(MdxEsm), MdxExpression(MdxExpression),
-    MdxJsx(MdxJsx), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
+    Frontmatter(Frontmatter), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
 });
 
 impl_meta_accessors!(Inline {
@@ -1002,13 +857,8 @@ impl_meta_accessors!(Inline {
     CharacterReference,
     Emphasis,
     Strong,
-    Underline,
     Delete,
-    Insert,
     Mark,
-    Subscript,
-    Superscript,
-    Spoiler,
     Shortcode,
     Code,
     Link,
@@ -1022,20 +872,17 @@ impl_meta_accessors!(Inline {
     FootnoteReference,
     InlineFootnote,
     WikiLink,
-    MdxExpression,
-    MdxJsx,
     TextDirective,
 });
 
 impl_from_variants!(Inline {
     Text(Text), Escape(Escape), CharacterReference(CharacterReference),
-    Emphasis(Emphasis), Strong(Strong), Underline(Underline), Delete(Delete),
-    Insert(Insert), Mark(Mark), Subscript(Subscript), Superscript(Superscript),
-    Spoiler(Spoiler), Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
+    Emphasis(Emphasis), Strong(Strong), Delete(Delete), Mark(Mark),
+    Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
     LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
     SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
-    MdxExpression(MdxExpressionInline), MdxJsx(MdxJsxInline), TextDirective(TextDirective),
+    TextDirective(TextDirective),
 });
 
 impl Inline {
@@ -1046,13 +893,8 @@ impl Inline {
         match self {
             Inline::Emphasis(n) => &n.children,
             Inline::Strong(n) => &n.children,
-            Inline::Underline(n) => &n.children,
             Inline::Delete(n) => &n.children,
-            Inline::Insert(n) => &n.children,
             Inline::Mark(n) => &n.children,
-            Inline::Subscript(n) => &n.children,
-            Inline::Superscript(n) => &n.children,
-            Inline::Spoiler(n) => &n.children,
             Inline::Link(n) => &n.children,
             Inline::Image(n) => &n.alt,
             Inline::LinkReference(n) => &n.children,
@@ -1125,7 +967,7 @@ impl Heading {
 }
 
 impl Link {
-    /// A bare-destination link with no title.
+    /// An inline, bare-destination link with no title.
     pub fn new<I, T>(destination: impl Into<String>, children: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -1133,6 +975,7 @@ impl Link {
     {
         Self {
             meta: NodeMeta::default(),
+            form: LinkForm::Inline,
             destination: destination.into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,

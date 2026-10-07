@@ -11,7 +11,7 @@ use crate::span::Span;
 pub enum DiagnosticSeverity {
     /// A non-fatal issue; tolerant parsing continues.
     Warning,
-    /// A hard error (e.g. promoted by `parse_strict`, or an invalid AST).
+    /// A hard error, such as a malformed directive or an invalid AST.
     Error,
 }
 
@@ -25,15 +25,9 @@ pub enum DiagnosticCode {
     UnclosedDirectiveContainer,
     /// A directive attribute without a valid name was dropped.
     InvalidDirectiveAttribute,
-    /// Malformed MDX syntax.
-    InvalidMdx,
-    /// A strict-mode parse promoted a configured extension diagnostic to an error.
-    StrictParse,
     /// AST validation failure (an invalid or unsupported node shape), the single
     /// code used by `Document::validate` and by serialize/HTML pre-validation.
     InvalidDocument,
-    /// A node has no Markdown that reads back as the same tree.
-    Unrepresentable,
 }
 
 /// A single diagnostic across every domain — parser, AST validation, and the

@@ -52,14 +52,6 @@ fn blocks(blocks: &mut [Block]) {
                     self::blocks(&mut item.children);
                 }
             }
-            Block::DescriptionList(node) => {
-                for item in &mut node.children {
-                    inlines(&mut item.term);
-                    for details in &mut item.details {
-                        self::blocks(&mut details.children);
-                    }
-                }
-            }
             Block::CodeBlock(node) => {
                 optional(&mut node.info);
                 string(&mut node.value);
@@ -93,9 +85,6 @@ fn blocks(blocks: &mut [Block]) {
             }
             Block::MathBlock(node) => string(&mut node.value),
             Block::Frontmatter(node) => string(&mut node.value),
-            Block::MdxEsm(node) => string(&mut node.value),
-            Block::MdxExpression(node) => string(&mut node.value),
-            Block::MdxJsx(node) => string(&mut node.value),
             Block::LeafDirective(node) => {
                 string(&mut node.name);
                 inlines(&mut node.label);
@@ -122,13 +111,8 @@ fn inlines(inlines: &mut [Inline]) {
             }
             Inline::Emphasis(node) => self::inlines(&mut node.children),
             Inline::Strong(node) => self::inlines(&mut node.children),
-            Inline::Underline(node) => self::inlines(&mut node.children),
             Inline::Delete(node) => self::inlines(&mut node.children),
-            Inline::Insert(node) => self::inlines(&mut node.children),
             Inline::Mark(node) => self::inlines(&mut node.children),
-            Inline::Subscript(node) => self::inlines(&mut node.children),
-            Inline::Superscript(node) => self::inlines(&mut node.children),
-            Inline::Spoiler(node) => self::inlines(&mut node.children),
             Inline::InlineFootnote(node) => self::inlines(&mut node.children),
             Inline::Shortcode(node) => string(&mut node.name),
             Inline::Code(node) => {
@@ -165,8 +149,6 @@ fn inlines(inlines: &mut [Inline]) {
                 string(&mut node.target);
                 string(&mut node.label);
             }
-            Inline::MdxExpression(node) => string(&mut node.value),
-            Inline::MdxJsx(node) => string(&mut node.value),
             Inline::TextDirective(node) => {
                 string(&mut node.name);
                 self::inlines(&mut node.label);

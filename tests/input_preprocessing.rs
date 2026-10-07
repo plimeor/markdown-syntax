@@ -85,7 +85,7 @@ fn nul_is_punctuation_for_emphasis_flanking() {
 
 #[test]
 fn nul_in_uri_autolink_reads_as_replacement_character() {
-    let document = SyntaxOptions::commonmark().parse("<ab:c\u{0}d>").document;
+    let document = parse("<ab:c\u{0}d>").document;
     let [Inline::Link(autolink)] = paragraph_inlines(&document) else {
         panic!("expected an autolink, got {:?}", document.children);
     };

@@ -125,6 +125,29 @@ inline link as `[text](destination "title")`.
 - **WHEN** a document holding a paragraph with `Link::new("u", [Text::from("a")])` is serialized
 - **THEN** `to_markdown()` returns `"[a](u)\n"`
 
+### Requirement: Breaks and item content placed by rule
+The serializer SHALL write a dash thematic break as `- - -` when it opens the
+document or directly follows a paragraph line, where `---` would open
+frontmatter or underline a setext heading; and SHALL start a list item's
+content on the line after its bullet when that content is a thematic break of
+the bullet's char or begins with a space or a tab.
+
+#### Scenario: Dash break opening the document
+- **WHEN** `parse("---").document.to_markdown()` runs
+- **THEN** it returns `"- - -\n"`
+
+#### Scenario: Dash break after a paragraph line
+- **WHEN** `parse("- a\n  - - -").document.to_markdown()` runs
+- **THEN** it returns `"- a\n  - - -\n"`
+
+#### Scenario: Break of the bullet's char
+- **WHEN** `parse("-\n  ---").document.to_markdown()` runs
+- **THEN** it returns `"-\n  ---\n"`
+
+#### Scenario: Item content opening with spaces
+- **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
+- **THEN** it returns `"-\n   <v>\n"`
+
 ## MODIFIED Requirements
 
 ### Requirement: Canonical output
@@ -220,8 +243,7 @@ Round-trip stability SHALL compare a reparsed document with the parsed one
 apart from spans, reading each `Escape` as a `Text` holding its char, each
 `CharacterReference` as a `Text` holding its value, and each `SoftBreak`
 inside a heading as a `Text` holding a space, and merging adjacent `Text`
-nodes; a code span whose `raw` is empty or whose `fence_length` is 0 compares
-by its `value`.
+nodes; a code span compares by its `value`.
 
 #### Scenario: Escape against text
 - **WHEN** a paragraph holding `Escape('*')` and `Text("a")` is compared with one holding `Text("*a")`

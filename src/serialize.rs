@@ -3,30 +3,18 @@
 //! [`to_markdown_with`](Document::to_markdown_with)); [`SerializeOptions`] tunes
 //! the output style. The document is validated first, so serialization can fail
 //! with a [`SerializeError`].
+//!
+//! The serializer only renders: each node is written in the spelling the AST
+//! records for it, or else by one fixed rule. Text, escapes, and character
+//! references are written as recorded, and the output is never parsed back.
 
 use alloc::{
     format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
-use core::ops::Deref;
 
-use crate::{
-    ast::*,
-    compare::layout_normalized_blocks,
-    diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
-    options::SyntaxOptions,
-    parse::parse_with_definitions,
-    validate::validate_document,
-};
-
-mod inline;
-mod layout;
-mod read_back;
-
-use layout::{Alternative, Layout, Node};
-use read_back::{write_reading_back, Extracted, Part, ReadBack};
+use crate::{ast::*, diagnostic::Diagnostic, validate::validate_document};
 
 /// The newline style emitted by the serializer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,8 +34,8 @@ impl LineEnding {
     }
 }
 
-/// Output-style options for serialization. Defaults: LF, trailing newline, `-`
-/// bullets, `.` ordered markers, and backtick code fences.
+/// Output-style options for serialization. Defaults: LF, trailing newline, and
+/// the list markers and code fences the AST records.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct SerializeOptions {
@@ -55,17 +43,15 @@ pub struct SerializeOptions {
     pub line_ending: LineEnding,
     /// Whether to end the output with a trailing newline.
     pub final_newline: bool,
-    /// The bullet marker for unordered lists.
+    /// The bullet marker for unordered lists. `-`, the default, keeps the
+    /// marker the AST records; another marker replaces it.
     pub bullet: ListDelimiter,
-    /// The delimiter for ordered-list markers (e.g. `.` → `1.`).
+    /// The delimiter for ordered-list markers (e.g. `.` → `1.`). `.`, the
+    /// default, keeps the delimiter the AST records; another replaces it.
     pub ordered_delimiter: ListDelimiter,
-    /// The fence character for fenced code blocks.
+    /// The fence character for fenced code blocks. Backticks, the default,
+    /// keep the fence the AST records; tildes replace it.
     pub fence_marker: FenceMarker,
-    /// The dialect the output is read back under: escapes and delimiter
-    /// choices are made so that parsing the output with these options yields
-    /// the serialized tree. Defaults to the maximal dialect,
-    /// [`SyntaxOptions::default`].
-    pub syntax: SyntaxOptions,
 }
 
 impl Default for SerializeOptions {
@@ -76,7 +62,6 @@ impl Default for SerializeOptions {
             bullet: ListDelimiter::Dash,
             ordered_delimiter: ListDelimiter::Period,
             fence_marker: FenceMarker::Backtick,
-            syntax: SyntaxOptions::default(),
         }
     }
 }
@@ -88,27 +73,6 @@ pub enum SerializeError {
     InvalidDocument(Vec<Diagnostic>),
     /// A node kind that the serializer does not support was encountered.
     UnsupportedNode(&'static str),
-    /// No Markdown the serializer can write reads back, under
-    /// [`SerializeOptions::syntax`], as the same tree; the diagnostic names
-    /// the first node that reads back differently.
-    Unrepresentable(Diagnostic),
-}
-
-/// The options a document is serialized with, and what its output is read
-/// back under.
-struct Cx<'o> {
-    options: &'o SerializeOptions,
-    read_back: ReadBack<'o>,
-    /// The layout alternatives the document's read-back called for.
-    layout: Layout,
-}
-
-impl Deref for Cx<'_> {
-    type Target = SerializeOptions;
-
-    fn deref(&self) -> &SerializeOptions {
-        self.options
-    }
 }
 
 impl Document {
@@ -124,275 +88,18 @@ impl Document {
             return Err(SerializeError::InvalidDocument(diagnostics));
         }
 
-        serialize_document_body(self, options)
-    }
-}
-
-fn serialize_document_body(
-    document: &Document,
-    options: &SerializeOptions,
-) -> Result<String, SerializeError> {
-    // The output is read as if each label the document defines or uses were
-    // defined, as the document resolves its references.
-    let mut known = Vec::new();
-    for block in &document.children {
-        known_labels_in_block(block, &mut known);
-    }
-    known.sort_unstable();
-    known.dedup();
-    let mut cx = Cx {
-        options,
-        read_back: ReadBack {
-            syntax: &options.syntax,
-            known,
-            written: Default::default(),
-        },
-        layout: Layout::default(),
-    };
-    // The document is written with the default layout and read back. Where
-    // it does not read back, each two neighbouring blocks are, and where
-    // those do not, the blocks inside them, so that a layout alternative
-    // applies where a written block reads back as another one. A block is
-    // read back a bounded number of times per level it sits at, and only
-    // where something does not read back.
-    let output = settle_blocks(&document.children, &mut cx, true)?;
-    let mut output = match output {
-        Some(output) => output,
-        None => {
-            // What the neighbours did not settle is settled on the whole.
-            let ours = layout_normalized_blocks(&document.children);
-            settle_fragment(
-                &document.children,
-                &ours,
-                &|address| address,
-                &mut cx,
-                &|cx| serialize_blocks_at_start(&document.children, cx, true),
-            )?;
-            serialize_blocks_at_start(&document.children, &cx, true)?
+        let mut output = write_blocks(&self.children, options, Join::Gap, true)?;
+        if options.line_ending == LineEnding::CrLf {
+            output = lf_to_crlf(&output);
         }
-    };
-    if options.line_ending == LineEnding::CrLf {
-        output = lf_to_crlf(&output);
-    }
-    // Blocks end without a line ending, except an HTML block whose last line
-    // is empty (the final newline ends that line too) and an indented code
-    // block that keeps its value's `\r` or `\r\n` ending.
-    if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output) {
-        output.push_str(options.line_ending.as_str());
-    }
-    Ok(output)
-}
-
-/// Layout alternatives the read-back of a few blocks tries at most.
-const LAYOUT_ROUNDS: usize = 32;
-
-/// The blocks `output` reads back as, read with its final line ending.
-fn read_back_blocks(output: &str, cx: &Cx<'_>) -> Vec<Block> {
-    let mut written = String::from(output);
-    if !written.is_empty() && !ends_with_carriage_return_ending(&written) {
-        written.push('\n');
-    }
-    parse_with_definitions(&written, &cx.options.syntax, &cx.read_back.known)
-        .document
-        .children
-}
-
-/// Whether what `write` writes reads back as `ours`.
-fn reads_back(
-    ours: &[Block],
-    cx: &Cx<'_>,
-    write: &dyn Fn(&Cx<'_>) -> Result<String, SerializeError>,
-) -> Option<String> {
-    let output = write(cx).ok()?;
-    (layout_normalized_blocks(&read_back_blocks(&output, cx)) == ours).then_some(output)
-}
-
-/// Settles the layout of `blocks`, and returns their Markdown when it reads
-/// back: where the sequence does not, each block with the one after it, and
-/// where those do not, the blocks inside them first.
-fn settle_blocks(
-    blocks: &[Block],
-    cx: &mut Cx<'_>,
-    document_start: bool,
-) -> Result<Option<String>, SerializeError> {
-    let ours = layout_normalized_blocks(blocks);
-    let whole = |cx: &Cx<'_>| serialize_blocks_at_start(blocks, cx, document_start);
-    if let Some(output) = reads_back(&ours, cx, &whole) {
-        return Ok(Some(output));
-    }
-    let windows = blocks.len().saturating_sub(1).max(1).min(blocks.len());
-    for start in 0..windows {
-        let end = (start + 2).min(blocks.len());
-        let window = &blocks[start..end];
-        let ours = layout_normalized_blocks(window);
-        let at_start = document_start && start == 0;
-        let write = |cx: &Cx<'_>| serialize_blocks_at_start(window, cx, at_start);
-        if reads_back(&ours, cx, &write).is_some() {
-            continue;
+        // Blocks end without a line ending, except an HTML block whose last
+        // line is empty (the final newline ends that line too) and an indented
+        // code block that keeps its value's `\r` or `\r\n` ending.
+        if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output)
+        {
+            output.push_str(options.line_ending.as_str());
         }
-        for block in window {
-            settle_inside(block, cx)?;
-        }
-        // Settled with the blocks around them, if not here.
-        let _ = settle_fragment(window, &ours, &|address| address, cx, &write);
-    }
-    Ok(reads_back(&ours, cx, &whole))
-}
-
-/// Settles the sequences of blocks `block` holds, and the items of a list
-/// two at a time.
-fn settle_inside(block: &Block, cx: &mut Cx<'_>) -> Result<(), SerializeError> {
-    match block {
-        Block::BlockQuote(node) => settle_blocks(&node.children, cx, false).map(drop),
-        Block::Alert(node) => settle_blocks(&node.children, cx, false).map(drop),
-        Block::FootnoteDefinition(node) => settle_blocks(&node.children, cx, false).map(drop),
-        Block::ContainerDirective(node) => settle_blocks(&node.children, cx, false).map(drop),
-        Block::HtmlContainer(HtmlContainer {
-            content: HtmlContainerContent::Blocks(children),
-            ..
-        }) => settle_blocks(children, cx, false).map(drop),
-        Block::DescriptionList(node) => {
-            for item in &node.children {
-                for details in &item.details {
-                    settle_blocks(&details.children, cx, false)?;
-                }
-            }
-            Ok(())
-        }
-        Block::List(list) => {
-            for item in &list.children {
-                settle_blocks(&item.children, cx, false)?;
-            }
-            // Two items at a time, as a list of their own.
-            for start in 0..list.children.len().saturating_sub(1) {
-                let items = start..start + 2;
-                let shape = [Block::List(List {
-                    meta: list.meta.clone(),
-                    ordered: list.ordered,
-                    start: list
-                        .ordered
-                        .then(|| list.start.unwrap_or(1).saturating_add(start as u64)),
-                    delimiter: list.delimiter,
-                    tight: list.tight,
-                    children: list.children[items.clone()].to_vec(),
-                })];
-                let mut pairs = Vec::new();
-                layout::address_pairs_of_items(
-                    &list.children[items.clone()],
-                    &shape,
-                    block,
-                    &mut pairs,
-                );
-                pairs.sort_unstable();
-                let ours = layout_normalized_blocks(&shape);
-                let translate = |address: usize| {
-                    pairs
-                        .binary_search_by_key(&address, |&(shape, _)| shape)
-                        .map_or(address, |at| pairs[at].1)
-                };
-                let write = |cx: &Cx<'_>| serialize_list_items(list, cx, items.clone());
-                if reads_back(&ours, cx, &write).is_none() {
-                    let _ = settle_fragment(&shape, &ours, &translate, cx, &write);
-                }
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
-}
-
-/// Settles the layout of what `write` writes: `shape` holds the blocks it
-/// writes, or copies of them, whose nodes `translate` maps to the written
-/// ones by address, and `ours` is their layout-normalized form. An
-/// alternative that leaves the difference where it was is withdrawn, and
-/// each is tried once. When no alternative makes it read back, the
-/// alternatives it applied are withdrawn: blocks read back apart from what
-/// is around them can read back otherwise there.
-fn settle_fragment(
-    shape: &[Block],
-    ours: &[Block],
-    translate: &dyn Fn(usize) -> usize,
-    cx: &mut Cx<'_>,
-    write: &dyn Fn(&Cx<'_>) -> Result<String, SerializeError>,
-) -> Result<(), SerializeError> {
-    let mut tried: Vec<layout::Choice> = Vec::new();
-    let mut last: Option<(layout::Choice, Option<usize>)> = None;
-    let give_up = |cx: &mut Cx<'_>, tried: &[layout::Choice], error| {
-        for choice in tried {
-            cx.layout.remove(choice);
-        }
-        Err(error)
-    };
-    loop {
-        let output = match write(cx) {
-            Ok(output) => output,
-            Err(error) => return give_up(cx, &tried, error),
-        };
-        let theirs = layout_normalized_blocks(&read_back_blocks(&output, cx));
-        if ours == theirs {
-            return Ok(());
-        }
-        let path = layout::divergence(shape, ours, &theirs);
-        let key = layout::key(&path);
-        if let Some((choice, before)) = last.take() {
-            if before == key {
-                cx.layout.remove(&choice);
-            }
-        }
-        let next = layout::candidates(&path)
-            .into_iter()
-            .map(|(address, alternative)| (translate(address), alternative))
-            .find(|choice| !tried.contains(choice) && !cx.layout.holds(choice));
-        match next {
-            Some(choice) if tried.len() < LAYOUT_ROUNDS => {
-                cx.layout.add(choice);
-                tried.push(choice);
-                last = Some((choice, key));
-            }
-            _ => {
-                let error = unrepresentable_block(layout::blamed(&path));
-                return give_up(cx, &tried, error);
-            }
-        }
-    }
-}
-
-fn unrepresentable_block(node: Option<Node<'_>>) -> SerializeError {
-    let (span, name) = match node {
-        Some(Node::Block(block)) => (block.span(), block_kind(block)),
-        Some(Node::Item(item)) => (item.meta.span, "a ListItem"),
-        None => (None, "the document"),
-    };
-    SerializeError::Unrepresentable(Diagnostic {
-        severity: DiagnosticSeverity::Error,
-        code: DiagnosticCode::Unrepresentable,
-        span,
-        message: format!("{name} has no Markdown that reads back as the same tree"),
-    })
-}
-
-fn block_kind(block: &Block) -> &'static str {
-    match block {
-        Block::Paragraph(_) => "a Paragraph",
-        Block::Heading(_) => "a Heading",
-        Block::ThematicBreak(_) => "a ThematicBreak",
-        Block::BlockQuote(_) => "a BlockQuote",
-        Block::Alert(_) => "an Alert",
-        Block::List(_) => "a List",
-        Block::DescriptionList(_) => "a DescriptionList",
-        Block::CodeBlock(_) => "a CodeBlock",
-        Block::HtmlBlock(_) => "an HtmlBlock",
-        Block::HtmlContainer(_) => "an HtmlContainer",
-        Block::Definition(_) => "a Definition",
-        Block::FootnoteDefinition(_) => "a FootnoteDefinition",
-        Block::Table(_) => "a Table",
-        Block::MathBlock(_) => "a MathBlock",
-        Block::Frontmatter(_) => "a Frontmatter",
-        Block::MdxEsm(_) => "an MdxEsm",
-        Block::MdxExpression(_) => "an MdxExpression",
-        Block::MdxJsx(_) => "an MdxJsx",
-        Block::LeafDirective(_) => "a LeafDirective",
-        Block::ContainerDirective(_) => "a ContainerDirective",
+        Ok(output)
     }
 }
 
@@ -428,507 +135,87 @@ fn push_block_gap(output: &mut String) {
     }
 }
 
-/// Serialize a block sequence. `document_start` is true only for the top-level
-/// document body, where the first block sits at byte 0 and a contiguous `---`
-/// would open frontmatter; that one position emits a spaced dash thematic break
-/// instead. Nested sequences (blockquotes, list items, ...) are never at byte 0.
-fn serialize_blocks_at_start(
+/// How sibling blocks are separated.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Join {
+    /// By a blank line.
+    Gap,
+    /// By a line ending alone, as the blocks of a tight list item are.
+    Line,
+}
+
+/// Writes a sequence of sibling blocks. `document_start` is true only for the
+/// top-level document body, where the first block sits at byte 0 and a
+/// contiguous `---` would open frontmatter.
+fn write_blocks(
     blocks: &[Block],
-    options: &Cx<'_>,
+    options: &SerializeOptions,
+    join: Join,
     document_start: bool,
 ) -> Result<String, SerializeError> {
-    // Written last to first: a list reads the indentation of the block after
-    // it, which would join its last item unless the items' content starts
-    // further in.
-    let mut outputs: Vec<(String, bool)> = Vec::with_capacity(blocks.len());
-    for (index, block) in blocks.iter().enumerate().rev() {
-        let at_document_start = document_start && index == 0;
-        let next = outputs
-            .last()
-            .map(|(next, _): &(String, bool)| next.as_str());
-        let written = match block {
-            Block::List(list) => (serialize_list_before(block, list, options, next)?, false),
-            // A paragraph or setext heading right after a definition may read
-            // back only as the continuation of the paragraph the definition
-            // was read from.
-            Block::Paragraph(paragraph) => serialize_paragraph(
-                paragraph,
-                options,
-                definition_before(blocks, index),
-                paragraph_before(blocks, index),
-            )?,
-            Block::Heading(heading) if writes_setext(heading) => {
-                serialize_setext_heading(heading, options, definition_before(blocks, index))?
-            }
-            _ => (serialize_block(block, options, at_document_start)?, false),
-        };
-        outputs.push(written);
-    }
     let mut output = String::new();
-    for (index, (written, continues)) in outputs.iter().rev().enumerate() {
+    // The kind and marker of the list written right before the current block.
+    let mut previous_list: Option<(bool, char)> = None;
+    for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
-            let joins = options
-                .layout
-                .has(&blocks[index - 1], Alternative::JoinNext);
-            if *continues || joins {
-                output.push('\n');
-            } else {
-                push_block_gap(&mut output);
+            match join {
+                Join::Gap => push_block_gap(&mut output),
+                Join::Line => output.push('\n'),
             }
         }
-        output.push_str(written);
-    }
-    Ok(output)
-}
-
-/// Whether the block before `blocks[index]` is a paragraph, after which a
-/// paragraph's first line can open a block of its own, such as description
-/// details.
-fn paragraph_before(blocks: &[Block], index: usize) -> bool {
-    index
-        .checked_sub(1)
-        .is_some_and(|before| matches!(blocks[before], Block::Paragraph(_)))
-}
-
-fn definition_before(blocks: &[Block], index: usize) -> Option<&Definition> {
-    match index.checked_sub(1).map(|before| &blocks[before]) {
-        Some(Block::Definition(definition)) => Some(definition),
-        _ => None,
-    }
-}
-
-/// A paragraph's Markdown, and whether it is written right after the
-/// definition before it, as the continuation of the paragraph that
-/// definition was read from.
-fn serialize_paragraph(
-    node: &Paragraph,
-    cx: &Cx<'_>,
-    after: Option<&Definition>,
-    after_paragraph: bool,
-) -> Result<(String, bool), SerializeError> {
-    // After a paragraph, the paragraph is read back after one.
-    let written = if after_paragraph {
-        let parts = [
-            Part::Literal("p\n\n".into()),
-            Part::Inlines(&node.children, Place::Block),
-        ];
-        let extract = extractor(|blocks| match blocks {
-            [Block::Paragraph(_), rest @ ..] => one_block(rest, paragraph_content),
-            _ => Extracted::Mismatch,
-        });
-        write_reading_back(&parts, extract, &cx.read_back)
-    } else {
-        let parts = [Part::Inlines(&node.children, Place::Block)];
-        write_reading_back(
-            &parts,
-            |blocks| one_block(blocks, paragraph_content),
-            &cx.read_back,
-        )
-    };
-    let error = match written {
-        Ok(mut written) => return Ok((written.remove(0), false)),
-        Err(error) => error,
-    };
-    let Some(definition) = after else {
-        return Err(error);
-    };
-    let parts = [
-        Part::Literal(serialize_definition(definition) + "\n"),
-        Part::Inlines(&node.children, Place::Continuation),
-    ];
-    let extract = extractor(|blocks| match blocks {
-        [Block::Definition(_), rest @ ..] => one_block(rest, paragraph_content),
-        _ => Extracted::Mismatch,
-    });
-    match write_reading_back(&parts, extract, &cx.read_back) {
-        Ok(mut written) => Ok((written.remove(0), true)),
-        Err(_) => Err(error),
-    }
-}
-
-/// `content`, typed as reading inline content from any block it is given.
-fn content_of<F>(content: F) -> F
-where
-    F: for<'d> Fn(&'d Block) -> Option<&'d [Inline]>,
-{
-    content
-}
-
-/// `extract`, typed as reading any blocks it is given.
-fn extractor<F>(extract: F) -> F
-where
-    F: for<'d> Fn(&'d [Block]) -> Extracted<'d>,
-{
-    extract
-}
-
-fn paragraph_content(block: &Block) -> Option<&[Inline]> {
-    match block {
-        Block::Paragraph(node) => Some(&node.children),
-        _ => None,
-    }
-}
-
-/// The inline content `content` reads from the one block `blocks` should
-/// hold, or where a line landed outside it.
-fn one_block<'d>(
-    blocks: &'d [Block],
-    content: impl for<'b> Fn(&'b Block) -> Option<&'b [Inline]>,
-) -> Extracted<'d> {
-    match blocks {
-        [only] => match content(only) {
-            Some(inlines) => Extracted::Lists(vec![inlines]),
-            None => misplaced_within(only),
-        },
-        [first, second, ..] => match (content(first), second.span()) {
-            (Some(_), Some(span)) => Extracted::Misplaced(span.start),
-            _ => match first.span() {
-                Some(span) => Extracted::Misplaced(span.start),
-                None => Extracted::Mismatch,
-            },
-        },
-        [] => Extracted::Mismatch,
-    }
-}
-
-/// Where a line landed in `block`, read where one block of another kind was
-/// written: the first block it holds that starts after it does, a setext
-/// heading's underline, or else its first line.
-fn misplaced_within(block: &Block) -> Extracted<'_> {
-    let Some(span) = block.span() else {
-        return Extracted::Mismatch;
-    };
-    let mut inner = None;
-    let mut visit = |child: &Block| {
-        if let Some(child) = child.span().filter(|child| child.start > span.start) {
-            inner = Some(inner.map_or(child.start, |start: usize| start.min(child.start)));
-        }
-    };
-    match block {
-        Block::BlockQuote(node) => node.children.iter().for_each(&mut visit),
-        Block::Alert(node) => node.children.iter().for_each(&mut visit),
-        Block::List(node) => node
-            .children
-            .iter()
-            .flat_map(|item| &item.children)
-            .for_each(&mut visit),
-        Block::DescriptionList(node) => node
-            .children
-            .iter()
-            .flat_map(|item| &item.details)
-            .flat_map(|details| &details.children)
-            .for_each(&mut visit),
-        Block::FootnoteDefinition(node) => node.children.iter().for_each(&mut visit),
-        Block::ContainerDirective(node) => node.children.iter().for_each(&mut visit),
-        Block::HtmlContainer(node) => {
-            if let HtmlContainerContent::Blocks(children) = &node.content {
-                children.iter().for_each(&mut visit);
+        let after_paragraph_line =
+            join == Join::Line && index > 0 && matches!(blocks[index - 1], Block::Paragraph(_));
+        let written = match block {
+            Block::List(list) => {
+                let marker = list_marker(list, options, previous_list);
+                previous_list = Some((list.ordered, marker));
+                write_list(list, options, marker)?
             }
-        }
-        _ => {}
-    }
-    match (inner, block) {
-        (Some(start), _) => Extracted::Misplaced(start),
-        (None, Block::Heading(heading)) if heading.kind == HeadingKind::Setext => {
-            Extracted::Misplaced(span.end.saturating_sub(1).max(span.start))
-        }
-        (None, _) => Extracted::Misplaced(span.start),
-    }
-}
-
-/// A task item's first paragraph, read back after its checkbox, which keeps
-/// the whitespace after it as text and holds the paragraph off the line's
-/// start.
-fn serialize_task_paragraph(
-    node: &Paragraph,
-    cx: &Cx<'_>,
-    checked: bool,
-) -> Result<String, SerializeError> {
-    let checkbox = if checked { "- [x] " } else { "- [ ] " };
-    let parts = [
-        Part::Literal(checkbox.into()),
-        Part::Inlines(&node.children, Place::ItemContent),
-    ];
-    let extract = extractor(|blocks| match blocks {
-        [Block::List(list)] => match list.children.as_slice() {
-            [item] if item.checked == Some(checked) => one_block(&item.children, paragraph_content),
-            [_, second, ..] => match second.meta.span {
-                Some(span) => Extracted::Misplaced(span.start),
-                None => Extracted::Mismatch,
-            },
-            _ => Extracted::Mismatch,
-        },
-        [Block::List(_), second, ..] => match second.span() {
-            Some(span) => Extracted::Misplaced(span.start),
-            None => Extracted::Mismatch,
-        },
-        _ => Extracted::Mismatch,
-    });
-    let written = write_reading_back(&parts, extract, &cx.read_back)?.remove(0);
-    // The list the item is written in indents its lines past the marker.
-    let mut lines = written.split('\n');
-    let mut output = String::from(lines.next().unwrap_or_default());
-    for line in lines {
-        output.push('\n');
-        output.push_str(line.strip_prefix("  ").unwrap_or(line));
-    }
-    Ok(output)
-}
-
-/// Whether `node` is written as a setext heading: a setext underline can only
-/// express depth 1 (`=`) or 2 (`-`); any other depth falls back to ATX,
-/// otherwise the depth is lost.
-fn writes_setext(node: &Heading) -> bool {
-    node.kind == HeadingKind::Setext && matches!(node.depth, 1 | 2)
-}
-
-fn heading_content(node: &Heading) -> impl for<'d> Fn(&'d Block) -> Option<&'d [Inline]> {
-    let setext = writes_setext(node);
-    let depth = node.depth;
-    content_of(move |block| match block {
-        Block::Heading(heading)
-            if heading.depth == depth && (heading.kind == HeadingKind::Setext) == setext =>
-        {
-            Some(&heading.children)
-        }
-        _ => None,
-    })
-}
-
-fn serialize_heading(node: &Heading, cx: &Cx<'_>) -> Result<String, SerializeError> {
-    if writes_setext(node) {
-        return Ok(serialize_setext_heading(node, cx, None)?.0);
-    }
-    let hashes = "#".repeat(usize::from(node.depth));
-    if node.children.is_empty() {
-        return Ok(hashes);
-    }
-    let content = heading_content(node);
-    let parts = [
-        Part::Literal(format!("{hashes} ")),
-        Part::Inlines(&node.children, Place::Block),
-    ];
-    let mut written =
-        write_reading_back(&parts, |blocks| one_block(blocks, &content), &cx.read_back)?;
-    Ok(format!("{hashes} {}", written.remove(0)))
-}
-
-/// A setext heading's Markdown, and whether it is written right after the
-/// definition before it, as the continuation of the paragraph that
-/// definition was read from.
-fn serialize_setext_heading(
-    node: &Heading,
-    cx: &Cx<'_>,
-    after: Option<&Definition>,
-) -> Result<(String, bool), SerializeError> {
-    let content = heading_content(node);
-    let marker = if node.depth == 1 { "=" } else { "-" };
-    let underline = |content: &str| marker.repeat(content.len().max(3));
-    let parts = [
-        Part::Inlines(&node.children, Place::Block),
-        Part::Literal(format!("\n{}", marker.repeat(3))),
-    ];
-    let error =
-        match write_reading_back(&parts, |blocks| one_block(blocks, &content), &cx.read_back) {
-            Ok(mut written) => {
-                let content = written.remove(0);
-                return Ok((format!("{content}\n{}", underline(&content)), false));
+            Block::ThematicBreak(node) => {
+                previous_list = None;
+                write_thematic_break(node, document_start && index == 0, after_paragraph_line)
             }
-            Err(error) => error,
+            _ => {
+                previous_list = None;
+                write_block(block, options)?
+            }
         };
-    let Some(definition) = after else {
-        return Err(error);
-    };
-    let parts = [
-        Part::Literal(serialize_definition(definition) + "\n"),
-        Part::Inlines(&node.children, Place::Continuation),
-        Part::Literal(format!("\n{}", marker.repeat(3))),
-    ];
-    let extract = extractor(|blocks| match blocks {
-        [Block::Definition(_), rest @ ..] => one_block(rest, &content),
-        _ => Extracted::Mismatch,
-    });
-    match write_reading_back(&parts, extract, &cx.read_back) {
-        Ok(mut written) => {
-            let content = written.remove(0);
-            Ok((format!("{content}\n{}", underline(&content)), true))
-        }
-        Err(_) => Err(error),
+        output.push_str(&written);
     }
+    Ok(output)
 }
 
-/// A directive's `[label]`, which reads back in `probe`, the directive
-/// written with its label marked by `(start, end)`.
-fn serialize_directive_label(
-    label: &[Inline],
-    cx: &Cx<'_>,
-    open: String,
-    close: String,
-    content: impl for<'d> Fn(&'d Block) -> Option<&'d [Inline]>,
-) -> Result<String, SerializeError> {
-    if label.is_empty() {
-        return Ok(String::new());
-    }
-    let parts = [
-        Part::Literal(open),
-        Part::Inlines(label, Place::Within),
-        Part::Literal(close),
-    ];
-    let mut written =
-        write_reading_back(&parts, |blocks| one_block(blocks, &content), &cx.read_back)?;
-    Ok(format!("[{}]", written.remove(0)))
-}
-
-fn serialize_definition(node: &Definition) -> String {
-    let destination = serialize_destination_kind(
-        &node.destination,
-        node.destination_kind,
-        InlineSerializeContext::block_content(),
-    );
-    // The label is matched as written, so it is written as the AST holds it;
-    // one that does not read back that way is unrepresentable.
-    let label = escape_reference_label_source(&node.label, false);
-    let mut output = format!("[{}]: {}", label, destination);
-    if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
-        output.push(' ');
-        output.push_str(&serialize_title_kind(
-            title,
-            title_kind,
-            InlineSerializeContext::block_content(),
-        ));
-    }
-    output
-}
-
-/// The identifiers of the definitions `block` holds and of the references it
-/// uses, at any depth.
-fn known_labels_in_block(block: &Block, known: &mut Vec<String>) {
-    let blocks = |children: &[Block], known: &mut Vec<String>| {
-        for child in children {
-            known_labels_in_block(child, known);
-        }
-    };
+fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
     match block {
-        Block::Definition(node) => known.push(node.identifier.clone()),
-        Block::Paragraph(node) => known_labels_in_inlines(&node.children, known),
-        Block::Heading(node) => known_labels_in_inlines(&node.children, known),
-        Block::BlockQuote(node) => blocks(&node.children, known),
-        Block::Alert(node) => blocks(&node.children, known),
-        Block::List(node) => {
-            for item in &node.children {
-                blocks(&item.children, known);
-            }
-        }
-        Block::DescriptionList(node) => {
-            for item in &node.children {
-                known_labels_in_inlines(&item.term, known);
-                for details in &item.details {
-                    blocks(&details.children, known);
-                }
-            }
-        }
-        Block::HtmlContainer(node) => match &node.content {
-            HtmlContainerContent::Blocks(children) => blocks(children, known),
-            HtmlContainerContent::Inlines(children) => known_labels_in_inlines(children, known),
-        },
-        Block::FootnoteDefinition(node) => blocks(&node.children, known),
-        Block::Table(node) => {
-            for row in &node.rows {
-                for cell in &row.cells {
-                    known_labels_in_inlines(&cell.children, known);
-                }
-            }
-        }
-        Block::LeafDirective(node) => known_labels_in_inlines(&node.label, known),
-        Block::ContainerDirective(node) => {
-            known_labels_in_inlines(&node.label, known);
-            blocks(&node.children, known);
-        }
-        _ => {}
-    }
-}
-
-fn known_labels_in_inlines(inlines: &[Inline], known: &mut Vec<String>) {
-    for inline in inlines {
-        match inline {
-            Inline::LinkReference(node) => known.push(node.identifier.clone()),
-            Inline::ImageReference(node) => known.push(node.identifier.clone()),
-            _ => {}
-        }
-        if let Some(children) = inline::inline_children(inline) {
-            known_labels_in_inlines(children, known);
-        }
-    }
-}
-
-fn serialize_block(
-    block: &Block,
-    options: &Cx<'_>,
-    at_document_start: bool,
-) -> Result<String, SerializeError> {
-    match block {
-        Block::Paragraph(node) => Ok(serialize_paragraph(node, options, None, false)?.0),
-        Block::Heading(node) => serialize_heading(node, options),
-        Block::ThematicBreak(node) => Ok(match node.marker {
-            // A Dash break is normally written contiguous (`---`). The spaced
-            // form is used at the document start, where a contiguous `---`
-            // opens frontmatter, and where `---` would be the setext underline
-            // of the paragraph before it.
-            ThematicBreakMarker::Dash
-                if at_document_start || options.layout.has(block, Alternative::BreakSpaced) =>
-            {
-                "- - -".into()
-            }
-            ThematicBreakMarker::Dash => "---".into(),
-            ThematicBreakMarker::Asterisk => "***".into(),
-            ThematicBreakMarker::Underscore => "___".into(),
-        }),
+        Block::Paragraph(node) => write_inlines(&node.children, Context::BLOCK),
+        Block::Heading(node) => write_heading(node),
+        Block::ThematicBreak(node) => Ok(write_thematic_break(node, false, false)),
         Block::BlockQuote(node) => {
-            let inner = serialize_blocks_at_start(&node.children, options, false)?;
-            let (marker, prefix) = if options.layout.has(block, Alternative::QuoteIndented) {
-                (" >", " > ")
+            let inner = write_blocks(&node.children, options, Join::Gap, false)?;
+            Ok(if inner.is_empty() {
+                ">".into()
             } else {
-                (">", "> ")
-            };
-            let mut output = if inner.is_empty() {
-                marker.into()
-            } else if options.layout.has(block, Alternative::QuoteOpensEmpty) {
-                format!("{marker}\n{}", prefix_lines(&inner, prefix))
-            } else {
-                prefix_lines(&inner, prefix)
-            };
-            if options.layout.has(block, Alternative::QuoteEndsEmpty) {
-                output.push('\n');
-                output.push_str(marker);
-            }
-            Ok(output)
+                prefix_lines(&inner, "> ")
+            })
         }
-        Block::Alert(node) => {
-            let mut output = serialize_alert(node, options)?;
-            if options.layout.has(block, Alternative::QuoteEndsEmpty) {
-                output.push_str("\n>");
-            }
-            Ok(output)
-        }
-        Block::List(node) => serialize_list_before(block, node, options, None),
-        Block::DescriptionList(node) => serialize_description_list(node, options),
-        Block::CodeBlock(node) => serialize_code_block(node, options),
+        Block::Alert(node) => write_alert(node, options),
+        Block::List(node) => write_list(node, options, list_marker(node, options, None)),
+        Block::CodeBlock(node) => Ok(write_code_block(node, options)),
         // An HTML block's lines are joined with `\n`, so a value ending in one
         // ends with an empty line that belongs to the block (an unclosed
         // comment, say); it is written as it is.
         Block::HtmlBlock(node) => Ok(node.value.clone()),
-        Block::HtmlContainer(node) => serialize_html_container(node, options),
-        Block::Definition(node) => Ok(serialize_definition(node)),
+        Block::HtmlContainer(node) => write_html_container(node, options),
+        Block::Definition(node) => Ok(write_definition(node)),
         Block::FootnoteDefinition(node) => {
-            let inner = serialize_blocks_at_start(&node.children, options, false)?;
-            let label = if node.meta.span.is_some() {
-                escape_footnote_label_source(&node.label)
-            } else {
-                escape_footnote_label_semantic(&node.label)
-            };
-            Ok(format!("[^{}]: {}", label, indent_continuation(&inner)))
+            let inner = write_blocks(&node.children, options, Join::Gap, false)?;
+            Ok(format!(
+                "[^{}]: {}",
+                escape_label(&node.label, false),
+                indent_continuation(&inner)
+            ))
         }
-        Block::Table(node) => serialize_table(node, options),
+        Block::Table(node) => write_table(node),
         Block::MathBlock(node) => {
             let fence = block_math_fence(&node.value);
             Ok(fenced_body(&fence, &node.value, &fence))
@@ -942,25 +229,14 @@ fn serialize_block(
             // so a final `\n` is an empty last line.
             Ok(format!("{fence}\n{}\n{fence}", node.value))
         }
-        Block::MdxEsm(node) => Ok(node.value.clone()),
-        Block::MdxExpression(node) => Ok(format!("{{{}}}", node.value)),
-        Block::MdxJsx(node) => Ok(node.value.clone()),
-        Block::LeafDirective(node) => {
-            let attributes = serialize_attributes(&node.attributes);
-            let label = serialize_directive_label(
-                &node.label,
-                options,
-                format!("::{}[", node.name),
-                format!("]{attributes}"),
-                content_of(|block| match block {
-                    Block::LeafDirective(directive) => Some(&directive.label[..]),
-                    _ => None,
-                }),
-            )?;
-            Ok(format!("::{}{label}{attributes}", node.name))
-        }
+        Block::LeafDirective(node) => Ok(format!(
+            "::{}{}{}",
+            node.name,
+            write_directive_label(&node.label)?,
+            write_attributes(&node.attributes, Context::BLOCK)
+        )),
         Block::ContainerDirective(node) => {
-            let mut inner = serialize_blocks_at_start(&node.children, options, false)?;
+            let mut inner = write_blocks(&node.children, options, Join::Gap, false)?;
             let fence = directive_fence(&inner);
             // Content ends with a line ending before the closing fence; an
             // empty directive takes no blank line, which would loosen a list
@@ -968,89 +244,99 @@ fn serialize_block(
             if !inner.is_empty() {
                 inner.push('\n');
             }
-            let attributes = serialize_attributes(&node.attributes);
-            let label = serialize_directive_label(
-                &node.label,
-                options,
-                format!(":::{}[", node.name),
-                format!("]{attributes}\n:::"),
-                content_of(|block| match block {
-                    Block::ContainerDirective(directive) => Some(&directive.label[..]),
-                    _ => None,
-                }),
-            )?;
             Ok(format!(
-                "{fence}{}{label}{attributes}\n{inner}{fence}",
-                node.name
+                "{fence}{}{}{}\n{inner}{fence}",
+                node.name,
+                write_directive_label(&node.label)?,
+                write_attributes(&node.attributes, Context::BLOCK)
             ))
         }
     }
 }
 
-fn serialize_html_container(
+/// A thematic break. A dash break is written spaced where a contiguous `---`
+/// would read otherwise: at the document start, where it opens frontmatter,
+/// and on the line after a paragraph's, where it underlines a setext heading.
+fn write_thematic_break(
+    node: &ThematicBreak,
+    at_document_start: bool,
+    after_paragraph_line: bool,
+) -> String {
+    match node.marker {
+        ThematicBreakMarker::Dash if at_document_start || after_paragraph_line => "- - -".into(),
+        ThematicBreakMarker::Dash => "---".into(),
+        ThematicBreakMarker::Asterisk => "***".into(),
+        ThematicBreakMarker::Underscore => "___".into(),
+    }
+}
+
+/// Whether `node` is written as a setext heading: a setext underline can only
+/// express depth 1 (`=`) or 2 (`-`), and it underlines content.
+fn writes_setext(node: &Heading) -> bool {
+    node.kind == HeadingKind::Setext && matches!(node.depth, 1 | 2) && !node.children.is_empty()
+}
+
+fn write_heading(node: &Heading) -> Result<String, SerializeError> {
+    let content = write_inlines(&node.children, Context::HEADING)?;
+    if writes_setext(node) {
+        let marker = if node.depth == 1 { "=" } else { "-" };
+        return Ok(format!(
+            "{content}\n{}",
+            marker.repeat(content.len().max(3))
+        ));
+    }
+    let hashes = "#".repeat(usize::from(node.depth));
+    Ok(if content.is_empty() {
+        hashes
+    } else {
+        format!("{hashes} {content}")
+    })
+}
+
+fn write_definition(node: &Definition) -> String {
+    let destination = write_destination(&node.destination, node.destination_kind, Context::BLOCK);
+    let mut output = format!("[{}]: {}", escape_label(&node.label, false), destination);
+    if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
+        output.push(' ');
+        output.push_str(&write_title(title, title_kind, Context::BLOCK));
+    }
+    output
+}
+
+fn write_html_container(
     node: &HtmlContainer,
-    options: &Cx<'_>,
+    options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
     match &node.content {
         HtmlContainerContent::Blocks(children) => {
-            let inner = serialize_blocks_at_start(children, options, false)?;
-            if inner.is_empty() {
-                Ok(format!("{}\n{}", node.opening.raw, node.closing.raw))
+            let inner = write_blocks(children, options, Join::Gap, false)?;
+            Ok(if inner.is_empty() {
+                format!("{}\n{}", node.opening.raw, node.closing.raw)
             } else {
-                Ok(format!(
-                    "{}\n{}\n\n{}",
-                    node.opening.raw, inner, node.closing.raw
-                ))
-            }
+                format!("{}\n{}\n\n{}", node.opening.raw, inner, node.closing.raw)
+            })
         }
-        HtmlContainerContent::Inlines(children) => {
-            // A summary reads back as the first line of a `<details>`.
-            let parts = [
-                Part::Literal(format!("<details>\n{}", node.opening.raw)),
-                Part::Inlines(children, Place::Within),
-                Part::Literal(format!("{}\n</details>", node.closing.raw)),
-            ];
-            let summary = content_of(|block| {
-                let Block::HtmlContainer(details) = block else {
-                    return None;
-                };
-                match &details.content {
-                    HtmlContainerContent::Blocks(blocks) => match blocks.first() {
-                        Some(Block::HtmlContainer(HtmlContainer {
-                            content: HtmlContainerContent::Inlines(children),
-                            ..
-                        })) => Some(children),
-                        _ => None,
-                    },
-                    HtmlContainerContent::Inlines(_) => None,
-                }
-            });
-            let mut written = write_reading_back(
-                &parts,
-                |blocks| one_block(blocks, summary),
-                &options.read_back,
-            )?;
-            Ok(format!(
-                "{}{}{}",
-                node.opening.raw,
-                written.remove(0),
-                node.closing.raw
-            ))
-        }
+        HtmlContainerContent::Inlines(children) => Ok(format!(
+            "{}{}{}",
+            node.opening.raw,
+            write_inlines(children, Context::BLOCK)?,
+            node.closing.raw
+        )),
     }
 }
 
-fn serialize_alert(node: &Alert, options: &Cx<'_>) -> Result<String, SerializeError> {
+fn write_alert(node: &Alert, options: &SerializeOptions) -> Result<String, SerializeError> {
     let mut output = String::from("> [!");
     output.push_str(alert_kind_name(node.kind));
     output.push(']');
     if let Some(title) = &node.title {
         if !title.is_empty() {
             output.push(' ');
-            output.push_str(&escape_alert_title(title));
+            // A line ending would end the marker's line.
+            output.push_str(&title.replace(['\n', '\r'], " "));
         }
     }
-    let inner = serialize_blocks_at_start(&node.children, options, false)?;
+    let inner = write_blocks(&node.children, options, Join::Gap, false)?;
     if !inner.is_empty() {
         output.push('\n');
         output.push_str(&prefix_lines(&inner, "> "));
@@ -1068,297 +354,151 @@ fn alert_kind_name(kind: AlertKind) -> &'static str {
     }
 }
 
-/// An alert title is kept as written, so only a line ending, which would end
-/// its line, is written as a space.
-fn escape_alert_title(input: &str) -> String {
-    input.replace(['\n', '\r'], " ")
-}
-
-/// The items `items` of a list, written as a list of their own.
-fn serialize_list_items(
-    node: &List,
-    options: &Cx<'_>,
-    items: core::ops::Range<usize>,
-) -> Result<String, SerializeError> {
-    serialize_list_with_marker_spacing(node, options, "", " ", None, items)
-}
-
-/// A list written before `next`, the Markdown of the block after it. A list
-/// the read-back keeps past the next block has its markers indented past
-/// that block's indentation, and one it keeps apart from the next list takes
-/// a marker other than the one that list starts with.
-fn serialize_list_before(
-    block: &Block,
-    node: &List,
-    options: &Cx<'_>,
-    next: Option<&str>,
-) -> Result<String, SerializeError> {
-    let avoid = next
-        .filter(|_| options.layout.has(block, Alternative::ListApartFromNext))
-        .and_then(|next| {
-            let marker = next.trim_start_matches(' ');
-            let digits = marker.bytes().take_while(u8::is_ascii_digit).count();
-            marker[digits..].chars().next()
-        });
-    let indent = next
-        .filter(|_| options.layout.has(block, Alternative::ListPastNext))
-        .map(|next| next.len() - next.trim_start_matches(' ').len());
-    let items = 0..node.children.len();
-    match indent {
-        Some(indent @ 1..=3) => serialize_list_with_marker_spacing(
-            node,
-            options,
-            &" ".repeat(indent),
-            " ",
-            avoid,
-            items,
-        ),
-        Some(4..) => serialize_list_with_marker_spacing(node, options, " ", "    ", avoid, items),
-        _ => serialize_list_with_marker_spacing(node, options, "", " ", avoid, items),
+/// The marker char a list is written with: the one the AST records, or the
+/// one the options replace it with. A replaced marker that the list written
+/// right before it in the same container, `previous`, also uses yields to the
+/// next one in the order `-`, `*`, `+`, or `.`, `)`.
+fn list_marker(list: &List, options: &SerializeOptions, previous: Option<(bool, char)>) -> char {
+    let defaults = SerializeOptions::default();
+    let (replaced, delimiter) = if list.ordered {
+        let replaced = options.ordered_delimiter != defaults.ordered_delimiter;
+        (
+            replaced,
+            if replaced {
+                options.ordered_delimiter
+            } else {
+                list.delimiter
+            },
+        )
+    } else {
+        let replaced = options.bullet != defaults.bullet;
+        (
+            replaced,
+            if replaced {
+                options.bullet
+            } else {
+                list.delimiter
+            },
+        )
+    };
+    let marker = if list.ordered {
+        ordered_list_marker(delimiter)
+    } else {
+        unordered_list_marker(delimiter)
+    };
+    if replaced && previous == Some((list.ordered, marker)) {
+        let order: &[char] = if list.ordered {
+            &['.', ')']
+        } else {
+            &['-', '*', '+']
+        };
+        let at = order.iter().position(|char| *char == marker).unwrap_or(0);
+        return order[(at + 1) % order.len()];
     }
+    marker
 }
 
-fn serialize_list_with_marker_spacing(
+fn write_list(
     node: &List,
-    options: &Cx<'_>,
-    marker_prefix: &str,
-    marker_padding: &str,
-    avoid: Option<char>,
-    items: core::ops::Range<usize>,
+    options: &SerializeOptions,
+    marker_char: char,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
-    let first = items.start;
-    for (index, item) in node
-        .children
-        .iter()
-        .enumerate()
-        .skip(first)
-        .take(items.len())
-    {
-        if index > first {
-            // An item whose last block takes the blank line after it is
-            // followed by the next one directly.
-            let joins = node.children[index - 1]
-                .children
-                .last()
-                .is_some_and(|last| options.layout.has(last, Alternative::JoinNext));
-            if node.tight || joins {
-                output.push('\n');
-            } else {
-                output.push_str("\n\n");
-            }
-        }
-        let mut list_delimiter = if node.ordered {
-            if options.ordered_delimiter == SerializeOptions::default().ordered_delimiter {
-                node.delimiter
-            } else {
-                options.ordered_delimiter
-            }
-        } else if options.bullet == SerializeOptions::default().bullet {
-            node.delimiter
-        } else {
-            options.bullet
-        };
-        let marker_char = |delimiter| {
-            if node.ordered {
-                ordered_list_marker(delimiter)
-            } else {
-                unordered_list_marker(delimiter)
-            }
-        };
-        if avoid == Some(marker_char(list_delimiter)) {
-            let others: &[ListDelimiter] = if node.ordered {
-                &[ListDelimiter::Period, ListDelimiter::Paren]
-            } else {
-                &[
-                    ListDelimiter::Dash,
-                    ListDelimiter::Asterisk,
-                    ListDelimiter::Plus,
-                ]
-            };
-            if let Some(other) = others
-                .iter()
-                .find(|other| Some(marker_char(**other)) != avoid)
-            {
-                list_delimiter = *other;
-            }
+    for (index, item) in node.children.iter().enumerate() {
+        if index > 0 {
+            output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
         let marker = if node.ordered {
             let start = node.start.unwrap_or(1).saturating_add(index as u64);
-            let delimiter = ordered_list_marker(list_delimiter);
-            format!("{marker_prefix}{start}{delimiter}{marker_padding}")
+            format!("{start}{marker_char} ")
         } else {
-            format!(
-                "{marker_prefix}{}{marker_padding}",
-                unordered_list_marker(list_delimiter)
-            )
+            format!("{marker_char} ")
         };
-        let inner = serialize_item_blocks(&item.children, options, node.tight, item.checked)?;
-        if !node.tight
+        let inner = write_item_blocks(&item.children, options, node.tight, item.checked)?;
+        // A loose list of one item holding one paragraph keeps a blank line
+        // inside the item, which is what makes it loose.
+        let loose_single = !node.tight
             && node.children.len() == 1
             && matches!(item.children.as_slice(), [Block::Paragraph(_)])
-            && !inner.is_empty()
-        {
+            && !inner.is_empty();
+        // A thematic break of the bullet's own char right after the bullet
+        // would read as one longer break, so it starts on the next line.
+        let break_after_bullet = !node.ordered
+            && item.checked.is_none()
+            && matches!(
+                item.children.first(),
+                Some(Block::ThematicBreak(ThematicBreak { marker, .. }))
+                    if thematic_break_char(*marker) == marker_char
+            );
+        // Spaces or a tab opening the item's content would read as padding
+        // after the marker, so that content starts on the next line.
+        let opens_with_whitespace = inner.starts_with([' ', '\t']);
+        if loose_single {
             output.push_str(marker.trim_end());
             output.push_str("\n\n");
             output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
-            continue;
-        }
-        if options.layout.has(item, Alternative::ItemOnNextLine) {
-            // An item that starts blank has its content one column past the
-            // marker, whatever padding the other items use.
-            let content_indent = marker.trim_end().len() + 1;
+        } else if break_after_bullet || opens_with_whitespace {
             output.push_str(marker.trim_end());
             output.push('\n');
-            output.push_str(&prefix_lines(&inner, &" ".repeat(content_indent)));
-            continue;
+            output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
+        } else {
+            output.push_str(&marker);
+            output.push_str(&indent_after_first_line(&inner, marker.len()));
         }
-        output.push_str(&marker);
-        output.push_str(&indent_after_first_line(&inner, marker.len()));
     }
     Ok(output)
 }
 
+fn thematic_break_char(marker: ThematicBreakMarker) -> char {
+    match marker {
+        ThematicBreakMarker::Dash => '-',
+        ThematicBreakMarker::Asterisk => '*',
+        ThematicBreakMarker::Underscore => '_',
+    }
+}
+
 /// An item's blocks; a task item's, `task` holding whether it is checked,
-/// have their first paragraph read back after the checkbox.
-fn serialize_item_blocks(
+/// open with its checkbox: at the start of the first paragraph after the
+/// definitions the item starts with, or else of the item.
+fn write_item_blocks(
     blocks: &[Block],
-    options: &Cx<'_>,
+    options: &SerializeOptions,
     tight: bool,
     task: Option<bool>,
 ) -> Result<String, SerializeError> {
-    // A task item's checkbox opens its first paragraph after the
-    // definitions it starts with, or else the item.
-    let checkbox = |checked: bool| if checked { "[x] " } else { "[ ] " };
+    let join = if tight { Join::Line } else { Join::Gap };
+    let Some(checked) = task else {
+        return write_blocks(blocks, options, join, false);
+    };
+    let checkbox = if checked { "[x]" } else { "[ ]" };
     let definitions = blocks
         .iter()
         .take_while(|block| matches!(block, Block::Definition(_)))
         .count();
-    let task_paragraph =
-        task.filter(|_| matches!(blocks.get(definitions), Some(Block::Paragraph(_))));
-    // Written last to first, as at the top level: a list reads the
-    // indentation of the block after it.
-    let mut written: Vec<String> = Vec::with_capacity(blocks.len());
-    for (index, block) in blocks.iter().enumerate().rev() {
-        let next = written.last().map(String::as_str);
-        written.push(match (block, task_paragraph) {
-            (Block::List(list), _) => serialize_list_before(block, list, options, next)?,
-            (Block::Paragraph(paragraph), Some(checked)) if index == definitions => {
-                let content = serialize_task_paragraph(paragraph, options, checked)?;
-                format!("{}{content}", checkbox(checked))
-            }
-            (Block::Paragraph(paragraph), _) if paragraph_before(blocks, index) => {
-                serialize_paragraph(paragraph, options, None, true)?.0
-            }
-            _ => serialize_block(block, options, false)?,
-        });
-    }
-    if let (Some(checked), None) = (task, task_paragraph) {
-        match written.last_mut() {
-            Some(first) => first.insert_str(0, checkbox(checked)),
-            None => written.push(checkbox(checked).trim_end().into()),
-        }
-    }
-    let mut output = String::new();
-    for (index, written) in written.iter().rev().enumerate() {
-        if index > 0 {
-            if tight
-                || options
-                    .layout
-                    .has(&blocks[index - 1], Alternative::JoinNext)
-            {
-                output.push('\n');
-            } else {
-                output.push_str("\n\n");
+    if matches!(blocks.get(definitions), Some(Block::Paragraph(_))) {
+        let before = write_blocks(&blocks[..definitions], options, join, false)?;
+        let rest = write_blocks(&blocks[definitions..], options, join, false)?;
+        let mut output = before;
+        if !output.is_empty() {
+            match join {
+                Join::Gap => push_block_gap(&mut output),
+                Join::Line => output.push('\n'),
             }
         }
-        output.push_str(written);
+        output.push_str(checkbox);
+        output.push(' ');
+        output.push_str(&rest);
+        return Ok(output);
     }
-    Ok(output)
+    let written = write_blocks(blocks, options, join, false)?;
+    Ok(if written.is_empty() {
+        checkbox.into()
+    } else {
+        format!("{checkbox} {written}")
+    })
 }
 
-fn serialize_description_list(
-    node: &DescriptionList,
-    options: &Cx<'_>,
-) -> Result<String, SerializeError> {
-    let mut output = String::new();
-    for (item_index, item) in node.children.iter().enumerate() {
-        if item_index > 0 {
-            output.push_str(if node.tight { "\n" } else { "\n\n" });
-        }
-        output.push_str(&serialize_term(&item.term, options)?);
-        for (detail_index, detail) in item.details.iter().enumerate() {
-            if node.tight && detail.children.len() == 1 {
-                if let Block::Paragraph(paragraph) = &detail.children[0] {
-                    output.push('\n');
-                    output.push_str(": ");
-                    output.push_str(&serialize_details_line(&paragraph.children, options)?);
-                    continue;
-                }
-            }
-            // A loose list is re-parsed as loose only through an intra-item blank;
-            // the parser treats blanks BETWEEN items as tight-preserving group
-            // separators. Encode the looseness with a blank line before the term's
-            // first definition marker (a `blank_after_term`), so the round trip
-            // keeps `tight=false`.
-            if !node.tight && detail_index == 0 {
-                output.push('\n');
-            }
-            output.push_str("\n:");
-            let inner = if node.tight {
-                serialize_item_blocks(&detail.children, options, true, None)?
-            } else {
-                serialize_blocks_at_start(&detail.children, options, false)?
-            };
-            if !inner.is_empty() {
-                output.push('\n');
-                output.push_str(&indent_lines(&inner, 4));
-            }
-        }
-    }
-    Ok(output)
-}
-
-/// A description term, which reads back above a details marker.
-fn serialize_term(term: &[Inline], cx: &Cx<'_>) -> Result<String, SerializeError> {
-    let parts = [
-        Part::Inlines(term, Place::Block),
-        Part::Literal("\n: x".into()),
-    ];
-    let content = content_of(|block| match block {
-        Block::DescriptionList(list) => list.children.first().map(|item| &item.term[..]),
-        _ => None,
-    });
-    let mut written =
-        write_reading_back(&parts, |blocks| one_block(blocks, content), &cx.read_back)?;
-    Ok(written.remove(0))
-}
-
-/// The paragraph of tight description details, on the marker's line.
-fn serialize_details_line(inlines: &[Inline], cx: &Cx<'_>) -> Result<String, SerializeError> {
-    let parts = [
-        Part::Literal("t\n: ".into()),
-        Part::Inlines(inlines, Place::Within),
-    ];
-    let content = content_of(|block| {
-        let Block::DescriptionList(list) = block else {
-            return None;
-        };
-        let details = list.children.first()?.details.first()?;
-        match details.children.as_slice() {
-            [Block::Paragraph(paragraph)] => Some(&paragraph.children[..]),
-            _ => None,
-        }
-    });
-    let mut written =
-        write_reading_back(&parts, |blocks| one_block(blocks, content), &cx.read_back)?;
-    Ok(written.remove(0))
-}
-
-fn serialize_code_block(
-    node: &CodeBlock,
-    options: &SerializeOptions,
-) -> Result<String, SerializeError> {
+fn write_code_block(node: &CodeBlock, options: &SerializeOptions) -> String {
     match node.kind {
         CodeBlockKind::Indented => {
             // Each value line ends with a line ending; the block gap or the
@@ -1369,7 +509,7 @@ fn serialize_code_block(
             if matches!(ending, "\r" | "\r\n") {
                 output.push_str(ending);
             }
-            Ok(output)
+            output
         }
         CodeBlockKind::Fenced { marker, length } => {
             let marker = code_block_fence_marker(node, marker, options);
@@ -1380,11 +520,11 @@ fn serialize_code_block(
                 opener.push_str(&escape_code_info(info));
             }
             let body = fenced_body(&opener, &node.value, &fence);
-            Ok(if indent == 0 {
+            if indent == 0 {
                 body
             } else {
                 prefix_lines(&body, &" ".repeat(indent))
-            })
+            }
         }
     }
 }
@@ -1404,6 +544,9 @@ fn fenced_body(opener: &str, value: &str, closer: &str) -> String {
     output
 }
 
+/// The fence char a code block is written with: tildes when its info string
+/// holds a backtick, which a backtick fence's info string cannot, or else the
+/// char the AST records or the options replace it with.
 fn code_block_fence_marker(
     node: &CodeBlock,
     marker: FenceMarker,
@@ -1428,12 +571,10 @@ fn escape_code_info(input: &str) -> String {
     for (offset, char) in input.char_indices() {
         match char {
             ' ' | '\t' if offset < inner_start || offset >= inner_end => {
-                output.push_str(&format!("&#x{:X};", char as u32));
+                output.push_str(&char_reference(char));
             }
-            '\n' => output.push_str("&#xA;"),
-            '\r' => output.push_str("&#xD;"),
             '\t' => output.push(char),
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
+            char if char.is_control() => output.push_str(&char_reference(char)),
             '\\' | '&' => {
                 output.push('\\');
                 output.push(char);
@@ -1444,7 +585,12 @@ fn escape_code_info(input: &str) -> String {
     output
 }
 
-fn serialize_table(node: &Table, cx: &Cx<'_>) -> Result<String, SerializeError> {
+/// A hexadecimal character reference for `char`.
+fn char_reference(char: char) -> String {
+    format!("&#x{:X};", char as u32)
+}
+
+fn write_table(node: &Table) -> Result<String, SerializeError> {
     let delimiter_row = node
         .alignments
         .iter()
@@ -1456,51 +602,17 @@ fn serialize_table(node: &Table, cx: &Cx<'_>) -> Result<String, SerializeError> 
         })
         .collect::<Vec<_>>()
         .join(" | ");
-    let mut parts = Vec::new();
-    for (row_index, row) in node.rows.iter().enumerate() {
-        match row_index {
-            0 => parts.push(Part::Literal("| ".into())),
-            1 => parts.push(Part::Literal(format!(" |\n| {delimiter_row} |\n| "))),
-            _ => parts.push(Part::Literal(" |\n| ".into())),
-        }
-        for (cell_index, cell) in row.cells.iter().enumerate() {
-            if cell_index > 0 {
-                parts.push(Part::Literal(" | ".into()));
-            }
-            parts.push(Part::Inlines(&cell.children, Place::Cell));
-        }
-    }
-    parts.push(Part::Literal(if node.rows.len() == 1 {
-        format!(" |\n| {delimiter_row} |")
-    } else {
-        " |".into()
-    }));
-    let shape: Vec<usize> = node.rows.iter().map(|row| row.cells.len()).collect();
-    let extract = extractor(|blocks| {
-        let [Block::Table(table)] = blocks else {
-            return Extracted::Mismatch;
-        };
-        let read: Vec<usize> = table.rows.iter().map(|row| row.cells.len()).collect();
-        if read != shape {
-            return Extracted::Mismatch;
-        }
-        Extracted::Lists(
-            table
-                .rows
-                .iter()
-                .flat_map(|row| row.cells.iter().map(|cell| &cell.children[..]))
-                .collect(),
-        )
-    });
-    let cells = write_reading_back(&parts, extract, &cx.read_back)?;
-    let mut cells = cells.into_iter();
     let mut output = String::new();
     for (row_index, row) in node.rows.iter().enumerate() {
         if row_index > 0 {
             output.push('\n');
         }
-        let written: Vec<String> = cells.by_ref().take(row.cells.len()).collect();
-        output.push_str(&format!("| {} |", written.join(" | ")));
+        let cells = row
+            .cells
+            .iter()
+            .map(|cell| write_inlines(&cell.children, Context::CELL))
+            .collect::<Result<Vec<_>, _>>()?;
+        output.push_str(&format!("| {} |", cells.join(" | ")));
         if row_index == 0 {
             output.push_str(&format!("\n| {delimiter_row} |"));
         }
@@ -1508,62 +620,273 @@ fn serialize_table(node: &Table, cx: &Cx<'_>) -> Result<String, SerializeError> 
     Ok(output)
 }
 
-/// Where inline content is written, as the value encodings of its nodes
-/// read it.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct InlineSerializeContext {
+/// Where inline content is written, as the value encodings of its nodes read
+/// it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Context {
     /// In a table cell, which a raw `|` would split.
     table_cell: bool,
+    /// In a heading, which a line ending would end.
+    heading: bool,
 }
 
-impl InlineSerializeContext {
-    const fn table_cell() -> Self {
-        Self { table_cell: true }
-    }
-
-    const fn block_content() -> Self {
-        Self { table_cell: false }
-    }
-}
-
-/// Where a block's inline content sits.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Place {
-    /// It opens a block, whose first line cannot move.
-    Block,
-    /// It continues a paragraph, so its first line can be indented too.
-    Continuation,
-    /// It follows other syntax on its block's first line.
-    Within,
-    /// It opens a list item after its marker, written `- `, and its lines
-    /// continue the item.
-    ItemContent,
-    /// It is a table cell.
-    Cell,
-}
-
-/// The URI `link` writes as an angle-bracket autolink: a link with no title
-/// whose one child is a text the autolink `<text>` reads back to the link's
-/// destination from.
-fn autolink_uri(link: &Link) -> Option<&str> {
-    let [Inline::Text(text)] = link.children.as_slice() else {
-        return None;
+impl Context {
+    const BLOCK: Self = Self {
+        table_cell: false,
+        heading: false,
     };
-    (link.title.is_none()
-        && link.destination_kind == LinkDestinationKind::Bare
-        && crate::parse::angle_autolink_destination(&text.value).as_deref()
-            == Some(link.destination.as_str()))
-    .then_some(text.value.as_str())
+    const CELL: Self = Self {
+        table_cell: true,
+        heading: false,
+    };
+    const HEADING: Self = Self {
+        table_cell: false,
+        heading: true,
+    };
 }
 
-fn serialize_attributes(attributes: &[DirectiveAttribute]) -> String {
-    serialize_attributes_with_context(attributes, InlineSerializeContext::default())
+fn write_inlines(inlines: &[Inline], context: Context) -> Result<String, SerializeError> {
+    let mut output = String::new();
+    for inline in inlines {
+        write_inline(inline, context, &mut output)?;
+    }
+    Ok(output)
 }
 
-fn serialize_attributes_with_context(
-    attributes: &[DirectiveAttribute],
-    context: InlineSerializeContext,
-) -> String {
+fn write_inline(inline: &Inline, context: Context, out: &mut String) -> Result<(), SerializeError> {
+    match inline {
+        Inline::Text(node) => out.push_str(&node.value),
+        Inline::Escape(node) => {
+            out.push('\\');
+            out.push(node.value);
+        }
+        Inline::CharacterReference(node) => out.push_str(&node.reference),
+        Inline::Emphasis(node) => {
+            let delimiter = emphasis_delimiter(node.delimiter);
+            write_span(out, delimiter, &node.children, delimiter, context)?;
+        }
+        Inline::Strong(node) => {
+            let delimiter = emphasis_delimiter(node.delimiter).repeat(2);
+            write_span(out, &delimiter, &node.children, &delimiter, context)?;
+        }
+        Inline::Delete(node) => write_span(out, "~~", &node.children, "~~", context)?,
+        Inline::Mark(node) => write_span(out, "==", &node.children, "==", context)?,
+        Inline::InlineFootnote(node) => write_span(out, "^[", &node.children, "]", context)?,
+        Inline::Shortcode(node) => {
+            out.push(':');
+            out.push_str(&node.name);
+            out.push(':');
+        }
+        Inline::Code(node) => write_code_span(node, context, out),
+        Inline::Link(node) => match node.form {
+            LinkForm::LiteralAutolink => {
+                push_verbatim(out, &write_inlines(&node.children, context)?, context);
+            }
+            LinkForm::AngleAutolink => {
+                out.push('<');
+                push_verbatim(out, &write_inlines(&node.children, context)?, context);
+                out.push('>');
+            }
+            LinkForm::Inline => {
+                write_span(out, "[", &node.children, "](", context)?;
+                write_resource(
+                    out,
+                    &node.destination,
+                    node.destination_kind,
+                    node.title.as_deref().zip(node.title_kind),
+                    context,
+                );
+            }
+        },
+        Inline::Image(node) => {
+            write_span(out, "![", &node.alt, "](", context)?;
+            write_resource(
+                out,
+                &node.destination,
+                node.destination_kind,
+                node.title.as_deref().zip(node.title_kind),
+                context,
+            );
+        }
+        Inline::LinkReference(node) => {
+            write_span(out, "[", &node.children, "]", context)?;
+            write_reference_kind(out, node.kind, &node.label, context);
+        }
+        Inline::ImageReference(node) => {
+            write_span(out, "![", &node.alt, "]", context)?;
+            write_reference_kind(out, node.kind, &node.label, context);
+        }
+        Inline::Html(node) => push_verbatim(out, &node.value, context),
+        Inline::SoftBreak(_) if context.heading => out.push(' '),
+        Inline::SoftBreak(_) => out.push('\n'),
+        Inline::LineBreak(node) => match node.kind {
+            LineBreakKind::Backslash => out.push_str("\\\n"),
+            LineBreakKind::Spaces => out.push_str("  \n"),
+        },
+        Inline::Math(node) => push_verbatim(out, &write_inline_math(node)?, context),
+        Inline::FootnoteReference(node) => {
+            out.push_str("[^");
+            out.push_str(&escape_label(&node.label, context.table_cell));
+            out.push(']');
+        }
+        Inline::WikiLink(node) => {
+            if node.embed {
+                out.push('!');
+            }
+            out.push_str("[[");
+            out.push_str(&escape_wikilink_part(&node.target));
+            if node.target != node.label {
+                out.push_str(if context.table_cell { "\\|" } else { "|" });
+                out.push_str(&escape_wikilink_part(&node.label));
+            }
+            out.push_str("]]");
+        }
+        Inline::TextDirective(node) => {
+            out.push(':');
+            out.push_str(&node.name);
+            if !node.label.is_empty() {
+                write_span(out, "[", &node.label, "]", context)?;
+            }
+            out.push_str(&write_attributes(&node.attributes, context));
+        }
+    }
+    Ok(())
+}
+
+fn emphasis_delimiter(delimiter: EmphasisDelimiter) -> &'static str {
+    match delimiter {
+        EmphasisDelimiter::Asterisk => "*",
+        EmphasisDelimiter::Underscore => "_",
+    }
+}
+
+/// Writes `open`, `children`, and `close`.
+fn write_span(
+    out: &mut String,
+    open: &str,
+    children: &[Inline],
+    close: &str,
+    context: Context,
+) -> Result<(), SerializeError> {
+    out.push_str(open);
+    for child in children {
+        write_inline(child, context, out)?;
+    }
+    out.push_str(close);
+    Ok(())
+}
+
+/// A link's or image's `destination "title")`, after its `](`.
+fn write_resource(
+    out: &mut String,
+    destination: &str,
+    kind: LinkDestinationKind,
+    title: Option<(&str, LinkTitleKind)>,
+    context: Context,
+) {
+    out.push_str(&write_destination(destination, kind, context));
+    if let Some((title, title_kind)) = title {
+        out.push(' ');
+        out.push_str(&write_title(title, title_kind, context));
+    }
+    out.push(')');
+}
+
+/// What follows a reference's text: nothing, `[]`, or `[label]`.
+fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str, context: Context) {
+    match kind {
+        ReferenceKind::Shortcut => {}
+        ReferenceKind::Collapsed => out.push_str("[]"),
+        ReferenceKind::Full => {
+            out.push('[');
+            out.push_str(&escape_label(label, context.table_cell));
+            out.push(']');
+        }
+    }
+}
+
+fn write_code_span(node: &CodeInline, context: Context, out: &mut String) {
+    if node.fence_length > 0 && !node.raw.is_empty() {
+        let fence = "`".repeat(node.fence_length);
+        out.push_str(&fence);
+        push_verbatim(out, &node.raw, context);
+        out.push_str(&fence);
+    } else if node.value.is_empty() {
+        out.push_str("`` ``");
+    } else {
+        let value = if context.table_cell {
+            escape_pipes(&node.value)
+        } else {
+            node.value.clone()
+        };
+        let fence = "`".repeat(longest_char_streak(&value, '`') + 1);
+        out.push_str(&fence);
+        if code_span_needs_padding(&value) {
+            out.push(' ');
+            out.push_str(&value);
+            out.push(' ');
+        } else {
+            out.push_str(&value);
+        }
+        out.push_str(&fence);
+    }
+}
+
+fn code_span_needs_padding(input: &str) -> bool {
+    input.starts_with('`')
+        || input.ends_with('`')
+        || (input.starts_with(' ') && input.ends_with(' ') && input.chars().any(|char| char != ' '))
+}
+
+fn write_inline_math(node: &MathInline) -> Result<String, SerializeError> {
+    match node.kind {
+        MathInlineKind::Code => {
+            if node.value.contains("`$") {
+                return Err(SerializeError::UnsupportedNode(
+                    "inline math (code-math form) containing a `$` close",
+                ));
+            }
+            Ok(format!("$`{}`$", node.value))
+        }
+        // Dollar math is written verbatim behind its exact-length fence.
+        MathInlineKind::Dollar { dollars } => {
+            let fence = "$".repeat(usize::from(dollars));
+            Ok(format!("{fence}{}{fence}", node.value))
+        }
+    }
+}
+
+/// Writes verbatim content, with the pipes a table cell would split at
+/// escaped: the cell reads each `\|` as `|` inside such content.
+fn push_verbatim(out: &mut String, text: &str, context: Context) {
+    if context.table_cell {
+        out.push_str(&escape_pipes(text));
+    } else {
+        out.push_str(text);
+    }
+}
+
+fn escape_pipes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for char in input.chars() {
+        if char == '|' {
+            output.push('\\');
+        }
+        output.push(char);
+    }
+    output
+}
+
+/// A directive's `[label]`, or nothing for an empty label.
+fn write_directive_label(label: &[Inline]) -> Result<String, SerializeError> {
+    if label.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(format!("[{}]", write_inlines(label, Context::BLOCK)?))
+    }
+}
+
+fn write_attributes(attributes: &[DirectiveAttribute], context: Context) -> String {
     if attributes.is_empty() {
         return String::new();
     }
@@ -1583,13 +906,8 @@ fn serialize_attributes_with_context(
             }
             (_, Some(value)) => {
                 output.push_str(&attribute.name);
-                output.push('=');
-                output.push('"');
-                output.push_str(&escape_title_with_context(
-                    value,
-                    LinkTitleKind::DoubleQuote,
-                    context,
-                ));
+                output.push_str("=\"");
+                output.push_str(&escape_title(value, LinkTitleKind::DoubleQuote, context));
                 output.push('"');
             }
             (_, None) => output.push_str(&attribute.name),
@@ -1606,161 +924,21 @@ fn is_directive_shorthand_value(input: &str) -> bool {
             .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'))
 }
 
-fn escape_destination_with_pipe(input: &str, escape_pipe: bool) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            // A space would end the destination, and `\ ` is no escape.
-            char if char.is_control() || char == ' ' => {
-                output.push_str(&format!("&#x{:X};", char as u32));
-            }
-            '|' if escape_pipe => {
-                output.push('\\');
-                output.push(char);
-            }
-            '(' | ')' | '\\' | '<' | '>' | '&' => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
-    }
-    output
-}
-
-/// Normalize a serialized reference label exactly the way the parser matches
-/// reference labels: collapse internal whitespace and Unicode case-fold the RAW
-/// text (no backslash/entity unescape). Delegating to the parser's
-/// `normalize_label` keeps this in lockstep so the Shortcut/Collapsed arms
-/// decide correctly whether the rendered children already reproduce the
-/// definition identifier.
-fn normalize_reference_label(input: &str) -> String {
-    crate::parse::normalize_label(input)
-}
-
-/// Emit the bracketed body of a link/image reference (`[text]`, `[text][]`, or
-/// `[text][label]`) given the already-serialized `rendered` children and the
-/// escaped raw `label`.
-///
-/// A Shortcut/Collapsed reference normally re-uses the rendered children as the
-/// matching label, so it is only whole if those children fold back to the
-/// definition identifier. Under RAW label matching the children can re-escape
-/// in a fold-breaking way (e.g. a leading `^` becomes `\^`), so when the
-/// children no longer reproduce the identifier we substitute the escaped raw
-/// label as the bracket body — keeping the Shortcut/Collapsed kind (and its
-/// re-parse) intact instead of degrading it into a Full reference.
-fn push_reference_body(
-    output: &mut String,
-    kind: ReferenceKind,
-    rendered: &str,
-    children_match_identifier: bool,
-    escaped_label: &str,
-) {
-    // For a Shortcut/Collapsed reference the bracket body must fold back to the
-    // identifier on its own. Substitute the escaped raw label when the rendered
-    // children would not (keeping the reference kind), but a Full reference
-    // always keeps its rendered text since its explicit label does the matching.
-    let use_label_body = !children_match_identifier && !matches!(kind, ReferenceKind::Full);
-    let body = if use_label_body {
-        escaped_label
+/// A reference, definition, or footnote label, which is matched as written:
+/// it is written as the AST holds it, with a pipe escaped in a table cell.
+fn escape_label(input: &str, escape_pipe: bool) -> String {
+    if escape_pipe {
+        escape_pipes(input)
     } else {
-        rendered
-    };
-
-    output.push('[');
-    output.push_str(body);
-    output.push(']');
-
-    match kind {
-        ReferenceKind::Shortcut => {}
-        ReferenceKind::Collapsed => output.push_str("[]"),
-        ReferenceKind::Full => {
-            output.push('[');
-            output.push_str(escaped_label);
-            output.push(']');
-        }
+        input.into()
     }
-}
-
-/// Escape the explicit label of a link/image reference. The original `label`
-/// (not the normalized identifier) is used so case and entity spelling survive
-/// the round-trip. A parsed label (`span.is_some()`) is already source text, so
-/// only control characters are escaped; a hand-built label is semantic text and
-/// is escaped like any reference label.
-fn reference_explicit_label(
-    from_source: bool,
-    label: &str,
-    context: InlineSerializeContext,
-) -> String {
-    if from_source {
-        escape_reference_label_source(label, context.table_cell)
-    } else {
-        escape_reference_label_with_pipe(label, context.table_cell)
-    }
-}
-
-fn escape_reference_label_source(input: &str, escape_pipe: bool) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            // A reference label may span several physical lines, and the parser
-            // matches the RAW label (whitespace collapsed, no entity decode), so
-            // every control char, line endings and tabs among them, is written
-            // as itself rather than as a reference such as `&#xA;`. This keeps
-            // a whitespace-bearing label re-parsing as the same reference —
-            // crucially, a `^`-prefixed label with a literal space stays a link
-            // reference instead of becoming a footnote.
-            char if char.is_control() => output.push(char),
-            '|' if escape_pipe => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
-    }
-    output
-}
-
-fn escape_reference_label_with_pipe(input: &str, escape_pipe: bool) -> String {
-    escape_label_syntax(input, escape_pipe, false)
-}
-
-/// A footnote label is matched as written, so its chars are.
-fn escape_footnote_label_source(input: &str) -> String {
-    input.into()
-}
-
-fn escape_footnote_label_semantic(input: &str) -> String {
-    escape_label_syntax(input, false, true)
-}
-
-fn escape_label_syntax(input: &str, escape_pipe: bool, escape_whitespace: bool) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            char if char.is_whitespace() && escape_whitespace => {
-                output.push_str(&format!("&#x{:X};", char as u32));
-            }
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            '|' if escape_pipe => {
-                output.push('\\');
-                output.push(char);
-            }
-            '\\' | '[' | ']' => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
-    }
-    output
 }
 
 fn escape_wikilink_part(input: &str) -> String {
     let mut output = String::new();
     for (offset, char) in input.char_indices() {
         match char {
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
+            char if char.is_control() => output.push_str(&char_reference(char)),
             '&' if crate::parse::parse_character_reference(input, offset).is_some() => {
                 output.push('\\');
                 output.push(char);
@@ -1775,53 +953,48 @@ fn escape_wikilink_part(input: &str) -> String {
     output
 }
 
-fn serialize_destination_kind(
-    input: &str,
-    kind: LinkDestinationKind,
-    context: InlineSerializeContext,
-) -> String {
+fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -> String {
     match kind {
         LinkDestinationKind::Omitted if input.is_empty() => String::new(),
         LinkDestinationKind::Angle => {
             let mut output = String::from("<");
-            output.push_str(&escape_angle_destination_with_context(input, context));
+            for char in input.chars() {
+                match char {
+                    char if char.is_control() => output.push_str(&char_reference(char)),
+                    '|' if context.table_cell => output.push_str("\\|"),
+                    '\\' | '<' | '>' => {
+                        output.push('\\');
+                        output.push(char);
+                    }
+                    _ => output.push(char),
+                }
+            }
             output.push('>');
             output
         }
+        LinkDestinationKind::Bare | LinkDestinationKind::Omitted if input.is_empty() => "<>".into(),
         LinkDestinationKind::Bare | LinkDestinationKind::Omitted => {
-            if input.is_empty() {
-                "<>".into()
-            } else {
-                escape_destination_with_pipe(input, context.table_cell)
+            let mut output = String::new();
+            for char in input.chars() {
+                match char {
+                    // A space would end the destination, and `\ ` is no escape.
+                    char if char.is_control() || char == ' ' => {
+                        output.push_str(&char_reference(char));
+                    }
+                    '|' if context.table_cell => output.push_str("\\|"),
+                    '(' | ')' | '\\' | '<' | '>' | '&' => {
+                        output.push('\\');
+                        output.push(char);
+                    }
+                    _ => output.push(char),
+                }
             }
+            output
         }
     }
 }
 
-fn escape_angle_destination_with_context(input: &str, context: InlineSerializeContext) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            '|' if context.table_cell => {
-                output.push('\\');
-                output.push(char);
-            }
-            '\\' | '<' | '>' => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
-    }
-    output
-}
-
-fn serialize_title_kind(
-    input: &str,
-    kind: LinkTitleKind,
-    context: InlineSerializeContext,
-) -> String {
+fn write_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
     let (open, close) = match kind {
         LinkTitleKind::DoubleQuote => ('"', '"'),
         LinkTitleKind::SingleQuote => ('\'', '\''),
@@ -1829,36 +1002,23 @@ fn serialize_title_kind(
     };
     let mut output = String::new();
     output.push(open);
-    output.push_str(&escape_title_with_context(input, kind, context));
+    output.push_str(&escape_title(input, kind, context));
     output.push(close);
     output
 }
 
-fn escape_title_with_context(
-    input: &str,
-    kind: LinkTitleKind,
-    context: InlineSerializeContext,
-) -> String {
+fn escape_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
     let mut output = String::new();
     for char in input.chars() {
         match char {
-            char if char.is_control() => output.push_str(&format!("&#x{:X};", char as u32)),
-            '|' if context.table_cell => {
-                output.push('\\');
-                output.push(char);
-            }
+            char if char.is_control() => output.push_str(&char_reference(char)),
+            '|' if context.table_cell => output.push_str("\\|"),
             '\\' | '&' => {
                 output.push('\\');
                 output.push(char);
             }
-            '"' if kind == LinkTitleKind::DoubleQuote => {
-                output.push('\\');
-                output.push(char);
-            }
-            '\'' if kind == LinkTitleKind::SingleQuote => {
-                output.push('\\');
-                output.push(char);
-            }
+            '"' if kind == LinkTitleKind::DoubleQuote => output.push_str("\\\""),
+            '\'' if kind == LinkTitleKind::SingleQuote => output.push_str("\\'"),
             '(' | ')' if kind == LinkTitleKind::Paren => {
                 output.push('\\');
                 output.push(char);
@@ -1888,6 +1048,7 @@ fn ordered_list_marker(delimiter: ListDelimiter) -> char {
     }
 }
 
+/// Prefixes every line of `input` with `prefix`, keeping each line's ending.
 fn prefix_lines(input: &str, prefix: &str) -> String {
     if input.is_empty() {
         return String::new();
@@ -1920,28 +1081,22 @@ fn prefix_lines(input: &str, prefix: &str) -> String {
 }
 
 fn indent_after_first_line(input: &str, width: usize) -> String {
-    indent_lines_of(input, width, false, true)
-}
-
-fn indent_lines(input: &str, width: usize) -> String {
-    indent_lines_of(input, width, true, false)
+    indent_lines_of(input, width)
 }
 
 fn indent_continuation(input: &str) -> String {
-    indent_lines_of(input, 4, false, true)
+    indent_lines_of(input, 4)
 }
 
-/// Indents the lines of `input` by `width` spaces: its first line when
-/// `first`, and empty lines when `empty`. Each line keeps its line ending, a
-/// final one included.
-fn indent_lines_of(input: &str, width: usize, first: bool, empty: bool) -> String {
+/// Indents every line of `input` after its first by `width` spaces. Each
+/// line keeps its line ending, a final one included.
+fn indent_lines_of(input: &str, width: usize) -> String {
     let mut output = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut line_start = 0;
     let mut index = 0;
     let push = |output: &mut String, line: &str, number: usize| {
-        let text = line.trim_end_matches(['\n', '\r']);
-        if (number > 0 || first) && (empty || !text.is_empty()) {
+        if number > 0 {
             output.extend(core::iter::repeat_n(' ', width));
         }
         output.push_str(line);
@@ -1976,15 +1131,6 @@ fn trim_trailing_newline(input: &str) -> &str {
 
 fn ends_with_line_ending(input: &str) -> bool {
     input.ends_with('\n') || input.ends_with('\r')
-}
-
-fn fence_for(input: &str, marker: FenceMarker, min_len: usize) -> String {
-    let char = match marker {
-        FenceMarker::Backtick => '`',
-        FenceMarker::Tilde => '~',
-    };
-    let longest = longest_char_streak(input, char);
-    char.to_string().repeat(min_len.max(longest + 1))
 }
 
 /// The fence for a code block's `value` and the columns the block is indented
@@ -2025,27 +1171,6 @@ fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> (String
     }
 }
 
-fn inline_code_fence(input: &str) -> String {
-    fence_for(input, FenceMarker::Backtick, 1)
-}
-
-fn code_span_needs_padding(input: &str) -> bool {
-    input.starts_with('`')
-        || input.ends_with('`')
-        || (input.starts_with(' ') && input.ends_with(' ') && input.chars().any(|char| char != ' '))
-}
-
-fn table_cell_escape_code_pipes(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    for char in input.chars() {
-        if char == '|' {
-            output.push('\\');
-        }
-        output.push(char);
-    }
-    output
-}
-
 fn block_math_fence(input: &str) -> String {
     let mut length = 2;
     for line in trim_trailing_newline(input).lines() {
@@ -2055,29 +1180,6 @@ fn block_math_fence(input: &str) -> String {
         }
     }
     "$".repeat(length)
-}
-
-fn serialize_inline_math(node: &MathInline) -> Result<String, SerializeError> {
-    let input = node.value.as_str();
-    match node.kind {
-        MathInlineKind::Code => {
-            if input.contains("`$") {
-                return Err(SerializeError::UnsupportedNode(
-                    "inline math (code-math form) containing a `$` close",
-                ));
-            }
-            Ok(format!("$`{input}`$"))
-        }
-        // Dollar math is emitted verbatim behind an exact-length fence: no
-        // padding strip and no fence widening. A single-`$` value can only
-        // contain a `$` that is backslash-escaped (`\$`), which the flanking
-        // parser skips, so an exact `$`…`$` fence round-trips; a `$$` display
-        // value is verbatim including any edge spaces or newlines.
-        MathInlineKind::Dollar { dollars } => {
-            let fence = "$".repeat(usize::from(dollars));
-            Ok(format!("{fence}{input}{fence}"))
-        }
-    }
 }
 
 fn longest_char_streak(input: &str, needle: char) -> usize {
@@ -2095,17 +1197,13 @@ fn longest_char_streak(input: &str, needle: char) -> usize {
 }
 
 fn directive_fence(inner: &str) -> String {
-    ":".repeat(directive_fence_len(inner))
-}
-
-fn directive_fence_len(inner: &str) -> usize {
-    let mut max = 3;
+    let mut length = 3;
     for line in inner.lines() {
-        if let Some(length) = directive_closing_fence_len(line) {
-            max = max.max(length + 1);
+        if let Some(closing) = directive_closing_fence_len(line) {
+            length = length.max(closing + 1);
         }
     }
-    max
+    ":".repeat(length)
 }
 
 fn directive_closing_fence_len(line: &str) -> Option<usize> {

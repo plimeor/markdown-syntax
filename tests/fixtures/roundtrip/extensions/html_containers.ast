@@ -11,7 +11,7 @@ Document
         Text "Nested"
       Paragraph
         Text "Nested "
-        Strong
+        Strong delimiter=*
           Text "body"
         Text "."
   HtmlContainer tag=details open="<details>" close="</details>"
@@ -19,7 +19,7 @@ Document
       Text "Compact"
     Paragraph
       Text "Compact "
-      Strong
+      Strong delimiter=*
         Text "body"
       Text "."
   HtmlContainer tag=details open="<details>" close="</details>"
@@ -27,6 +27,6 @@ Document
       Text "Compact tight"
     Paragraph
       Text "Compact "
-      Strong
+      Strong delimiter=*
         Text "body"
       Text "."

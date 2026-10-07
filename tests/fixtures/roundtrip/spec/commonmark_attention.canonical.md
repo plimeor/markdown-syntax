@@ -12,7 +12,7 @@ _ foo bar_
 
 foo_bar_
 
-foo-*(bar)*
+foo-_(bar)_
 
 *foo bar *
 
@@ -20,7 +20,7 @@ foo-*(bar)*
 
 __foo__bar
 
-foo-**(bar)**
+foo-__(bar)__
 
 *foo**bar**baz*
 

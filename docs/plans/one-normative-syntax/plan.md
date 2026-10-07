@@ -80,6 +80,15 @@ serializer only renders.
     the list of cases that differ by design, each with its reason.
   - The seeded round-trip test lists the generated documents that do not
     read back, each with its reason.
+- The fixture inventory (task 6.3) adds these fixed rules:
+  - A dash thematic break that opens the document or follows a paragraph
+    line is written `- - -`.
+  - A list item whose content is a thematic break of its bullet's char, or
+    begins with a space or a tab, starts that content on the line after the
+    bullet.
+  - Tree comparison compares a code span by its value.
+- The conformance bench lists, apart from the by-design deviations, the
+  known defects: cases that fail on `main` as well.
 - Decision 0007 records the one syntax and supersedes 0005. Decision 0008
   records the render-only serializer.
 - `CHANGELOG.md` `[Unreleased]` is rewritten as one migration note for this
@@ -229,41 +238,41 @@ Specs:
 ## Tasks
 
 ### 1. Decision records
-- [ ] 1.1 Write decision 0007, one normative syntax: `Accepted`, superseding 0005. Change only 0005's status line to `Superseded by 0007`. Verified by reading both files.
-- [ ] 1.2 Write decision 0008, a render-only serializer with spellings fixed at parse and validation as the gate: `Accepted`. Verified by reading the file.
+- [x] 1.1 Write decision 0007, one normative syntax: `Accepted`, superseding 0005. Change only 0005's status line to `Superseded by 0007`. Verified by reading both files.
+- [x] 1.2 Write decision 0008, a render-only serializer with spellings fixed at parse and validation as the gate: `Accepted`. Verified by reading the file.
 
 ### 2. One syntax in the parser
-- [ ] 2.1 Hard-code the syntax: replace every flag read in `src/parse.rs` and `src/parse/blocks.rs` with its constant branch, and drop the options parameter from the parser's functions. Delete `src/options.rs`, `SyntaxOptions::parse`, `parse_strict`, `ParseStrictError`, and their crate-root and prelude exports. Port every test caller to `parse`:
+- [x] 2.1 Hard-code the syntax: replace every flag read in `src/parse.rs` and `src/parse/blocks.rs` with its constant branch, and drop the options parameter from the parser's functions. Delete `src/options.rs`, `SyntaxOptions::parse`, `parse_strict`, `ParseStrictError`, and their crate-root and prelude exports. Port every test caller to `parse`:
   - `tests/support/fixtures.rs`: drop `profile_options`, `assert_required_profiles`, the per-profile MANIFEST check, and the `profile` field in `.cases` headers;
   - the preset loops in `parse_inline_regressions.rs`, `serialize_regressions.rs`, `parse_span_contract.rs`, `serialize_roundtrip_fuzz.rs`, and `src/serialize/read_back.rs`;
   - `tests/html_conformance/runner.rs` `plan()`, which keeps only the render tokens.
 
   Regenerate and read each golden that moves. Verified by `cargo build`, by `grep` finding no `SyntaxOptions`, `Constructs`, `Construct`, `ParseOptions`, `parse_strict`, or `WikiLinkOrder` in `src/` and `tests/`, and by `cargo test` passing.
-- [ ] 2.2 Delete the code of the removed constructs from the parser, block parser, AST, HTML renderer, `validate.rs`, `compare.rs`, `source_map.rs`, `nul_replacement.rs`, and `src/test_support.rs`, along with their scan mirrors and the tests of those internals in `src/parse/scan_tests.rs`. Rewrite each assertion that named a removed node to the result under the one syntax. Verified by:
+- [x] 2.2 Delete the code of the removed constructs from the parser, block parser, AST, HTML renderer, `validate.rs`, `compare.rs`, `source_map.rs`, `nul_replacement.rs`, and `src/test_support.rs`, along with their scan mirrors and the tests of those internals in `src/parse/scan_tests.rs`. Rewrite each assertion that named a removed node to the result under the one syntax. Verified by:
   - inline-syntax "Strikethrough takes two tildes", "Inline footnotes", "Double underscore is strong", "Extension marks", and "Marks pair in closing order";
   - block-syntax "Extension blocks" and "Table rows split at unescaped pipes";
   - public-api "One syntax";
   - `cargo test`.
-- [ ] 2.3 Remove `DiagnosticCode::StrictParse`, `DiagnosticCode::InvalidMdx`, `Delete.marker`/`DeleteMarker`, and `WikiLink.label_order`/`WikiLinkLabelOrder`. Verified by `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
+- [x] 2.3 Remove `DiagnosticCode::StrictParse`, `DiagnosticCode::InvalidMdx`, `Delete.marker`/`DeleteMarker`, and `WikiLink.label_order`/`WikiLinkLabelOrder`. Verified by `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
 
 ### 3. Precedence rules
-- [ ] 3.1 Strict GFM literal autolinks: delete the relaxed path and the extents it gave the kept forms, and keep `mailto:` and `xmpp:`. Verified by inline-syntax "Literal autolinks", including "Other schemes stay text" and "Prefixed email forms".
-- [ ] 3.2 Directive names: apply `[A-Za-z]+(-[A-Za-z]+)*` to all three forms in the parser, `validate.rs`, and the serializer, and add the text directive's following-char rule. Verified by inline-syntax "Shortcodes and text directives share the colon" and block-syntax "Block directives". This includes the gfm_autolink_literal oracle cases 54 and 55.
-- [ ] 3.3 Wiki links: no unescaped `[` or `]` in the content. Verified by inline-syntax "Wikilinks": "Extra brackets around a wikilink" and "Defined label".
+- [x] 3.1 Strict GFM literal autolinks: delete the relaxed path and the extents it gave the kept forms, and keep `mailto:` and `xmpp:`. Verified by inline-syntax "Literal autolinks", including "Other schemes stay text" and "Prefixed email forms".
+- [x] 3.2 Directive names: apply `[A-Za-z]+(-[A-Za-z]+)*` to all three forms in the parser, `validate.rs`, and the serializer, and add the text directive's following-char rule. Verified by inline-syntax "Shortcodes and text directives share the colon" and block-syntax "Block directives". This includes the gfm_autolink_literal oracle cases 54 and 55.
+- [x] 3.3 Wiki links: no unescaped `[` or `]` in the content. Verified by inline-syntax "Wikilinks": "Extra brackets around a wikilink" and "Defined label".
 
 ### 4. Recorded spellings
-- [ ] 4.1 Add a `*`/`_` delimiter field to `Emphasis` and `Strong`, and a form field to `Link` (inline, angle-bracket autolink, literal autolink). The parser fills them; `Link::new` records an inline link, and both types' `Default` is `*` and inline. Verified by public-api "Recorded syntax forms".
+- [x] 4.1 Add a `*`/`_` delimiter field to `Emphasis` and `Strong`, and a form field to `Link` (inline, angle-bracket autolink, literal autolink). The parser fills them; `Link::new` records an inline link, and both types' `Default` is `*` and inline. Verified by public-api "Recorded syntax forms".
 
 ### 5. Validation gate
-- [ ] 5.1 Reject the new shapes in `validate.rs`: link inside link text; emphasis-like content with edge whitespace; an autolink form that does not fit its content; adjacent same-marker lists; directive names outside the rule. Verified by the validation "Shapes that cannot be written" scenarios and serialization "Link inside a link".
+- [x] 5.1 Reject the new shapes in `validate.rs`: link inside link text; emphasis-like content with edge whitespace; an autolink form that does not fit its content; adjacent same-marker lists; directive names outside the rule. Verified by the validation "Shapes that cannot be written" scenarios and serialization "Link inside a link".
 
 ### 6. Render-only serializer
-- [ ] 6.1 Delete the read-back:
+- [x] 6.1 Delete the read-back:
   - `src/serialize/read_back.rs`, `src/serialize/layout.rs`, the parser's syntax trace, the escape rounds, delimiter switching, edge character references, the all-escapes fallback, and the settle passes;
   - `SerializeOptions::syntax`, `SerializeError::Unrepresentable`, and `DiagnosticCode::Unrepresentable`.
 
   `compare.rs` stays for round-trip checks and reads a heading's `SoftBreak` as a space. Verified by `grep` finding no `read_back`, `Unrepresentable`, or trace parameter in `src/`, and by serialization "Rendering only" and "Tree comparison".
-- [ ] 6.2 Render by rule:
+- [x] 6.2 Render by rule:
   - text, escapes, and references as recorded;
   - recorded delimiters and link forms;
   - full container prefixes, and heading soft breaks as spaces;
@@ -271,11 +280,19 @@ Specs:
 
   Verified by the serialization scenarios "Text is written as recorded", "Container lines take their full prefix", "Heading soft breaks", "Values are encoded by rule", "Links written in their recorded form", "Canonical output", and "Serialize options".
 - [ ] 6.3 Inventory: run every fixture under `tests/fixtures/roundtrip/` through parse, render, and reparse. Settle each failure with a recorded spelling in the parser (task 4.1's rule), a fixed render rule, or a validation rule, never a search, and list each addition in this plan's What changes. Verified by `cargo test --test fixtures` and serialization "Round-trip fixtures".
-- [ ] 6.4 Seeded round trip: `tests/serialize_roundtrip_fuzz.rs` runs one syntax and lists each generated document that does not read back, with its reason. Listed documents must serialize without panicking, and a listed document that reads back fails the test. Keep every parsed input of the removed serialization scenarios in `tests/serialize_regressions.rs`, each asserting a round trip or a listed reason. Verified by serialization "Seeded round-trip generators" and `cargo test`.
+
+  Awaiting a decision (Risks, first entry): the fixtures
+  `gfm_table_containers` and `gfm_table_edges` and the derived cases listed
+  in `tests/support/fixtures.rs` read back only with a lazy line, whitespace,
+  or a blank line the AST does not record; so do the inputs that
+  `tests/serialize_regressions.rs` and `tests/serialize_roundtrip_fuzz.rs`
+  list. A text directive's empty `[]` or `{}` and an escaped char in a wiki
+  link's target are spellings the AST does not record either.
+- [x] 6.4 Seeded round trip: `tests/serialize_roundtrip_fuzz.rs` runs one syntax and lists each generated document that does not read back, with its reason. Listed documents must serialize without panicking, and a listed document that reads back fails the test. Keep every parsed input of the removed serialization scenarios in `tests/serialize_regressions.rs`, each asserting a round trip or a listed reason. Verified by serialization "Seeded round-trip generators" and `cargo test`.
 
 ### 7. Conformance bench and cost tests
-- [ ] 7.1 Delete `gfm/description_lists`, `spoiler`, `subscript`, `supersubscript`, `insert`, and `underline`, and add the deviation list in `tests/html_conformance/`: file, case, and reason for each case that differs by design. The report prints, separately, the listed cases that now pass and the unlisted cases that deviate. Verified by inline-syntax and block-syntax "CommonMark oracle cases", and by `cargo test --features html --test html_conformance -- --nocapture` showing no unlisted deviation.
-- [ ] 7.2 `tests/pathological_inputs.rs`:
+- [x] 7.1 Delete `gfm/description_lists`, `spoiler`, `subscript`, `supersubscript`, `insert`, and `underline`, and add the deviation list in `tests/html_conformance/`: file, case, and reason for each case that differs by design. The report prints, separately, the listed cases that now pass and the unlisted cases that deviate. Verified by inline-syntax and block-syntax "CommonMark oracle cases", and by `cargo test --features html --test html_conformance -- --nocapture` showing no unlisted deviation.
+- [x] 7.2 `tests/pathological_inputs.rs`:
   - keep every input under `parse`;
   - add the long footnote definition case;
   - drop the MDX `n log n` allowance;
@@ -284,7 +301,7 @@ Specs:
   Verified by untrusted-input-cost "Linear time", "Block nesting limit", and "Inline nesting limit", and by the suite passing in a debug build.
 
 ### 8. Docs and release notes
-- [ ] 8.1 Rewrite `CHANGELOG.md` `[Unreleased]` as one migration note, folding in #15's unreleased changes and dropping the `SerializeOptions::syntax` entry. Cover:
+- [x] 8.1 Rewrite `CHANGELOG.md` `[Unreleased]` as one migration note, folding in #15's unreleased changes and dropping the `SerializeOptions::syntax` entry. Cover:
   - the removed API, constructs, nodes, fields, codes, and errors;
   - the precedence changes;
   - the recorded spellings;
@@ -293,9 +310,9 @@ Specs:
   - the canonical output changes.
 
   Verified by reading it against the code.
-- [ ] 8.2 Update `README.md` (examples, dialect table, scope list), `CLAUDE.md` and `AGENTS.md` (the identity line no longer mentions MDX), `docs/overview.md` (What this is, Current focus, Next), and the Purpose lines of `docs/specs/public-api.md` and `docs/specs/inline-syntax.md`, which name `src/options.rs`, choosing a dialect, and the MDX forms. Verified by the README doc-test in `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
+- [x] 8.2 Update `README.md` (examples, dialect table, scope list), `CLAUDE.md` and `AGENTS.md` (the identity line no longer mentions MDX), `docs/overview.md` (What this is, Current focus, Next), and the Purpose lines of `docs/specs/public-api.md` and `docs/specs/inline-syntax.md`, which name `src/options.rs`, choosing a dialect, and the MDX forms. Verified by the README doc-test in `cargo test` and `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
 
 ### 9. Integration checks
-- [ ] 9.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
+- [x] 9.1 These all pass: `cargo fmt --check`, `cargo build`, `cargo test`, `cargo test --features html`, `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`, `cargo build --target wasm32-unknown-unknown`, and a build with Rust 1.82.
 - [ ] 9.2 Conformance numbers observed on `main` and on the branch, reported in the PR and not stored; every deviation is listed with its reason.
-- [ ] 9.3 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.
+- [x] 9.3 `tests/pathological_inputs.rs` and the 2 MiB stack test pass in a debug build.

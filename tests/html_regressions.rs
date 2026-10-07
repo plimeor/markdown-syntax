@@ -1,41 +1,17 @@
 #![cfg(feature = "html")]
 
 use markdown_syntax::{
-    Block, Constructs, Document, Heading, HeadingKind, HtmlError, HtmlOptions, NodeMeta,
-    ParseOptions, SafeRawHtmlForm, SyntaxOptions, TasklistAttrOrder,
+    parse, Block, Document, Heading, HeadingKind, HtmlError, HtmlOptions, NodeMeta,
+    SafeRawHtmlForm, TasklistAttrOrder,
 };
 
-fn parse_render(markdown: &str, syntax: &SyntaxOptions, html: &HtmlOptions) -> String {
-    let output = syntax.parse(markdown);
+fn parse_render(markdown: &str, html: &HtmlOptions) -> String {
+    let output = parse(markdown);
     assert_eq!(output.diagnostics, Vec::new());
     output
         .document
         .to_html_with(html)
         .expect("document renders")
-}
-
-fn extension_options() -> SyntaxOptions {
-    let mut constructs = Constructs::gfm();
-    constructs.gfm_alert = true;
-    constructs.description_list = true;
-    constructs.underline = true;
-    constructs.insert = true;
-    constructs.highlight = true;
-    constructs.subscript = true;
-    constructs.superscript = true;
-    constructs.spoiler = true;
-    constructs.shortcode = true;
-    constructs.math_block = true;
-    constructs.math_inline = true;
-    constructs.inline_footnote = true;
-    constructs.wikilink_title_after_pipe = true;
-    SyntaxOptions {
-        constructs: constructs,
-        parse: ParseOptions {
-            single_tilde_strikethrough: false,
-            ..ParseOptions::default()
-        },
-    }
 }
 
 fn gfm_html_options() -> HtmlOptions {
@@ -69,11 +45,7 @@ fn commonmark_blocks_and_core_inlines_render() {
         "next\n",
     );
 
-    let actual = parse_render(
-        markdown,
-        &SyntaxOptions::commonmark(),
-        &HtmlOptions::default(),
-    );
+    let actual = parse_render(markdown, &HtmlOptions::default());
 
     assert_eq!(
         actual,
@@ -125,7 +97,7 @@ fn extension_blocks_and_inlines_render() {
         "[^a]: note\n",
     );
 
-    let actual = parse_render(markdown, &extension_options(), &gfm_html_options());
+    let actual = parse_render(markdown, &gfm_html_options());
 
     assert_eq!(
         actual,
@@ -138,10 +110,7 @@ fn extension_blocks_and_inlines_render() {
             "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> done</li>\n",
             "<li><input type=\"checkbox\" disabled=\"\" /> todo</li>\n",
             "</ul>\n",
-            "<dl>\n",
-            "<dt>Term</dt>\n",
-            "<dd>Detail</dd>\n",
-            "</dl>\n",
+            "<p>Term\n: Detail</p>\n",
             "<table>\n",
             "<thead>\n",
             "<tr>\n",
@@ -156,8 +125,8 @@ fn extension_blocks_and_inlines_render() {
             "</tr>\n",
             "</tbody>\n",
             "</table>\n",
-            "<p><ins>ins</ins> <mark>mark</mark> <u>under</u> <sub>sub</sub> ",
-            "<sup>sup</sup> <span class=\"spoiler\">hide</span> \u{1F680} ",
+            "<p>++ins++ <mark>mark</mark> <strong>under</strong> ~sub~ ",
+            "^sup^ ||hide|| \u{1F680} ",
             "<span data-math-style=\"inline\">x</span> ",
             "<span data-math-style=\"display\">y</span> ",
             "<a href=\"Page\" data-wikilink=\"true\">Label</a> ",
@@ -181,14 +150,6 @@ fn extension_blocks_and_inlines_render() {
 
 #[test]
 fn directives_render_through_public_options() {
-    let mut constructs = Constructs::commonmark();
-    constructs.directive_text = true;
-    constructs.directive_leaf = true;
-    constructs.directive_container = true;
-    let syntax = SyntaxOptions {
-        constructs: constructs,
-        parse: ParseOptions::default(),
-    };
     let markdown = concat!(
         "::leaf[Label]{key=\"v\"}\n",
         "\n",
@@ -197,7 +158,7 @@ fn directives_render_through_public_options() {
         ":::\n",
     );
 
-    let actual = parse_render(markdown, &syntax, &HtmlOptions::default());
+    let actual = parse_render(markdown, &HtmlOptions::default());
 
     assert_eq!(
         actual,
@@ -211,7 +172,7 @@ fn directives_render_through_public_options() {
 }
 
 #[test]
-fn mdx_nodes_emit_no_html_but_surrounding_text_survives() {
+fn former_mdx_syntax_renders_as_text_and_raw_html() {
     let markdown = concat!(
         "import X from './x'\n",
         "\n",
@@ -222,9 +183,17 @@ fn mdx_nodes_emit_no_html_but_surrounding_text_survives() {
         "inline {x} <Y /> end\n",
     );
 
-    let actual = parse_render(markdown, &SyntaxOptions::mdx(), &HtmlOptions::default());
+    let actual = parse_render(markdown, &HtmlOptions::default());
 
-    assert_eq!(actual, "<p>inline   end</p>");
+    assert_eq!(
+        actual,
+        concat!(
+            "<p>import X from './x'</p>\n",
+            "<p>{value}</p>\n",
+            "&lt;X /&gt;\n",
+            "<p>inline {x} &lt;Y /&gt; end</p>",
+        )
+    );
 }
 
 #[test]
@@ -234,12 +203,10 @@ fn html_options_and_validate_first_are_public_contract() {
         "\n",
         "- [x] done\n",
         "\n",
-        "smb:///share\n"
+        "smb:///share <smb:///share>\n"
     );
-    let mut syntax = SyntaxOptions::gfm();
-    syntax.constructs.relaxed_autolinks = true;
 
-    let default_html = parse_render(markdown, &syntax, &HtmlOptions::default());
+    let default_html = parse_render(markdown, &HtmlOptions::default());
     assert_eq!(
         default_html,
         concat!(
@@ -247,11 +214,11 @@ fn html_options_and_validate_first_are_public_contract() {
             "<ul>\n",
             "<li><input type=\"checkbox\" disabled=\"\" checked=\"\" /> done</li>\n",
             "</ul>\n",
-            "<p><a href=\"\">smb:///share</a></p>",
+            "<p>smb:///share <a href=\"\">smb:///share</a></p>",
         )
     );
 
-    let gfm_form = parse_render(markdown, &syntax, &gfm_html_options());
+    let gfm_form = parse_render(markdown, &gfm_html_options());
     assert_eq!(
         gfm_form,
         concat!(
@@ -259,7 +226,7 @@ fn html_options_and_validate_first_are_public_contract() {
             "<ul>\n",
             "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> done</li>\n",
             "</ul>\n",
-            "<p><a href=\"smb:///share\">smb:///share</a></p>",
+            "<p>smb:///share <a href=\"smb:///share\">smb:///share</a></p>",
         )
     );
 
@@ -281,32 +248,21 @@ fn html_options_and_validate_first_are_public_contract() {
 
 #[test]
 fn dangerous_protocol_matrix_matches_public_options() {
-    let syntax = SyntaxOptions::commonmark();
-
     assert_eq!(
-        parse_render("<javascript:alert(1)>\n", &syntax, &HtmlOptions::default()),
+        parse_render("<javascript:alert(1)>\n", &HtmlOptions::default()),
         "<p><a href=\"\">javascript:alert(1)</a></p>",
     );
     assert_eq!(
-        parse_render(
-            "[x](javascript:alert(1))\n",
-            &syntax,
-            &HtmlOptions::default()
-        ),
+        parse_render("[x](javascript:alert(1))\n", &HtmlOptions::default()),
         "<p><a href=\"\">x</a></p>",
     );
     assert_eq!(
-        parse_render(
-            "![x](javascript:alert(1))\n",
-            &syntax,
-            &HtmlOptions::default()
-        ),
+        parse_render("![x](javascript:alert(1))\n", &HtmlOptions::default()),
         "<p><img src=\"\" alt=\"x\" /></p>",
     );
     assert_eq!(
         parse_render(
             "[x](irc:///help) ![x](irc:///help)\n",
-            &syntax,
             &HtmlOptions::default()
         ),
         "<p><a href=\"irc:///help\">x</a> <img src=\"\" alt=\"x\" /></p>",
@@ -314,7 +270,6 @@ fn dangerous_protocol_matrix_matches_public_options() {
     assert_eq!(
         parse_render(
             "![x](data:image/png;base64,abc) ![x](data:text/html,abc)\n",
-            &syntax,
             &HtmlOptions::default()
         ),
         "<p><img src=\"data:image/png;base64,abc\" alt=\"x\" /> <img src=\"\" alt=\"x\" /></p>",
@@ -325,7 +280,6 @@ fn dangerous_protocol_matrix_matches_public_options() {
     assert_eq!(
         parse_render(
             "[x](javascript:alert(1)) ![x](javascript:alert(1))\n",
-            &syntax,
             &dangerous
         ),
         "<p><a href=\"javascript:alert(1)\">x</a> <img src=\"javascript:alert(1)\" alt=\"x\" /></p>",
@@ -336,7 +290,6 @@ fn dangerous_protocol_matrix_matches_public_options() {
     assert_eq!(
         parse_render(
             "[x](javascript:alert(1)) ![x](javascript:alert(1))\n",
-            &syntax,
             &any_img
         ),
         "<p><a href=\"\">x</a> <img src=\"javascript:alert(1)\" alt=\"x\" /></p>",
@@ -345,21 +298,19 @@ fn dangerous_protocol_matrix_matches_public_options() {
 
 #[test]
 fn raw_html_and_tagfilter_options_are_independent() {
-    let syntax = SyntaxOptions::commonmark();
-
     assert_eq!(
-        parse_render("<iframe>\n", &syntax, &HtmlOptions::default()),
+        parse_render("<iframe>\n", &HtmlOptions::default()),
         "&lt;iframe&gt;",
     );
 
     let mut dangerous = HtmlOptions::default();
     dangerous.allow_dangerous_html = true;
-    assert_eq!(parse_render("<iframe>\n", &syntax, &dangerous), "<iframe>");
+    assert_eq!(parse_render("<iframe>\n", &dangerous), "<iframe>");
 
     let mut tagfilter_only = HtmlOptions::default();
     tagfilter_only.gfm_tagfilter = true;
     assert_eq!(
-        parse_render("<iframe>\n", &syntax, &tagfilter_only),
+        parse_render("<iframe>\n", &tagfilter_only),
         "&lt;iframe&gt;",
     );
 
@@ -367,11 +318,11 @@ fn raw_html_and_tagfilter_options_are_independent() {
     filtered.allow_dangerous_html = true;
     filtered.gfm_tagfilter = true;
     assert_eq!(
-        parse_render("<iframe>\n\n<div>\n", &syntax, &filtered),
+        parse_render("<iframe>\n\n<div>\n", &filtered),
         "&lt;iframe>\n<div>",
     );
     assert_eq!(
-        parse_render("a <iframe>\n", &syntax, &filtered),
+        parse_render("a <iframe>\n", &filtered),
         "<p>a &lt;iframe></p>",
     );
 }
@@ -379,32 +330,20 @@ fn raw_html_and_tagfilter_options_are_independent() {
 #[test]
 fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
     assert_eq!(
-        parse_render(
-            "![[x.png]]",
-            &SyntaxOptions::default(),
-            &HtmlOptions::default()
-        ),
+        parse_render("![[x.png]]", &HtmlOptions::default()),
         "<p><a href=\"x.png\" data-wikilink=\"true\" data-wikilink-embed=\"true\">x.png</a></p>"
     );
 }
 
 #[test]
 fn shortcodes_render_their_gemoji_glyph() {
-    let html = parse_render(
-        ":sparkles:",
-        &SyntaxOptions::default(),
-        &HtmlOptions::default(),
-    );
+    let html = parse_render(":sparkles:", &HtmlOptions::default());
     assert_eq!(html.trim_end(), "<p>\u{2728}</p>");
 }
 
 #[test]
 fn a_shortcode_in_image_alt_text_reads_as_its_glyph() {
-    let html = parse_render(
-        "![:tada: x](i.png)",
-        &SyntaxOptions::default(),
-        &HtmlOptions::default(),
-    );
+    let html = parse_render("![:tada: x](i.png)", &HtmlOptions::default());
     assert_eq!(
         html.trim_end(),
         "<p><img src=\"i.png\" alt=\"\u{1F389} x\" /></p>"

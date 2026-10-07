@@ -1,21 +1,15 @@
 Document
   Paragraph
-    Text "This is "
-    Insert
-      Text "important!"
-    Text "."
+    Text "This is ++important!++."
   Paragraph
-    Text "This is "
-    Insert
-      Text "very "
-      Strong
-        Text "important"
-    Text " OK?"
+    Text "This is ++very "
+    Strong delimiter=*
+      Text "important"
+    Text "++ OK?"
   Paragraph
-    Insert
-      Text "It is a"
-      SoftBreak
-      Text "shrubbery"
+    Text "++It is a"
+    SoftBreak
+    Text "shrubbery++"
   Paragraph
     Text "This is "
     Mark
@@ -25,7 +19,7 @@ Document
     Text "This is "
     Mark
       Text "very "
-      Strong
+      Strong delimiter=*
         Text "important"
     Text " OK?"
   Paragraph

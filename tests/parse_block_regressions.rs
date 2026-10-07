@@ -14,15 +14,13 @@ mod review_block {
     //! review. Each asserts the CommonMark-correct
     //! AST shape against the live parser.
 
-    use markdown_syntax::{
-        Block, CodeBlockKind, HeadingKind, Inline, ListDelimiter, SyntaxOptions,
-    };
+    use markdown_syntax::{parse, Block, CodeBlockKind, HeadingKind, Inline, ListDelimiter};
 
     /// B1: a multi-line paragraph followed by a setext underline is a setext
     /// heading whose content spans every paragraph line, not one flat paragraph.
     #[test]
     fn setext_heading_absorbs_multiline_paragraph() {
-        let output = SyntaxOptions::commonmark().parse("Foo\nbar\n===\n");
+        let output = parse("Foo\nbar\n===\n");
 
         let [Block::Heading(heading)] = output.document.children.as_slice() else {
             panic!(
@@ -45,7 +43,7 @@ mod review_block {
     /// not break the original one-line case).
     #[test]
     fn setext_heading_single_line_still_parses() {
-        let output = SyntaxOptions::commonmark().parse("Foo\n---\n");
+        let output = parse("Foo\n---\n");
         let [Block::Heading(heading)] = output.document.children.as_slice() else {
             panic!(
                 "expected a single setext heading: {:?}",
@@ -61,7 +59,7 @@ mod review_block {
     /// the setext heading from forming.
     #[test]
     fn setext_heading_rejected_when_continuation_is_block_start() {
-        let output = SyntaxOptions::commonmark().parse("Foo\n# heading\n===\n");
+        let output = parse("Foo\n# heading\n===\n");
         assert!(
             !output.document.children.iter().any(
                 |block| matches!(block, Block::Heading(heading) if heading.kind == HeadingKind::Setext)
@@ -75,7 +73,7 @@ mod review_block {
     /// items, not three separate lists or a single item.
     #[test]
     fn bullets_with_too_few_spaces_are_siblings_not_sublists() {
-        let output = SyntaxOptions::commonmark().parse("- foo\n - bar\n  - baz\n   - boo\n");
+        let output = parse("- foo\n - bar\n  - baz\n   - boo\n");
 
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected one bullet list: {:?}", output.document.children);
@@ -103,7 +101,7 @@ mod review_block {
     /// sublists (the indent threshold must keep real nesting working).
     #[test]
     fn bullets_with_enough_spaces_still_nest() {
-        let output = SyntaxOptions::commonmark().parse("- foo\n  - bar\n");
+        let output = parse("- foo\n  - bar\n");
 
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected one bullet list: {:?}", output.document.children);
@@ -127,7 +125,7 @@ mod review_block {
     /// B2 guard: a delimiter change still splits one list into two.
     #[test]
     fn delimiter_change_still_splits_lists() {
-        let output = SyntaxOptions::commonmark().parse("- a\n+ b\n");
+        let output = parse("- a\n+ b\n");
         let lists = output
             .document
             .children
@@ -145,7 +143,7 @@ mod review_block {
     /// paragraph, not a paragraph plus an empty list.
     #[test]
     fn empty_list_item_does_not_interrupt_paragraph() {
-        let output = SyntaxOptions::commonmark().parse("foo\n*\n");
+        let output = parse("foo\n*\n");
         let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
             panic!(
                 "expected a single paragraph: {:?}",
@@ -163,7 +161,7 @@ mod review_block {
     /// list.
     #[test]
     fn empty_list_at_block_start_still_parses() {
-        let output = SyntaxOptions::commonmark().parse("*\n");
+        let output = parse("*\n");
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected an empty list: {:?}", output.document.children);
         };
@@ -174,7 +172,7 @@ mod review_block {
     /// B3 guard: a non-empty list item still interrupts a paragraph.
     #[test]
     fn non_empty_list_item_still_interrupts_paragraph() {
-        let output = SyntaxOptions::commonmark().parse("foo\n- bar\n");
+        let output = parse("foo\n- bar\n");
         assert!(matches!(
             output.document.children.as_slice(),
             [Block::Paragraph(_), Block::List(_)]
@@ -185,7 +183,7 @@ mod review_block {
     /// each content line.
     #[test]
     fn fenced_code_strips_opening_indent_from_content() {
-        let output = SyntaxOptions::commonmark().parse(" ```\n aaa\naaa\n```\n");
+        let output = parse(" ```\n aaa\naaa\n```\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one fenced code block: {:?}",
@@ -199,7 +197,7 @@ mod review_block {
     /// B4 guard: only up to N spaces are removed; deeper indentation is preserved.
     #[test]
     fn fenced_code_keeps_indent_beyond_opening() {
-        let output = SyntaxOptions::commonmark().parse("   ```\n   aaa\n    aaa\n  aaa\n   ```\n");
+        let output = parse("   ```\n   aaa\n    aaa\n  aaa\n   ```\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one fenced code block: {:?}",
@@ -215,7 +213,7 @@ mod review_block {
     /// interior blanks and the final content line ending stay.
     #[test]
     fn indented_code_trims_trailing_blank_lines() {
-        let output = SyntaxOptions::commonmark().parse("    foo\n    \n");
+        let output = parse("    foo\n    \n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one indented code block: {:?}",
@@ -229,7 +227,7 @@ mod review_block {
     /// B5 guard: interior blank lines are preserved.
     #[test]
     fn indented_code_keeps_interior_blank_lines() {
-        let output = SyntaxOptions::commonmark().parse("    foo\n\n    bar\n");
+        let output = parse("    foo\n\n    bar\n");
         let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
             panic!(
                 "expected one indented code block: {:?}",
@@ -242,13 +240,13 @@ mod review_block {
 
 mod parser {
     use markdown_syntax::{
-        Block, Constructs, DiagnosticCode, HtmlContainerContent, Inline, LinkDestinationKind,
-        LinkTitleKind, ParseOptions, ParseStrictError, ReferenceKind, Span, SyntaxOptions,
+        parse, Block, HtmlContainerContent, Inline, LinkDestinationKind, LinkTitleKind,
+        ReferenceKind, Span,
     };
 
     #[test]
     fn reference_definitions_are_collected_from_real_blocks_only() {
-        let output = SyntaxOptions::commonmark().parse("```\n[foo]: /url\n```\n\n[foo]\n");
+        let output = parse("```\n[foo]: /url\n```\n\n[foo]\n");
 
         assert!(matches!(
             output.document.children.first(),
@@ -264,7 +262,7 @@ mod parser {
 
     #[test]
     fn reference_definitions_support_multiline_destination() {
-        let output = SyntaxOptions::commonmark().parse("[foo]:\n /url\n\n[foo]\n");
+        let output = parse("[foo]:\n /url\n\n[foo]\n");
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected link reference definition");
@@ -283,14 +281,14 @@ mod parser {
 
     #[test]
     fn ordered_list_markers_follow_commonmark_interrupt_rules() {
-        let interrupted = SyntaxOptions::commonmark().parse("a\n2. b\n");
+        let interrupted = parse("a\n2. b\n");
         assert_eq!(interrupted.document.children.len(), 1);
         assert!(matches!(
             interrupted.document.children.as_slice(),
             [Block::Paragraph(_)]
         ));
 
-        let too_many_digits = SyntaxOptions::commonmark().parse("1234567890. not ok\n");
+        let too_many_digits = parse("1234567890. not ok\n");
         assert!(matches!(
             too_many_digits.document.children.as_slice(),
             [Block::Paragraph(_)]
@@ -299,7 +297,7 @@ mod parser {
 
     #[test]
     fn html_block_starts_interrupt_paragraphs_when_commonmark_allows() {
-        let output = SyntaxOptions::commonmark().parse("foo\n<div>\nbar\n");
+        let output = parse("foo\n<div>\nbar\n");
 
         assert!(matches!(
             output.document.children.as_slice(),
@@ -310,7 +308,7 @@ mod parser {
     #[test]
     fn raw_html_block_close_requires_matching_raw_tag_name() {
         let source = "<script>\nnot closed by </scripture>\nstill raw\n</script>\n";
-        let output = SyntaxOptions::commonmark().parse(source);
+        let output = parse(source);
 
         let [Block::HtmlBlock(block)] = output.document.children.as_slice() else {
             panic!("expected one raw HTML block");
@@ -324,7 +322,7 @@ mod parser {
     #[test]
     fn default_parses_details_summary_as_html_containers() {
         let source = "<details>\n<summary>Install</summary>\n\nRun `cargo test`.\n\n</details>\n";
-        let output = SyntaxOptions::default().parse(source);
+        let output = parse(source);
 
         let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
             panic!(
@@ -350,7 +348,7 @@ mod parser {
     #[test]
     fn default_parses_compact_details_summary_line_as_html_container() {
         let source = "<details><summary>Compact</summary>\n\nbody\n\n</details>\n";
-        let output = SyntaxOptions::default().parse(source);
+        let output = parse(source);
 
         let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
             panic!(
@@ -372,31 +370,19 @@ mod parser {
     }
 
     #[test]
-    fn commonmark_keeps_details_as_raw_html_blocks() {
+    fn details_on_their_own_lines_form_an_html_container() {
         let source = "<details>\n\nbody\n\n</details>\n";
-        let output = SyntaxOptions::commonmark().parse(source);
+        let output = parse(source);
 
         assert!(matches!(
             output.document.children.as_slice(),
-            [
-                Block::HtmlBlock(_),
-                Block::Paragraph(_),
-                Block::HtmlBlock(_)
-            ]
+            [Block::HtmlContainer(_)]
         ));
     }
 
     #[test]
     fn html_container_construct_can_interrupt_without_html_block() {
-        let mut constructs = Constructs::commonmark();
-        constructs.html_block = false;
-        constructs.html_inline = false;
-        constructs.html_container = true;
-        let output = SyntaxOptions {
-            constructs,
-            parse: Default::default(),
-        }
-        .parse("before\n<details>\n\nbody\n\n</details>\n");
+        let output = parse("before\n<details>\n\nbody\n\n</details>\n");
 
         assert!(matches!(
             output.document.children.as_slice(),
@@ -407,7 +393,7 @@ mod parser {
     #[test]
     fn unclosed_details_falls_back_to_raw_html_block() {
         let source = "<details>\n<summary>Open</summary>\n";
-        let output = SyntaxOptions::default().parse(source);
+        let output = parse(source);
 
         assert!(matches!(
             output.document.children.as_slice(),
@@ -424,7 +410,7 @@ mod parser {
             "- <details>\n\n  x\n  \t</details>",
             "- a\n\t<details>\n\t<summary>\n\t\t\tExample\n\t</summary>\n\n\tb\n\t</details>\n",
         ] {
-            let document = SyntaxOptions::default().parse(source).document;
+            let document = parse(source).document;
             let [Block::List(list)] = document.children.as_slice() else {
                 panic!("{source:?}: expected one list, got {:?}", document.children);
             };
@@ -437,7 +423,7 @@ mod parser {
                 list.children[0].children
             );
             let markdown = document.to_markdown().expect("document serializes");
-            let reparsed = SyntaxOptions::default().parse(&markdown).document;
+            let reparsed = parse(&markdown).document;
             assert_eq!(
                 format!("{:?}", crate::normalize::normalized(&reparsed.children)),
                 format!("{:?}", crate::normalize::normalized(&document.children)),
@@ -449,7 +435,7 @@ mod parser {
     #[test]
     fn details_container_scan_ignores_closing_tag_inside_fenced_code() {
         let source = "<details>\n<summary>Log</summary>\n\n```\n</details>\n```\n\n</details>\n";
-        let output = SyntaxOptions::default().parse(source);
+        let output = parse(source);
 
         let [Block::HtmlContainer(details)] = output.document.children.as_slice() else {
             panic!(
@@ -469,7 +455,7 @@ mod parser {
     fn reference_labels_allow_999_characters() {
         let label = "x".repeat(999);
         let source = format!("[{label}]: /url\n\n[full][{label}]\n[{label}][]\n[{label}]\n");
-        let output = SyntaxOptions::commonmark().parse(&source);
+        let output = parse(&source);
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected max-length definition");
@@ -500,7 +486,7 @@ mod parser {
     fn reference_labels_reject_1000_character_labels() {
         let overlong = format!("x{}", " ".repeat(999));
         let definition_source = format!("[{overlong}]: /url\n\n[x]\n");
-        let definition_output = SyntaxOptions::commonmark().parse(&definition_source);
+        let definition_output = parse(&definition_source);
 
         assert!(definition_output
             .document
@@ -519,7 +505,7 @@ mod parser {
 
         let reference_source =
             format!("[x]: /url\n\n[full][{overlong}]\n[{overlong}][]\n[{overlong}]\n");
-        let reference_output = SyntaxOptions::commonmark().parse(&reference_source);
+        let reference_output = parse(&reference_source);
 
         assert!(matches!(
             reference_output.document.children.first(),
@@ -535,24 +521,20 @@ mod parser {
     }
 
     #[test]
-    fn strict_mdx_reports_unclosed_jsx_blocks() {
-        let err = SyntaxOptions::mdx().parse_strict("<A>\n").unwrap_err();
+    fn a_former_mdx_jsx_block_is_raw_html() {
+        let output = parse("<A>\n");
 
-        let ParseStrictError::Diagnostic(diagnostic) = err else {
-            panic!("expected strict parse diagnostic");
-        };
-        assert_eq!(diagnostic.code, DiagnosticCode::InvalidMdx);
+        assert!(
+            matches!(output.document.children.as_slice(), [Block::HtmlBlock(_)]),
+            "{:?}",
+            output.document.children
+        );
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
     }
 
     #[test]
     fn directive_openers_scan_escaped_labels_and_quoted_attributes() {
-        let mut constructs = Constructs::commonmark();
-        constructs.directive_text = true;
-        let options = SyntaxOptions {
-            constructs: constructs,
-            parse: ParseOptions::default(),
-        };
-        let output = options.parse(":note[has \\] bracket]{title=\"x } y\"}\n");
+        let output = parse(":note[has \\] bracket]{title=\"x } y\"}\n");
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -574,11 +556,7 @@ mod parser {
     fn named_character_references_cover_common_html5_entities() {
         let source =
             "&semi; &trade; &NotEqualTilde; &CounterClockwiseContourIntegral; &acE; &nGg; &fjlig; &AMP;\n";
-        let options = SyntaxOptions {
-            constructs: Constructs::commonmark(),
-            parse: ParseOptions::default(),
-        };
-        let output = options.parse(source);
+        let output = parse(source);
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -612,7 +590,7 @@ mod parser {
     fn asterisk_runs_open_emphasis_only_as_whole_left_flanking_runs() {
         // CommonMark example 397: a `**` run followed by whitespace is not
         // left-flanking, so no single `*` may be peeled off to open emphasis.
-        let space = SyntaxOptions::commonmark().parse("** foo bar**\n").document;
+        let space = parse("** foo bar**\n").document;
         assert!(
             matches!(
                 space.children.as_slice(),
@@ -624,7 +602,7 @@ mod parser {
 
         // CommonMark example 399: an interior `**` run is not left-flanking next to
         // punctuation, and the second asterisk of a run can never open on its own.
-        let punctuation = SyntaxOptions::commonmark().parse("a**\"foo\"**\n").document;
+        let punctuation = parse("a**\"foo\"**\n").document;
         assert!(
             matches!(
                 punctuation.children.as_slice(),
@@ -636,7 +614,7 @@ mod parser {
 
         // Guard against over-restriction: a genuinely left-flanking `**` run still
         // opens strong emphasis.
-        let strong = SyntaxOptions::commonmark().parse("**foo bar**\n").document;
+        let strong = parse("**foo bar**\n").document;
         assert!(
             matches!(
                 strong.children.as_slice(),
@@ -660,11 +638,7 @@ mod parser {
         // characters.
         let source =
             "&#x41; &#9; &#10; &#0; &#1; &#127; &#128; &#xFDD0; &#xFFFE; &#xD800; &#x110000;\n";
-        let options = SyntaxOptions {
-            constructs: Constructs::commonmark(),
-            parse: ParseOptions::default(),
-        };
-        let output = options.parse(source);
+        let output = parse(source);
 
         let Some(Block::Paragraph(paragraph)) = output.document.children.first() else {
             panic!("expected paragraph");
@@ -699,7 +673,7 @@ mod parser {
 
     #[test]
     fn link_resources_preserve_destination_and_title_kinds_in_ast() {
-        let output = SyntaxOptions::commonmark().parse("[foo]: <my url> 'title'\n\n[angle](<foo bar> 'single') [paren](url (paren title)) [empty]( \"title\")\n");
+        let output = parse("[foo]: <my url> 'title'\n\n[angle](<foo bar> 'single') [paren](url (paren title)) [empty]( \"title\")\n");
 
         let Some(Block::Definition(definition)) = output.document.children.first() else {
             panic!("expected definition");
@@ -737,7 +711,7 @@ mod parser {
 
     #[test]
     fn localized_source_spans_track_trimmed_markers() {
-        let heading = SyntaxOptions::commonmark().parse("# foo #\n");
+        let heading = parse("# foo #\n");
         let Some(Block::Heading(node)) = heading.document.children.first() else {
             panic!("expected heading");
         };
@@ -746,7 +720,7 @@ mod parser {
             [Inline::Text(text)] if text.meta.span == Some(Span::new(2, 5))
         ));
 
-        let blockquote = SyntaxOptions::commonmark().parse("> **a**\n");
+        let blockquote = parse("> **a**\n");
         let Some(Block::BlockQuote(quote)) = blockquote.document.children.first() else {
             panic!("expected blockquote");
         };
@@ -758,13 +732,7 @@ mod parser {
             [Inline::Strong(strong)] if strong.meta.span == Some(Span::new(2, 7))
         ));
 
-        let mut constructs = Constructs::commonmark();
-        constructs.directive_text = true;
-        let options = SyntaxOptions {
-            constructs: constructs,
-            parse: ParseOptions::default(),
-        };
-        let directive = options.parse(":note[*x*]\n");
+        let directive = parse(":note[*x*]\n");
         let Some(Block::Paragraph(paragraph)) = directive.document.children.first() else {
             panic!("expected directive paragraph");
         };
@@ -780,7 +748,7 @@ mod parser {
     /// The inline content of each body-row cell of the table `source` parses
     /// to, written compactly.
     fn body_cells(source: &str) -> Vec<String> {
-        let output = SyntaxOptions::default().parse(source);
+        let output = parse(source);
         let Some(Block::Table(table)) = output.document.children.first() else {
             panic!("{source:?}: expected a table");
         };
@@ -794,19 +762,6 @@ mod parser {
                         Inline::Text(text) => text.value.clone(),
                         Inline::Escape(escape) => format!("\\{}", escape.value),
                         Inline::Code(code) => format!("Code({})", code.value),
-                        Inline::Spoiler(spoiler) => format!(
-                            "Spoiler({})",
-                            spoiler
-                                .children
-                                .iter()
-                                .map(|inline| match inline {
-                                    Inline::Text(text) => text.value.clone(),
-                                    Inline::Escape(escape) => format!("\\{}", escape.value),
-                                    Inline::Code(code) => format!("Code({})", code.value),
-                                    other => format!("{other:?}"),
-                                })
-                                .collect::<String>()
-                        ),
                         other => format!("{other:?}"),
                     })
                     .collect()
@@ -815,30 +770,23 @@ mod parser {
     }
 
     #[test]
-    fn table_spoilers_pair_as_the_inline_parser_pairs_them() {
-        // A spoiler keeps the pipes between its bars in its cell.
+    fn table_rows_split_at_unescaped_pipes() {
+        // Every unescaped pipe delimits a cell, inside a `||` run or a code
+        // span too; a row keeps as many cells as the header has.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| ||a | b|| | c |"),
-            ["Spoiler(a | b)", "c"]
+            ["", ""]
         );
-        // A `||` inside a code span closes no spoiler, so the opener's bars
-        // delimit.
         assert_eq!(
             body_cells("| w | x | y | z |\n|-|-|-|-|\n| ||a `||` | b |"),
-            ["", "", "a Code(||)", "b"]
+            ["", "", "a `", ""]
         );
-        // The closer is the next `||` outside code spans.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| ||a `||` b|| | c |"),
-            ["Spoiler(a Code(||) b)", "c"]
+            ["", ""]
         );
-        // A row may start with a spoiler instead of a border pipe.
-        assert_eq!(
-            body_cells("| x | y |\n|---|---|\n||a|| | d |"),
-            ["Spoiler(a)", "d"]
-        );
-        // Escaped pipes stay literal text in their own cells: a pair that uses
-        // one never holds a pipe that delimits.
+        assert_eq!(body_cells("| x | y |\n|---|---|\n||a|| | d |"), ["", "a"]);
+        // Escaped pipes stay literal text in their own cells.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
             ["a \\|\\| b", "or, like c \\|\\| d"]
@@ -847,13 +795,10 @@ mod parser {
             body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
             ["\\| a", "b \\|"]
         );
-        // An escaped backtick opens no code span, so the `||` after it opens a
-        // spoiler that holds the pipe.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),
-            ["\\`Spoiler(a\\` | b)", ""]
+            ["\\`", ""]
         );
-        // Bars with no closer are delimiters around an empty cell.
         assert_eq!(
             body_cells("| x | y | z |\n|---|---|---|\n|a||b|"),
             ["a", "", "b"]
@@ -866,10 +811,10 @@ mod lazy_lines_and_final_whitespace {
     //! continue, and a paragraph or setext heading drops the final whitespace
     //! of its content, as CommonMark specifies.
 
-    use markdown_syntax::{Block, Inline, SyntaxOptions};
+    use markdown_syntax::{parse, Block, Inline};
 
     fn blocks(source: &str) -> Vec<Block> {
-        SyntaxOptions::commonmark().parse(source).document.children
+        parse(source).document.children
     }
 
     fn texts(inlines: &[Inline]) -> Vec<String> {
@@ -967,10 +912,10 @@ mod container_laziness {
     //! commonmark.js, and micromark read it, and the blank lines and blank
     //! item separators that end containers or loosen lists.
 
-    use markdown_syntax::{Block, Inline, ListItem, SyntaxOptions};
+    use markdown_syntax::{parse, Block, Inline, ListItem};
 
     fn blocks(source: &str) -> Vec<Block> {
-        SyntaxOptions::commonmark().parse(source).document.children
+        parse(source).document.children
     }
 
     fn texts(inlines: &[Inline]) -> Vec<String> {
@@ -1145,10 +1090,7 @@ mod container_laziness {
 
     #[test]
     fn a_line_after_an_html_or_math_block_in_a_block_quote_is_not_lazy() {
-        let math = SyntaxOptions::default()
-            .parse("> $$\n> x\na")
-            .document
-            .children;
+        let math = parse("> $$\n> x\na").document.children;
         for blocks in [blocks("> <div>\n> x\na"), blocks("> <!--\n> x\na"), math] {
             let [quote, paragraph] = blocks.as_slice() else {
                 panic!("expected a quote and a paragraph, got {blocks:?}");
@@ -1211,10 +1153,10 @@ mod container_laziness {
 mod paragraph_interruption {
     //! Only a line that opens the block it looks like interrupts a paragraph.
 
-    use markdown_syntax::{Block, CodeBlock, SyntaxOptions};
+    use markdown_syntax::{parse, Block, CodeBlock};
 
     fn blocks(source: &str) -> Vec<Block> {
-        SyntaxOptions::commonmark().parse(source).document.children
+        parse(source).document.children
     }
 
     #[test]
@@ -1259,7 +1201,7 @@ mod paragraph_interruption {
     #[test]
     fn a_malformed_directive_line_continues_the_paragraph() {
         for source in ["a\n::", "a\n::1bad", "a\n:::", "a\n::: x"] {
-            let blocks = SyntaxOptions::default().parse(source).document.children;
+            let blocks = parse(source).document.children;
             assert!(
                 matches!(blocks.as_slice(), [Block::Paragraph(_)]),
                 "{source:?}: {blocks:?}"
@@ -1296,10 +1238,7 @@ mod paragraph_interruption {
 
     #[test]
     fn a_header_row_indented_four_columns_starts_no_table() {
-        let blocks = SyntaxOptions::default()
-            .parse("a\n    |b\n----")
-            .document
-            .children;
+        let blocks = parse("a\n    |b\n----").document.children;
         assert!(
             matches!(blocks.as_slice(), [Block::Heading(_)]),
             "{blocks:?}"
@@ -1308,7 +1247,7 @@ mod paragraph_interruption {
 
     #[test]
     fn a_directive_attribute_without_a_valid_name_is_dropped() {
-        let document = SyntaxOptions::default().parse(":b{<} :c{a <=1 d}").document;
+        let document = parse(":b{<} :c{a <=1 d}").document;
         let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, ":b :c{a d}\n");
     }
@@ -1396,15 +1335,14 @@ mod unicode_whitespace {
     //! another whitespace char, such as a no-break space or a form feed, is
     //! neither blank nor indented, and such a char ends no marker or fence.
 
-    use markdown_syntax::{Block, Inline, SyntaxOptions};
+    use markdown_syntax::{parse, Block, Inline};
 
-    fn blocks(source: &str, options: &SyntaxOptions) -> Vec<Block> {
-        options.parse(source).document.children
+    fn blocks(source: &str) -> Vec<Block> {
+        parse(source).document.children
     }
 
     #[test]
     fn a_line_with_other_whitespace_is_text() {
-        let commonmark = SyntaxOptions::commonmark();
         for source in [
             "***\u{a0}",
             "\u{a0}***",
@@ -1414,18 +1352,17 @@ mod unicode_whitespace {
             "a\n\u{c}---",
             "<a>\u{a0}\nx",
         ] {
-            let blocks = blocks(source, &commonmark);
+            let blocks = blocks(source);
             assert!(
                 matches!(blocks.as_slice(), [Block::Paragraph(_)]),
                 "{source:?}: {blocks:?}"
             );
         }
         // The dashes read as list markers, as no thematic break forms.
-        let nested = blocks("- - -\u{c}", &commonmark);
+        let nested = blocks("- - -\u{c}");
         assert!(matches!(nested.as_slice(), [Block::List(_)]), "{nested:?}");
-        let gfm = SyntaxOptions::gfm();
         for source in ["| a |\n| - |\u{a0}", "\u{a0}| a |\n| - |"] {
-            let blocks = blocks(source, &gfm);
+            let blocks = blocks(source);
             assert!(
                 matches!(blocks.as_slice(), [Block::Paragraph(_)]),
                 "{source:?}: {blocks:?}"
@@ -1434,8 +1371,8 @@ mod unicode_whitespace {
     }
 
     #[test]
-    fn a_no_break_space_before_mdx_jsx_keeps_it_inline() {
-        let blocks = blocks("\u{a0} <p/>", &SyntaxOptions::mdx());
+    fn a_no_break_space_before_a_tag_keeps_it_inline() {
+        let blocks = blocks("\u{a0} <p/>");
         assert!(
             matches!(blocks.as_slice(), [Block::Paragraph(_)]),
             "{blocks:?}"
@@ -1444,7 +1381,7 @@ mod unicode_whitespace {
 
     #[test]
     fn a_form_feed_ending_a_paragraph_stays_its_text() {
-        let blocks = blocks("a\u{c}", &SyntaxOptions::commonmark());
+        let blocks = blocks("a\u{c}");
         let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
             panic!("{blocks:?}");
         };
@@ -1456,23 +1393,19 @@ mod unicode_whitespace {
 
     #[test]
     fn labels_collapse_only_spaces_tabs_and_line_endings() {
-        let options = SyntaxOptions::default();
-        let debug = format!("{:?}", blocks("[a\u{a0}b]\n\n[a b]: /u", &options));
+        let debug = format!("{:?}", blocks("[a\u{a0}b]\n\n[a b]: /u"));
         assert!(!debug.contains("LinkReference"), "{debug}");
-        let debug = format!("{:?}", blocks("[^a\u{a0}b]\n\n[^a\u{a0}b]: x", &options));
+        let debug = format!("{:?}", blocks("[^a\u{a0}b]\n\n[^a\u{a0}b]: x"));
         assert!(debug.contains("FootnoteReference"), "{debug}");
     }
 }
 
 mod footnotes_and_directives {
-    use markdown_syntax::{Block, Inline, SyntaxOptions};
+    use markdown_syntax::{parse, Block, Inline};
 
     #[test]
     fn a_footnote_definitions_first_line_keeps_a_hard_break() {
-        let blocks = SyntaxOptions::default()
-            .parse("[^1]: a  \nb")
-            .document
-            .children;
+        let blocks = parse("[^1]: a  \nb").document.children;
         let [Block::FootnoteDefinition(definition)] = blocks.as_slice() else {
             panic!("{blocks:?}");
         };
@@ -1490,10 +1423,7 @@ mod footnotes_and_directives {
 
     #[test]
     fn a_directive_opener_inside_fenced_code_is_code() {
-        let blocks = SyntaxOptions::default()
-            .parse(":::t\n```\n:::e\n```\n:::")
-            .document
-            .children;
+        let blocks = parse(":::t\n```\n:::e\n```\n:::").document.children;
         let [Block::ContainerDirective(directive)] = blocks.as_slice() else {
             panic!("{blocks:?}");
         };
@@ -1505,8 +1435,7 @@ mod footnotes_and_directives {
 
     #[test]
     fn a_fence_left_open_in_a_nested_directive_ends_with_it() {
-        let output = SyntaxOptions::default()
-            .parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
+        let output = parse(":::outer\n:::inner\n```\n:::\n:::other\nx\n:::\n:::\nafter");
         assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
         let blocks = output.document.children;
         let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
@@ -1517,7 +1446,7 @@ mod footnotes_and_directives {
             matches!(
                 outer.children.as_slice(),
                 [Block::ContainerDirective(inner), Block::ContainerDirective(inner2)]
-                    if inner.name == "inner" && inner2.name == "inner2"
+                    if inner.name == "inner" && inner2.name == "other"
             ),
             "{blocks:?}"
         );
@@ -1525,10 +1454,10 @@ mod footnotes_and_directives {
 }
 
 mod gfm_tables {
-    use markdown_syntax::{Block, SyntaxOptions};
+    use markdown_syntax::{parse, Block};
 
     fn blocks(source: &str) -> Vec<Block> {
-        SyntaxOptions::gfm().parse(source).document.children
+        parse(source).document.children
     }
 
     #[test]
@@ -1583,10 +1512,10 @@ mod gfm_tables {
 }
 
 mod list_items_in_containers {
-    use markdown_syntax::{Block, SyntaxOptions};
+    use markdown_syntax::{parse, Block};
 
     fn blocks(source: &str) -> Vec<Block> {
-        SyntaxOptions::commonmark().parse(source).document.children
+        parse(source).document.children
     }
 
     #[test]
@@ -1652,7 +1581,7 @@ mod nested_containers {
     //! with the HTML commonmark.js renders for it. Where micromark renders
     //! something else, the case says so; commonmark.js is the reference.
 
-    use markdown_syntax::{HtmlOptions, SyntaxOptions};
+    use markdown_syntax::{parse, HtmlOptions};
 
     struct Case {
         name: &'static str,
@@ -1766,18 +1695,6 @@ mod nested_containers {
             micromark: None,
         },
         Case {
-            name: "delimiter-row-like line with tables off",
-            source: "- a\n  |-|\nx",
-            commonmark_js: "<ul>\n<li>a\n|-|\nx</li>\n</ul>",
-            micromark: None,
-        },
-        Case {
-            name: "delimiter-row-like line in a quoted item",
-            source: "> - z\n>   |-|\n>$$",
-            commonmark_js: "<blockquote>\n<ul>\n<li>z\n|-|\n$$</li>\n</ul>\n</blockquote>",
-            micromark: None,
-        },
-        Case {
             name: "blank line inside a nested fence",
             source: "- a\n  - ```\n\n    x\n\n- b",
             commonmark_js: "<ul>\n<li>a\n<ul>\n<li>\n<pre><code>\nx\n\n</code></pre>\n</li>\n</ul>\n</li>\n<li>b</li>\n</ul>",
@@ -1833,12 +1750,33 @@ mod nested_containers {
         },
     ];
 
+    /// Tables are part of the syntax, so a delimiter row in an item makes its
+    /// line a table header, where commonmark.js, without tables, reads
+    /// `"<ul>\n<li>a\n|-|\nx</li>\n</ul>"`.
+    #[test]
+    fn a_delimiter_row_in_an_item_forms_a_table() {
+        let html = parse("- a\n  |-|\nx").document.to_html().unwrap();
+        assert_eq!(
+            html.trim_end(),
+            "<ul>\n<li>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>\n</li>\n</ul>\n<p>x</p>"
+        );
+        // commonmark.js reads `"<blockquote>\n<ul>\n<li>z\n|-|\n$$</li>\n</ul>\n</blockquote>"`.
+        let html = parse("> - z\n>   |-|\n>$$").document.to_html().unwrap();
+        assert_eq!(
+            html.trim_end(),
+            concat!(
+                "<blockquote>\n<ul>\n<li>\n<table>\n<thead>\n<tr>\n<th>z</th>\n</tr>\n</thead>\n</table>\n</li>\n</ul>\n",
+                "<pre><code class=\"language-math\" data-math-style=\"display\"></code></pre>\n</blockquote>"
+            )
+        );
+    }
+
     #[test]
     fn nested_containers_match_the_reference() {
         let mut options = HtmlOptions::default();
         options.allow_dangerous_html = true;
         for case in CASES {
-            let document = SyntaxOptions::commonmark().parse(case.source).document;
+            let document = parse(case.source).document;
             let html = document
                 .to_html_with(&options)
                 .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
@@ -1859,12 +1797,10 @@ mod one_pass_over_open_blocks {
     //! block-syntax "One pass over open blocks", indentation, tab, and blank
     //! line scenarios.
 
-    use markdown_syntax::{
-        parse, Block, CodeBlockKind, HeadingKind, Inline, List, ListItem, SyntaxOptions,
-    };
+    use markdown_syntax::{parse, Block, CodeBlockKind, HeadingKind, Inline, List, ListItem};
 
-    fn commonmark(source: &str) -> Vec<Block> {
-        SyntaxOptions::commonmark().parse(source).document.children
+    fn blocks_of(source: &str) -> Vec<Block> {
+        parse(source).document.children
     }
 
     fn code_value(block: &Block) -> &str {
@@ -1877,17 +1813,17 @@ mod one_pass_over_open_blocks {
     #[test]
     fn an_unclosed_fence_keeps_an_empty_last_line_without_a_line_ending() {
         // commonmark.js gives `a\n\n` for each.
-        assert_eq!(code_value(&commonmark("  ```\na\n  ")[0]), "a\n\n");
+        assert_eq!(code_value(&blocks_of("  ```\na\n  ")[0]), "a\n\n");
         assert_eq!(
-            code_value(&only_item(&commonmark("- ```\n  a\n  ")[0]).children[0]),
+            code_value(&only_item(&blocks_of("- ```\n  a\n  ")[0]).children[0]),
             "a\n\n"
         );
-        assert_eq!(code_value(&commonmark("```\r\na\r\n")[0]), "a\r\n");
+        assert_eq!(code_value(&blocks_of("```\r\na\r\n")[0]), "a\r\n");
     }
 
     #[test]
     fn the_task_checkbox_follows_cmark_gfm_and_micromark() {
-        let gfm = |source: &str| SyntaxOptions::gfm().parse(source).document.children;
+        let gfm = |source: &str| parse(source).document.children;
         // A setext heading is no paragraph, so `[x]` stays its text.
         let blocks = gfm("- [x] a\n  ===");
         let item = only_item(&blocks[0]);
@@ -1910,7 +1846,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_definition_title_drops_the_indentation_of_its_lines() {
-        let blocks = commonmark("[a]: /u \"x\n   y\"\n\n[a]");
+        let blocks = blocks_of("[a]: /u \"x\n   y\"\n\n[a]");
         let Block::Definition(definition) = &blocks[0] else {
             panic!("expected a definition, got {blocks:?}");
         };
@@ -1920,7 +1856,7 @@ mod one_pass_over_open_blocks {
     #[test]
     fn indented_code_does_not_interrupt_an_alert_marker_line() {
         for source in ["> [!NOTE]\n    code", "> [!NOTE]\n>     code"] {
-            let blocks = SyntaxOptions::default().parse(source).document.children;
+            let blocks = parse(source).document.children;
             let [Block::Alert(alert)] = blocks.as_slice() else {
                 panic!("{source:?}: expected one alert, got {blocks:?}");
             };
@@ -1975,7 +1911,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn item_indentation_is_measured_from_the_quotes_content() {
-        let blocks = commonmark("  > - a\n>   ===\nb");
+        let blocks = blocks_of("  > - a\n>   ===\nb");
         let [quoted, after] = blocks.as_slice() else {
             panic!("{blocks:?}");
         };
@@ -1992,14 +1928,14 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_nested_item_behind_an_inner_quote_ends_with_the_outer_quote() {
-        let blocks = commonmark("> - > - a\n>   > 2.\nz");
+        let blocks = blocks_of("> - > - a\n>   > 2.\nz");
         assert!(matches!(blocks[0], Block::BlockQuote(_)), "{blocks:?}");
         assert_eq!(paragraph(&blocks[1]), ["z"]);
     }
 
     #[test]
     fn a_quote_marker_four_columns_in_is_text() {
-        let blocks = commonmark("- - >=\n\t\t>```\n=");
+        let blocks = blocks_of("- - >=\n\t\t>```\n=");
         let outer = only_item(&blocks[0]);
         let inner = only_item(&outer.children[0]);
         let inner_quote = quote(&inner.children[0]);
@@ -2009,7 +1945,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn item_continuation_indented_four_columns_more_continues_the_paragraph() {
-        let blocks = commonmark("> - >a\n>     >- =\n=");
+        let blocks = blocks_of("> - >a\n>     >- =\n=");
         let item = only_item(&quote(&blocks[0])[0]);
         let inner_quote = quote(&item.children[0]);
         let innermost = only_item(&inner_quote[1]);
@@ -2018,7 +1954,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn an_open_fence_in_a_nested_item_is_not_trusted_after_it_closes() {
-        let blocks = commonmark("- 1. c\n  2. ```\n  \tx");
+        let blocks = blocks_of("- 1. c\n  2. ```\n  \tx");
         let item = only_item(&blocks[0]);
         assert!(matches!(item.children[0], Block::List(_)), "{item:?}");
         assert_eq!(paragraph(&item.children[1]), ["x"]);
@@ -2030,7 +1966,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_lazy_line_from_an_outer_quote_does_not_enter_a_fence() {
-        let blocks = commonmark("> - ```\n>   x\n  y");
+        let blocks = blocks_of("> - ```\n>   x\n  y");
         let item = only_item(&quote(&blocks[0])[0]);
         assert!(matches!(
             code(&item.children[0]),
@@ -2041,14 +1977,14 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_dedented_lazy_line_opens_no_block() {
-        let blocks = commonmark("   - > q\n    1. a\n1.  ```");
+        let blocks = blocks_of("   - > q\n    1. a\n1.  ```");
         let item = only_item(&blocks[0]);
         assert_eq!(paragraph(&quote(&item.children[0])[0]), ["q", "\n", "1. a"]);
     }
 
     #[test]
     fn an_html_block_on_a_quoted_items_continuation_line_ends_at_the_next_item() {
-        let blocks = commonmark("> - <div>\n>   <!--\n> - x\n>   y\nz");
+        let blocks = blocks_of("> - <div>\n>   <!--\n> - x\n>   y\nz");
         let items = &list(&quote(&blocks[0])[0]).children;
         assert_eq!(
             paragraph(&items[1].children[0]),
@@ -2058,7 +1994,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_sibling_item_ends_a_fence_behind_a_quote() {
-        let blocks = commonmark("- > - ```\n  > - b\nc");
+        let blocks = blocks_of("- > - ```\n  > - b\nc");
         let item = only_item(&blocks[0]);
         let nested = &list(&quote(&item.children[0])[0]).children;
         assert_eq!(paragraph(&nested[1].children[0]), ["b", "\n", "c"]);
@@ -2077,37 +2013,37 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn tabs_after_a_split_tab_keep_their_columns() {
-        let blocks = commonmark(">\t\t\tfoo");
+        let blocks = blocks_of(">\t\t\tfoo");
         assert_eq!(
             code(&quote(&blocks[0])[0]),
             (&CodeBlockKind::Indented, "  \tfoo\n")
         );
-        let blocks = commonmark("> ```\n>\t\tcode\n> ```");
+        let blocks = blocks_of("> ```\n>\t\tcode\n> ```");
         assert_eq!(code(&quote(&blocks[0])[0]).1, "  \tcode\n");
     }
 
     #[test]
     fn blank_lines_inside_open_leaf_blocks_loosen_no_list() {
         for source in ["- a\n  - ```\n\n    x\n\n- b", "\n\n- <!--\n\n- text"] {
-            assert!(list(&commonmark(source)[0]).tight, "{source:?}");
+            assert!(list(&blocks_of(source)[0]).tight, "{source:?}");
         }
         assert!(list(&parse("- $$\n\n- b").document.children[0]).tight);
     }
 
     #[test]
     fn an_unclosed_fence_keeps_its_trailing_blank_lines() {
-        let blocks = commonmark("- ```\n  x\n\n- b");
+        let blocks = blocks_of("- ```\n  x\n\n- b");
         assert_eq!(code(&list(&blocks[0]).children[0].children[0]).1, "x\n\n");
-        let blocks = commonmark("> ```\n> a\n>\nb");
+        let blocks = blocks_of("> ```\n> a\n>\nb");
         assert_eq!(code(&quote(&blocks[0])[0]).1, "a\n\n");
     }
 
     #[test]
     fn container_lines_follow_the_open_blocks() {
-        let blocks = commonmark("2. a\n   1. ```\n\n2. b");
+        let blocks = blocks_of("2. a\n   1. ```\n\n2. b");
         assert!(blocks.len() == 1 && list(&blocks[0]).tight, "{blocks:?}");
 
-        let blocks = commonmark("> - a\n> 2.\nz");
+        let blocks = blocks_of("> - a\n> 2.\nz");
         let inner = quote(&blocks[0]);
         assert!(
             matches!(inner, [Block::List(_), Block::List(_)]),
@@ -2115,21 +2051,24 @@ mod one_pass_over_open_blocks {
         );
         assert_eq!(paragraph(&blocks[1]), ["z"]);
 
-        let blocks = commonmark("> 1. a\n> ===\nb");
+        let blocks = blocks_of("> 1. a\n> ===\nb");
         let item = only_item(&quote(&blocks[0])[0]);
         assert_eq!(paragraph(&item.children[0]), ["a", "\n", "===", "\n", "b"]);
 
-        assert!(!list(&commonmark("- - ```\n  - a\n\n- b")[0]).tight);
+        assert!(!list(&blocks_of("- - ```\n  - a\n\n- b")[0]).tight);
 
-        let blocks = commonmark("1.   a\n    ```\n\nb");
+        let blocks = blocks_of("1.   a\n    ```\n\nb");
         assert!(matches!(blocks[0], Block::List(_)), "{blocks:?}");
         assert_eq!(paragraph(&blocks[1]), ["b"]);
 
-        let blocks = commonmark("- a\n  |-|\nx");
-        assert_eq!(
-            paragraph(&only_item(&blocks[0]).children[0]),
-            ["a", "\n", "|-|", "\n", "x"]
+        // A delimiter row makes the item's line a table header, and the
+        // line after the table is no lazy continuation.
+        let blocks = blocks_of("- a\n  |-|\nx");
+        assert!(
+            matches!(only_item(&blocks[0]).children.as_slice(), [Block::Table(_)]),
+            "{blocks:?}"
         );
+        assert_eq!(paragraph(&blocks[1]), ["x"]);
     }
 
     #[test]
@@ -2146,10 +2085,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn a_quoted_footnote_definition_takes_lazy_lines() {
-        let blocks = SyntaxOptions::gfm()
-            .parse("> [^1]: a\nb\n\nx[^1]")
-            .document
-            .children;
+        let blocks = parse("> [^1]: a\nb\n\nx[^1]").document.children;
         let [Block::FootnoteDefinition(definition)] = quote(&blocks[0]) else {
             panic!("{blocks:?}");
         };

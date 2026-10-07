@@ -8,10 +8,10 @@ Document
     Text "Text"
     InlineFootnote
       Text "With "
-      Emphasis
+      Emphasis delimiter=*
         Text "emphasis"
       Text " and "
-      Strong
+      Strong delimiter=*
         Text "strong"
     Text "."
   Paragraph

@@ -16,9 +16,7 @@ Markdown source arguments extracted from recognized upstream parser-facing calls
 and package-owned stability inputs. Executable cases declare
 `role: upstream-input`.
 
-Each semantic case declares a `profile` in its case header. The fixture runner
-uses that profile to choose `CommonMark`, `GFM`, `MDX`, math, frontmatter,
-wikilink, or `extras` syntax options per case.
+Every case parses under the crate's one syntax.
 
 The executable check uses the public `markdown-syntax` boundary:
 
@@ -38,18 +36,17 @@ commit: 1506572
 source: upstream-tests/html_flow.rs
 role: upstream-input
 count: 151
-profiles: commonmark
 ```
 
 The `source:` value is a historical provenance identifier. The vendored upstream
 sources are not present in this tree, and `source:` is not cross-checked against
 an on-disk file.
 
-Executable semantic cases include a profile in the case header. Each case is
-length-prefixed so the Markdown body can contain arbitrary delimiter-like text:
+Each case is length-prefixed so the Markdown body can contain arbitrary
+delimiter-like text:
 
 ```text
---- case 1 profile gfm bytes 17
+--- case 1 bytes 17
 | a |
 | - |
 | b |

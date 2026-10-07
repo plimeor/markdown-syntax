@@ -1,33 +1,33 @@
 Document
   Paragraph
-    Link destination=/uri title=none
+    Link form=inline destination=/uri title=none
       Text "link "
-      Emphasis
+      Emphasis delimiter=*
         Text "foo "
-        Strong
+        Strong delimiter=*
           Text "bar"
         Text " "
         Code value="#" raw="#" fence=1
   Paragraph
-    Link destination=/uri title=none
+    Link form=inline destination=/uri title=none
       Image destination=moon.jpg title=none
         Text "moon"
   Paragraph
     Text "[foo "
-    Link destination=/inner title=none
+    Link form=inline destination=/inner title=none
       Text "bar"
     Text "](/outer)"
   Paragraph
     Text "[foo "
-    Emphasis
+    Emphasis delimiter=*
       Text "[bar "
-      Link destination=/inner title=none
+      Link form=inline destination=/inner title=none
         Text "baz"
       Text "](/middle)"
     Text "](/outer)"
   Paragraph
     Image destination=uri3 title=none
       Text "["
-      Link destination=uri1 title=none
+      Link form=inline destination=uri1 title=none
         Text "foo"
       Text "](uri2)"

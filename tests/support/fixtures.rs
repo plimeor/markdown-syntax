@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -7,104 +6,12 @@ use std::{
 #[path = "normalize.rs"]
 mod normalize;
 
-use markdown_syntax::{
-    Block, Constructs, DiagnosticSeverity, Document, Inline, ParseOptions, SerializeOptions,
-    SyntaxOptions,
-};
+use markdown_syntax::{parse, Block, DiagnosticSeverity, Document, Inline};
 
-pub(crate) fn profile_options(profile: &str) -> SyntaxOptions {
-    match profile {
-        "commonmark" => SyntaxOptions::commonmark(),
-        "gfm" => SyntaxOptions::gfm(),
-        "mdx" => SyntaxOptions::mdx(),
-        "math" => {
-            let mut constructs = Constructs::commonmark();
-            constructs.math_block = true;
-            constructs.math_inline = true;
-            SyntaxOptions {
-                constructs: constructs,
-                parse: ParseOptions::default(),
-            }
-        }
-        "frontmatter" => {
-            let mut constructs = Constructs::commonmark();
-            constructs.frontmatter = true;
-            SyntaxOptions {
-                constructs: constructs,
-                parse: ParseOptions::default(),
-            }
-        }
-        "extras" => SyntaxOptions {
-            constructs: extra_constructs(),
-            parse: extra_parse_options(),
-        },
-        "wikilink-after" => {
-            let mut constructs = extra_constructs();
-            constructs.wikilink_title_after_pipe = true;
-            SyntaxOptions {
-                constructs: constructs,
-                parse: extra_parse_options(),
-            }
-        }
-        "wikilink-before" => {
-            let mut constructs = extra_constructs();
-            constructs.wikilink_title_before_pipe = true;
-            SyntaxOptions {
-                constructs: constructs,
-                parse: extra_parse_options(),
-            }
-        }
-        other => panic!("unknown derived corpus profile: {other}"),
-    }
-}
+pub(crate) fn assert_fixture(stem: &str) {
+    let (output, markdown) = assert_fixture_goldens(stem);
 
-fn extra_constructs() -> Constructs {
-    let mut constructs = Constructs::gfm();
-    constructs.math_block = true;
-    constructs.math_inline = true;
-    constructs.frontmatter = true;
-    constructs.gfm_alert = true;
-    constructs.underline = true;
-    constructs.insert = true;
-    constructs.highlight = true;
-    constructs.subscript = true;
-    constructs.superscript = true;
-    constructs.spoiler = true;
-    constructs.shortcode = true;
-    constructs.description_list = true;
-    constructs.inline_footnote = true;
-    constructs.directive_text = true;
-    constructs.directive_leaf = true;
-    constructs.directive_container = true;
-    constructs
-}
-
-fn extra_parse_options() -> ParseOptions {
-    ParseOptions {
-        single_tilde_strikethrough: true,
-    }
-}
-
-pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
-    let input = read_fixture(&format!("{stem}.md"));
-    let expected_ast = read_fixture(&format!("{stem}.ast"));
-    let expected_markdown =
-        normalize_expected_markdown(&read_fixture(&format!("{stem}.canonical.md")));
-
-    let output = options.parse(&input);
-    assert_eq!(output.diagnostics, Vec::new());
-    assert_eq!(
-        snapshot_document(&output.document),
-        trim_final_newline(&expected_ast)
-    );
-
-    let markdown = output
-        .document
-        .to_markdown_with(&reading_back_under(&options))
-        .expect("document serializes");
-    assert_eq!(markdown, expected_markdown);
-
-    let reparsed = options.parse(&markdown);
+    let reparsed = parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
         snapshot_document_normalized(&output.document)
@@ -112,21 +19,46 @@ pub(crate) fn assert_fixture(stem: &str, options: SyntaxOptions) {
 
     let second = reparsed
         .document
-        .to_markdown_with(&reading_back_under(&options))
+        .to_markdown()
         .expect("reparsed document serializes");
     assert_eq!(second, markdown);
 }
 
-/// Serialize options that read the output back under `options`.
-pub(crate) fn reading_back_under(options: &SyntaxOptions) -> SerializeOptions {
-    let mut serialize = SerializeOptions::default();
-    serialize.syntax = options.clone();
-    serialize
+/// Checks a fixture listed as not reading back: its goldens hold, and its
+/// Markdown still reads back as a different tree, so the listing cannot go
+/// stale.
+pub(crate) fn assert_fixture_not_reading_back(stem: &str) {
+    let (output, markdown) = assert_fixture_goldens(stem);
+    let reparsed = parse(&markdown);
+    assert_ne!(
+        snapshot_document_normalized(&reparsed.document),
+        snapshot_document_normalized(&output.document),
+        "{stem}: listed as not reading back, but it does"
+    );
 }
 
-pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions) {
+/// Parses a fixture and checks its `.ast` and `.canonical.md` goldens.
+fn assert_fixture_goldens(stem: &str) -> (markdown_syntax::ParseOutput, String) {
+    let input = read_fixture(&format!("{stem}.md"));
+    let expected_ast = read_fixture(&format!("{stem}.ast"));
+    let expected_markdown =
+        normalize_expected_markdown(&read_fixture(&format!("{stem}.canonical.md")));
+
+    let output = parse(&input);
+    assert_eq!(output.diagnostics, Vec::new());
+    assert_eq!(
+        snapshot_document(&output.document),
+        trim_final_newline(&expected_ast)
+    );
+
+    let markdown = output.document.to_markdown().expect("document serializes");
+    assert_eq!(markdown, expected_markdown);
+    (output, markdown)
+}
+
+pub(crate) fn assert_parse_serialize_stable(path: &str) {
     let input = read_fixture(path);
-    let output = options.parse(&input);
+    let output = parse(&input);
     assert!(
         output
             .diagnostics
@@ -136,11 +68,8 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
         output.diagnostics
     );
 
-    let markdown = output
-        .document
-        .to_markdown_with(&reading_back_under(options))
-        .expect("document serializes");
-    let reparsed = options.parse(&markdown);
+    let markdown = output.document.to_markdown().expect("document serializes");
+    let reparsed = parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
         snapshot_document_normalized(&output.document),
@@ -149,12 +78,12 @@ pub(crate) fn assert_parse_serialize_stable(path: &str, options: &SyntaxOptions)
 
     let second = reparsed
         .document
-        .to_markdown_with(&reading_back_under(options))
+        .to_markdown()
         .expect("reparsed document serializes");
     assert_eq!(second, markdown, "{path}: serializer is not idempotent");
 }
 
-pub(crate) fn assert_case_file_stable(path: &Path, options: &SyntaxOptions) -> usize {
+pub(crate) fn assert_case_file_stable(path: &Path) -> usize {
     let metadata = read_derived_metadata(path);
     let cases = read_derived_cases(path);
     assert_eq!(
@@ -165,13 +94,20 @@ pub(crate) fn assert_case_file_stable(path: &Path, options: &SyntaxOptions) -> u
     );
 
     for case in &cases {
-        assert_source_stable(&case.input, path, case.index, options);
+        assert_source_stable(&case.input, path, case.index);
     }
 
     cases.len()
 }
 
-pub(crate) fn assert_semantic_input_corpus_stable(root: &Path) -> DerivedCorpusStats {
+/// Checks every case of the derived corpus under `root`. A case `listed`
+/// by its file, relative to `root`, and its number must serialize and read
+/// back as a different tree; every other case must round-trip.
+pub(crate) fn assert_semantic_input_corpus_stable(
+    root: &Path,
+    listed: &[(&str, usize)],
+) -> DerivedCorpusStats {
+    let mut seen = Vec::new();
     let mut files = Vec::new();
     collect_files(root, "cases", &mut files);
     files.sort();
@@ -199,18 +135,31 @@ pub(crate) fn assert_semantic_input_corpus_stable(root: &Path) -> DerivedCorpusS
             origin => panic!("{}: unexpected origin: {origin}", file.display()),
         }
 
+        let relative = file
+            .strip_prefix(root)
+            .expect("case file is under the root")
+            .to_string_lossy()
+            .replace('\\', "/");
         for case in cases {
-            stats.profiles.insert(case.profile.clone());
             stats.total_cases += 1;
-            let options = profile_options(&case.profile);
-            if case.input.contains('\u{0}') {
+            if listed.contains(&(relative.as_str(), case.index)) {
+                seen.push((relative.clone(), case.index));
+                assert_source_not_reading_back(&case.input, &file, case.index);
+            } else if case.input.contains('\u{0}') {
                 // code-lean: literal NUL fuzz cases cover parse totality only; upgrade when
                 // NUL serializer/reparse stability becomes a contract.
-                let _ = options.parse(&case.input);
+                let _ = parse(&case.input);
             } else {
-                assert_source_stable(&case.input, &file, case.index, &options);
+                assert_source_stable(&case.input, &file, case.index);
             }
         }
+    }
+    for &(file, index) in listed {
+        assert!(
+            seen.iter()
+                .any(|(seen_file, seen_index)| seen_file == file && *seen_index == index),
+            "{file}#{index}: listed case not found"
+        );
     }
 
     assert_promoted_semantic_sources(root);
@@ -223,25 +172,6 @@ pub(crate) struct DerivedCorpusStats {
     pub(crate) total_cases: usize,
     pub(crate) commonmark_cases: usize,
     pub(crate) gfm_cases: usize,
-    pub(crate) profiles: BTreeSet<String>,
-}
-
-pub(crate) fn assert_required_profiles(profiles: &BTreeSet<String>) {
-    for profile in [
-        "commonmark",
-        "gfm",
-        "mdx",
-        "math",
-        "frontmatter",
-        "extras",
-        "wikilink-after",
-        "wikilink-before",
-    ] {
-        assert!(
-            profiles.contains(profile),
-            "semantic derived corpus is missing required profile: {profile}"
-        );
-    }
 }
 
 fn assert_promoted_semantic_sources(root: &Path) {
@@ -281,14 +211,6 @@ fn assert_semantic_manifest_matches(root: &Path, stats: &DerivedCorpusStats) {
         "{}: manifest total does not match parsed semantic corpus",
         manifest_path.display()
     );
-
-    for profile in &stats.profiles {
-        assert!(
-            manifest.contains(&format!("`{profile}`")),
-            "{}: manifest does not mention executable profile `{profile}`",
-            manifest_path.display()
-        );
-    }
 }
 
 pub(crate) struct DerivedMetadata {
@@ -336,11 +258,9 @@ pub(crate) fn read_derived_metadata(path: &Path) -> DerivedMetadata {
     }
 }
 
-/// One case of a derived `.cases` file: its number, the profile it parses
-/// under, and its input.
+/// One case of a derived `.cases` file: its number and its input.
 pub(crate) struct DerivedCase {
     pub(crate) index: usize,
-    pub(crate) profile: String,
     pub(crate) input: String,
 }
 
@@ -357,7 +277,7 @@ pub(crate) fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
             .map(|offset| header_start + offset)
             .unwrap_or(source.len());
         let header = &source[header_start..header_end];
-        let (index, profile, byte_len) = parse_case_header(path, header);
+        let (index, byte_len) = parse_case_header(path, header);
         let body_start = header_end.saturating_add(1);
         let body_end = body_start + byte_len;
         assert!(
@@ -380,7 +300,6 @@ pub(crate) fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
 
         cases.push(DerivedCase {
             index,
-            profile,
             input: source[body_start..body_end].to_string(),
         });
         cursor = body_end + end_marker.len();
@@ -389,15 +308,10 @@ pub(crate) fn read_derived_cases(path: &Path) -> Vec<DerivedCase> {
     cases
 }
 
-fn parse_case_header(path: &Path, header: &str) -> (usize, String, usize) {
+fn parse_case_header(path: &Path, header: &str) -> (usize, usize) {
     let parts = header.split_whitespace().collect::<Vec<_>>();
     assert!(
-        (parts.len() == 5 && parts[0] == "---" && parts[1] == "case" && parts[3] == "bytes")
-            || (parts.len() == 7
-                && parts[0] == "---"
-                && parts[1] == "case"
-                && parts[3] == "profile"
-                && parts[5] == "bytes"),
+        parts.len() == 5 && parts[0] == "---" && parts[1] == "case" && parts[3] == "bytes",
         "{}: invalid case header: {header}",
         path.display()
     );
@@ -407,46 +321,48 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, String, usize) {
             path.display()
         )
     });
-    let (profile, byte_len_part) = if parts.len() == 7 {
-        (parts[4].to_string(), parts[6])
-    } else {
-        ("commonmark".to_string(), parts[4])
-    };
-    let byte_len = byte_len_part.parse::<usize>().unwrap_or_else(|error| {
+    let byte_len = parts[4].parse::<usize>().unwrap_or_else(|error| {
         panic!(
             "{}: invalid case byte length in {header}: {error}",
             path.display()
         )
     });
-    (index, profile, byte_len)
+    (index, byte_len)
 }
 
-fn assert_source_stable(source: &str, path: &Path, index: usize, options: &SyntaxOptions) {
-    let output = options.parse(source);
+fn assert_source_not_reading_back(source: &str, path: &Path, index: usize) {
+    let output = parse(source);
+    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
+        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
+    });
+    assert_ne!(
+        snapshot_document_normalized(&parse(&markdown).document),
+        snapshot_document_normalized(&output.document),
+        "{}#{index}: listed as not reading back, but it does",
+        path.display()
+    );
+}
 
-    let markdown = output
-        .document
-        .to_markdown_with(&reading_back_under(options))
-        .unwrap_or_else(|error| {
-            panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
-        });
-    let reparsed = options.parse(&markdown);
+fn assert_source_stable(source: &str, path: &Path, index: usize) {
+    let output = parse(source);
+
+    let markdown = output.document.to_markdown().unwrap_or_else(|error| {
+        panic!("{}#{index}: serialize failed: {:?}", path.display(), error)
+    });
+    let reparsed = parse(&markdown);
     assert_eq!(
         snapshot_document_normalized(&reparsed.document),
         snapshot_document_normalized(&output.document),
         "{}#{index}: AST changed after serialize/reparse",
         path.display()
     );
-    let again = reparsed
-        .document
-        .to_markdown_with(&reading_back_under(options))
-        .unwrap_or_else(|error| {
-            panic!(
-                "{}#{index}: reserialize failed: {:?}",
-                path.display(),
-                error
-            )
-        });
+    let again = reparsed.document.to_markdown().unwrap_or_else(|error| {
+        panic!(
+            "{}#{index}: reserialize failed: {:?}",
+            path.display(),
+            error
+        )
+    });
     assert_eq!(
         again,
         markdown,
@@ -567,24 +483,6 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
                 }
             }
         }
-        Block::DescriptionList(node) => {
-            push(
-                lines,
-                indent,
-                format!("DescriptionList tight={}", node.tight),
-            );
-            for item in &node.children {
-                push(lines, indent + 1, "Item");
-                push(lines, indent + 2, "Term");
-                snapshot_inlines(&item.term, indent + 3, lines);
-                for details in &item.details {
-                    push(lines, indent + 2, "Details");
-                    for child in &details.children {
-                        snapshot_block(child, indent + 3, lines);
-                    }
-                }
-            }
-        }
         Block::CodeBlock(node) => {
             push(
                 lines,
@@ -691,21 +589,6 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
             indent,
             format!("Frontmatter {}", quote_trimmed(&node.value)),
         ),
-        Block::MdxEsm(node) => push(
-            lines,
-            indent,
-            format!("MdxEsm {}", quote_trimmed(&node.value)),
-        ),
-        Block::MdxExpression(node) => push(
-            lines,
-            indent,
-            format!("MdxExpression {}", quote_trimmed(&node.value)),
-        ),
-        Block::MdxJsx(node) => push(
-            lines,
-            indent,
-            format!("MdxJsx {}", quote_trimmed(&node.value)),
-        ),
         Block::LeafDirective(node) => {
             push(
                 lines,
@@ -742,6 +625,13 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
     }
 }
 
+fn snapshot_delimiter(delimiter: markdown_syntax::EmphasisDelimiter) -> &'static str {
+    match delimiter {
+        markdown_syntax::EmphasisDelimiter::Asterisk => "*",
+        markdown_syntax::EmphasisDelimiter::Underscore => "_",
+    }
+}
+
 fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) {
     for inline in inlines {
         match inline {
@@ -759,39 +649,27 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 ),
             ),
             Inline::Emphasis(node) => {
-                push(lines, indent, "Emphasis");
+                push(
+                    lines,
+                    indent,
+                    format!("Emphasis delimiter={}", snapshot_delimiter(node.delimiter)),
+                );
                 snapshot_inlines(&node.children, indent + 1, lines);
             }
             Inline::Strong(node) => {
-                push(lines, indent, "Strong");
-                snapshot_inlines(&node.children, indent + 1, lines);
-            }
-            Inline::Underline(node) => {
-                push(lines, indent, "Underline");
+                push(
+                    lines,
+                    indent,
+                    format!("Strong delimiter={}", snapshot_delimiter(node.delimiter)),
+                );
                 snapshot_inlines(&node.children, indent + 1, lines);
             }
             Inline::Delete(node) => {
                 push(lines, indent, "Delete");
                 snapshot_inlines(&node.children, indent + 1, lines);
             }
-            Inline::Insert(node) => {
-                push(lines, indent, "Insert");
-                snapshot_inlines(&node.children, indent + 1, lines);
-            }
             Inline::Mark(node) => {
                 push(lines, indent, "Mark");
-                snapshot_inlines(&node.children, indent + 1, lines);
-            }
-            Inline::Subscript(node) => {
-                push(lines, indent, "Subscript");
-                snapshot_inlines(&node.children, indent + 1, lines);
-            }
-            Inline::Superscript(node) => {
-                push(lines, indent, "Superscript");
-                snapshot_inlines(&node.children, indent + 1, lines);
-            }
-            Inline::Spoiler(node) => {
-                push(lines, indent, "Spoiler");
                 snapshot_inlines(&node.children, indent + 1, lines);
             }
             Inline::Shortcode(node) => {
@@ -812,7 +690,12 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                     lines,
                     indent,
                     format!(
-                        "Link destination={} title={}",
+                        "Link form={} destination={} title={}",
+                        match node.form {
+                            markdown_syntax::LinkForm::Inline => "inline",
+                            markdown_syntax::LinkForm::AngleAutolink => "angle",
+                            markdown_syntax::LinkForm::LiteralAutolink => "literal",
+                        },
                         node.destination,
                         snapshot_title(&node.title)
                     ),
@@ -883,22 +766,12 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
                 lines,
                 indent,
                 format!(
-                    "WikiLink target={} label={} order={}{}",
+                    "WikiLink target={} label={}{}",
                     quote(&node.target),
                     quote(&node.label),
-                    match node.label_order {
-                        markdown_syntax::WikiLinkLabelOrder::AfterPipe => "after",
-                        markdown_syntax::WikiLinkLabelOrder::BeforePipe => "before",
-                    },
                     if node.embed { " embed" } else { "" }
                 ),
             ),
-            Inline::MdxExpression(node) => push(
-                lines,
-                indent,
-                format!("MdxExpression {}", quote(&node.value)),
-            ),
-            Inline::MdxJsx(node) => push(lines, indent, format!("MdxJsx {}", quote(&node.value))),
             Inline::TextDirective(node) => {
                 push(
                     lines,

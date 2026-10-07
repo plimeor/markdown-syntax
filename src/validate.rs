@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use crate::{
     ast::{
         Block, CodeInline, ContainerDirective, DirectiveAttribute, Document, Escape, Heading,
-        HtmlContainer, HtmlContainerContent, Inline, LeafDirective, List, MathInlineKind, Table,
-        TextDirective,
+        HtmlContainer, HtmlContainerContent, Inline, LeafDirective, Link, LinkDestinationKind,
+        LinkForm, List, MathInlineKind, Table, TextDirective,
     },
     diagnostic::Diagnostic,
     span::Span,
@@ -24,10 +24,26 @@ impl Document {
 
 pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    for block in &document.children {
-        validate_block(block, &mut diagnostics);
-    }
+    validate_blocks(&document.children, &mut diagnostics);
     diagnostics
+}
+
+/// A sequence of sibling blocks: each block, and two adjacent lists that one
+/// marker would write as one list.
+fn validate_blocks(blocks: &[Block], diagnostics: &mut Vec<Diagnostic>) {
+    for (index, block) in blocks.iter().enumerate() {
+        if let (Some(Block::List(before)), Block::List(list)) =
+            (index.checked_sub(1).map(|before| &blocks[before]), block)
+        {
+            if before.ordered == list.ordered && before.delimiter == list.delimiter {
+                diagnostics.push(Diagnostic::invalid(
+                    list.meta.span,
+                    "adjacent lists cannot use the same marker",
+                ));
+            }
+        }
+        validate_block(block, diagnostics);
+    }
 }
 
 fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
@@ -35,37 +51,15 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
         Block::Paragraph(paragraph) => validate_inlines(&paragraph.children, diagnostics),
         Block::Heading(heading) => validate_heading(heading, diagnostics),
         Block::BlockQuote(block_quote) => {
-            for child in &block_quote.children {
-                validate_block(child, diagnostics);
-            }
+            validate_blocks(&block_quote.children, diagnostics);
         }
         Block::Alert(alert) => {
-            for child in &alert.children {
-                validate_block(child, diagnostics);
-            }
+            validate_blocks(&alert.children, diagnostics);
         }
         Block::List(list) => {
             validate_list_start(list, diagnostics);
             for item in &list.children {
-                for child in &item.children {
-                    validate_block(child, diagnostics);
-                }
-            }
-        }
-        Block::DescriptionList(list) => {
-            for item in &list.children {
-                validate_inlines(&item.term, diagnostics);
-                if item.details.is_empty() {
-                    diagnostics.push(Diagnostic::invalid(
-                        item.meta.span,
-                        "description item must contain at least one details block",
-                    ));
-                }
-                for details in &item.details {
-                    for child in &details.children {
-                        validate_block(child, diagnostics);
-                    }
-                }
+                validate_blocks(&item.children, diagnostics);
             }
         }
         Block::Table(table) => validate_table(table, diagnostics),
@@ -76,9 +70,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
                     "footnote definition identifier cannot be empty",
                 ));
             }
-            for child in &definition.children {
-                validate_block(child, diagnostics);
-            }
+            validate_blocks(&definition.children, diagnostics);
         }
         Block::Definition(definition) => {
             if definition
@@ -101,10 +93,7 @@ fn validate_block(block: &Block, diagnostics: &mut Vec<Diagnostic>) {
         | Block::CodeBlock(_)
         | Block::HtmlBlock(_)
         | Block::MathBlock(_)
-        | Block::Frontmatter(_)
-        | Block::MdxEsm(_)
-        | Block::MdxExpression(_)
-        | Block::MdxJsx(_) => {}
+        | Block::Frontmatter(_) => {}
     }
 }
 
@@ -142,9 +131,7 @@ fn validate_html_container(container: &HtmlContainer, diagnostics: &mut Vec<Diag
 
     match &container.content {
         HtmlContainerContent::Blocks(children) => {
-            for child in children {
-                validate_block(child, diagnostics);
-            }
+            validate_blocks(children, diagnostics);
         }
         HtmlContainerContent::Inlines(children) => validate_inlines(children, diagnostics),
     }
@@ -207,9 +194,7 @@ fn validate_container_directive(directive: &ContainerDirective, diagnostics: &mu
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inlines(&directive.label, diagnostics);
-    for child in &directive.children {
-        validate_block(child, diagnostics);
-    }
+    validate_blocks(&directive.children, diagnostics);
 }
 
 /// Inline content whose container ends where its line does, or with a closing
@@ -236,25 +221,10 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
             Inline::Strong(node) => {
                 validate_emphasis_container(&node.children, node.meta.span, diagnostics)
             }
-            Inline::Underline(node) => {
-                validate_emphasis_container(&node.children, node.meta.span, diagnostics)
-            }
             Inline::Delete(node) => {
                 validate_emphasis_container(&node.children, node.meta.span, diagnostics)
             }
-            Inline::Insert(node) => {
-                validate_emphasis_container(&node.children, node.meta.span, diagnostics)
-            }
             Inline::Mark(node) => {
-                validate_emphasis_container(&node.children, node.meta.span, diagnostics)
-            }
-            Inline::Subscript(node) => {
-                validate_emphasis_container(&node.children, node.meta.span, diagnostics)
-            }
-            Inline::Superscript(node) => {
-                validate_emphasis_container(&node.children, node.meta.span, diagnostics)
-            }
-            Inline::Spoiler(node) => {
                 validate_emphasis_container(&node.children, node.meta.span, diagnostics)
             }
             Inline::Shortcode(node) => {
@@ -265,7 +235,11 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                     ));
                 }
             }
-            Inline::Link(node) => validate_inline_nodes(&node.children, diagnostics),
+            Inline::Link(node) => {
+                validate_link_form(node, diagnostics);
+                validate_link_text(&node.children, diagnostics);
+                validate_inline_nodes(&node.children, diagnostics);
+            }
             Inline::Image(node) => validate_inline_nodes(&node.alt, diagnostics),
             Inline::LinkReference(node) => {
                 if node.identifier.is_empty() {
@@ -274,6 +248,7 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                         "link reference identifier cannot be empty",
                     ));
                 }
+                validate_link_text(&node.children, diagnostics);
                 validate_inline_nodes(&node.children, diagnostics);
             }
             Inline::ImageReference(node) => {
@@ -327,12 +302,7 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                     ));
                 }
             }
-            Inline::Text(_)
-            | Inline::Html(_)
-            | Inline::SoftBreak(_)
-            | Inline::LineBreak(_)
-            | Inline::MdxExpression(_)
-            | Inline::MdxJsx(_) => {}
+            Inline::Text(_) | Inline::Html(_) | Inline::SoftBreak(_) | Inline::LineBreak(_) => {}
         }
     }
 }
@@ -347,8 +317,99 @@ fn validate_emphasis_container(
             span,
             "emphasis-like inline container cannot have empty children",
         ));
+    } else if starts_with_whitespace(children) || ends_with_whitespace(children) {
+        diagnostics.push(Diagnostic::invalid(
+            span,
+            "emphasis-like inline content cannot start or end with whitespace",
+        ));
     }
     validate_inlines(children, diagnostics);
+}
+
+/// Whether inline content starts with a space, a tab, or a line break.
+fn starts_with_whitespace(inlines: &[Inline]) -> bool {
+    match inlines.first() {
+        Some(Inline::Text(text)) => text.value.starts_with([' ', '\t']),
+        Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => true,
+        _ => false,
+    }
+}
+
+/// Whether inline content ends with a space, a tab, or a line break.
+fn ends_with_whitespace(inlines: &[Inline]) -> bool {
+    match inlines.last() {
+        Some(Inline::Text(text)) => text.value.ends_with([' ', '\t']),
+        Some(Inline::SoftBreak(_) | Inline::LineBreak(_)) => true,
+        _ => false,
+    }
+}
+
+/// Link text holds no link, at any depth.
+fn validate_link_text(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+    for inline in inlines {
+        match inline {
+            Inline::Link(_) | Inline::LinkReference(_) | Inline::WikiLink(_) => {
+                diagnostics.push(Diagnostic::invalid(
+                    inline.span(),
+                    "link text cannot hold a link",
+                ));
+            }
+            _ => validate_link_text(inline.children(), diagnostics),
+        }
+    }
+}
+
+/// A link recorded as an autolink holds the one text that autolink writes
+/// for its destination, and no title.
+fn validate_link_form(link: &Link, diagnostics: &mut Vec<Diagnostic>) {
+    let fits = match link.form {
+        LinkForm::Inline => true,
+        LinkForm::AngleAutolink => autolink_text(link).is_some_and(|text| {
+            crate::parse::angle_autolink_destination(text).as_deref()
+                == Some(link.destination.as_str())
+        }),
+        LinkForm::LiteralAutolink => {
+            autolink_text(link).is_some_and(|text| literal_autolink_writes(text, &link.destination))
+        }
+    };
+    if !fits {
+        diagnostics.push(Diagnostic::invalid(
+            link.meta.span,
+            "an autolink must hold the one text that writes its destination, and no title",
+        ));
+    }
+}
+
+/// Whether a literal autolink written as `text` links to `destination`: a
+/// URL or a `mailto:` / `xmpp:` address links to itself, a `www.` domain to
+/// it after `http://`, and an email address to it after `mailto:`.
+fn literal_autolink_writes(text: &str, destination: &str) -> bool {
+    let starts_with = |prefix: &str| {
+        text.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    };
+    if ["http://", "https://", "mailto:", "xmpp:"]
+        .iter()
+        .any(|prefix| starts_with(prefix))
+    {
+        return destination == text;
+    }
+    if starts_with("www") {
+        return destination.strip_prefix("http://") == Some(text);
+    }
+    text.contains('@') && destination.strip_prefix("mailto:") == Some(text)
+}
+
+/// The one text an autolink holds, when it has no title.
+fn autolink_text(link: &Link) -> Option<&str> {
+    match link.children.as_slice() {
+        [Inline::Text(text)]
+            if link.title.is_none() && link.destination_kind == LinkDestinationKind::Bare =>
+        {
+            Some(&text.value)
+        }
+        _ => None,
+    }
 }
 
 fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
@@ -415,7 +476,7 @@ fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Vec
     if !is_directive_name(name) {
         diagnostics.push(Diagnostic::invalid(
             span,
-            "directive name must start with a letter and contain letters, digits, `_`, or `-`",
+            "directive name must be runs of ASCII letters joined by single `-`",
         ));
     }
 }
@@ -434,15 +495,10 @@ fn validate_directive_attributes(
     }
 }
 
+/// Whether `name` is one or more runs of ASCII letters joined by single `-`.
 pub(crate) fn is_directive_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() {
-        return false;
-    }
-    chars.all(|char| char.is_ascii_alphanumeric() || char == '_' || char == '-')
+    name.split('-')
+        .all(|run| !run.is_empty() && run.bytes().all(|byte| byte.is_ascii_alphabetic()))
 }
 
 pub(crate) fn is_attribute_name(name: &str) -> bool {

@@ -58,16 +58,8 @@ The renderer SHALL emit task list checkboxes with `disabled=""` unless
 `disabled` or `checked` comes first.
 
 #### Scenario: Default checkbox
-- **WHEN** `"- [x] done"` is rendered with the GFM preset and default options
+- **WHEN** `"- [x] done"` is rendered with default options
 - **THEN** the item is `<li><input type="checkbox" disabled="" checked="" /> done</li>`
-
-### Requirement: MDX emits no HTML
-The renderer SHALL emit nothing for MDX ESM, expression, and JSX nodes while
-rendering the text around them.
-
-#### Scenario: Mixed MDX document
-- **WHEN** a document with an import, a flow expression, a flow JSX element, and the line `inline {x} <Y /> end` is parsed with the MDX preset and rendered
-- **THEN** the output is `<p>inline   end</p>`
 
 ### Requirement: Document layout
 The renderer SHALL join rendered top-level blocks with a single `\n`, with no

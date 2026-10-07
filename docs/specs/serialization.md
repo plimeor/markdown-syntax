@@ -10,9 +10,10 @@ by `src/serialize.rs`.
 ### Requirement: Canonical output
 `Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
 spelling the AST records for it, such as a list marker, a fence's char and
-length, a heading's style, a reference's kind, an escaped char, a character
-reference as written, or a wiki link's embed mark, or else one fixed spelling,
-independent of source details the AST does not record.
+length, a heading's style, a reference's kind, an emphasis or strong
+delimiter, a link's form, an escaped char, a character reference as written,
+or a wiki link's embed mark, or else one fixed spelling, independent of source
+details the AST does not record.
 
 #### Scenario: Paragraph and heading
 - **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
@@ -21,6 +22,10 @@ independent of source details the AST does not record.
 #### Scenario: Marker the AST records
 - **WHEN** `parse("+ a").document.to_markdown()` runs
 - **THEN** it returns `"+ a\n"`
+
+#### Scenario: Delimiters the AST records
+- **WHEN** `parse("_a_ __b__").document.to_markdown()` runs
+- **THEN** it returns `"_a_ __b__\n"`
 
 #### Scenario: Escape the author wrote
 - **WHEN** `parse("a\\.b \\#tag").document.to_markdown()` runs
@@ -35,28 +40,30 @@ independent of source details the AST does not record.
 - **THEN** it returns `"see ![[x.png]]\n"`
 
 ### Requirement: Round-trip stability
-For a document parsed with a `SyntaxOptions`, parsing the Markdown that
-`to_markdown_with` writes with `syntax` set to those options SHALL yield, under
-the same options, a document equal to the first as "Tree comparison" defines,
-and serializing that reparsed document the same way SHALL yield the same text
-byte for byte.
+For a parsed document, parsing the Markdown that `to_markdown` writes SHALL
+yield a document equal to the first as "Tree comparison" defines, and
+serializing that reparsed document SHALL yield the same text byte for byte.
+This SHALL hold for every fixture under `tests/fixtures/roundtrip/` and for
+every document the seeded generators build from their recorded seeds, apart
+from the generated documents that `tests/serialize_roundtrip_fuzz.rs` lists
+one by one, each with the reason it does not read back.
 
 #### Scenario: Round-trip fixtures
-- **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed with its profile's options, serialized with `syntax` set to them, reparsed with them, and serialized again
+- **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed, serialized, reparsed, and serialized again
 - **THEN** the reparsed AST matches the first and the two serialized texts are identical
 
 #### Scenario: Seeded round-trip generators
-- **WHEN** the inline, block-oriented, and emphasis-heavy generators in `tests/serialize_roundtrip_fuzz.rs` run with the seeds recorded in that file, in each dialect
-- **THEN** every generated document round-trips, or serialization returns `SerializeError::Unrepresentable`
+- **WHEN** the inline, block-oriented, and emphasis-heavy generators in `tests/serialize_roundtrip_fuzz.rs` run with the seeds recorded in that file
+- **THEN** every generated document round-trips, except those the file lists with a reason, which serialize without panicking
 
 ### Requirement: Serialize options
-`SerializeOptions` SHALL control the line ending, the trailing newline, and the
-syntax options the output is read back under (`syntax`, the maximal default
-dialect by default); a bullet marker, ordered-list delimiter, or code fence
-character other than its default SHALL replace the one the AST records, while
-the default keeps it. A replaced marker SHALL yield where two adjacent lists
-would read back as one: that list keeps another marker. Options SHALL be constructed by mutating
-`SerializeOptions::default()`.
+`SerializeOptions` SHALL control the line ending and the trailing newline; a
+bullet marker, ordered-list delimiter, or code fence character other than its
+default SHALL replace the one the AST records, while the default keeps it. A
+replaced list marker SHALL yield where the list before it in the same
+container is written with the same marker: that list takes the next marker in
+the order `-`, `*`, `+`, or `.`, `)` for an ordered list. Options SHALL be
+constructed by mutating `SerializeOptions::default()`.
 
 #### Scenario: CRLF without final newline
 - **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
@@ -66,18 +73,10 @@ would read back as one: that list keeps another marker. Options SHALL be constru
 - **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
 - **THEN** it returns `"+ a\n\n- b\n\n+ c\n"`
 
-#### Scenario: Escapes follow the read-back dialect
-- **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized once with default options and once with `syntax = SyntaxOptions::commonmark()`
-- **THEN** the first output is `"\\=\\=a\\=\\=\n"` and the second is `"==a==\n"`
-
 ### Requirement: Invalid documents are rejected
 Serialization SHALL validate the document first and return
 `SerializeError::InvalidDocument` with the validation diagnostics when it is
 invalid, and `SerializeError::UnsupportedNode` for a node kind it cannot write.
-When no Markdown it can write reads back, under `SerializeOptions::syntax`, as
-the same tree, compared as "Tree comparison" defines, it SHALL return
-`SerializeError::Unrepresentable` with a diagnostic naming the first node that
-reads back differently.
 
 #### Scenario: Empty table
 - **WHEN** a hand-built document holding a `Table` with no rows is serialized
@@ -85,36 +84,97 @@ reads back differently.
 
 #### Scenario: Link inside a link
 - **WHEN** a hand-built paragraph holding a `Link` whose children hold another `Link` is serialized
-- **THEN** `to_markdown()` returns `Err(SerializeError::Unrepresentable(_))`
+- **THEN** `to_markdown()` returns `Err(SerializeError::InvalidDocument(_))`
 
-### Requirement: Escaping keeps text literal
-The serializer SHALL escape text so that reparsing the output yields the same
-text and leaves the nodes beside it unchanged, rather than forming new
-constructs.
+### Requirement: No HTML filtering or style preservation
+The serializer SHALL write raw HTML node values as they are, without safety
+filtering, and SHALL NOT recover source spelling that the AST does not
+record.
 
-#### Scenario: Literal asterisks in text
-- **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same text and no `Emphasis`
+#### Scenario: Raw HTML passes through
+- **WHEN** `parse("<script>alert(1)</script>").document.to_markdown()` runs
+- **THEN** the output contains `<script>alert(1)</script>`
 
-#### Scenario: Text delimiter after a closing run
-- **WHEN** a hand-built paragraph holding an `Emphasis` around a `Strong` around `Text("(a b)_.")`, followed by `Text("*#")`, is serialized with `syntax = SyntaxOptions::commonmark()` and reparsed with the CommonMark preset
-- **THEN** `to_markdown_with()` returns `"***(a b)_.***\\*#\n"` and the reparsed paragraph compares equal to the original
+### Requirement: Tree comparison
+Round-trip stability SHALL compare a reparsed document with the parsed one
+apart from spans, reading each `Escape` as a `Text` holding its char, each
+`CharacterReference` as a `Text` holding its value, and each `SoftBreak`
+inside a heading as a `Text` holding a space, and merging adjacent `Text`
+nodes; a code span compares by its `value`.
 
-#### Scenario: Parenthesis after a shortcut reference
-- **WHEN** a hand-built paragraph holding a shortcut `LinkReference` to `foo` followed by `Text("(a)")` is serialized and reparsed with a definition of `foo`
-- **THEN** the reparsed paragraph holds the shortcut `LinkReference` followed by the text `(a)`
+#### Scenario: Escape against text
+- **WHEN** a paragraph holding `Escape('*')` and `Text("a")` is compared with one holding `Text("*a")`
+- **THEN** the two compare equal
 
-#### Scenario: Parenthesis after a shortcut image reference
-- **WHEN** a hand-built paragraph holding a shortcut `ImageReference` to `foo` followed by `Text("(a)")` is serialized and reparsed with a definition of `foo`
-- **THEN** the reparsed paragraph holds the shortcut `ImageReference` followed by the text `(a)`
+#### Scenario: Split text
+- **WHEN** a hand-built paragraph holding `Text("a")` followed by `Text("b")` is serialized and reparsed
+- **THEN** `to_markdown()` returns `"ab\n"` and the reparsed `Text("ab")` compares equal to the original
 
-#### Scenario: Colon after a shortcut reference that starts a paragraph
-- **WHEN** a hand-built paragraph holding a shortcut `LinkReference` to `foo` followed by `Text(": /x")` is serialized and reparsed with a definition of `foo`
-- **THEN** the reparsed document still holds the paragraph, with the shortcut `LinkReference` followed by the text `: /x`
+#### Scenario: Soft break in a heading
+- **WHEN** the document parsed from `"a\nb\n==="` is serialized and reparsed
+- **THEN** the reparsed heading holding `Text("a b")` compares equal to the parsed one
 
-#### Scenario: Pipe ending a level-two setext heading
-- **WHEN** the document parsed from `"a |\n-"` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"a |\n---\n"` and the reparsed document holds the same setext `Heading` and no `Table`
+### Requirement: Rendering only
+`Document::to_markdown` SHALL produce its output from the document and the
+options alone, by fixed rules, without parsing the output; when the output
+would read back as a different tree, it SHALL still return it.
+
+#### Scenario: Text that reads as syntax
+- **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized
+- **THEN** `to_markdown()` returns `"==a==\n"`, which reads back as a `Mark`
+
+#### Scenario: Recorded delimiters reproduce the source
+- **WHEN** the document parsed from `"__#$***~**b~**__|#"` is serialized
+- **THEN** `to_markdown()` returns `"__#$***~**b~**__|#\n"`
+
+### Requirement: Text is written as recorded
+The serializer SHALL write each `Text` value as it is, each `Escape` as a
+backslash and its char, and each `CharacterReference` as its reference, and
+SHALL add no escape of its own.
+
+#### Scenario: Literal asterisks in hand-built text
+- **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized
+- **THEN** `to_markdown()` returns `"*not emphasis*\n"`
+
+#### Scenario: Backticks
+- **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
+- **THEN** it returns ``"Test \\`hello world` here.\n"``, the second backtick written raw
+
+#### Scenario: Unpaired delimiters
+- **WHEN** `parse("x_y_ a*b x^2 ~5").document.to_markdown()` runs
+- **THEN** it returns `"x_y_ a*b x^2 ~5\n"`
+
+### Requirement: Container lines take their full prefix
+The serializer SHALL write every line inside a block quote or alert with the
+quote's `> ` prefix, and every line inside a list item or footnote definition
+with the item's or definition's content indentation; it SHALL NOT write a lazy
+continuation line.
+
+#### Scenario: Lazy line in a quote
+- **WHEN** `parse("> a\nb").document.to_markdown()` runs
+- **THEN** it returns `"> a\n> b\n"`
+
+#### Scenario: Code span across a lazy delimiter-row line
+- **WHEN** the document parsed from ``"> `|a\n|-|-|\nb`"`` is serialized
+- **THEN** `to_markdown()` returns ``"> `|a\n> |-|-|\n> b`\n"``, which reads back as a block quote holding a `Table`
+
+### Requirement: Heading soft breaks
+The serializer SHALL write a `SoftBreak` inside a heading as one space.
+
+#### Scenario: Setext heading on two lines
+- **WHEN** `parse("a\nb\n===").document.to_markdown()` runs
+- **THEN** it returns `"a b\n===\n"`
+
+#### Scenario: Hand-built ATX heading
+- **WHEN** a hand-built level-1 `Heading` holding `Text("a")`, a `SoftBreak`, and `Text("b")` is serialized
+- **THEN** `to_markdown()` returns `"# a b\n"`
+
+### Requirement: Values are encoded by rule
+The serializer SHALL write a value that a construct holds as raw text (code,
+math, an info string, a link destination, raw HTML) so that the construct
+reads back with the same value: a fence longer than any fence-like run in the
+value, whitespace at the ends of an info string or in a bare destination as
+character references, and a value's own line endings as they are.
 
 #### Scenario: Empty fenced code block
 - **WHEN** ``parse("```\n```").document.to_markdown()`` runs
@@ -124,21 +184,13 @@ constructs.
 - **WHEN** the document parsed from ``"```&#x20;a&#9;\nb\n```"`` is serialized
 - **THEN** `to_markdown()` returns ``"``` &#x20;a&#x9;\nb\n```\n"`` and reparsing it yields the info string `" a\t"`
 
-#### Scenario: Text right after a literal autolink
-- **WHEN** the documents parsed from `"://&amp;"` and `"www.}"` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same `Link` and the same inlines after it
+#### Scenario: Fence length
+- **WHEN** the document parsed from ``"```\n```*"`` is serialized
+- **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
 
-#### Scenario: Paragraph that opens with a soft break
-- **WHEN** the document parsed from `"&#x20;\na"` is serialized
-- **THEN** `to_markdown()` returns `"&#x20;\na\n"`
-
-#### Scenario: Text line that would open a block
-- **WHEN** the documents parsed from `"a\n\\<div>"` and `"a\n\\::b"` are serialized and reparsed
-- **THEN** each reparsed document holds the same single `Paragraph`
-
-#### Scenario: HTML block value
-- **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
-- **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
+#### Scenario: Code fence a content line would close
+- **WHEN** the document parsed from `" ~~~\n    ~~~"` is serialized
+- **THEN** `to_markdown()` returns `" ~~~\n    ~~~\n ~~~\n"`, keeping the fence length 3
 
 #### Scenario: Indented code ending in a carriage return
 - **WHEN** the document parsed from `"\ta\r\tb"` is serialized
@@ -148,315 +200,62 @@ constructs.
 - **WHEN** the document parsed from ``"```\r\na\r\n```\r\nb"`` is serialized with `LineEnding::CrLf`
 - **THEN** the output is ``"```\r\na\r\n```\r\n\r\nb\r\n"``
 
-#### Scenario: Break that opens a line or a delimited span
-- **WHEN** the documents parsed from `"&#x20; \na"`, `"a\n&#x20;\nb"`, and `"_&#x20;\n=_"` are serialized and reparsed
-- **THEN** each reparsed paragraph equals the parsed one, and the first two outputs are `"&#x20;\na\n"` and `"a\n&#x20;\nb\n"`
-
-#### Scenario: Continuation line inside a code span that would start a block
-- **WHEN** the document parsed from ``"=```\n    ```"`` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same code span
-
-#### Scenario: Delimiter run partly escapable
-- **WHEN** the documents parsed from `"**\t*$"`, `"(*~\n**)"`, and `"($$]$="` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same single text, since a run of `*`, `_`, or `$` is escaped whole
-
-#### Scenario: Underscore emphasis beside an alphanumeric
-- **WHEN** the document parsed from `"y***b***"` is serialized
-- **THEN** `to_markdown()` returns `"y***b***\n"`
-
-#### Scenario: Abutting attention runs
-- **WHEN** the documents parsed from `"__**)**&__"`, `"**:__$__**"`, `"****(*+***"`, `"***_|_***"`, `"__***/***__"`, `"**#****]***_**"`, `"***_\\**#*"`, `"***b_*_b_*"`, `` "__<__y_`__" ``, and `"_# _*#***___"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same nested `Strong` and `Emphasis` runs
-
-#### Scenario: Abutting attention runs under CommonMark
-- **WHEN** the documents parsed from `"_^*^*_c__"` and `"_# _*#***___"` with the CommonMark preset are serialized with `syntax` set to it and reparsed with it
-- **THEN** each reparsed paragraph equals the parsed one
-
-#### Scenario: Text beside a literal autolink
-- **WHEN** the documents parsed from `` "a\\-://`" ``, `"ab&#99;://x"`, `"*://*&mp;"`, `"**://**&mp;"`, `"://^&mp;"`, `"://~&mp;~"`, `"://__&mp;__"`, `"://~&mp;&p;~"`, and `"www.\\[]_("` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same `Link` with the same inlines around it
-
-#### Scenario: Character references beside a literal autolink under GFM
-- **WHEN** the document parsed from `"://&#x0;&mp;"` with the GFM preset is serialized with `syntax` set to it and reparsed with it
-- **THEN** the reparsed paragraph equals the parsed one
-
-#### Scenario: Emphasis delimiters beside a literal autolink
-- **WHEN** the documents parsed from `"**a *b*www.x.com**"`, `"**a *b*x@y.com**"`, `"**x@y.com***x@y.com*"`, and `"**\\*www.x.com**"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph equals the parsed one
-
-#### Scenario: Backtick after a reference's raw label
-- **WHEN** the document parsed from ``` "[^`]``" ``` with `parse` is serialized
-- **THEN** `to_markdown()` returns `` "[^`]&#96;&#96;\n" ``, since an escaped backtick would close a code span that the label's backtick opens
-
-#### Scenario: Bang before a wiki link
-- **WHEN** a hand-built paragraph holding `Text("a!")` followed by a `WikiLink` to `x` that is not an embed is serialized and reparsed
-- **THEN** `to_markdown()` returns `"a\\![[x]]\n"` and the reparsed paragraph holds the text `a!` and the same `WikiLink`
-
-#### Scenario: Escaped backslash before a bang
-- **WHEN** the document parsed from `"\\\\&#33;[a](b)"` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same `Escape`, `CharacterReference`, and `Link`, and no `Image`
-
-#### Scenario: Tilde beside an attention run
-- **WHEN** the documents parsed from `"b**~\n~**"`, `"a*~ **&*"`, and `"t_~>___~"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same inlines
-
-#### Scenario: Delimiters a following construct writes
-- **WHEN** the documents parsed from `":\\^:^[|]"`, `"*\\$#$>$"`, `"~\\$#://$"`, and `"b\\-p://"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same inlines
-
-#### Scenario: Run of bars before a spoiler
-- **WHEN** the document parsed from `")||||||\t||"` with `parse` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same `Text` and `Spoiler`
-
-#### Scenario: Whitespace control chars in text
-- **WHEN** the documents parsed from `"\u{c}:a"`, `"[^\u{c}]"`, `"[;\u{c}]:["`, and `"://y\u{c}c"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same inlines, and a line tabulation, form feed, or next-line char in text is written as itself
-
-#### Scenario: Hard break opening a span
-- **WHEN** the document parsed from `"==&#x20; \n-=="` with `parse` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same `Mark`
-
-#### Scenario: Space between a literal autolink and a span delimiter
-- **WHEN** the documents parsed from `"^://y ^"`, `"_&#x20;://_"`, and `"*&#x20;http://x*"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same span and `Link`
-
-#### Scenario: Text between a literal autolink and a span
-- **WHEN** the document parsed from `"://\\~||>||"` with `parse` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same `Link`, `Escape('~')`, and `Spoiler`
-
-#### Scenario: Text after a bare text directive
-- **WHEN** the documents parsed from `":e{}1"`, `":e[]www.+"`, and `":e{}[^1]"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same `TextDirective` and what follows it
-
-#### Scenario: Email-local char before an email
-- **WHEN** the documents parsed from `"]\\-a@b.c"`, `"++@b.c"`, and `"\\+@b.p://"` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph holds the same inlines and links
-
-#### Scenario: Alert title and empty container directive
-- **WHEN** the documents parsed from `">[!NOTE]+\t*"` and `"]\n: :::e"` with `parse` are serialized and reparsed
-- **THEN** each reparsed document holds the same blocks, since an alert title is written as its source and an empty container directive takes no blank line
-
-#### Scenario: Paragraph opening with an ESM keyword
-- **WHEN** the document parsed from `" import -"` with the MDX preset is serialized with `syntax` set to it and reparsed with it
-- **THEN** the reparsed document holds the same `Paragraph`
-
-#### Scenario: Content that reads back only under its preset
-- **WHEN** the documents parsed from `"**=* ++@b.c*"` with the GFM preset and `"\\{[]()}"` with the MDX preset are serialized with `syntax` set to the same preset and reparsed with it
-- **THEN** each reparsed paragraph holds the same inlines
-
-#### Scenario: Heading content
-- **WHEN** the document parsed from `"# _*www._"` with `parse` is serialized and reparsed
-- **THEN** the reparsed heading holds the same `Emphasis` and `Link`
-
-#### Scenario: Flow-like first line under MDX
-- **WHEN** the documents parsed from `"{}&#x20;\n\\"`, `"{}&#x20; \n\\"`, and `"<!--@b>"` with the MDX preset are serialized with `syntax` set to it and reparsed with it
-- **THEN** each reparsed document holds the same `Paragraph`
-
-#### Scenario: Task item text opening with whitespace
-- **WHEN** the document parsed from `"+ [x]  :e"` with `parse` is serialized and reparsed
-- **THEN** the reparsed item holds the same `Text(" ")` and `TextDirective`
-
-#### Scenario: Literal autolink before a shortcode
-- **WHEN** the document parsed from `"://\\::+1:"` with `parse` is serialized and reparsed
-- **THEN** the reparsed paragraph holds the same `Link`, `Escape(':')`, and `Shortcode`
-
 #### Scenario: Space in a bare destination
 - **WHEN** the document parsed from `"[o]:&#x20;"` is serialized
 - **THEN** `to_markdown()` returns `"[o]: &#x20;\n"` and the reparsed definition keeps a `Bare` destination `" "`
 
-#### Scenario: Whitespace that opens a list item's first block
-- **WHEN** the document parsed from `"-\n   <v>"` is serialized
-- **THEN** `to_markdown()` returns `"-\n   <v>\n"` and the reparsed `HtmlBlock` value is `" <v>"`
+#### Scenario: HTML block value
+- **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
+- **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
 
-#### Scenario: Fence length
-- **WHEN** the document parsed from ``"```\n```*"`` is serialized
-- **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
+### Requirement: Breaks and item content placed by rule
+The serializer SHALL write a dash thematic break as `- - -` when it opens the
+document or directly follows a paragraph line, where `---` would open
+frontmatter or underline a setext heading; and SHALL start a list item's
+content on the line after its bullet when that content is a thematic break of
+the bullet's char or begins with a space or a tab.
 
-#### Scenario: Text that would open an extension construct
-- **WHEN** the documents parsed with `parse` from `":b["`, `"\\:p"`, `":\\+:"`, `"\\:p://"`, and `` "`\\$[<a>[$>" `` are serialized and reparsed
-- **THEN** each reparsed paragraph equals the parsed one
+#### Scenario: Dash break opening the document
+- **WHEN** `parse("---").document.to_markdown()` runs
+- **THEN** it returns `"- - -\n"`
 
-#### Scenario: Literal tilde beside an emphasis run
-- **WHEN** the document parsed from `"a**~**"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"a**~**\n"`
+#### Scenario: Dash break after a paragraph line
+- **WHEN** `parse("- a\n  - - -").document.to_markdown()` runs
+- **THEN** it returns `"- a\n  - - -\n"`
 
-#### Scenario: Pipe written by an inline in a table cell
-- **WHEN** the document parsed from `"$\\|$||\n-|-"` with `parse` is serialized and reparsed
-- **THEN** the reparsed cell holds the same dollar `Math` with value `"|"`
+#### Scenario: Break of the bullet's char
+- **WHEN** `parse("-\n  ---").document.to_markdown()` runs
+- **THEN** it returns `"-\n  ---\n"`
 
-#### Scenario: List before an indented HTML block
-- **WHEN** the document parsed from `"-\t(\n  <v>"` is serialized and reparsed
-- **THEN** the reparsed document holds the `List` followed by the `HtmlBlock` `"  <v>"`
+#### Scenario: Item content opening with spaces
+- **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
+- **THEN** it returns `"-\n   <v>\n"`
 
-#### Scenario: Thematic break opening a list item
-- **WHEN** the document parsed from `"-\n  ---"` is serialized
-- **THEN** `to_markdown()` returns `"-\n  ---\n"`
-
-#### Scenario: Code fence a content line would close
-- **WHEN** the document parsed from `" ~~~\n    ~~~"` is serialized
-- **THEN** `to_markdown()` returns `" ~~~\n    ~~~\n ~~~\n"`, keeping the fence length 3
-
-#### Scenario: Raw HTML after a definition
-- **WHEN** the document parsed from `"[o]:u\n\t<div>"` is serialized and reparsed
-- **THEN** the reparsed document holds the `Definition` and a `Paragraph` holding the `Html` inline
-
-#### Scenario: Line that would open description details
-- **WHEN** the document parsed from `` "a\n   : `" `` with `parse` is serialized and reparsed
-- **THEN** the reparsed document holds the same single `Paragraph`
-
-#### Scenario: Run delimiters inside a link or mark
-- **WHEN** the documents parsed from `"[__**)**&__](u)"` and `"==__***/***__=="` with `parse` are serialized and reparsed
-- **THEN** each reparsed paragraph equals the parsed one
-
-#### Scenario: Strong after an emphasis with underline enabled
-- **WHEN** the document parsed from `"*a***b**"` with underline enabled is serialized with `syntax` set to the same options
-- **THEN** `to_markdown()` returns `"*a***b**\n"`, which reparses with a `Strong` and no `Underline`
-
-#### Scenario: Doubled delimiter that could close its span
-- **WHEN** the document parsed from `"==a\\== b=="` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"==a\\== b==\n"`
-
-#### Scenario: Math opening a definition's paragraph
-- **WHEN** the document parsed from `"[o]:u\n\t$$\na$$"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"[o]: u\n    $$\n    a$$\n"`, which keeps the math inline in the paragraph the definition was read from: a continuation line that would start a block is indented, with the lines after it
-
-#### Scenario: Cell pipe after an escaped backslash
-- **WHEN** the document parsed from `"| <a b=\"x\\\\\\|y\"> |\n| --- |"` with the GFM preset is serialized with `syntax` set to it and reparsed with it
-- **THEN** the reparsed table holds the same raw HTML in one cell
-
-#### Scenario: Raw label backtick before a span
-- **WHEN** the document parsed from `` "*[foo`bar]* &#96;\n\n[foo`bar]: /u" `` with `parse` is serialized and reparsed
-- **THEN** the reparsed paragraph equals the parsed one
-
-#### Scenario: Paragraph after an empty quote line in an item
-- **WHEN** the documents parsed from `"- > a\n  >\n  b\n  ---"` and `"- > a\n  >\n  | b |\n  | - |"` with `parse` are serialized and reparsed
-- **THEN** each reparsed document equals the parsed one, the second still holding its `Table`
-
-#### Scenario: What borders spans, cells, items, and quotes
-- **WHEN** the documents parsed with `parse` from `` "-[^\\`]://\\`" ``, `"++:++\\:"`, `"&#x20;://>|>\n-|-"`, `"- *  (\n    <a>"`, `"~~:~ :e~"`, `"++\\+>++"`, and `">\n>[!NOTE]:>"` are serialized and reparsed
-- **THEN** each reparsed document equals the parsed one
-
-### Requirement: No HTML filtering or style preservation
-The serializer SHALL write raw HTML and MDX node values as they are, without
-safety filtering, and SHALL NOT recover source spelling that the AST does not
-record.
-
-#### Scenario: Raw HTML passes through
-- **WHEN** `parse("<script>alert(1)</script>").document.to_markdown()` runs
-- **THEN** the output contains `<script>alert(1)</script>`
-
-### Requirement: Literal backticks are always escaped
-The serializer SHALL write every backtick in a text value as `` \` ``.
-
-#### Scenario: Backtick run before a lone backtick
-- **WHEN** a hand-built paragraph holding ```Text("b ``a`")``` is serialized
-- **THEN** `to_markdown()` returns ``"b \\`\\`a\\`\n"`` and reparsing it yields the same text and no code span
-
-#### Scenario: Paired backticks
-- **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
-- **THEN** it returns ``"Test \\`hello world\\` here.\n"``
-
-### Requirement: Tree comparison
-Where serialization compares a reparsed document with the one it wrote, it
-SHALL compare them apart from spans, reading each `Escape` as a `Text` holding
-its char and each `CharacterReference` as a `Text` holding its value, and
-merging adjacent `Text` nodes; a code span whose `raw` is empty or whose
-`fence_length` is 0 is written from its `value` and compares by it. The
-reparse SHALL read the written document as if it also held a definition of
-each reference label the document uses without defining.
-
-#### Scenario: Escape the serializer adds
-- **WHEN** a hand-built paragraph holding `Text("*a*")` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"\\*a\\*\n"`, the reparsed paragraph holds `Escape('*')`, `Text("a")`, and `Escape('*')`, which compare equal to the original, and serializing the reparsed document returns the same text
-
-#### Scenario: Reference without its definition
-- **WHEN** a hand-built paragraph holding a shortcut `LinkReference` to `foo`, in a document holding no `Definition`, is serialized
-- **THEN** `to_markdown()` returns `"[foo]\n"`
-
-#### Scenario: Split text
-- **WHEN** a hand-built paragraph holding `Text("a")` followed by `Text("b")` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"ab\n"` and the reparsed `Text("ab")` compares equal to the original
-
-### Requirement: Syntax rules come from the parser
-The serializer SHALL decide which text chars to escape, which delimiter each
-`Emphasis` and `Strong` takes, and when a block needs a layout other than the
-default one, by parsing its own rendering under `SerializeOptions::syntax` and
-reading what that parse took as syntax and which container or block each
-written line landed in. A text char
-SHALL be written raw unless that parse reads it, written raw, as part of a
-construct, a delimiter run counting whole; the exceptions are a backtick,
-which is always escaped, the encodings that "Escape forms" requires for a
-node or block that does not read back, and a text char sharing an emphasis or
-strong delimiter run that the parse leaves literal, which is written raw when
-no escaped writing of its block reads back. Emphasis and strong SHALL be
-written with `*` and `**` unless that does not read back; a run that the
-parse does not read where it was written switches between `*` and `_` where
-the parser's flanking allows `_` there.
-
-#### Scenario: Unpaired delimiters stay raw
-- **WHEN** a hand-built paragraph holding `Text("x_y_ a*b x^2 ~5")` is serialized
-- **THEN** `to_markdown()` returns `"x_y_ a*b x^2 ~5\n"`
-
-#### Scenario: Brackets with and without a definition
-- **WHEN** a hand-built paragraph holding `Text("[x]")` is serialized alone, and again in a document that also holds a `Definition` of `x`
-- **THEN** the first output is `"[x]\n"` and the second writes the paragraph as `\[x\]`
-
-#### Scenario: Mark delimiters escaped whole
-- **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized
-- **THEN** `to_markdown()` returns `"\\=\\=a\\=\\=\n"`
-
-#### Scenario: Line-start check in mid-line
-- **WHEN** the documents parsed from `` "`x`<div" `` and `"a *b*::c"` with `parse` are serialized
-- **THEN** `to_markdown()` returns `` "`x`<div\n" `` and `"a *b*::c\n"`
-
-#### Scenario: Colon before a span's closing delimiter
-- **WHEN** the document parsed from `"++a:++ b:"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"++a:++ b:\n"`
-
-#### Scenario: Nested list before an indented block
-- **WHEN** the document parsed from `"- a\n  - b\n   <div>"` is serialized
-- **THEN** the nested item is written as `  - b`, and reparsing the output yields the same tree
-
-### Requirement: Escape forms
-An escaped ASCII punctuation char SHALL be written with a backslash, or as a
-character reference when the parse still reads its backslash form as syntax;
-any other escaped char SHALL be written as a character reference. When a node
-does not read back, the text chars touching its delimiters, inside and
-outside, SHALL be written as character references. When a block still does
-not read back after three rounds of escaping, every ASCII punctuation char of
-its text SHALL be escaped, and when it then still does not read back,
-serialization SHALL return `SerializeError::Unrepresentable`.
-
-#### Scenario: Space at an emphasis edge
-- **WHEN** a hand-built paragraph holding an `Emphasis` around `Text("a ")` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"*&#97;&#x20;*\n"` and the reparsed paragraph compares equal to the original
-
-#### Scenario: Letter before a shortcode
-- **WHEN** a hand-built paragraph holding `Text("a")` followed by a `Shortcode` named `smile` is serialized and reparsed
-- **THEN** `to_markdown()` returns `"&#97;:smile:\n"` and the reparsed paragraph compares equal to the original
-
-### Requirement: Links written as autolinks
-A `Link` with no title whose one child is a `Text` equal to its destination,
-or for a `mailto:` destination equal to the address after it, SHALL be written
-as an angle-bracket autolink when that autolink reads back as the same `Link`,
-and as `[text](destination)` otherwise.
+### Requirement: Links written in their recorded form
+The serializer SHALL write a `Link` in the form it records: a literal autolink
+as its text, an angle-bracket autolink as `<` and its text and `>`, and an
+inline link as `[text](destination "title")`.
 
 #### Scenario: Literal URL
 - **WHEN** `parse("see http://a.b").document.to_markdown()` runs
-- **THEN** it returns `"see <http://a.b>\n"`
+- **THEN** it returns `"see http://a.b\n"`
 
 #### Scenario: `www` link
 - **WHEN** `parse("www.a.b").document.to_markdown()` runs
-- **THEN** it returns `"[www.a.b](http://www.a.b)\n"`
-
-#### Scenario: Inline link whose text is its URL
-- **WHEN** `parse("[http://a.b](http://a.b)").document.to_markdown()` runs
-- **THEN** it returns `"<http://a.b>\n"`
+- **THEN** it returns `"www.a.b\n"`
 
 #### Scenario: Literal email
 - **WHEN** `parse("a@b.c").document.to_markdown()` runs
-- **THEN** it returns `"<a@b.c>\n"`
+- **THEN** it returns `"a@b.c\n"`
 
-#### Scenario: Scheme too short for an angle-bracket autolink
-- **WHEN** the document parsed from `"a://x"` with `parse` is serialized
-- **THEN** `to_markdown()` returns `"[a://x](a://x)\n"`
+#### Scenario: Angle-bracket autolink
+- **WHEN** `parse("<a@b.c> <http://a.b>").document.to_markdown()` runs
+- **THEN** it returns `"<a@b.c> <http://a.b>\n"`
+
+#### Scenario: Inline link whose text is its URL
+- **WHEN** `parse("[http://a.b](http://a.b)").document.to_markdown()` runs
+- **THEN** it returns `"[http://a.b](http://a.b)\n"`
+
+#### Scenario: Constructed link
+- **WHEN** a document holding a paragraph with `Link::new("u", [Text::from("a")])` is serialized
+- **THEN** `to_markdown()` returns `"[a](u)\n"`

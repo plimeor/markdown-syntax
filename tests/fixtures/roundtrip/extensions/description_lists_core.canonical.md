@@ -1,19 +1,12 @@
 apple
-
-:
-    red fruit
-:
-    computer company
-
+: red fruit
+: computer company
 orange
-
-:
-    orange fruit
+: orange fruit
 
 Term 1
 
-:
-    Definition 1
+: Definition 1
 
 * Nested
   

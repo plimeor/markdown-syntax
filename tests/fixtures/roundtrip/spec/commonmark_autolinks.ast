@@ -1,25 +1,37 @@
 Document
   Paragraph
     Text "Autolinks "
-    Link destination=irc://foo.bar:2233/baz title=none
+    Link form=angle destination=irc://foo.bar:2233/baz title=none
       Text "irc://foo.bar:2233/baz"
     Text " and "
-    Link destination=made-up-scheme://foo,bar title=none
+    Link form=angle destination=made-up-scheme://foo,bar title=none
       Text "made-up-scheme://foo,bar"
     Text "."
     SoftBreak
     Text "Email "
-    Link destination=mailto:foo+special@Bar.baz-bar0.com title=none
+    Link form=angle destination=mailto:foo+special@Bar.baz-bar0.com title=none
       Text "foo+special@Bar.baz-bar0.com"
     Text "."
     SoftBreak
     Text "Special "
-    Link destination=mailto:foo.!#$%&'*+/=?^_`{|}~-@example.com title=none
+    Link form=angle destination=mailto:foo.!#$%&'*+/=?^_`{|}~-@example.com title=none
       Text "foo.!#$%&'*+/=?^_`{|}~-@example.com"
     Text "."
     SoftBreak
-    Text "Invalid email <foo..bar@example.com> <foo@example-.com> <foo@-example.com> <foo"
+    Text "Invalid email <"
+    Link form=literal destination=mailto:foo..bar@example.com title=none
+      Text "foo..bar@example.com"
+    Text "> <"
+    Link form=literal destination=mailto:foo@example-.com title=none
+      Text "foo@example-.com"
+    Text "> <"
+    Link form=literal destination=mailto:foo@-example.com title=none
+      Text "foo@-example.com"
+    Text "> <foo"
     Escape "+"
     Text "@bar.example.com>."
     SoftBreak
-    Text "Invalid <m:abc> <http://foo.bar/baz bim>."
+    Text "Invalid <m:abc> <"
+    Link form=literal destination=http://foo.bar/baz title=none
+      Text "http://foo.bar/baz"
+    Text " bim>."

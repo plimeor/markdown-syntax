@@ -4,9 +4,8 @@ commit: d2da7a0
 source: upstream-tests/strikethrough.rs
 role: upstream-input
 count: 1
-profiles: gfm
 
---- case 1 profile gfm bytes 81
+--- case 1 bytes 81
 This is ~strikethrough~.
 
 As is ~~this, okay~~?

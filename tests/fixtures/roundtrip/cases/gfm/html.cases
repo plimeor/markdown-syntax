@@ -4,46 +4,45 @@ commit: d2da7a0
 source: upstream-tests/html.rs
 role: upstream-input
 count: 62
-profiles: commonmark
 
---- case 1 profile commonmark bytes 17
+--- case 1 bytes 17
 <script></script>
 --- end
---- case 2 profile commonmark bytes 18
+--- case 2 bytes 18
 <script> </script>
 --- end
---- case 3 profile commonmark bytes 29
+--- case 3 bytes 29
 <script>A html block</script>
 --- end
---- case 4 profile commonmark bytes 47
+--- case 4 bytes 47
 <SCRIPT>A html
 
 **block** </Script>
 
 **parsed**
 --- end
---- case 5 profile commonmark bytes 27
+--- case 5 bytes 27
 <style>A html block</style>
 --- end
---- case 6 profile commonmark bytes 33
+--- case 6 bytes 33
 <textarea>A html block</textarea>
 --- end
---- case 7 profile commonmark bytes 23
+--- case 7 bytes 23
 <pre>A html block</pre>
 --- end
---- case 8 profile commonmark bytes 25
+--- case 8 bytes 25
 <pre>
 A html block
 </pre>
 --- end
---- case 9 profile commonmark bytes 27
+--- case 9 bytes 27
 <pre>
 
 A html block
 
 </pre>
 --- end
---- case 10 profile commonmark bytes 42
+--- case 10 bytes 42
 Test
 
 <pre>
@@ -52,28 +51,28 @@ A html block
 
 More text
 --- end
---- case 11 profile commonmark bytes 7
+--- case 11 bytes 7
 <!---->
 --- end
---- case 12 profile commonmark bytes 8
+--- case 12 bytes 8
 <!-- -->
 --- end
---- case 13 profile commonmark bytes 21
+--- case 13 bytes 21
 <!-- A html block -->
 --- end
---- case 14 profile commonmark bytes 21
+--- case 14 bytes 21
 <!-- A
 html
 block -->
 --- end
---- case 15 profile commonmark bytes 23
+--- case 15 bytes 23
 <!-- A
 
 html
 
 block -->
 --- end
---- case 16 profile commonmark bytes 38
+--- case 16 bytes 38
 Test
 
 <!-- A
@@ -82,28 +81,28 @@ block -->
 
 More text
 --- end
---- case 17 profile commonmark bytes 4
+--- case 17 bytes 4
 <??>
 --- end
---- case 18 profile commonmark bytes 5
+--- case 18 bytes 5
 <? ?>
 --- end
---- case 19 profile commonmark bytes 22
+--- case 19 bytes 22
 <?html a html block ?>
 --- end
---- case 20 profile commonmark bytes 22
+--- case 20 bytes 22
 <?html
 a html
 block ?>
 --- end
---- case 21 profile commonmark bytes 24
+--- case 21 bytes 24
 <?html
 
 a html
 
 block ?>
 --- end
---- case 22 profile commonmark bytes 39
+--- case 22 bytes 39
 Test
 
 <?html
@@ -112,25 +111,25 @@ block ?>
 
 More text
 --- end
---- case 23 profile commonmark bytes 4
+--- case 23 bytes 4
 <!a>
 --- end
---- case 24 profile commonmark bytes 4
+--- case 24 bytes 4
 <!A>
 --- end
---- case 25 profile commonmark bytes 15
+--- case 25 bytes 15
 <!DOCTYPE html>
 --- end
---- case 26 profile commonmark bytes 15
+--- case 26 bytes 15
 <!DOCTYPE
 html>
 --- end
---- case 27 profile commonmark bytes 16
+--- case 27 bytes 16
 <!DOCTYPE
 
 html>
 --- end
---- case 28 profile commonmark bytes 32
+--- case 28 bytes 32
 Test
 
 <!DOCTYPE
@@ -138,25 +137,25 @@ html>
 
 More text
 --- end
---- case 29 profile commonmark bytes 12
+--- case 29 bytes 12
 <![CDATA[]]>
 --- end
---- case 30 profile commonmark bytes 24
+--- case 30 bytes 24
 <![CDATA[A html block]]>
 --- end
---- case 31 profile commonmark bytes 25
+--- case 31 bytes 25
 <![CDATA[
 A html
 block]]>
 --- end
---- case 32 profile commonmark bytes 27
+--- case 32 bytes 27
 <![CDATA[
 
 A html
 
 block]]>
 --- end
---- case 33 profile commonmark bytes 42
+--- case 33 bytes 42
 Test
 
 <![CDATA[
@@ -165,45 +164,45 @@ block]]>
 
 More text
 --- end
---- case 34 profile commonmark bytes 11
+--- case 34 bytes 11
 <div></div>
 --- end
---- case 35 profile commonmark bytes 23
+--- case 35 bytes 23
 <div>A html block</div>
 --- end
---- case 36 profile commonmark bytes 24
+--- case 36 bytes 24
 <div>A html block
 </div>
 --- end
---- case 37 profile commonmark bytes 24
+--- case 37 bytes 24
 <div>
 A html block</div>
 --- end
---- case 38 profile commonmark bytes 25
+--- case 38 bytes 25
 <div>
 A html block
 </div>
 --- end
---- case 39 profile commonmark bytes 26
+--- case 39 bytes 26
 <div>
 A html block
 
 </div>
 --- end
---- case 40 profile commonmark bytes 26
+--- case 40 bytes 26
 <div>
 
 A html block
 </div>
 --- end
---- case 41 profile commonmark bytes 27
+--- case 41 bytes 27
 <div>
 
 A html block
 
 </div>
 --- end
---- case 42 profile commonmark bytes 41
+--- case 42 bytes 41
 Test
 <div>
 A html block
@@ -211,7 +210,7 @@ A html block
 
 More text
 --- end
---- case 43 profile commonmark bytes 42
+--- case 43 bytes 42
 Test
 
 <div>
@@ -220,7 +219,7 @@ A html block
 
 More text
 --- end
---- case 44 profile commonmark bytes 43
+--- case 44 bytes 43
 Test
 
 <div>
@@ -230,7 +229,7 @@ A html block
 
 More text
 --- end
---- case 45 profile commonmark bytes 43
+--- case 45 bytes 43
 Test
 
 <div>
@@ -240,7 +239,7 @@ A html block
 
 More text
 --- end
---- case 46 profile commonmark bytes 44
+--- case 46 bytes 44
 Test
 
 <div>
@@ -251,43 +250,43 @@ A html block
 
 More text
 --- end
---- case 47 profile commonmark bytes 15
+--- case 47 bytes 15
 <testa></testa>
 --- end
---- case 48 profile commonmark bytes 16
+--- case 48 bytes 16
 <testb>
 </testb>
 --- end
---- case 49 profile commonmark bytes 17
+--- case 49 bytes 17
 <testc>
 
 </testc>
 --- end
---- case 50 profile commonmark bytes 27
+--- case 50 bytes 27
 <test>
 A html block
 </test>
 --- end
---- case 51 profile commonmark bytes 28
+--- case 51 bytes 28
 <test>
 B html block
 
 </test>
 --- end
---- case 52 profile commonmark bytes 28
+--- case 52 bytes 28
 <test>
 
 C html block
 </test>
 --- end
---- case 53 profile commonmark bytes 29
+--- case 53 bytes 29
 <test>
 
 D html block
 
 </test>
 --- end
---- case 54 profile commonmark bytes 44
+--- case 54 bytes 44
 Test
 
 <test>
@@ -296,7 +295,7 @@ E html block
 
 More text
 --- end
---- case 55 profile commonmark bytes 46
+--- case 55 bytes 46
 Test
 
 <test>
@@ -307,24 +306,24 @@ F html block
 
 More text
 --- end
---- case 56 profile commonmark bytes 19
+--- case 56 bytes 19
 > <script></script>
 --- end
---- case 57 profile commonmark bytes 9
+--- case 57 bytes 9
 > <!---->
 --- end
---- case 58 profile commonmark bytes 6
+--- case 58 bytes 6
 > <??>
 --- end
---- case 59 profile commonmark bytes 6
+--- case 59 bytes 6
 > <!a>
 --- end
---- case 60 profile commonmark bytes 14
+--- case 60 bytes 14
 > <![CDATA[]]>
 --- end
---- case 61 profile commonmark bytes 13
+--- case 61 bytes 13
 > <div></div>
 --- end
---- case 62 profile commonmark bytes 17
+--- case 62 bytes 17
 > <testa></testa>
 --- end

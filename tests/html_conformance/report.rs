@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
+use crate::deviations::{DEVIATIONS, KNOWN_DEFECTS};
 use crate::types::Category;
 
 /// Per-case outcome.
@@ -24,6 +25,7 @@ pub enum Outcome {
 
 pub struct CaseResult {
     pub source_file: &'static str,
+    pub index: usize,
     pub category: Category,
     pub label: Option<String>,
     pub outcome: Outcome,
@@ -130,7 +132,58 @@ impl Report {
                 t.pct(),
             );
         }
+        self.print_deviations();
         println!("=====================================================\n");
+    }
+
+    /// The cases that differ from their oracle by design are listed in
+    /// `crate::deviations`. Prints, apart from each other, the listed cases
+    /// that now pass and the unlisted cases that fail.
+    fn print_deviations(&self) {
+        let listed = |r: &CaseResult| {
+            DEVIATIONS
+                .iter()
+                .chain(KNOWN_DEFECTS)
+                .any(|(file, index, _)| *file == r.source_file && *index == r.index)
+        };
+        let failed =
+            |r: &CaseResult| matches!(r.outcome, Outcome::Fail { .. } | Outcome::ParseError(_));
+        let now_passing: Vec<&CaseResult> = self
+            .results
+            .iter()
+            .filter(|r| listed(r) && !failed(r))
+            .collect();
+        let unlisted: Vec<&CaseResult> = self
+            .results
+            .iter()
+            .filter(|r| !listed(r) && failed(r))
+            .collect();
+        let unknown: Vec<&(&str, usize, &str)> = DEVIATIONS
+            .iter()
+            .chain(KNOWN_DEFECTS)
+            .filter(|(file, index, _)| {
+                !self
+                    .results
+                    .iter()
+                    .any(|r| r.source_file == *file && r.index == *index)
+            })
+            .collect();
+        println!(
+            "\n-- deviations: {} by design, {} known defects, {} listed now passing, {} unlisted failing --",
+            DEVIATIONS.len(),
+            KNOWN_DEFECTS.len(),
+            now_passing.len(),
+            unlisted.len()
+        );
+        for r in now_passing {
+            println!("  listed, now passes: {} case {}", r.source_file, r.index);
+        }
+        for r in unlisted {
+            println!("  UNLISTED deviation: {} case {}", r.source_file, r.index);
+        }
+        for (file, index, _) in unknown {
+            println!("  listed, no such case: {file} case {index}");
+        }
     }
 
     /// Dump every failure (and parse error) as an inspectable block for triage.
@@ -146,8 +199,9 @@ impl Report {
                 } => {
                     n += 1;
                     out.push_str(&format!(
-                        "### FAIL #{n} [{}] {}\n--- input ---\n{}\n--- expected ---\n{}\n--- actual ---\n{}\n\n",
+                        "### FAIL #{n} [{} case {}] {}\n--- input ---\n{}\n--- expected ---\n{}\n--- actual ---\n{}\n\n",
                         r.source_file,
+                        r.index,
                         r.label.as_deref().unwrap_or(""),
                         show(input),
                         show(expected),

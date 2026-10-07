@@ -1,6 +1,6 @@
 //! Memoized forward scans over one input.
 //!
-//! The inline parser and the text escaper ask "where is the first X at or
+//! The inline parser asks "where is the first X at or
 //! after position p" for many start positions in the same input. Answering
 //! each question with a fresh scan makes a paragraph full of unclosed openers
 //! quadratic (or worse, when a scan step itself scans). The structures here
@@ -234,75 +234,5 @@ impl BracketMemo {
             }
         }
         answer
-    }
-}
-
-/// Versions of a map from the small integer keys `0..keys` to positions. Each
-/// `insert` returns a new version and leaves the old one readable, sharing all
-/// unchanged structure (path copying over a segment tree), so a version per
-/// position costs `O(log keys)` each.
-pub(crate) struct PersistentMap {
-    keys: usize,
-    /// `(left child, right child, leaf value)`; node 0 is the empty version.
-    nodes: Vec<(usize, usize, usize)>,
-    path: Vec<(usize, bool)>,
-}
-
-impl PersistentMap {
-    /// The version that maps no key.
-    pub(crate) const EMPTY: usize = 0;
-
-    pub(crate) fn new(keys: usize) -> Self {
-        Self {
-            keys: keys.max(1),
-            nodes: alloc::vec![(0, 0, NO_ANSWER)],
-            path: Vec::new(),
-        }
-    }
-
-    /// `version` with `key` mapped to `value`, as a new version.
-    pub(crate) fn insert(&mut self, version: usize, key: usize, value: usize) -> usize {
-        let (mut low, mut high, mut node) = (0, self.keys, version);
-        while high - low > 1 {
-            let middle = (low + high) / 2;
-            let right = key >= middle;
-            self.path.push((node, right));
-            let (left_child, right_child, _) = self.nodes[node];
-            node = if right { right_child } else { left_child };
-            if right {
-                low = middle;
-            } else {
-                high = middle;
-            }
-        }
-        self.nodes.push((0, 0, value));
-        let mut child = self.nodes.len() - 1;
-        while let Some((node, right)) = self.path.pop() {
-            let (left_child, right_child, value) = self.nodes[node];
-            self.nodes.push(if right {
-                (left_child, child, value)
-            } else {
-                (child, right_child, value)
-            });
-            child = self.nodes.len() - 1;
-        }
-        child
-    }
-
-    /// What `version` maps `key` to.
-    pub(crate) fn get(&self, version: usize, key: usize) -> Option<usize> {
-        let (mut low, mut high, mut node) = (0, self.keys, version);
-        while high - low > 1 {
-            let middle = (low + high) / 2;
-            let (left_child, right_child, _) = self.nodes[node];
-            if key >= middle {
-                node = right_child;
-                low = middle;
-            } else {
-                node = left_child;
-                high = middle;
-            }
-        }
-        decode(self.nodes[node].2)
     }
 }

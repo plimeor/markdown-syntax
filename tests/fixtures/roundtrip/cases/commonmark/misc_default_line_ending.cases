@@ -4,19 +4,18 @@ commit: 1506572
 source: upstream-tests/misc_default_line_ending.rs
 role: upstream-input
 count: 4
-profiles: commonmark
 
---- case 1 profile commonmark bytes 3
+--- case 1 bytes 3
 > a
 --- end
---- case 2 profile commonmark bytes 4
+--- case 2 bytes 4
 > a
 
 --- end
---- case 3 profile commonmark bytes 4
+--- case 3 bytes 4
 > a
 --- end
---- case 4 profile commonmark bytes 5
+--- case 4 bytes 5
 > a
 
 --- end
