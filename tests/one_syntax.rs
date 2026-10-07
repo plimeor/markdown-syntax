@@ -151,3 +151,47 @@ fn build_layer_round_trips() {
     assert_eq!(document.children[0].span(), None);
     assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
 }
+
+#[test]
+fn a_text_directive_ends_at_whitespace_or_written_punctuation() {
+    let directives = |md: &str| {
+        first_para(md)
+            .iter()
+            .filter(|inline| matches!(inline, Inline::TextDirective(_)))
+            .count()
+    };
+    // Whitespace or the end of the content follows the whole directive, or
+    // ASCII punctuation follows a label or attributes.
+    for md in [
+        ":e",
+        "see :call-out here",
+        ":e[] text",
+        ":e{}",
+        "Inside :badge[ok]{flag}.",
+        "(:e[x])",
+        ":e{a=b},",
+        // Braces holding only an attribute without a valid name still count.
+        ":e{!}.",
+    ] {
+        assert_eq!(directives(md), 1, "{md:?}: {:?}", first_para(md));
+    }
+    // Anything else after it, or punctuation after a directive with nothing
+    // written after its name, keeps the whole run text.
+    for md in [
+        ":e{}x",
+        ":e{}1",
+        ":e[]www.a.b",
+        ":e{}a@b.c",
+        ":e{}[^1]",
+        ":e[a]b",
+        ":e{}.",
+        "(:note)",
+        "see :note.",
+        ":h1[x]",
+        ":my_note",
+        ":e[a]。",
+    ] {
+        assert_eq!(directives(md), 0, "{md:?}: {:?}", first_para(md));
+        assert_eq!(parse(md).diagnostics, Vec::new(), "{md:?}");
+    }
+}

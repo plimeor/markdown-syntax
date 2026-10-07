@@ -134,22 +134,6 @@ const NOT_READING_BACK: &[(&str, &str)] = &[
         "the escape in the wiki link's target, which keeps the `$` from closing math, is not recorded",
     ),
     (
-        ":e{}1",
-        "the empty attributes that end the directive's name are not recorded",
-    ),
-    (
-        ":e[]www.+",
-        "the empty label that ends the directive's name is not recorded",
-    ),
-    (
-        ":e{}a@b.c",
-        "the empty attributes that end the directive's name are not recorded",
-    ),
-    (
-        ":e{}[^1]",
-        "the empty attributes that keep `[^1]` from being the directive's label are not recorded",
-    ),
-    (
         "=```\n    ```",
         "the indentation of the continuation line, which keeps its fence from closing the code span's line as a block, is not recorded",
     ),

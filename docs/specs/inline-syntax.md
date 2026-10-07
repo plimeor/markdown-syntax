@@ -69,8 +69,12 @@ crate's pinned gemoji table, the source char before the opening `:` is not a
 Unicode letter or digit, and the source char after the closing `:` is not one
 either. It SHALL read `:name[label]{attrs}`, with label and attributes each
 optional, as a `TextDirective` only when `name` is one or more runs of ASCII
-letters joined by single `-` chars and the char right after `name` is `[`,
-`{`, a space, a tab, or a line ending, or `name` ends the inline content.
+letters joined by single `-` chars, the char right after `name` is `[`, `{`,
+a space, a tab, or a line ending, or `name` ends the inline content, and the
+char right after the whole directive is a space, a tab, or a line ending, or
+the directive ends the inline content, or that char is ASCII punctuation and
+the directive has a non-empty label or attribute braces holding a
+non-whitespace char.
 
 #### Scenario: Shortcode
 - **WHEN** `"a :tada: b"` is parsed with `parse`
@@ -118,6 +122,14 @@ letters joined by single `-` chars and the char right after `name` is `[`,
 
 #### Scenario: Name with a digit, an underscore, or trailing punctuation
 - **WHEN** `":h1[x]"`, `":my_note"`, `"(:note)"`, and `"see :note."` are parsed with `parse`
+- **THEN** none of the paragraphs holds a `TextDirective`
+
+#### Scenario: Punctuation after a written label or attributes
+- **WHEN** `"Inside :badge[ok]{flag}."` and `"(:e[x])"` are parsed with `parse`
+- **THEN** each paragraph holds one `TextDirective`
+
+#### Scenario: Other chars after a directive
+- **WHEN** `":e{}x"`, `":e{}1"`, `":e[]www.a.b"`, `":e{}a@b.c"`, `":e{}[^1]"`, `":e[a]b"`, and `":e{}."` are parsed with `parse`
 - **THEN** none of the paragraphs holds a `TextDirective`
 
 ### Requirement: Wikilinks

@@ -185,6 +185,12 @@ fn runs_of_unclosed_openers_parse_in_bounded_time() {
         let input = opener.repeat(60_000 / opener.len()) + "]]>}`$)";
         parse_bounded(opener, input);
     }
+    // Directive openers sharing one closer followed by a char that refuses
+    // every one of them.
+    for (opener, tail) in [(":a{", "}x"), (":a[", "]x")] {
+        let input = opener.repeat(60_000 / opener.len()) + tail;
+        parse_bounded(opener, input);
+    }
 }
 
 #[test]

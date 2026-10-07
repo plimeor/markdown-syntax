@@ -3097,17 +3097,26 @@ fn parse_text_directive(
     ) {
         return None;
     }
-    let opener = parse_directive_opener_with(opener_source, |close, open| {
-        let found = match close {
-            DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
-            DirectiveClose::Attributes => {
-                pass.scan.directive_attributes_close(opener_offset + open)
-            }
-        };
-        found.map(|position| position - opener_offset)
-    });
+    let mut ends = true;
+    let opener = parse_directive_opener_with(
+        opener_source,
+        |close, open| {
+            let found = match close {
+                DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
+                DirectiveClose::Attributes => {
+                    pass.scan.directive_attributes_close(opener_offset + open)
+                }
+            };
+            found.map(|position| position - opener_offset)
+        },
+        |label, attributes, next| {
+            ends = text_directive_ends(label, attributes, next);
+            ends
+        },
+    );
     let Some(opener) = opener else {
-        if directive_opener_looks_malformed(opener_source) {
+        // An opener refused for the char after it is text, not malformed.
+        if ends && directive_opener_looks_malformed(opener_source) {
             diagnostics.push(Diagnostic::new(
                 DiagnosticSeverity::Error,
                 DiagnosticCode::InvalidDirectiveName,
@@ -3151,6 +3160,23 @@ fn parse_text_directive(
     ))
 }
 
+/// Whether a text directive with this label and attribute source ends before
+/// `next`: whitespace or the end of the content, or ASCII punctuation when the
+/// label is not empty or the attributes hold a non-space char. So `:e[a].` is
+/// a directive, while `:e{}x`, `:e{}.`, and `:e[a]b` stay text. Deciding from
+/// the sources keeps a refused opener from parsing its attributes.
+fn text_directive_ends(label: Option<&str>, attributes: Option<&str>, next: Option<u8>) -> bool {
+    match next {
+        None | Some(b' ' | b'\t' | b'\n' | b'\r') => true,
+        Some(byte) if byte.is_ascii_punctuation() => {
+            label.is_some_and(|label| !label.is_empty())
+                || attributes
+                    .is_some_and(|source| source.bytes().any(|byte| !byte.is_ascii_whitespace()))
+        }
+        Some(_) => false,
+    }
+}
+
 /// A directive's name, label, and attributes, read from the text after its
 /// colons.
 struct DirectiveOpener<'a> {
@@ -3182,10 +3208,14 @@ impl DirectiveOpener<'_> {
 }
 
 fn parse_directive_opener(input: &str) -> Option<DirectiveOpener<'_>> {
-    parse_directive_opener_with(input, |close, open| match close {
-        DirectiveClose::Label => find_link_label_end(input, open),
-        DirectiveClose::Attributes => find_directive_attributes_close(input, open),
-    })
+    parse_directive_opener_with(
+        input,
+        |close, open| match close {
+            DirectiveClose::Label => find_link_label_end(input, open),
+            DirectiveClose::Attributes => find_directive_attributes_close(input, open),
+        },
+        |_, _, _| true,
+    )
 }
 
 /// Which closing position `parse_directive_opener_with` asks its finder for.
@@ -3197,9 +3227,12 @@ enum DirectiveClose {
     Attributes,
 }
 
+/// `accept` sees the label source, the attribute source, and the byte after
+/// the opener, and can refuse the opener before its attributes are parsed.
 fn parse_directive_opener_with(
     input: &str,
     mut find_close: impl FnMut(DirectiveClose, usize) -> Option<usize>,
+    accept: impl FnOnce(Option<&str>, Option<&str>, Option<u8>) -> bool,
 ) -> Option<DirectiveOpener<'_>> {
     let mut index = 0;
     while let Some((next, char)) = next_char(input, index) {
@@ -3215,8 +3248,7 @@ fn parse_directive_opener_with(
     }
 
     let mut label = None;
-    let mut attributes = Vec::new();
-    let mut dropped = Vec::new();
+    let mut attribute_source = None;
     let mut consumed = index;
     if input.as_bytes().get(consumed) == Some(&b'[') {
         let close = find_close(DirectiveClose::Label, consumed)?;
@@ -3225,13 +3257,26 @@ fn parse_directive_opener_with(
     }
     if input.as_bytes().get(consumed) == Some(&b'{') {
         let close = find_close(DirectiveClose::Attributes, consumed)?;
-        let start = consumed + 1;
-        (attributes, dropped) = parse_attributes(&input[start..close]);
-        for range in &mut dropped {
-            *range = (range.0 + start, range.1 + start);
-        }
+        attribute_source = Some((consumed + 1, &input[consumed + 1..close]));
         consumed = close + 1;
     }
+    if !accept(
+        label,
+        attribute_source.map(|(_, source)| source),
+        input.as_bytes().get(consumed).copied(),
+    ) {
+        return None;
+    }
+    let (attributes, dropped) = match attribute_source {
+        Some((start, source)) => {
+            let (attributes, mut dropped) = parse_attributes(source);
+            for range in &mut dropped {
+                *range = (range.0 + start, range.1 + start);
+            }
+            (attributes, dropped)
+        }
+        None => (Vec::new(), Vec::new()),
+    };
 
     Some(DirectiveOpener {
         name: name.into(),

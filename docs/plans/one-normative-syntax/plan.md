@@ -43,6 +43,10 @@ serializer only renders.
     `-`. A text directive forms only when its name is followed by `[`, `{`,
     a space, a tab, or a line ending, or ends the inline content. So
     `:noreply@x.com` is an email link and `:www.x.com` is text.
+  - A whole text directive is followed by whitespace or the end of the
+    content, or by ASCII punctuation when it has a non-empty label or
+    non-blank attribute braces. So `:badge[ok].` is a directive, and `:e{}x`, `:e{}.`, and
+    `:e[a]b` are text.
   - A wiki link's content holds no unescaped `[` or `]`, so `[[[foo]]]` is
     `[`, a wiki link, and `]`. A wiki link still wins over a defined
     reference label.
@@ -286,8 +290,8 @@ Specs:
   in `tests/support/fixtures.rs` read back only with a lazy line, whitespace,
   or a blank line the AST does not record; so do the inputs that
   `tests/serialize_regressions.rs` and `tests/serialize_roundtrip_fuzz.rs`
-  list. A text directive's empty `[]` or `{}` and an escaped char in a wiki
-  link's target are spellings the AST does not record either.
+  list. An escaped char in a wiki link's target is a spelling the AST does
+  not record either.
 - [x] 6.4 Seeded round trip: `tests/serialize_roundtrip_fuzz.rs` runs one syntax and lists each generated document that does not read back, with its reason. Listed documents must serialize without panicking, and a listed document that reads back fails the test. Keep every parsed input of the removed serialization scenarios in `tests/serialize_regressions.rs`, each asserting a round trip or a listed reason. Verified by serialization "Seeded round-trip generators" and `cargo test`.
 
 ### 7. Conformance bench and cost tests

@@ -67,9 +67,13 @@ with struct literals, or compares canonical output needs these updates.
     `-`, in all three directive forms. A text directive forms only when its
     name is followed by `[`, `{`, a space, a tab, or a line ending, or ends
     the inline content, so `:noreply@x.com` is an email link and
-    `:www.x.com` is text. A directive whose name breaks the rule is text:
-    `:h1[x]` silently, and a leaf or container opener such as `::my_note`
-    with `DiagnosticCode::InvalidDirectiveName`.
+    `:www.x.com` is text. The whole text directive is followed by
+    whitespace or the end of the content, or by ASCII punctuation when it
+    has a non-empty label or non-blank attribute braces: `:badge[ok].` is a
+    directive, and `:e{}x`, `:e{}.`, and `:e[a]b` are text. A directive
+    whose name breaks the rule is text: `:h1[x]` silently, and a leaf or
+    container opener such as `::my_note` with
+    `DiagnosticCode::InvalidDirectiveName`.
   - A wiki link's content holds no unescaped `[` or `]`, so `[[[foo]]]` is
     `[`, a wiki link, and `]`. A wiki link still wins over a defined
     reference label.
