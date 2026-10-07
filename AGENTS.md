@@ -50,6 +50,9 @@ file also runs quickly as plain `cargo test --test <name>`.
   `BREAKING CHANGE:` footer.
 - Enable the local commit-message hook with `cog install-hook commit-msg`;
   `cog.toml` owns the executable check for this rule.
+- Before a release, run `scripts/pre-release-check.sh`: it builds for
+  `wasm32-unknown-unknown` and with Rust 1.82, with default features and with
+  `html`, the invariants CI does not check.
 
 ## Conformance
 

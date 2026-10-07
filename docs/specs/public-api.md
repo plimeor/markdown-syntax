@@ -16,7 +16,7 @@ keep the same constraints.
 
 #### Scenario: Default build
 - **WHEN** the crate is built with default features
-- **THEN** it compiles for `wasm32-unknown-unknown` and with Rust 1.82, pulls in no runtime dependency, and exports no HTML renderer
+- **THEN** it compiles for `wasm32-unknown-unknown` and with Rust 1.82, pulls in no runtime dependency, and exports no HTML renderer; `scripts/pre-release-check.sh` checks the two builds before a release
 
 #### Scenario: HTML feature
 - **WHEN** the crate is built with `--features html`
