@@ -1131,7 +1131,7 @@ impl<'a> BlockParser<'a> {
         if !indented && matches!(byte, Some(b'`' | b'~')) {
             if let Some((marker, length)) = fence_start(cursor.nonspace_rest()) {
                 let info = cursor.nonspace_rest()[length..].trim_matches([' ', '\t']);
-                let info = (!info.is_empty()).then(|| unescape_string(info));
+                let info = (!info.is_empty()).then(|| decode_escapes_and_references(info));
                 let indent = cursor.indent;
                 self.close_unmatched();
                 self.add_frame(

@@ -1100,6 +1100,39 @@ mod wikilinks_as_written {
             );
         }
     }
+
+    #[test]
+    fn decoding_reads_escapes_and_references() {
+        let link = wikilink("[[a\\|b &amp; c|x &#65; \\y]]");
+        assert_eq!(
+            (link.target.as_str(), link.label.as_str()),
+            ("a\\|b &amp; c", "x &#65; \\y")
+        );
+        assert_eq!(
+            (link.decoded_target(), link.decoded_label()),
+            ("a|b & c".to_string(), "x A \\y".to_string())
+        );
+        // An unlabeled link's label is its target.
+        let link = wikilink("[[a\\$b]]");
+        assert_eq!(link.label, link.target);
+        assert_eq!(link.decoded_label(), "a$b");
+    }
+
+    #[test]
+    fn a_decoded_target_compares_with_a_link_destination() {
+        let document = parse("[[a&amp;b]] [x](a&amp;b)").document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        let [Inline::WikiLink(wiki), Inline::Text(_), Inline::Link(link)] =
+            paragraph.children.as_slice()
+        else {
+            panic!("{:?}", paragraph.children);
+        };
+        assert_eq!(wiki.target, "a&amp;b");
+        assert_eq!(wiki.decoded_target(), link.destination);
+        assert_eq!(link.destination, "a&b");
+    }
 }
 
 mod literal_autolink_trailing_references {

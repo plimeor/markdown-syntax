@@ -279,6 +279,21 @@ hold.
 - **WHEN** `glyph()` is called on a hand-built `Shortcode` named `not_an_emoji_name`
 - **THEN** it returns `None`
 
+### Requirement: Wiki link decoding
+`WikiLink::decoded_target()` and `WikiLink::decoded_label()` SHALL return the
+target and the label with each backslash escape of an ASCII punctuation
+character replaced by that character and each valid character reference
+replaced by the text it names, the decoding CommonMark applies to a link
+destination. A backslash before any other character SHALL stay as written.
+
+#### Scenario: Escapes and references
+- **WHEN** `decoded_target()` and `decoded_label()` are called on the `WikiLink` parsed from `"[[a\\|b &amp; c|x &#65; \\y]]"`
+- **THEN** they return `a|b & c` and `x A \y`
+
+#### Scenario: Compared with a link destination
+- **WHEN** `"[[a&amp;b]] [x](a&amp;b)"` is parsed with `parse`
+- **THEN** the `WikiLink`'s target is `a&amp;b`, and its `decoded_target()` equals the `Link`'s destination, `a&b`
+
 ### Requirement: One syntax
 `parse(input)` SHALL be the only way to parse, and SHALL recognize one fixed
 syntax with no configuration: CommonMark with raw HTML and indented code,

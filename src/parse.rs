@@ -6,8 +6,11 @@ use alloc::{borrow::Cow, collections::BTreeMap, string::String, vec, vec::Vec};
 
 use crate::{
     ast::*,
+    decode::{
+        decode_escapes_and_references, decode_selected_escapes_and_references,
+        parse_character_reference,
+    },
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
-    entities::named_character_reference,
     memo::{
         bracket_walk, path_walk, pattern_starts, BracketMemo, BracketStep, PathMemo, Positions,
         Step,
@@ -3439,7 +3442,10 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
         while cursor < input.len() {
             let (next, char) = next_char(input, cursor)?;
             if char as u8 == quote && !is_escaped_at(input, cursor) {
-                return Some((unescape_ascii_punctuation(&input[index + 1..cursor]), next));
+                return Some((
+                    decode_escapes_and_references(&input[index + 1..cursor]),
+                    next,
+                ));
             }
             cursor = next;
         }
@@ -3448,7 +3454,7 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
 
     let (value, next) = parse_attribute_token(input, index);
     Some((
-        unescape_selected(value, |char| matches!(char, '\\' | '&')),
+        decode_selected_escapes_and_references(value, |char| matches!(char, '\\' | '&')),
         next,
     ))
 }
@@ -3865,7 +3871,7 @@ fn parse_link_destination(
             return None;
         }
         return Some((
-            unescape_ascii_punctuation(&input[index + 1..stop]),
+            decode_escapes_and_references(&input[index + 1..stop]),
             LinkDestinationKind::Angle,
             stop + 1,
         ));
@@ -3901,7 +3907,7 @@ fn parse_link_destination(
         None
     } else {
         Some((
-            unescape_ascii_punctuation(&input[index..cursor]),
+            decode_escapes_and_references(&input[index..cursor]),
             LinkDestinationKind::Bare,
             cursor,
         ))
@@ -3924,7 +3930,7 @@ fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind,
                 return None;
             }
             return Some((
-                unescape_ascii_punctuation(&input[index + 1..cursor]),
+                decode_escapes_and_references(&input[index + 1..cursor]),
                 title_kind,
                 next,
             ));
@@ -3991,76 +3997,6 @@ fn skip_link_resource_space_with_info(input: &str, mut index: usize) -> Option<(
         }
     }
     Some((index, had_space))
-}
-
-pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
-    let rest = input.get(index..)?;
-    if let Some(rest) = rest
-        .strip_prefix("&#x")
-        .or_else(|| rest.strip_prefix("&#X"))
-    {
-        let digits = find_reference_terminator(rest, 6)?;
-        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return None;
-        }
-        let value = u32::from_str_radix(&rest[..digits], 16).ok()?;
-        return Some((
-            index + 3 + digits + 1,
-            character_reference_value(value).into(),
-        ));
-    }
-    if let Some(rest) = rest.strip_prefix("&#") {
-        let digits = find_reference_terminator(rest, 7)?;
-        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        let value = rest[..digits].parse::<u32>().ok()?;
-        return Some((
-            index + 2 + digits + 1,
-            character_reference_value(value).into(),
-        ));
-    }
-
-    let name_end = find_reference_terminator(rest, 32)?;
-    if name_end == 0 {
-        return None;
-    }
-    let name = &rest[1..name_end];
-    named_character_reference(name).map(|value| (index + name_end + 1, value.into()))
-}
-
-/// Finds the `;` that ends a character reference body, looking no further than
-/// `max_len` bytes: a longer body is never a reference, so the scan stays
-/// bounded instead of running to the end of the input.
-fn find_reference_terminator(rest: &str, max_len: usize) -> Option<usize> {
-    rest.as_bytes()
-        .iter()
-        .take(max_len + 1)
-        .position(|byte| *byte == b';')
-}
-
-/// Decode a numeric character reference codepoint to its scalar value.
-///
-/// This follows the CommonMark reference behavior: `U+0000`, the UTF-16
-/// surrogate range, and codepoints beyond the Unicode scalar range decode to
-/// `U+FFFD`; every other codepoint decodes to itself.
-///
-/// Two deliberate non-behaviors:
-/// - We do NOT apply the HTML5 Windows-1252 remapping of C1 bytes; `&#128;`
-///   decodes to `U+0080`, not the Euro sign. The CommonMark reference does not
-///   perform that remapping.
-/// - We do NOT extend replacement to the C0/C1 controls, DEL, or the Unicode
-///   noncharacters the way some HTML-oriented decoders do. Keeping those as
-///   their literal scalar is what makes the serializer's `&#xNN;` escaping of
-///   control characters round-trip through a re-parse. The roundtrip corpus
-///   only pins `{0 -> FFFD, 9 -> tab, 10 -> line feed, surrogate -> FFFD,
-///   out-of-range -> FFFD}`, all of which this matches.
-pub(crate) fn character_reference_value(value: u32) -> char {
-    if value == 0 {
-        '\u{FFFD}'
-    } else {
-        char::from_u32(value).unwrap_or('\u{FFFD}')
-    }
 }
 
 pub(crate) fn is_escaped_at(input: &str, index: usize) -> bool {
@@ -4135,48 +4071,6 @@ fn line_may_close_title(line: &str, closer: char) -> bool {
 fn line_can_start_definition_title(input: &str) -> bool {
     let trimmed = trim_ascii_start(input);
     matches!(trimmed.as_bytes().first(), Some(b'"' | b'\'' | b'('))
-}
-
-fn unescape_ascii_punctuation(input: &str) -> String {
-    // Only ASCII punctuation is escapable (`\ ` keeps its backslash).
-    unescape_selected(input, |char| char.is_ascii_punctuation())
-}
-
-pub(crate) fn unescape_string(input: &str) -> String {
-    unescape_selected(input, |char| char.is_ascii_punctuation() || char == '&')
-}
-
-fn unescape_selected(input: &str, should_unescape: impl Fn(char) -> bool) -> String {
-    let mut output = String::new();
-    let mut cursor = 0;
-    while cursor < input.len() {
-        if input.as_bytes().get(cursor) == Some(&b'&') {
-            if let Some((end, value)) = parse_character_reference(input, cursor) {
-                output.push_str(&value);
-                cursor = end;
-                continue;
-            }
-        }
-        let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
-        if char == '\\' {
-            if let Some((after_escape, escaped)) = next_char(input, next) {
-                if should_unescape(escaped) {
-                    output.push(escaped);
-                } else {
-                    output.push(char);
-                    output.push(escaped);
-                }
-                cursor = after_escape;
-            } else {
-                output.push(char);
-                cursor = next;
-            }
-        } else {
-            output.push(char);
-            cursor = next;
-        }
-    }
-    output
 }
 
 fn push_line(output: &mut String, line: &str) {
