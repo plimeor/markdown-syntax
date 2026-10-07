@@ -1064,6 +1064,25 @@ mod autolinks_inside_link_text {
     }
 
     #[test]
+    fn an_angle_bracket_autolink_in_link_text_reads_as_its_text() {
+        // cmark-gfm, commonmark.js, and micromark nest the autolink's `<a>`
+        // inside the link's; link text here holds no links.
+        let source = "[this <http://and.com> that](url)";
+        let document = parse(source).document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        let [Inline::Link(link)] = paragraph.children.as_slice() else {
+            panic!("{:?}", paragraph.children);
+        };
+        assert!(
+            matches!(link.children.as_slice(), [Inline::Text(text)] if text.value == "this http://and.com that"),
+            "{:?}",
+            link.children
+        );
+    }
+
+    #[test]
     fn a_backslash_before_punctuation_ends_a_literal_autolink() {
         // cmark-gfm keeps `\*x` inside the URL. Here it ends the URL, so the
         // escapes the serializer writes after an autolink read back as text.

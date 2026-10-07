@@ -23,6 +23,10 @@ spans, links, and emphasis.
 - **WHEN** `"[foo [bar](/u)](/v)"` is parsed
 - **THEN** only `[bar](/u)` becomes a link and the surrounding brackets and `(/v)` stay text
 
+#### Scenario: Angle-bracket autolink inside link text
+- **WHEN** `"[this <http://and.com> that](url)"` is parsed
+- **THEN** the paragraph holds a `Link` to `url` whose only child is `Text("this http://and.com that")`
+
 #### Scenario: Shortcut reference before an unclosed label
 - **WHEN** `"[foo][bar\n\n[foo]: /u"` is parsed
 - **THEN** the paragraph holds a shortcut `LinkReference` to `foo` followed by `Text("[bar")`

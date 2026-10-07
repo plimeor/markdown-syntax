@@ -1,0 +1,12 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: link_text
+decision: Link text holds no links: an autolink inside it reads as its text, an angle-bracket autolink without its brackets.
+count: 1
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 98 input-bytes 33 expected-bytes 49
+from gfm/autolink.cases #28; comrak oracle; cmark-gfm, commonmark.js, and micromark nest the `<a>`
+--- input
+[this <http://and.com> that](url)
+--- expected
+<p><a href="url">this http://and.com that</a></p>
+--- end

@@ -124,5 +124,5 @@ fn decision_cases_render_as_verified() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 96, "syntax decision cases drifted");
+    assert_eq!(checked, 97, "syntax decision cases drifted");
 }
