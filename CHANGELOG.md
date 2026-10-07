@@ -112,6 +112,9 @@ with struct literals, or compares canonical output needs these updates.
   - an empty `MathInline`, and code-form math whose value holds a backtick
     followed by `$`;
   - two adjacent lists in one container written with the same marker char;
+  - inside a table cell, a code span, math, raw HTML, autolink, reference
+    label, or wiki link value holding a `|` after an odd run of
+    backslashes, which no cell source can spell;
   - a directive name outside the name rule.
 - **Validation is the only gate.** `SerializeError::UnsupportedNode` is
   removed: every tree that validates is written.
@@ -133,6 +136,9 @@ with struct literals, or compares canonical output needs these updates.
   - Recorded spellings come back as written: `_a_ __b__`, `a\.b \#tag`,
     `&#35;tag &amp; x`, `www.a.b`, `a@b.c`, `<http://a.b>`, and
     `[http://a.b](http://a.b)` are each written as they were parsed.
+  - A table cell is written by the ordinary rules and then encoded once: a
+    `|` after zero or an even number of backslashes gets one more, so a
+    hand-built `Text("a|b")` in a cell is written `a\|b`.
   - A code span is written with the shortest backtick fence that neither
     occurs in its value nor closes an earlier unmatched backtick run, and
     with a padding space at each end only where the value needs one.

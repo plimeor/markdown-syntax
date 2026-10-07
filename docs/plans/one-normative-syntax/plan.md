@@ -331,7 +331,7 @@ The design review of this branch found the issues below; each task carries the o
 - [x] 10.3 Validation is the only gate: code-form math holding its close and empty inline math are validation errors, `SerializeError::UnsupportedNode` is removed, and the validation spec lists exactly the checks the code makes. Verified by `tests/validate_regressions.rs`.
 - [x] 10.4 Conformance exception lists are keyed by case content, and `exception_lists_are_current` fails on a stale or duplicate entry. Verified by `cargo test --profile ci --features html --test html_conformance`.
 - [ ] 10.5 Tests organized by flow: Markdown → AST (`.ast`), AST → Markdown (exact strings), Markdown → AST → Markdown (`.canonical.md`), source read-back with one content-keyed exception list, and tree read-back in the seeded fuzz test only.
-- [ ] 10.6 Table cells: the serializer encodes `|` in one pass over each written cell, following the parser's cell split.
+- [x] 10.6 Table cells: the serializer encodes `|` in one pass over each written cell, following the parser's cell split, and validation rejects a cell value no cell source can spell. Verified by serialization "Table cells encoded by one rule".
 - [x] 10.7 A directive opener reports why it was refused (`Refused::{Name, Unclosed, Follow}`); diagnostics are emitted by reason. Verified by the existing directive tests and a differential parse of about 575k inputs.
 - [x] 10.8 Strikethrough and autolink residue of removed configuration is deleted (`strike`, `DelimRoles`, `trim_from`). Verified by the same differential parse.
 - [x] 10.9 One crate-private decoder for escapes and character references; `WikiLink::decoded_target()` and `WikiLink::decoded_label()`. Verified by `tests/parse_inline_regressions.rs`.
