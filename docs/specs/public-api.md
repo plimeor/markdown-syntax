@@ -118,8 +118,8 @@ only by whitespace, apart from one leading U+FEFF before the first block.
 ### Requirement: Hand construction
 The AST SHALL provide `From` conversions into `Block` and `Inline` for every node
 type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
-`Text`, `Paragraph`, `Heading`, `Link`, `Code`, and `List`, all defaulting `meta`
-to no span; `markdown_syntax::prelude::*` SHALL import this surface.
+`Text`, `Paragraph`, `Heading`, `Link`, `Autolink`, `CodeInline`,
+`CharacterReference`, and `List`, all defaulting `meta` to no span; `markdown_syntax::prelude::*` SHALL import this surface.
 
 #### Scenario: Build and serialize
 - **WHEN** a `Document` is built from `Heading::new(1, [Text::from("Title")]).into()` and `Paragraph::new([Text::from("hello")]).into()`
@@ -343,7 +343,8 @@ syntax with no configuration: CommonMark with raw HTML and indented code,
 and `~~` strikethrough, footnotes and inline footnotes, GitHub alerts,
 frontmatter, shortcodes, `==` highlight, wiki links, math, and directives.
 Subscript, superscript, insert, spoiler, underline, description lists,
-scheme-less and non-HTTP literal autolinks, and MDX SHALL NOT be recognized.
+literal autolinks with a scheme other than `http`, `https`, `mailto`, and
+`xmpp`, and MDX SHALL NOT be recognized.
 
 #### Scenario: Double underscore is strong
 - **WHEN** `parse("a __b__ c")` runs

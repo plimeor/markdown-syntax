@@ -155,7 +155,7 @@ the bullet's char or begins with a space or a tab.
 spelling the AST records for it, such as a list marker, a fence's char and
 length, a heading's style, a reference's kind, an emphasis or strong
 delimiter, a link's form, an escaped char, a character reference as written,
-or a wiki link's embed mark, or else one fixed spelling, independent of source
+a wiki link's target and label as written, or a wiki link's embed mark, or else one fixed spelling, independent of source
 details the AST does not record.
 
 #### Scenario: Paragraph and heading

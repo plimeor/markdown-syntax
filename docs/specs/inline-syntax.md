@@ -175,11 +175,21 @@ SHALL NOT link a bare URL with any other scheme. The extent
 of a literal autolink SHALL follow the GFM specification, except that it SHALL
 also end before the first Unicode whitespace char, `<`, non-ASCII char in
 CommonMark's Unicode punctuation set (the Unicode `P` and `S` categories)
-other than the replacement char U+FFFD, or `[[`; the GFM trailing-punctuation
-trimming then applies to what remains. The check on the text before an email
+other than the replacement char U+FFFD, or `[[`, before a `]` outside
+backticks when no `[` came before it in the URL, and before a `\` followed by
+ASCII punctuation other than `.`; the GFM trailing-punctuation trimming then
+applies to what remains. The check on the text before an email
 SHALL read whitespace as Unicode whitespace on char boundaries; a `www.`
 literal SHALL start, as on GitHub, only after one of `*_~([]` or a space,
 tab, or line ending.
+
+#### Scenario: Backslash escape after a URL
+- **WHEN** `"www.a.com\\*x"` is parsed with `parse`
+- **THEN** the paragraph holds a literal `Autolink` whose text is `www.a.com`, an `Escape` of `*`, and `Text("x")`
+
+#### Scenario: Unopened bracket after a URL
+- **WHEN** `"https://a.b/c]d"` is parsed with `parse`
+- **THEN** the paragraph holds a literal `Autolink` whose text is `https://a.b/c` followed by `Text("]d")`
 
 #### Scenario: Trailing numeric reference
 - **WHEN** `"www.a.b&#x41;"` is parsed with `parse`
