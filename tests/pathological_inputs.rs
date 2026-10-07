@@ -82,6 +82,7 @@ fn inline_depth(nodes: &[Inline]) -> usize {
                     | Inline::Math(_)
                     | Inline::FootnoteReference(_)
                     | Inline::WikiLink(_)
+                    | Inline::Autolink(_)
             );
             if container {
                 deepest = deepest.max(depth + 1);

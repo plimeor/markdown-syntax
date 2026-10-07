@@ -1462,6 +1462,44 @@ mod footnotes_and_directives {
     }
 
     #[test]
+    fn block_directive_names_are_runs_of_letters_joined_by_dashes() {
+        let output = parse(":::call-out\nbody\n:::");
+        assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+        assert!(
+            matches!(output.document.children.as_slice(), [Block::ContainerDirective(node)] if node.name == "call-out"),
+            "{:?}",
+            output.document.children
+        );
+        for (source, span) in [
+            ("::h1[x]", 0..7),
+            ("::my_note", 0..9),
+            (":::a1\nx\n:::", 0..5),
+        ] {
+            let output = parse(source);
+            assert!(
+                matches!(output.document.children.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {:?}",
+                output.document.children
+            );
+            let codes: Vec<_> = output
+                .diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    (
+                        diagnostic.code,
+                        diagnostic.span.map(|span| span.start..span.end),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                codes,
+                [(DiagnosticCode::InvalidDirectiveName, Some(span))],
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_digit_in_a_nested_directive_name_leaves_its_lines_as_text() {
         let output = parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
         let codes: Vec<_> = output
