@@ -73,6 +73,8 @@ with struct literals, or compares canonical output needs these updates.
     other scheme stays text. A literal autolink ends at Unicode whitespace,
     `<`, a non-ASCII punctuation or symbol char (`，`, `。`, `、`), or `[[`.
     `parse` no longer panics on a no-break space before an email-like run.
+    As in cmark-gfm, a URL after a `[` no `]` has closed yet stays text
+    (`[https://foo.com]`), while an email address still links.
   - A directive name is one or more runs of ASCII letters joined by single
     `-`, in all three directive forms. A text directive forms only when its
     name is followed by `[`, `{`, a space, a tab, or a line ending, or ends

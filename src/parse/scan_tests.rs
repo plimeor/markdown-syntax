@@ -326,54 +326,6 @@ mod reference {
         None
     }
 
-    pub(super) fn has_unclosed_link_label_opener(input: &str, index: usize) -> bool {
-        let line_start = input[..index]
-            .rfind(['\n', '\r'])
-            .map_or(0, |offset| offset + 1);
-        let mut depth = 0usize;
-        let mut cursor = line_start;
-        while cursor < index {
-            let Some((next, char)) = next_char(input, cursor) else {
-                break;
-            };
-            match char {
-                '\\' => {
-                    cursor = next_char(input, next)
-                        .map(|(after_escape, _)| after_escape)
-                        .unwrap_or(next);
-                    continue;
-                }
-                '[' => depth += 1,
-                ']' => {
-                    depth = depth.saturating_sub(1);
-                }
-                _ => {}
-            }
-            cursor = next;
-        }
-        depth > 0
-    }
-
-    pub(super) fn find_link_resource_tail_close(input: &str, start: usize) -> Option<usize> {
-        let mut cursor = start;
-        while cursor < input.len() {
-            let (next, char) = next_char(input, cursor)?;
-            match char {
-                '\\' => {
-                    cursor = next_char(input, next)
-                        .map(|(after_escape, _)| after_escape)
-                        .unwrap_or(next);
-                    continue;
-                }
-                '\n' | '\r' => return None,
-                ')' => return Some(cursor),
-                _ => {}
-            }
-            cursor = next;
-        }
-        None
-    }
-
     pub(super) fn find_html_container_close(
         lines: &[Line<'_>],
         mut cursor: usize,
@@ -1014,18 +966,6 @@ fn literal_autolink_scans_match_the_reference_scan() {
             reference::parse_literal_email(input, index),
             "{input:?} at {index}"
         );
-        assert_eq!(
-            scan.literal_autolinks.resource_tail_close(input, index),
-            reference::find_link_resource_tail_close(input, index),
-            "{input:?} at {index}"
-        );
-        assert_eq!(
-            scan.literal_autolinks
-                .label_openers
-                .has_unclosed_opener(input, index),
-            reference::has_unclosed_link_label_opener(input, index),
-            "{input:?} at {index}"
-        );
     });
 }
 
@@ -1034,7 +974,7 @@ fn every_literal_autolink_the_parser_reads_has_its_destination() {
     for input in generated_inputs(700, 40, 16) {
         for index in boundaries(&input) {
             let Some((end, prefix)) =
-                parse_literal_autolink(&input, index, &mut LiteralAutolinkScan::default())
+                parse_literal_autolink(&input, index, &mut LiteralAutolinkScan::default(), true)
             else {
                 continue;
             };

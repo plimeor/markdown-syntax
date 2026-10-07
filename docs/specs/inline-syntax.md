@@ -181,7 +181,18 @@ ASCII punctuation other than `.`; the GFM trailing-punctuation trimming then
 applies to what remains. The check on the text before an email
 SHALL read whitespace as Unicode whitespace on char boundaries; a `www.`
 literal SHALL start, as on GitHub, only after one of `*_~([]` or a space,
-tab, or line ending.
+tab, or line ending. As in cmark-gfm, a `www.`, `http://`, or `https://`
+literal SHALL NOT form after a `[` that no `]` in the same inline content has
+closed yet; an email address, with or without a `mailto:` or `xmpp:` prefix,
+still links there.
+
+#### Scenario: URL after an open bracket
+- **WHEN** `"[https://foo.com]"` and `"[a [b](c) https://x.y]"` are parsed with `parse`
+- **THEN** neither holds an `Autolink`: each URL is text
+
+#### Scenario: Email after an open bracket
+- **WHEN** `"[a@b.com]"` is parsed with `parse`
+- **THEN** the paragraph holds `Text("[")`, a literal `Autolink` whose text is `a@b.com`, and `Text("]")`
 
 #### Scenario: Backslash escape after a URL
 - **WHEN** `"www.a.com\\*x"` is parsed with `parse`

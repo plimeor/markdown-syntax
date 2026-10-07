@@ -1942,6 +1942,12 @@ impl Brackets {
         }
     }
 
+    /// Whether a `[` is open: pushed and not yet closed by a `]`, as an
+    /// opener or as text left for want of nesting room.
+    fn open(&self) -> bool {
+        !self.openers.is_empty() || self.overflow > 0
+    }
+
     /// Keeps every open `[` from forming a link around what follows.
     fn close_links(&mut self) {
         self.link_floor = self.openers.len();
@@ -2509,9 +2515,12 @@ fn parse_inline_content(
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
             if literal_autolinks {
-                if let Some((end, _)) =
-                    parse_literal_autolink(input, index, &mut pass.scan.literal_autolinks)
-                {
+                if let Some((end, _)) = parse_literal_autolink(
+                    input,
+                    index,
+                    &mut pass.scan.literal_autolinks,
+                    !brackets.open(),
+                ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(autolink_node(
                         AutolinkForm::Literal,
@@ -2708,12 +2717,15 @@ fn parse_inline_content(
             }
         }
 
-        // A bare URL is an autolink even inside an open bracket; if the bracket
+        // Inside an open `[` only an email address links; if the bracket
         // forms a link, `demote_links` turns it back into text.
         if literal_autolinks {
-            if let Some((end, _)) =
-                parse_literal_autolink(input, index, &mut pass.scan.literal_autolinks)
-            {
+            if let Some((end, _)) = parse_literal_autolink(
+                input,
+                index,
+                &mut pass.scan.literal_autolinks,
+                !brackets.open(),
+            ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(autolink_node(
                     AutolinkForm::Literal,
@@ -4680,7 +4692,8 @@ fn is_email_autolink(input: &str) -> bool {
 pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
     let mut input = String::from(text);
     input.push_str(".. ]");
-    let (end, prefix) = parse_literal_autolink(&input, 0, &mut LiteralAutolinkScan::default())?;
+    let (end, prefix) =
+        parse_literal_autolink(&input, 0, &mut LiteralAutolinkScan::default(), true)?;
     (end == text.len()).then(|| {
         let mut destination = String::from(prefix);
         destination.push_str(text);
@@ -4695,12 +4708,19 @@ pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
 // the end and the prefix the destination puts before `input[index..end]`, the
 // visible original: `http://` for a `www.` URL, `mailto:` for a bare email,
 // and nothing otherwise.
+/// A literal autolink starting at `index`. `urls` is false inside an open
+/// `[`: as in cmark-gfm, a `http://`, `https://`, or `www.` URL after a `[`
+/// no `]` has closed yet stays text, and only an email address links.
 fn parse_literal_autolink(
     input: &str,
     index: usize,
     scan: &mut LiteralAutolinkScan,
+    urls: bool,
 ) -> Option<(usize, &'static str)> {
     let rest = &input[index..];
+    if !urls {
+        return parse_literal_email(input, index, &mut scan.email_local);
+    }
 
     // `http://` / `https://` URLs. cmark requires the char before the scheme
     // to be non-alphanumeric (so `mmmhttp://…` does not link from `mmmh`).
@@ -4723,9 +4743,6 @@ fn parse_literal_autolink(
         if end <= index + scheme_len {
             return None;
         }
-        if scan.suppressed_by_link_label(input, index, end) {
-            return None;
-        }
         return Some((end, ""));
     }
 
@@ -4744,9 +4761,6 @@ fn parse_literal_autolink(
         }
         let end = autolink_url_end(input, index);
         if end <= index || (end <= index + 3 && !literal_starts_line(input, index)) {
-            return None;
-        }
-        if scan.suppressed_by_link_label(input, index, end) {
             return None;
         }
         return Some((end, "http://"));
@@ -4790,65 +4804,6 @@ fn literal_starts_line(input: &str, index: usize) -> bool {
             .as_bytes()
             .get(index - 1)
             .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
-}
-
-/// Whether an unclosed `[` precedes a literal autolink on its line: the
-/// `[`/`]` depth from the line start (honouring `\` escapes) is positive. The
-/// walk is kept across calls because one inline scan asks about increasing
-/// positions; it drops back to depth 0 after each line break it consumes, which
-/// is exactly the state a walk from that line's start reaches.
-#[derive(Default)]
-struct LabelOpenerScan {
-    /// The last position asked about; the walk has stopped at the first step
-    /// at or after it.
-    queried: usize,
-    cursor: usize,
-    depth: usize,
-}
-
-impl LabelOpenerScan {
-    fn has_unclosed_opener(&mut self, input: &str, index: usize) -> bool {
-        if index < self.queried {
-            *self = Self::default();
-        }
-        while self.cursor < index {
-            let Some((next, char)) = next_char(input, self.cursor) else {
-                break;
-            };
-            match char {
-                '\\' => {
-                    // An escaped line break still ends the line, so it is left
-                    // for the next step to consume as a break.
-                    self.cursor = match next_char(input, next) {
-                        Some((_, '\n' | '\r')) | None => next,
-                        Some((after_escape, _)) => after_escape,
-                    };
-                    continue;
-                }
-                '\n' | '\r' => self.depth = 0,
-                '[' => self.depth += 1,
-                ']' => self.depth = self.depth.saturating_sub(1),
-                _ => {}
-            }
-            self.cursor = next;
-        }
-        self.queried = index;
-        self.depth > 0
-    }
-}
-
-/// One step of the walk from a link resource's start to the `)` that closes
-/// it on its line.
-fn resource_tail_close_step(input: &str, cursor: usize) -> Step {
-    let Some((next, char)) = next_char(input, cursor) else {
-        return Step::Done(None);
-    };
-    match char {
-        '\\' => Step::Next(next_char(input, next).map_or(next, |(after_escape, _)| after_escape)),
-        '\n' | '\r' => Step::Done(None),
-        ')' => Step::Done(Some(cursor)),
-        _ => Step::Next(next),
-    }
 }
 
 fn http_literal_host_ok(host: &str) -> bool {
@@ -5040,29 +4995,6 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
 struct LiteralAutolinkScan {
     /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
     email_local: ByteRun,
-    label_openers: LabelOpenerScan,
-    /// The `)` closing a link resource on its line, by resource start.
-    resource_closes: PathMemo,
-}
-
-impl LiteralAutolinkScan {
-    /// Whether the literal autolink at `index..end` stays text: an unclosed
-    /// `[` precedes it on its line, and `](` follows it with no `)` closing
-    /// that resource on the line.
-    fn suppressed_by_link_label(&mut self, input: &str, index: usize, end: usize) -> bool {
-        self.label_openers.has_unclosed_opener(input, index)
-            && input[end..].starts_with("](")
-            && self.resource_tail_close(input, end + 2).is_none()
-    }
-
-    /// The `)` closing, on its line, the link resource that starts at
-    /// `start`, memoized.
-    fn resource_tail_close(&mut self, input: &str, start: usize) -> Option<usize> {
-        self.resource_closes
-            .resolve(input.len() + 1, start, |cursor| {
-                resource_tail_close_step(input, cursor)
-            })
-    }
 }
 
 /// The extent of one run of bytes accepted by a fixed predicate: every start

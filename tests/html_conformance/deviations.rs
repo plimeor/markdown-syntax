@@ -87,7 +87,6 @@ pub const DEVIATIONS: &[Listed] = &[
     case("commonmark/list.cases", "-", 0x57ecef8531311db8, "- ```\n   \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/list.cases", "-", 0x68dbf208da8c60bc, "- ```\n    \n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
     case("commonmark/list.cases", "-", 0xcfbe10e540f5a44f, "- ```\n\t\n  ```", "a whitespace-only line in a fence in a list item keeps no whitespace past the item's indentation; the oracle keeps it; this crate follows commonmark.js, as block-syntax \"CommonMark oracle cases\" requires"),
-    case("gfm/autolink.cases", "extension.autolink", 0xeeec9d08384f38db, "[https://foo.com]", "a URL its author wrapped in brackets is linked, with the brackets as text; the oracle, without relaxed autolinks, leaves it unlinked. With a matching definition the brackets form a shortcut reference instead"),
 ];
 
 /// Cases that fail as parser defects, not by design. A case belongs here only
