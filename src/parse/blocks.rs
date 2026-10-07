@@ -1238,7 +1238,7 @@ impl<'a> BlockParser<'a> {
         // HTML block.
         if !indented && byte == Some(b'<') {
             if let Some(kind) = html_block_start(cursor.nonspace_rest()) {
-                if kind != HtmlBlockKind::UntilBlank || !interrupting {
+                if !interrupting || html_block_may_interrupt(kind) {
                     self.close_unmatched();
                     self.add_frame(
                         Kind::HtmlBlock {
@@ -2074,15 +2074,11 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
     let (delimiter, width) = list_marker_head(rest)?;
     let ordered = matches!(delimiter, ListDelimiter::Period | ListDelimiter::Paren);
     let start = if ordered {
-        let number: u64 = rest[..width - 1].parse().ok()?;
-        if interrupting && number != 1 {
-            return None;
-        }
-        Some(number)
+        Some(rest[..width - 1].parse().ok()?)
     } else {
         None
     };
-    if interrupting && is_blank(&rest[width..]) {
+    if interrupting && !marker_may_interrupt(start, is_blank(&rest[width..])) {
         return None;
     }
     let marker_offset = cursor.indent;
@@ -2121,6 +2117,49 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
         delimiter,
         indent: marker_offset + padding,
     })
+}
+
+/// Whether a list item marker numbered `number` (`None` for a bullet), with
+/// `blank` saying whether nothing follows it on its line, may interrupt a
+/// paragraph: it needs content and, when ordered, the number 1.
+fn marker_may_interrupt(number: Option<u64>, blank: bool) -> bool {
+    !blank && number.is_none_or(|number| number == 1)
+}
+
+/// Whether an HTML block of `kind` may interrupt a paragraph: every kind but
+/// a lone tag's, which ends at a blank line.
+fn html_block_may_interrupt(kind: HtmlBlockKind) -> bool {
+    kind != HtmlBlockKind::UntilBlank
+}
+
+/// Whether `block`, written on the line right after a paragraph's, starts
+/// there instead of continuing the paragraph, by the checks `start` makes on
+/// a line that would interrupt one: paragraph text continues the paragraph,
+/// a definition starts only a paragraph, indented code and a frontmatter
+/// fence cannot start in one (`---` underlines it), a list needs its first
+/// item's marker to interrupt, and an HTML block its first line. Whether a
+/// heading is written as a setext heading, whose text line would continue
+/// the paragraph, is the serializer's choice and is not judged here.
+pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
+    match block {
+        Block::Paragraph(_) | Block::Definition(_) | Block::Frontmatter(_) => false,
+        Block::CodeBlock(node) => node.kind != CodeBlockKind::Indented,
+        Block::List(list) => {
+            let number = list.ordered.then(|| list.start.unwrap_or(1));
+            let blank = list
+                .children
+                .first()
+                .is_none_or(|item| item.children.is_empty());
+            marker_may_interrupt(number, blank)
+        }
+        Block::HtmlBlock(node) => {
+            let first_line = node.value.split(['\n', '\r']).next().unwrap_or_default();
+            // The columns a leading tab reaches depend on where the block is
+            // written, so the indentation is not judged.
+            html_block_start(trim_ascii_start(first_line)).is_some_and(html_block_may_interrupt)
+        }
+        _ => true,
+    }
 }
 
 /// The delimiter and width of the list item marker `rest` opens with, when

@@ -293,7 +293,7 @@ fn write_thematic_break(
 
 /// Whether `node` is written as a setext heading: a setext underline can only
 /// express depth 1 (`=`) or 2 (`-`), and it underlines content.
-fn writes_setext(node: &Heading) -> bool {
+pub(crate) fn writes_setext(node: &Heading) -> bool {
     node.kind == HeadingKind::Setext && matches!(node.depth, 1 | 2) && !node.children.is_empty()
 }
 

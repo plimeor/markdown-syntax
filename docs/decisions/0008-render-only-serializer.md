@@ -34,9 +34,18 @@ Each spelling decision is made once, where the information to make it exists:
   reference that is not one reference, an empty code span or one holding a
   line ending, empty inline math or code-form math holding its close,
   adjacent lists written with one marker, a table cell value no cell source
-  spells, and a directive name outside the name rule. Each rule is decided by
-  the code that owns it: the parser's own functions say whether a text is an
-  autolink, and the serializer's says which marker a list is written with.
+  spells, and a directive name outside the name rule; a span holding only a
+  span whose delimiters join its own, adjacent strikethroughs, a line ending
+  in text, a break after a break or on a one-line label or cell, a label or
+  identifier the parser would not read back, a task item without its
+  paragraph, a tight item's block that cannot interrupt the paragraph before
+  it, an empty list or inline footnote, misplaced frontmatter or frontmatter
+  holding its fence, an alert title or info string the parser would trim
+  away, an empty bare destination, and indented code with a blank edge line.
+  Each rule is decided by the code that owns it: the parser's own functions
+  say whether a text is an autolink, a label is a label, or a block
+  interrupts a paragraph, and the serializer's say which marker a list is
+  written with and whether a heading is written as setext.
   The serializer refuses nothing that validates. A shape that depends on
   neighbouring characters is not rejected; it renders and may read back
   differently.

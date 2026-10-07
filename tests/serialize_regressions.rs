@@ -433,11 +433,15 @@ mod value_encodings {
 
     #[test]
     fn definition_labels_are_written_as_recorded() {
-        // A label is matched raw, so it is written as the AST holds it; one
-        // holding an unescaped bracket reads back as something else. A label
-        // may span lines, and its escapes stay as written.
+        // A label is matched raw, so it is written as the AST holds it. A
+        // label may span lines, and its escapes stay as written; one holding
+        // an unescaped bracket would read back as something else, and
+        // validation rejects it.
+        assert!(matches!(
+            definition("a]b\\c[d", "a]b\\c[d").to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
         for (label, identifier, expected) in [
-            ("a]b\\c[d", "a]b\\c[d", "[a]b\\c[d]: /u\n"),
             ("line\nbreak", "line break", "[line\nbreak]: /u\n"),
             ("a\\]b\\\\c\\[d", "a\\]b\\\\c\\[d", "[a\\]b\\\\c\\[d]: /u\n"),
         ] {
@@ -463,16 +467,18 @@ mod value_encodings {
                 }),
             ])
         };
-        // A label holding an unescaped bracket or whitespace reads back as
-        // something else.
         assert_eq!(
-            rendered(&footnote("a]b\\c[d")),
-            "See [^a]b\\c[d]\n\n[^a]b\\c[d]: note\n"
+            rendered(&footnote("a\\]b\\c\\[d")),
+            "See [^a\\]b\\c\\[d]\n\n[^a\\]b\\c\\[d]: note\n"
         );
-        assert_eq!(
-            rendered(&footnote("white space")),
-            "See [^white space]\n\n[^white space]: note\n"
-        );
+        // A label holding an unescaped bracket or whitespace would read back
+        // as something else, and validation rejects it.
+        for label in ["a]b\\c[d", "white space"] {
+            assert!(matches!(
+                footnote(label).to_markdown(),
+                Err(SerializeError::InvalidDocument(_))
+            ));
+        }
     }
 }
 
@@ -503,8 +509,12 @@ mod recorded_spellings {
         let built =
             |inner| paragraph_document(vec![strong(STAR, vec![emphasis(inner, vec![text("em")])])]);
         assert_eq!(rendered(&built(UNDERSCORE)), "**_em_**\n");
-        // With one delimiter the runs merge and read back the other way round.
-        assert_eq!(rendered(&built(STAR)), "***em***\n");
+        // With one delimiter the runs would merge into `***em***` and read
+        // back the other way round, so validation rejects it.
+        assert!(matches!(
+            built(STAR).to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
     }
 
     #[test]

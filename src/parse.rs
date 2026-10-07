@@ -25,6 +25,7 @@ mod nul_replacement;
 mod scan_tests;
 mod source_map;
 
+pub(crate) use blocks::interrupts_paragraph;
 use source_map::{DerivedText, Segment, SourceMap};
 
 /// The largest ordered-list item number: a marker holds at most 9 digits.
@@ -176,7 +177,7 @@ fn source_char(char: char) -> char {
 /// directives, footnote definitions, HTML containers, description details) the
 /// parser opens. Deeper container markers stay leaf-block text, so recursion
 /// and the native stack it uses stay bounded.
-const MAX_BLOCK_NESTING: usize = 32;
+pub(crate) const MAX_BLOCK_NESTING: usize = 32;
 
 /// Parses the blocks of a container's derived content.
 /// The column `text` reaches from column `column`, with tab stops every four.
@@ -270,7 +271,7 @@ impl<'a> LineSegments<'a> {
     }
 }
 
-fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
+pub(crate) fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
     match line.trim_end_matches([' ', '\t']) {
         "---" => Some(FrontmatterKind::Yaml),
         "+++" => Some(FrontmatterKind::Toml),
@@ -343,15 +344,14 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
         "caution" => AlertKind::Caution,
         _ => return None,
     };
-    let title = line[close + 1..].trim_matches([' ', '\t']);
-    Some((
-        kind,
-        if title.is_empty() {
-            None
-        } else {
-            Some(title.into())
-        },
-    ))
+    Some((kind, alert_title(&line[close + 1..])))
+}
+
+/// The title an alert marker line gives with `text` after its `]`: the text
+/// without the spaces and tabs around it, or none when nothing else is left.
+pub(crate) fn alert_title(text: &str) -> Option<String> {
+    let title = text.trim_matches([' ', '\t']);
+    (!title.is_empty()).then(|| title.into())
 }
 
 fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
@@ -4121,6 +4121,32 @@ fn reference_label_is_within_limit(label: &str) -> bool {
     label.chars().take(REFERENCE_LABEL_MAX_CHARS + 1).count() <= REFERENCE_LABEL_MAX_CHARS
 }
 
+/// Whether `[label]` reads back as a link reference label holding `label`:
+/// the walk to its `]` ends at its own `]`, so the label holds no unescaped
+/// bracket and does not escape its close; it is within the length limit, is
+/// not blank, and holds no blank line, which would end its paragraph.
+pub(crate) fn is_reference_label(label: &str) -> bool {
+    let written = alloc::format!("[{label}]");
+    path_walk(1, |cursor| reference_label_step(&written, cursor)) == Some(written.len() - 1)
+        && reference_label_is_within_limit(label)
+        && !normalize_label(label).is_empty()
+        && !holds_blank_line(label)
+}
+
+/// Whether `[^label]` reads back as a footnote label holding `label`: a
+/// footnote label whose `]` it does not escape.
+pub(crate) fn is_written_footnote_label(label: &str) -> bool {
+    is_footnote_label(label) && !is_escaped_at(&alloc::format!("{label}]"), label.len())
+}
+
+/// Whether a line of `text` other than its first and its last, which share
+/// their lines with what is written around `text`, is blank.
+fn holds_blank_line(text: &str) -> bool {
+    let text = text.replace("\r\n", "\n");
+    let lines: Vec<&str> = text.split(['\n', '\r']).collect();
+    lines.len() > 2 && lines[1..lines.len() - 1].iter().any(|line| is_blank(line))
+}
+
 fn trim_up_to_three_spaces(input: &str) -> Option<&str> {
     let (columns, bytes) = leading_indent(input);
     if columns <= 3 {
@@ -4224,7 +4250,7 @@ fn task_marker_checked(input: &str) -> Option<bool> {
 }
 
 /// Whether `text` holds only spaces and tabs, as a blank line does.
-fn is_blank(text: &str) -> bool {
+pub(crate) fn is_blank(text: &str) -> bool {
     text.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
 }
 
@@ -5338,7 +5364,7 @@ fn is_email_domain(input: &str, min_labels: usize) -> bool {
 
 /// A footnote label: no space, tab, or line ending and, as in a link label,
 /// no unescaped bracket.
-fn is_footnote_label(label: &str) -> bool {
+pub(crate) fn is_footnote_label(label: &str) -> bool {
     !label.is_empty()
         && reference_label_is_within_limit(label)
         && !label.contains([' ', '\t', '\n', '\r'])

@@ -120,7 +120,30 @@ with struct literals, or compares canonical output needs these updates.
   - inside a table cell, a code span, math, raw HTML, autolink, reference
     label, or wiki link value holding a `|` after an odd run of
     backslashes, which no cell source can spell;
-  - a directive name outside the name rule.
+  - a directive name outside the name rule;
+  - an `Emphasis` or `Strong` whose only child is an `Emphasis` with the
+    same delimiter, a `Delete` holding only a `Delete`, a `Mark` holding
+    only a `Mark`, and two adjacent `Delete`s;
+  - a `Text` holding a line ending; a soft break, or a hard break of
+    trailing spaces, right after a break; a break in a table cell or in a
+    leaf or container directive label;
+  - a reference or definition identifier other than the parser's
+    normalization of its label; a definition or full reference label the
+    parser does not read back as a label (an unescaped bracket, an escaped
+    close, a blank line, over 999 chars, or blank); a footnote label that is
+    not one; a definition label that is `^` and a footnote label where the
+    parser would read a footnote definition;
+  - a task list item without a non-empty paragraph after its leading
+    definitions;
+  - in a tight list item, a block after a paragraph that cannot interrupt
+    it: a paragraph, a definition, indented code, frontmatter, a setext
+    heading, an ordered list not starting at 1, a list whose first item is
+    empty, or an HTML block that is a lone tag or opens no HTML block;
+  - an empty `List`; a `Frontmatter` inside a container or holding its own
+    fence line; an empty `InlineFootnote`; an `Alert` title that is empty or
+    has spaces or tabs around it; a `CodeBlock` info string of `Some("")`;
+    an empty bare destination; an indented `CodeBlock` that is empty or
+    starts or ends with a blank line.
 - **Validation is the only gate.** `SerializeError::UnsupportedNode` is
   removed: every tree that validates is written.
 - **Serialize options keep or replace.** `SerializeOptions::bullet` is an
