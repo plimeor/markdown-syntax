@@ -21,7 +21,7 @@ diagnostic per invalid shape it finds, and an empty list for a valid document.
 
 ### Requirement: Shapes that cannot be written
 Validation SHALL reject exactly these shapes, each visible from the node, its
-children, or its sibling blocks:
+children, its sibling blocks, or whether it sits in a table cell:
 
 - Block sequences: two adjacent `List`s in the same container written with
   the same marker char; a list recording a delimiter of the other list kind is
@@ -59,6 +59,12 @@ children, or its sibling blocks:
 - `CodeInline`: an empty value, or a value holding a line ending.
 - `MathInline`: an empty value; a dollar fence of length 0; code-form math
   whose value holds a backtick followed by `$`, which would close it early.
+- In a table cell, at any depth: a `CodeInline`, `MathInline`, or `Html`
+  value, an `Autolink` text, a `LinkReference`, `ImageReference`, or
+  `FootnoteReference` label, or a `WikiLink` target or label that holds a `|`
+  right after an odd run of backslashes. A row splits at a `|` after no
+  backslash or an even run of them, and the cell reads an odd run before a
+  `|` with one backslash less, so no cell source gives such a value.
 
 #### Scenario: Empty inline math
 - **WHEN** a paragraph holding a `MathInline` with an empty value, in the dollar or the code form, is validated
@@ -91,6 +97,10 @@ children, or its sibling blocks:
 #### Scenario: Code span holding a line ending
 - **WHEN** a paragraph holding `CodeInline::new("a\nb")` is validated
 - **THEN** the result holds an `InvalidDocument` error
+
+#### Scenario: Code span holding an escaped pipe in a table cell
+- **WHEN** a table cell holding a `CodeInline` whose value is `a\|b` is validated and serialized
+- **THEN** the result holds an `InvalidDocument` error, and `to_markdown()` returns `Err(SerializeError::InvalidDocument(_))`; the same code span in a paragraph is valid and is written `` `a\|b` ``
 
 #### Scenario: Adjacent lists with one marker
 - **WHEN** a document holding two adjacent unordered `List`s that both use `-` is validated

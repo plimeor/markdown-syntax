@@ -232,7 +232,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             let inner = write_blocks(&node.children, options, Join::Gap, false)?;
             Ok(format!(
                 "[^{}]: {}",
-                escape_label(&node.label, false),
+                node.label,
                 indent_continuation(&inner)
             ))
         }
@@ -254,7 +254,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             "::{}{}{}",
             node.name,
             write_directive_label(&node.label)?,
-            write_attributes(&node.attributes, Context::BLOCK)
+            write_attributes(&node.attributes)
         )),
         Block::ContainerDirective(node) => {
             let mut inner = write_blocks(&node.children, options, Join::Gap, false)?;
@@ -269,7 +269,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
                 "{fence}{}{}{}\n{inner}{fence}",
                 node.name,
                 write_directive_label(&node.label)?,
-                write_attributes(&node.attributes, Context::BLOCK)
+                write_attributes(&node.attributes)
             ))
         }
     }
@@ -315,11 +315,11 @@ fn write_heading(node: &Heading) -> Result<String, SerializeError> {
 }
 
 fn write_definition(node: &Definition) -> String {
-    let destination = write_destination(&node.destination, node.destination_kind, Context::BLOCK);
-    let mut output = format!("[{}]: {}", escape_label(&node.label, false), destination);
+    let destination = write_destination(&node.destination, node.destination_kind);
+    let mut output = format!("[{}]: {}", node.label, destination);
     if let (Some(title), Some(title_kind)) = (&node.title, node.title_kind) {
         output.push(' ');
-        output.push_str(&write_title(title, title_kind, Context::BLOCK));
+        output.push_str(&write_title(title, title_kind));
     }
     output
 }
@@ -638,8 +638,8 @@ fn write_table(node: &Table) -> Result<String, SerializeError> {
         let cells = row
             .cells
             .iter()
-            .map(|cell| write_inlines(&cell.children, Context::CELL))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|cell| Ok(encode_cell(&write_inlines(&cell.children, Context::BLOCK)?)))
+            .collect::<Result<Vec<_>, SerializeError>>()?;
         output.push_str(&format!("| {} |", cells.join(" | ")));
         if row_index == 0 {
             output.push_str(&format!("\n| {delimiter_row} |"));
@@ -648,29 +648,37 @@ fn write_table(node: &Table) -> Result<String, SerializeError> {
     Ok(output)
 }
 
+/// A cell's inline content, written as anywhere else, encoded as cell
+/// source. The parser splits a row at each `|` after no backslash or an even
+/// run of them, and reads an odd run before a `|` with one backslash less, so
+/// a `\` added before each `|` of the first kind reads back as written. A `|`
+/// that the content already puts after an odd run, an escaped `|` in text,
+/// reads with one backslash less, still as an escaped `|`; validation rejects
+/// the cell values whose meaning that would change.
+fn encode_cell(written: &str) -> String {
+    let mut output = String::with_capacity(written.len());
+    let mut backslashes = 0usize;
+    for char in written.chars() {
+        if char == '|' && backslashes % 2 == 0 {
+            output.push('\\');
+        }
+        backslashes = if char == '\\' { backslashes + 1 } else { 0 };
+        output.push(char);
+    }
+    output
+}
+
 /// Where inline content is written, as the value encodings of its nodes read
 /// it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Context {
-    /// In a table cell, which a raw `|` would split.
-    table_cell: bool,
     /// In a heading, which a line ending would end.
     heading: bool,
 }
 
 impl Context {
-    const BLOCK: Self = Self {
-        table_cell: false,
-        heading: false,
-    };
-    const CELL: Self = Self {
-        table_cell: true,
-        heading: false,
-    };
-    const HEADING: Self = Self {
-        table_cell: false,
-        heading: true,
-    };
+    const BLOCK: Self = Self { heading: false };
+    const HEADING: Self = Self { heading: true };
 }
 
 fn write_inlines(inlines: &[Inline], context: Context) -> Result<String, SerializeError> {
@@ -784,7 +792,7 @@ fn write_inline(
             out.push_str(&node.name);
             out.push(':');
         }
-        Inline::Code(node) => write_code_span(node, context, out),
+        Inline::Code(node) => write_code_span(node, out),
         Inline::Link(node) => {
             write_span(out, "[", &node.children, "](", context)?;
             out.push_opaque(|out| {
@@ -793,15 +801,14 @@ fn write_inline(
                     &node.destination,
                     node.destination_kind,
                     node.title.as_deref().zip(node.title_kind),
-                    context,
                 );
             });
         }
         Inline::Autolink(node) => out.push_opaque(|out| match node.form {
-            AutolinkForm::Literal => push_verbatim(out, &node.text, context),
+            AutolinkForm::Literal => out.push_str(&node.text),
             AutolinkForm::Angle => {
                 out.push('<');
-                push_verbatim(out, &node.text, context);
+                out.push_str(&node.text);
                 out.push('>');
             }
         }),
@@ -813,19 +820,18 @@ fn write_inline(
                     &node.destination,
                     node.destination_kind,
                     node.title.as_deref().zip(node.title_kind),
-                    context,
                 );
             });
         }
         Inline::LinkReference(node) => {
             write_span(out, "[", &node.children, "]", context)?;
-            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label, context));
+            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label));
         }
         Inline::ImageReference(node) => {
             write_span(out, "![", &node.alt, "]", context)?;
-            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label, context));
+            out.push_opaque(|out| write_reference_kind(out, node.kind, &node.label));
         }
-        Inline::Html(node) => out.push_opaque(|out| push_verbatim(out, &node.value, context)),
+        Inline::Html(node) => out.push_opaque(|out| out.push_str(&node.value)),
         Inline::SoftBreak(_) if context.heading => out.push(' '),
         Inline::SoftBreak(_) => out.push('\n'),
         Inline::LineBreak(node) => match node.kind {
@@ -834,11 +840,11 @@ fn write_inline(
         },
         Inline::Math(node) => {
             let math = write_inline_math(node);
-            out.push_opaque(|out| push_verbatim(out, &math, context));
+            out.push_opaque(|out| out.push_str(&math));
         }
         Inline::FootnoteReference(node) => {
             out.push_str("[^");
-            out.push_str(&escape_label(&node.label, context.table_cell));
+            out.push_str(&node.label);
             out.push(']');
         }
         Inline::WikiLink(node) => out.push_opaque(|out| {
@@ -846,10 +852,10 @@ fn write_inline(
                 out.push('!');
             }
             out.push_str("[[");
-            out.push_str(&write_wikilink_part(&node.target, context));
+            out.push_str(&node.target);
             if node.target != node.label {
-                out.push_str(if context.table_cell { "\\|" } else { "|" });
-                out.push_str(&write_wikilink_part(&node.label, context));
+                out.push('|');
+                out.push_str(&node.label);
             }
             out.push_str("]]");
         }),
@@ -864,7 +870,7 @@ fn write_inline(
                 out.push(':');
                 out.push_str(&node.name);
                 out.push_str(&label);
-                out.push_str(&write_attributes(&node.attributes, context));
+                out.push_str(&write_attributes(&node.attributes));
             });
         }
     }
@@ -900,24 +906,24 @@ fn write_resource(
     destination: &str,
     kind: LinkDestinationKind,
     title: Option<(&str, LinkTitleKind)>,
-    context: Context,
 ) {
-    out.push_str(&write_destination(destination, kind, context));
+    out.push_str(&write_destination(destination, kind));
     if let Some((title, title_kind)) = title {
         out.push(' ');
-        out.push_str(&write_title(title, title_kind, context));
+        out.push_str(&write_title(title, title_kind));
     }
     out.push(')');
 }
 
 /// What follows a reference's text: nothing, `[]`, or `[label]`.
-fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str, context: Context) {
+fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str) {
     match kind {
         ReferenceKind::Shortcut => {}
         ReferenceKind::Collapsed => out.push_str("[]"),
         ReferenceKind::Full => {
             out.push('[');
-            out.push_str(&escape_label(label, context.table_cell));
+            // A label is matched as written.
+            out.push_str(label);
             out.push(']');
         }
     }
@@ -927,14 +933,10 @@ fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str, cont
 /// that neither the value holds nor a run written before it in the same
 /// inline content opens, and padded with a space at each end when the value
 /// would otherwise lose an end to the fence or to the space stripping.
-fn write_code_span(node: &CodeInline, context: Context, out: &mut InlineOut) {
-    let value = if context.table_cell {
-        escape_pipes(&node.value)
-    } else {
-        node.value.clone()
-    };
+fn write_code_span(node: &CodeInline, out: &mut InlineOut) {
+    let value = &node.value;
     out.scan_open_runs();
-    let held = backtick_runs(&value);
+    let held = backtick_runs(value);
     // An escaped backtick written just before joins the opening fence into
     // one longer run, which an earlier open run of that length would take as
     // its close.
@@ -948,12 +950,12 @@ fn write_code_span(node: &CodeInline, context: Context, out: &mut InlineOut) {
         .unwrap_or(1);
     let fence = "`".repeat(length);
     out.push_str(&fence);
-    if code_span_needs_padding(&value) {
+    if code_span_needs_padding(value) {
         out.push(' ');
-        out.push_str(&value);
+        out.push_str(value);
         out.push(' ');
     } else {
-        out.push_str(&value);
+        out.push_str(value);
     }
     out.push_str(&fence);
     // The span's own runs are matched; what follows is read afresh.
@@ -994,27 +996,6 @@ fn write_inline_math(node: &MathInline) -> String {
     }
 }
 
-/// Writes verbatim content, with the pipes a table cell would split at
-/// escaped: the cell reads each `\|` as `|` inside such content.
-fn push_verbatim(out: &mut String, text: &str, context: Context) {
-    if context.table_cell {
-        out.push_str(&escape_pipes(text));
-    } else {
-        out.push_str(text);
-    }
-}
-
-fn escape_pipes(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    for char in input.chars() {
-        if char == '|' {
-            output.push('\\');
-        }
-        output.push(char);
-    }
-    output
-}
-
 /// A directive's `[label]`, or nothing for an empty label.
 fn write_directive_label(label: &[Inline]) -> Result<String, SerializeError> {
     if label.is_empty() {
@@ -1024,7 +1005,7 @@ fn write_directive_label(label: &[Inline]) -> Result<String, SerializeError> {
     }
 }
 
-fn write_attributes(attributes: &[DirectiveAttribute], context: Context) -> String {
+fn write_attributes(attributes: &[DirectiveAttribute]) -> String {
     if attributes.is_empty() {
         return String::new();
     }
@@ -1045,7 +1026,7 @@ fn write_attributes(attributes: &[DirectiveAttribute], context: Context) -> Stri
             (_, Some(value)) => {
                 output.push_str(&attribute.name);
                 output.push_str("=\"");
-                output.push_str(&escape_title(value, LinkTitleKind::DoubleQuote, context));
+                output.push_str(&escape_title(value, LinkTitleKind::DoubleQuote));
                 output.push('"');
             }
             (_, None) => output.push_str(&attribute.name),
@@ -1062,27 +1043,7 @@ fn is_directive_shorthand_value(input: &str) -> bool {
             .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'))
 }
 
-/// A reference, definition, or footnote label, which is matched as written:
-/// it is written as the AST holds it, with a pipe escaped in a table cell.
-fn escape_label(input: &str, escape_pipe: bool) -> String {
-    if escape_pipe {
-        escape_pipes(input)
-    } else {
-        input.into()
-    }
-}
-
-/// A wiki link's target or label as written; a table cell reads each `\|`
-/// as `|`, so there each `|` is written `\|`.
-fn write_wikilink_part(input: &str, context: Context) -> String {
-    if context.table_cell {
-        input.replace('|', "\\|")
-    } else {
-        input.into()
-    }
-}
-
-fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -> String {
+fn write_destination(input: &str, kind: LinkDestinationKind) -> String {
     match kind {
         LinkDestinationKind::Omitted if input.is_empty() => String::new(),
         LinkDestinationKind::Angle => {
@@ -1090,7 +1051,6 @@ fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -
             for char in input.chars() {
                 match char {
                     char if char.is_control() => output.push_str(&char_reference(char)),
-                    '|' if context.table_cell => output.push_str("\\|"),
                     '\\' | '<' | '>' => {
                         output.push('\\');
                         output.push(char);
@@ -1110,7 +1070,6 @@ fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -
                     char if char.is_control() || char == ' ' => {
                         output.push_str(&char_reference(char));
                     }
-                    '|' if context.table_cell => output.push_str("\\|"),
                     '(' | ')' | '\\' | '<' | '>' | '&' => {
                         output.push('\\');
                         output.push(char);
@@ -1123,7 +1082,7 @@ fn write_destination(input: &str, kind: LinkDestinationKind, context: Context) -
     }
 }
 
-fn write_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
+fn write_title(input: &str, kind: LinkTitleKind) -> String {
     let (open, close) = match kind {
         LinkTitleKind::DoubleQuote => ('"', '"'),
         LinkTitleKind::SingleQuote => ('\'', '\''),
@@ -1131,17 +1090,16 @@ fn write_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
     };
     let mut output = String::new();
     output.push(open);
-    output.push_str(&escape_title(input, kind, context));
+    output.push_str(&escape_title(input, kind));
     output.push(close);
     output
 }
 
-fn escape_title(input: &str, kind: LinkTitleKind, context: Context) -> String {
+fn escape_title(input: &str, kind: LinkTitleKind) -> String {
     let mut output = String::new();
     for char in input.chars() {
         match char {
             char if char.is_control() => output.push_str(&char_reference(char)),
-            '|' if context.table_cell => output.push_str("\\|"),
             '\\' | '&' => {
                 output.push('\\');
                 output.push(char);

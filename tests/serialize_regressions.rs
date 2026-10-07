@@ -324,7 +324,7 @@ mod value_encodings {
     }
 
     #[test]
-    fn table_cells_escape_resource_pipes() {
+    fn a_cell_escapes_the_pipes_of_destinations_and_titles() {
         let document = document(vec![table(
             vec!["Link", "Image"],
             vec![
@@ -348,14 +348,19 @@ mod value_encodings {
         )]);
 
         let markdown = assert_reads_back(&document);
-        assert!(markdown.contains(r#"b\|c "t\|u""#));
-        assert!(markdown.contains(r#"y\|z "i\|j""#));
+        assert_eq!(
+            markdown,
+            r#"| Link | Image |
+| --- | --- |
+| [a](b\|c "t\|u") | ![x](y\|z "i\|j") |
+"#
+        );
     }
 
     #[test]
-    fn table_cell_values_escape_their_pipes_and_text_holds_escapes() {
-        // Literal text pipes are built as escapes; the values of code, math,
-        // labels, and attributes are encoded by the serializer.
+    fn a_cell_escapes_the_pipes_of_values_and_keeps_escaped_pipes() {
+        // An escaped pipe is written once; every other pipe, in a value or a
+        // label, takes a backslash.
         let document = document(vec![
             table(
                 vec![
@@ -417,20 +422,75 @@ mod value_encodings {
         ]);
 
         let markdown = assert_reads_back(&document);
-        assert!(markdown.contains(r"a\|b"));
-        assert!(markdown.contains(r"`c\|d`"));
-        assert!(markdown.contains(r"$x\|y$"));
-        assert!(markdown.contains(r"[link\|label](/link)"));
-        assert!(markdown.contains(r"![img\|alt](/img)"));
-        assert!(markdown.contains(r"[ref\|text][pipe\|id]"));
-        assert!(markdown.contains(r#":note[label\|text]{data="value\|pipe"}"#));
+        assert_eq!(
+            markdown,
+            r#"| Text | Code | Math | Link | Image | Reference | Directive |
+| --- | --- | --- | --- | --- | --- | --- |
+| a\|b | `c\|d` | $x\|y$ | [link\|label](/link) | ![img\|alt](/img) | [ref\|text][pipe\|id] | :note[label\|text]{data="value\|pipe"} |
+
+[pipe|id]: /dest
+"#
+        );
     }
 
     #[test]
-    fn a_text_pipe_in_a_cell_is_written_as_recorded() {
+    fn a_text_pipe_in_a_cell_is_written_escaped() {
+        // The cell reads `\|` as an escaped pipe, which compares as text.
         let document = document(vec![table(vec!["Text"], vec![vec![text("a|b")]])]);
-        let markdown = assert_reads_back_otherwise(&document);
-        assert_eq!(markdown, "| Text |\n| --- |\n| a|b |\n");
+        let markdown = assert_reads_back(&document);
+        assert_eq!(markdown, "| Text |\n| --- |\n| a\\|b |\n");
+    }
+
+    #[test]
+    fn a_pipe_after_an_even_backslash_run_in_a_cell_takes_one_more() {
+        let document = document(vec![table(
+            vec!["Escape", "Code"],
+            vec![
+                vec![text("a"), escape('\\'), text("|b")],
+                vec![Inline::Code(CodeInline::new(r"a\\|b"))],
+            ],
+        )]);
+        let markdown = assert_reads_back(&document);
+        assert_eq!(
+            markdown,
+            r"| Escape | Code |
+| --- | --- |
+| a\\\|b | `a\\\|b` |
+"
+        );
+    }
+
+    #[test]
+    fn a_cell_reads_its_text_as_a_paragraph_does() {
+        // Text recorded as `a\\|b` is written as it is, then encoded: the
+        // cell reads an escaped backslash and a pipe, as a paragraph does.
+        let recorded = r"a\\|b";
+        let document = document(vec![table(vec!["Text"], vec![vec![text(recorded)]])]);
+        let markdown = document.to_markdown().expect("document serializes");
+        assert_eq!(markdown, "| Text |\n| --- |\n| a\\\\\\|b |\n");
+        let reparsed = parse(&markdown).document;
+        let [Block::Table(table)] = reparsed.children.as_slice() else {
+            panic!("{markdown:?}");
+        };
+        assert_eq!(
+            normalized(&paragraph_document(table.rows[1].cells[0].children.clone())),
+            normalized(&parse(recorded).document),
+        );
+    }
+
+    #[test]
+    fn a_cell_value_holding_an_escaped_pipe_is_invalid() {
+        // No cell source reads as the value `a\|b`: `a\|b` reads as `a|b`,
+        // and `a\\|b` splits the cell.
+        let code = || Inline::Code(CodeInline::new(r"a\|b"));
+        let document = document(vec![table(vec!["Code"], vec![vec![code()]])]);
+        assert_eq!(document.validate().len(), 1);
+        assert!(matches!(
+            document.to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
+        let markdown = assert_reads_back(&paragraph_document(vec![code()]));
+        assert_eq!(markdown, "`a\\|b`\n");
     }
 
     #[test]
