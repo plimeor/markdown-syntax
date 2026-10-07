@@ -17,6 +17,14 @@ input size.
 - **WHEN** an input of tens of thousands of unclosed openers of one construct (for example `[`, `==`, `^[`, or `<!X`) is parsed
 - **THEN** doubling the input at most roughly doubles the time
 
+#### Scenario: Repeated fragment combinations
+- **WHEN** any pair or triple of syntax fragments — link, image, footnote, wiki link, and directive openers and closers, literal autolinks, code, math, emphasis, strikethrough, and highlight delimiters, a backslash, a character reference, a pipe, a space, a line ending, and block quote and list markers — is repeated `n` and `2n` times, alone or after a paragraph's first word, and parsed and serialized
+- **THEN** doubling the repetitions at most roughly doubles the time of each
+
+#### Scenario: Literal autolinks in open labels
+- **WHEN** thousands of link labels left open, each holding a literal autolink and followed by `(`, such as `"[ www.a]("` repeated, are parsed
+- **THEN** quadrupling them at most roughly quadruples the time
+
 #### Scenario: Diagnostics running to the end of a paragraph
 - **WHEN** thousands of lines each holding a malformed text directive opener, such as `" x :a{"`, are parsed, at the top level or in a block quote
 - **THEN** quadrupling the lines at most roughly quadruples the time
@@ -47,7 +55,7 @@ nests; the deepest input SHALL fit a 2 MiB thread stack, in unoptimized builds
 too.
 
 #### Scenario: Deep nesting on a small stack
-- **WHEN** inputs nested thousands of levels deep (block quotes, lists, links, emphasis) are parsed, serialized, rendered, and validated on a 2 MiB thread in a debug build
+- **WHEN** inputs nested tens of thousands of levels deep (block quotes, lists, links, emphasis) are parsed, serialized, rendered, and validated on a 2 MiB thread, in a debug or an optimized build
 - **THEN** none overflows the stack
 
 ### Requirement: Block nesting limit

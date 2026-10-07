@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use markdown_syntax::{parse, Block, Document, Inline};
 
 /// Generous for an unoptimized build; every input below parses in
-/// milliseconds when parsing is linear.
+/// milliseconds when parsing is linear. It catches a hang; growth is checked
+/// by `assert_linear_growth` below and by `tests/linear_growth.rs`.
 const TIME_LIMIT: Duration = Duration::from_secs(10);
 
 /// Held by each test for its whole run: the tests here time their work, and
@@ -25,7 +26,9 @@ fn one_at_a_time() -> MutexGuard<'static, ()> {
 
 /// Thread stack for each parse: the Rust default for spawned threads. Enough
 /// for the nesting limits even in an unoptimized build, far too small for
-/// recursion that follows input depth.
+/// recursion that follows input depth. Optimized frames are smaller, so the
+/// deep inputs below nest tens of thousands of levels: deeper than any
+/// realistic frame size fits in this stack.
 const STACK_BYTES: usize = 2 << 20;
 
 /// Parses `input` on a small-stack thread, serializes and validates the
@@ -129,7 +132,7 @@ fn contains_link(nodes: &[Inline]) -> bool {
 #[test]
 fn nested_link_labels_parse_in_bounded_time() {
     let _serial = one_at_a_time();
-    for depth in [30, 1_000] {
+    for depth in [30, 50_000] {
         let input = "[".repeat(depth) + "x" + &"](u)".repeat(depth);
         let document = parse_bounded("nested link labels", input);
         assert!(
@@ -256,11 +259,11 @@ fn long_marker_runs_on_a_quote_continuation_line_are_bounded() {
 #[test]
 fn inline_nesting_stops_at_the_limit() {
     let _serial = one_at_a_time();
-    let input = "*a ".repeat(5_000) + &" a*".repeat(5_000);
+    let input = "*a ".repeat(50_000) + &" a*".repeat(50_000);
     let document = parse_bounded("nested emphasis", input);
     assert_eq!(emphasis_depth(first_paragraph(&document)), 16);
 
-    let input = "**a ".repeat(5_000) + &" a**".repeat(5_000);
+    let input = "**a ".repeat(50_000) + &" a**".repeat(50_000);
     let document = parse_bounded("nested strong", input);
     assert_eq!(emphasis_depth(first_paragraph(&document)), 16);
 
@@ -271,7 +274,7 @@ fn inline_nesting_stops_at_the_limit() {
         ("nested highlights", "==a ", " a=="),
         ("nested spoilers", "||a ", " a||"),
     ] {
-        let input = open.repeat(5_000) + "x" + &close.repeat(5_000);
+        let input = open.repeat(50_000) + "x" + &close.repeat(50_000);
         let document = parse_bounded(name, input);
         assert!(
             inline_depth(first_paragraph(&document)) <= 32,
@@ -415,29 +418,100 @@ fn long_nested_containers_and_tables_parse_in_bounded_time() {
     parse_bounded("cell of escaped pipes", escaped_pipes);
 }
 
-/// Asserts that the work `run` times grows about linearly: four times the
-/// input may take at most eight times as long, where a quadratic cost takes
-/// sixteen. The best of three runs counts, and a small slack absorbs noise.
-fn assert_linear_growth(name: &str, n: usize, run: impl Fn(usize) -> Duration) {
-    let best = |n| (0..3).map(|_| run(n)).min().expect("three runs");
-    let (small, large) = (best(n), best(4 * n));
+/// Each timed sample repeats its work until it takes at least this long, so
+/// that timer and scheduler noise stay small beside it in an optimized build
+/// too, where one run of the work may take microseconds.
+const MIN_SAMPLE: Duration = Duration::from_millis(5);
+
+/// The best of three samples of `work` on each of `inputs`, taken in turn so
+/// that a change in load falls on all of them. Every sample repeats `work`
+/// as often as the first input needs to fill `MIN_SAMPLE`, so the samples
+/// compare as single runs would.
+fn best_samples<T, const N: usize>(inputs: &[T; N], work: impl Fn(&T)) -> [Duration; N] {
+    let sample = |input: &T, repeats: u32| {
+        let started = Instant::now();
+        for _ in 0..repeats {
+            work(input);
+        }
+        started.elapsed()
+    };
+    let mut repeats = 1;
+    while repeats < 1 << 16 && sample(&inputs[0], repeats) < MIN_SAMPLE {
+        repeats *= 2;
+    }
+    let mut best = [Duration::MAX; N];
+    for _ in 0..3 {
+        for (input, best) in inputs.iter().zip(&mut best) {
+            *best = (*best).min(sample(input, repeats));
+        }
+    }
+    best
+}
+
+/// `best_samples`, taken again until they satisfy `linear`, at most three
+/// times. A burst of load on the machine can spoil one measurement of a
+/// linear cost; a superlinear cost fails every one.
+fn growth_samples<T, const N: usize>(
+    inputs: &[T; N],
+    work: impl Fn(&T),
+    linear: impl Fn(&[Duration; N]) -> bool,
+) -> [Duration; N] {
+    let mut samples = best_samples(inputs, &work);
+    for _ in 1..3 {
+        if linear(&samples) {
+            break;
+        }
+        samples = best_samples(inputs, &work);
+    }
+    samples
+}
+
+/// Asserts that `work` on `setup(n)` grows about linearly with `n`: four
+/// times the input may take at most ten times as long, where a quadratic
+/// cost takes sixteen. The margin over four covers the slower memory a
+/// larger input and its tree reach.
+fn assert_linear_growth<T>(name: &str, n: usize, setup: impl Fn(usize) -> T, work: impl Fn(&T)) {
+    let linear = |[small, large]: &[Duration; 2]| *large <= *small * 10;
+    let samples = growth_samples(&[setup(n), setup(4 * n)], work, linear);
+    let [small, large] = samples;
     assert!(
-        large <= small * 8 + Duration::from_millis(20),
-        "{name}: {small:?} at {n}, {large:?} at {}",
+        linear(&samples),
+        "{name}: {small:?} at {n}, {large:?} at {} per sample",
         4 * n
     );
 }
 
-fn time_parse(input: &str) -> Duration {
-    let started = Instant::now();
-    let _ = parse(input);
-    started.elapsed()
+/// Asserts that `work` on `setup(depth)` at most roughly doubles in time with
+/// each doubling of the depth: each step may take at most three times as
+/// long as the one before, where a cost quadratic in the depth takes four.
+fn assert_depth_growth<T>(
+    name: &str,
+    depths: [usize; 3],
+    setup: impl Fn(usize) -> T,
+    work: impl Fn(&T),
+) {
+    let linear = |[low, mid, high]: &[Duration; 3]| *mid <= *low * 3 && *high <= *mid * 3;
+    let samples = growth_samples(&depths.map(setup), work, linear);
+    assert!(
+        linear(&samples),
+        "{name}: {samples:?} per sample at depths {depths:?}"
+    );
 }
 
-fn time_serialize(document: &Document) -> Duration {
-    let started = Instant::now();
+fn parse_input(input: &impl AsRef<str>) {
+    let _ = parse(input.as_ref());
+}
+
+fn parse_document(input: String) -> Document {
+    parse(&input).document
+}
+
+fn serialize(document: &Document) {
     let _ = document.to_markdown();
-    started.elapsed()
+}
+
+fn parse_and_serialize(input: &impl AsRef<str>) {
+    assert!(parse(input.as_ref()).document.to_markdown().is_ok());
 }
 
 #[test]
@@ -446,15 +520,29 @@ fn parsing_grows_linearly_with_lines_and_diagnostics() {
     // Each malformed opener's diagnostic runs to the end of the paragraph;
     // translating it must not walk the lines after it.
     for line in [" x :a{\n", "> x :a{ \n"] {
-        assert_linear_growth(line, 8_000, |n| time_parse(&line.repeat(n)));
+        assert_linear_growth(line, 8_000, |n| line.repeat(n), parse_input);
     }
     let quote_prefix = "> ".repeat(30);
-    assert_linear_growth("long nested block quote", 500, |n| {
-        let quoted: String = (0..n)
-            .map(|line| format!("{quote_prefix}line {line} *a* [b](u)\r\n"))
-            .collect();
-        time_parse(&quoted)
-    });
+    assert_linear_growth(
+        "long nested block quote",
+        500,
+        |n| -> String {
+            (0..n)
+                .map(|line| format!("{quote_prefix}line {line} *a* [b](u)\r\n"))
+                .collect()
+        },
+        parse_input,
+    );
+}
+
+#[test]
+fn literal_autolinks_in_open_labels_grow_linearly() {
+    let _serial = one_at_a_time();
+    // Each literal autolink in a label left open looks ahead for the label's
+    // resource; the look must not run to the paragraph's end.
+    for unit in ["[ www.a](", "[ http://a]("] {
+        assert_linear_growth(unit, 500, |n| unit.repeat(n), parse_input);
+    }
 }
 
 #[test]
@@ -463,25 +551,33 @@ fn block_containers_grow_linearly_with_their_lines() {
     // A paragraph after a `:` line continues with lazy lines, as it did when
     // the line opened description details, and so does a footnote
     // definition's paragraph.
-    assert_linear_growth("long footnote definition", 2_000, |n| {
-        time_parse(&(String::from("[^1]: b\n") + &"c\n".repeat(n)))
-    });
-    assert_linear_growth("long former description details", 2_000, |n| {
-        time_parse(&(String::from("a\n: b\n") + &"c\n".repeat(n)))
-    });
+    assert_linear_growth(
+        "long footnote definition",
+        2_000,
+        |n| String::from("[^1]: b\n") + &"c\n".repeat(n),
+        parse_input,
+    );
+    assert_linear_growth(
+        "long former description details",
+        2_000,
+        |n| String::from("a\n: b\n") + &"c\n".repeat(n),
+        parse_input,
+    );
     // Each line passes the same nested containers.
     let prefix = "> - ".repeat(8);
-    assert_linear_growth("long nested containers", 500, |n| {
-        let mut input = format!("{prefix}x\n");
-        let continuation = format!("> {}", "  ".repeat(8));
-        for line in 0..n {
-            input.push_str(&format!("{continuation}line {line} *a*\n"));
-        }
-        let started = Instant::now();
-        let document = parse(&input).document;
-        assert!(document.to_markdown().is_ok());
-        started.elapsed()
-    });
+    assert_linear_growth(
+        "long nested containers",
+        500,
+        |n| {
+            let mut input = format!("{prefix}x\n");
+            let continuation = format!("> {}", "  ".repeat(8));
+            for line in 0..n {
+                input.push_str(&format!("{continuation}line {line} *a*\n"));
+            }
+            input
+        },
+        parse_and_serialize,
+    );
 }
 
 #[test]
@@ -489,57 +585,90 @@ fn open_definitions_and_terms_grow_linearly() {
     let _serial = one_at_a_time();
     // A title left open runs to the paragraph's end; each line that could
     // close it must not reparse the title so far.
-    for name in ["open title", "open title before pipes"] {
-        assert_linear_growth(name, 2_000, |n| {
-            let line = if name == "open title" { "\nx" } else { "\n|x" };
-            time_parse(&(String::from("[a]: /u \"") + &line.repeat(n)))
-        });
+    for (name, line) in [("open title", "\nx"), ("open title before pipes", "\n|x")] {
+        assert_linear_growth(
+            name,
+            2_000,
+            |n| String::from("[a]: /u \"") + &line.repeat(n),
+            parse_input,
+        );
     }
     // An unclosed label before lines a table delimiter row could follow.
-    assert_linear_growth("open label before pipes", 2_000, |n| {
-        time_parse(&(format!("[{}", "a".repeat(85)) + &"\n|x".repeat(n)))
-    });
+    assert_linear_growth(
+        "open label before pipes",
+        2_000,
+        |n| format!("[{}", "a".repeat(85)) + &"\n|x".repeat(n),
+        parse_input,
+    );
     // Former description markers after a long paragraph.
-    assert_linear_growth("markers after a long paragraph", 2_000, |n| {
-        time_parse(&("a\n".repeat(n) + "    b\n" + &"~ x\n".repeat(n)))
-    });
+    assert_linear_growth(
+        "markers after a long paragraph",
+        2_000,
+        |n| "a\n".repeat(n) + "    b\n" + &"~ x\n".repeat(n),
+        parse_input,
+    );
     // Quoted former MDX expression openers before list items.
-    assert_linear_growth("quoted expression openers", 1_000, |n| {
-        time_parse(&"> {\n- a\n".repeat(n))
-    });
+    assert_linear_growth(
+        "quoted expression openers",
+        1_000,
+        |n| "> {\n- a\n".repeat(n),
+        parse_input,
+    );
 }
 
 #[test]
 fn serialization_grows_linearly_with_definitions_and_lists() {
     let _serial = one_at_a_time();
-    assert_linear_growth("definitions before paragraphs", 500, |n| {
-        let mut input: String = (0..n).map(|i| format!("[a{i}]: /u{i}\n")).collect();
-        input.push('\n');
-        input.push_str(&"plain words here\n\n".repeat(n));
-        time_serialize(&parse(&input).document)
-    });
-    assert_linear_growth("lists that need a layout", 100, |n| {
-        time_serialize(&parse(&"-\n  ---\n\nx\n\n".repeat(n)).document)
-    });
-    assert_linear_growth("items that need a layout", 100, |n| {
-        time_serialize(&parse(&"-\n  ---\n".repeat(n)).document)
-    });
+    assert_linear_growth(
+        "definitions before paragraphs",
+        500,
+        |n| {
+            let mut input: String = (0..n).map(|i| format!("[a{i}]: /u{i}\n")).collect();
+            input.push('\n');
+            input.push_str(&"plain words here\n\n".repeat(n));
+            parse_document(input)
+        },
+        serialize,
+    );
+    assert_linear_growth(
+        "lists that need a layout",
+        100,
+        |n| parse_document("-\n  ---\n\nx\n\n".repeat(n)),
+        serialize,
+    );
+    assert_linear_growth(
+        "items that need a layout",
+        100,
+        |n| parse_document("-\n  ---\n".repeat(n)),
+        serialize,
+    );
     // Groups of abutting runs.
-    assert_linear_growth("abutting run groups", 250, |n| {
-        time_serialize(&parse(&"***b_*_b_* ".repeat(n)).document)
-    });
+    assert_linear_growth(
+        "abutting run groups",
+        250,
+        |n| parse_document("***b_*_b_* ".repeat(n)),
+        serialize,
+    );
 }
 
 #[test]
 fn serialization_grows_linearly_with_runs() {
     let _serial = one_at_a_time();
-    assert_linear_growth("tilde run", 20_000, |n| {
-        time_serialize(&parse(&format!("a {} b", "~".repeat(n))).document)
-    });
-    assert_linear_growth("nested emphasis paragraphs", 20, |n| {
-        let paragraph = format!("{}bc{}\n\n", "*a ".repeat(16), "c*".repeat(16));
-        time_serialize(&parse(&paragraph.repeat(n)).document)
-    });
+    assert_linear_growth(
+        "tilde run",
+        20_000,
+        |n| parse_document(format!("a {} b", "~".repeat(n))),
+        serialize,
+    );
+    assert_linear_growth(
+        "nested emphasis paragraphs",
+        20,
+        |n| {
+            let paragraph = format!("{}bc{}\n\n", "*a ".repeat(16), "c*".repeat(16));
+            parse_document(paragraph.repeat(n))
+        },
+        serialize,
+    );
 }
 
 #[test]
@@ -565,21 +694,11 @@ fn deeply_nested_emphasis_serializes_in_time_linear_in_its_depth() {
         started.elapsed()
     );
 
-    // Forty such paragraphs, so that the time measured is well past the
-    // slack the bound allows.
-    let best = |depth| {
-        let document = parse(&format!("{}\n\n", paragraph(depth)).repeat(40)).document;
-        assert!(document.to_markdown().is_ok());
-        (0..3)
-            .map(|_| time_serialize(&document))
-            .min()
-            .expect("three runs")
-    };
-    let (four, eight, sixteen) = (best(4), best(8), best(16));
-    assert!(
-        eight <= four * 3 + Duration::from_millis(5)
-            && sixteen <= eight * 3 + Duration::from_millis(5),
-        "{four:?} at 4, {eight:?} at 8, {sixteen:?} at 16"
+    assert_depth_growth(
+        "nested emphasis",
+        [4, 8, 16],
+        |depth| parse_document(paragraph(depth)),
+        serialize,
     );
 }
 
@@ -603,24 +722,7 @@ fn nested_quote_depth_grows_time_linearly() {
         started.elapsed()
     );
 
-    let best = |depth| {
-        let input = quoted(depth);
-        (0..3)
-            .map(|_| {
-                let started = Instant::now();
-                let document = parse(&input).document;
-                assert!(document.to_markdown().is_ok());
-                started.elapsed()
-            })
-            .min()
-            .expect("three runs")
-    };
-    let (four, eight, sixteen) = (best(4), best(8), best(16));
-    assert!(
-        eight <= four * 3 + Duration::from_millis(5)
-            && sixteen <= eight * 3 + Duration::from_millis(5),
-        "{four:?} at 4, {eight:?} at 8, {sixteen:?} at 16"
-    );
+    assert_depth_growth("nested quotes", [4, 8, 16], quoted, parse_and_serialize);
 }
 
 #[test]
@@ -638,25 +740,15 @@ fn nested_list_depth_grows_time_linearly() {
         }
         input
     };
-    let best = |depth| {
-        let input = listed(depth);
-        (0..5)
-            .map(|_| {
-                let started = Instant::now();
-                let document = parse(&input).document;
-                assert!(document.to_markdown().is_ok());
-                started.elapsed()
-            })
-            .min()
-            .expect("five runs")
-    };
-    let (eight, sixteen, thirty_two) = (best(8), best(16), best(32));
-    assert!(thirty_two < Duration::from_secs(1), "{thirty_two:?}");
+    let started = Instant::now();
+    parse_and_serialize(&listed(32));
     assert!(
-        sixteen.as_secs_f64() <= eight.as_secs_f64() * 2.75 + 0.005
-            && thirty_two.as_secs_f64() <= sixteen.as_secs_f64() * 2.75 + 0.005,
-        "{eight:?} at 8, {sixteen:?} at 16, {thirty_two:?} at 32"
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
     );
+
+    assert_depth_growth("nested lists", [8, 16, 32], listed, parse_and_serialize);
 }
 
 #[test]
