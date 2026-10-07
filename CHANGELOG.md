@@ -154,6 +154,10 @@ with struct literals, or compares canonical output needs these updates.
     content on the line after the bullet.
   - A list marker override yields where the list before it in the same
     container is written with the same marker.
+- **Linear time on more inputs.** Literal autolinks inside unclosed link
+  text, `www.` hosts after backslash escapes, long `~` runs in a paragraph,
+  runs of escaped `$`, and multi-line definition labels parse in linear
+  time.
 - **Block structure follows CommonMark's algorithm.** Block quotes, list
   items, container directives, footnote definitions, HTML containers, and
   alerts are read in one pass over a stack of open blocks, matching
