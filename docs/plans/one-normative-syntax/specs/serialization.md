@@ -18,7 +18,8 @@ would read back as a different tree, it SHALL still return it.
 ### Requirement: Text is written as recorded
 The serializer SHALL write each `Text` value as it is, each `Escape` as a
 backslash and its char, and each `CharacterReference` as its reference, and
-SHALL add no escape of its own.
+SHALL add no escape of its own, apart from the backslashes a table cell's
+encoding adds before pipes.
 
 #### Scenario: Literal asterisks in hand-built text
 - **WHEN** a hand-built paragraph holding `Text("*not emphasis*")` is serialized
@@ -44,7 +45,11 @@ continuation line.
 
 #### Scenario: Code span across a lazy delimiter-row line
 - **WHEN** the document parsed from ``"> `|a\n|-|-|\nb`"`` is serialized
-- **THEN** `to_markdown()` returns ``"> `|a\n> |-|-|\n> b`\n"``, which reads back as a block quote holding a `Table`
+- **THEN** `to_markdown()` returns ``"> `|a |-|-| b`\n"``, which reads back as the same tree
+
+#### Scenario: HTML block ending in an empty line inside a quote
+- **WHEN** `parse("> <!--\n>\n\nx").document.to_markdown()` runs
+- **THEN** it returns `"> <!--\n>\n\nx\n"`: the HTML block's empty last line keeps its `>`
 
 ### Requirement: Heading soft breaks
 The serializer SHALL write a `SoftBreak` inside a heading as one space.
@@ -58,8 +63,8 @@ The serializer SHALL write a `SoftBreak` inside a heading as one space.
 - **THEN** `to_markdown()` returns `"# a b\n"`
 
 ### Requirement: Values are encoded by rule
-The serializer SHALL write a value that a construct holds as raw text (code,
-math, an info string, a link destination, raw HTML) so that the construct
+The serializer SHALL write a value that a construct holds as raw text (a code
+block, math, an info string, a link destination, raw HTML) so that the construct
 reads back with the same value: a fence longer than any fence-like run in the
 value, whitespace at the ends of an info string or in a bare destination as
 character references, and a value's own line endings as they are.
@@ -96,10 +101,123 @@ character references, and a value's own line endings as they are.
 - **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
 - **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
 
-### Requirement: Links written in their recorded form
-The serializer SHALL write a `Link` in the form it records: a literal autolink
-as its text, an angle-bracket autolink as `<` and its text and `>`, and an
-inline link as `[text](destination "title")`.
+### Requirement: Breaks and item content placed by rule
+The serializer SHALL write a dash thematic break as `- - -` when it opens the
+document or directly follows a paragraph line, where `---` would open
+frontmatter or underline a setext heading; and SHALL start a list item's
+content on the line after its bullet when that content is a thematic break of
+the bullet's char or begins with one to three spaces or a tab; content that
+begins with indented code SHALL stay on the bullet's line after one space,
+since an item that starts empty cannot interrupt a paragraph. It SHALL start a
+footnote definition's content on the line after its label, indented four
+spaces, when that content begins with a space or a tab. It SHALL number an
+ordered list's items from the list's start, one up per item, and write an item
+whose number would exceed 999999999, the largest a 9-digit marker holds, with
+999999999.
+
+#### Scenario: Indented code opening a nested item
+- **WHEN** `parse("- a\n  -     x").document.to_markdown()` runs
+- **THEN** it returns `"- a\n  -     x\n"`, which reads back as the same tree
+
+#### Scenario: Footnote definition opening with indented code
+- **WHEN** `parse("[^1]:\n\n        code").document.to_markdown()` runs
+- **THEN** it returns `"[^1]:\n        code\n"`, which reads back as a `FootnoteDefinition` holding an indented `CodeBlock`
+
+#### Scenario: Item numbers at the marker limit
+- **WHEN** `parse("999999999. a\n1. b").document.to_markdown()` runs
+- **THEN** it returns `"999999999. a\n999999999. b\n"`, which reads back as one list starting at 999999999
+
+#### Scenario: Dash break opening the document
+- **WHEN** `parse("---").document.to_markdown()` runs
+- **THEN** it returns `"- - -\n"`
+
+#### Scenario: Dash break after a paragraph line
+- **WHEN** `parse("- a\n  - - -").document.to_markdown()` runs
+- **THEN** it returns `"- a\n  - - -\n"`
+
+#### Scenario: Break of the bullet's char
+- **WHEN** `parse("-\n  ---").document.to_markdown()` runs
+- **THEN** it returns `"-\n  ---\n"`
+
+#### Scenario: Item content opening with spaces
+- **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
+- **THEN** it returns `"-\n   <v>\n"`
+
+### Requirement: Table cells encoded by one rule
+The serializer SHALL write a table cell's inline content as it writes any
+inline content and then encode it as cell source by one rule: a `\` is added
+before each `|` that no backslash or an even run of backslashes precedes, and
+nothing else changes. The row splits at none of the cell's pipes, and the cell
+reads each added `\|` as the `|` written, so its inline content reads as the
+content written. A `|` that the content already writes after an odd run of
+backslashes, as an `Escape('|')` does, is read with one backslash less, as an
+escaped `|`, which it also is outside a cell. The rule covers every inline
+alike: a `Text` holding `|` is written with `\|`.
+
+#### Scenario: Escaped pipe written once
+- **WHEN** `parse("| a\\|b |\n| - |").document.to_markdown()` runs
+- **THEN** it returns `"| a\\|b |\n| --- |\n"`
+
+#### Scenario: Pipe in hand-built text
+- **WHEN** a hand-built table whose body cell holds `Text("a|b")` under a header cell holding `Text("h")` is serialized
+- **THEN** `to_markdown()` returns `"| h |\n| --- |\n| a\\|b |\n"`, which reads back with the cell holding `Text("a")`, `Escape('|')`, and `Text("b")`
+
+#### Scenario: Pipe after an even backslash run
+- **WHEN** a hand-built table cell holds a `CodeInline` whose value is `a`, two backslashes, `|`, and `b`
+- **THEN** the cell is written as that code span with a third backslash before the `|`, and reads back with the same value
+
+#### Scenario: Pipes in destinations and titles
+- **WHEN** a hand-built table cell holds a `Link` whose text is `Text("a")`, to `b|c` with the double-quoted title `t|u`
+- **THEN** the cell is written `[a](b\|c "t\|u")`, and reads back as the same link
+
+### Requirement: ATX content ending in a closing-like run
+The serializer SHALL write an ATX heading whose written content ends in a run
+of `#` that is all of the content or follows a space or a tab with a closing
+sequence ` #` after it, so the run reads back as content.
+
+#### Scenario: Heading ending in a hash
+- **WHEN** `parse("# C # #").document.to_markdown()` runs
+- **THEN** it returns `"# C # #\n"`, which reads back as a heading holding `Text("C #")`
+
+#### Scenario: Heading of hashes
+- **WHEN** a hand-built level-1 `Heading` holding `Text("#")` is serialized
+- **THEN** `to_markdown()` returns `"# # #\n"`, which reads back as the same tree
+
+### Requirement: Code spans written from their value
+The serializer SHALL write a code span from its value alone: fenced by the
+shortest backtick run that the value holds no run of and that would not close
+a backtick run written before it in the same inline pass that opens no code
+span (runs inside code spans, raw HTML, math, autolinks, wiki links, text
+directives, and link and image destinations, titles, and reference labels do
+not count); and with one space added at each end when the value starts or
+ends with a backtick, or starts and ends with a space and is not all spaces.
+
+#### Scenario: Backticks in the value
+- **WHEN** a hand-built paragraph holding `CodeInline::new("a``b")` is serialized
+- **THEN** `to_markdown()` returns ``"`a``b`\n"``
+
+#### Scenario: Padding
+- **WHEN** the document parsed from ``"`` `code` ``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`` `code` ``\n"``
+
+#### Scenario: Line endings in the source
+- **WHEN** the document parsed from ``"``\nfoo\nbar\n``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`foo bar`\n"``
+
+#### Scenario: Backtick run written before the span
+- **WHEN** the document parsed from ``"`foo``bar``"`` is serialized
+- **THEN** `to_markdown()` returns ``"`foo``bar``\n"``, whose first backtick stays text
+
+### Requirement: Links and autolinks written in their recorded form
+The serializer SHALL write a literal `Autolink` as its text, an angle-bracket
+`Autolink` as `<` and its text and `>`, and a `Link` as
+`[text](destination "title")`. It SHALL write a full reference as its text
+and then its label, and a shortcut or collapsed reference as its label as
+written, which is both its text and its key.
+
+#### Scenario: Shortcut reference holding a code span
+- **WHEN** ``parse("[`` a ``]\n\n[`` a ``]: /u").document.to_markdown()`` runs
+- **THEN** it returns ``"[`` a ``]\n\n[`` a ``]: /u\n"``, whose reference still names the definition
 
 #### Scenario: Literal URL
 - **WHEN** `parse("see http://a.b").document.to_markdown()` runs
@@ -125,36 +243,13 @@ inline link as `[text](destination "title")`.
 - **WHEN** a document holding a paragraph with `Link::new("u", [Text::from("a")])` is serialized
 - **THEN** `to_markdown()` returns `"[a](u)\n"`
 
-### Requirement: Breaks and item content placed by rule
-The serializer SHALL write a dash thematic break as `- - -` when it opens the
-document or directly follows a paragraph line, where `---` would open
-frontmatter or underline a setext heading; and SHALL start a list item's
-content on the line after its bullet when that content is a thematic break of
-the bullet's char or begins with a space or a tab.
-
-#### Scenario: Dash break opening the document
-- **WHEN** `parse("---").document.to_markdown()` runs
-- **THEN** it returns `"- - -\n"`
-
-#### Scenario: Dash break after a paragraph line
-- **WHEN** `parse("- a\n  - - -").document.to_markdown()` runs
-- **THEN** it returns `"- a\n  - - -\n"`
-
-#### Scenario: Break of the bullet's char
-- **WHEN** `parse("-\n  ---").document.to_markdown()` runs
-- **THEN** it returns `"-\n  ---\n"`
-
-#### Scenario: Item content opening with spaces
-- **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
-- **THEN** it returns `"-\n   <v>\n"`
-
 ## MODIFIED Requirements
 
 ### Requirement: Canonical output
 `Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
 spelling the AST records for it, such as a list marker, a fence's char and
 length, a heading's style, a reference's kind, an emphasis or strong
-delimiter, a link's form, an escaped char, a character reference as written,
+delimiter, an autolink's form, an escaped char, a character reference as written,
 a wiki link's target and label as written, or a wiki link's embed mark, or else one fixed spelling, independent of source
 details the AST does not record.
 
@@ -185,41 +280,84 @@ details the AST does not record.
 ### Requirement: Round-trip stability
 For a parsed document, parsing the Markdown that `to_markdown` writes SHALL
 yield a document equal to the first as "Tree comparison" defines, and
-serializing that reparsed document SHALL yield the same text byte for byte.
-This SHALL hold for every fixture under `tests/fixtures/roundtrip/` and for
-every document the seeded generators build from their recorded seeds, apart
-from the generated documents that `tests/serialize_roundtrip_fuzz.rs` lists
-one by one, each with the reason it does not read back.
+serializing that reparsed document SHALL yield the same text byte for byte,
+unless the source holds a detail the AST does not record (decision 0008): a
+lazy continuation line, an indentation width, or a count of blank lines.
 
-#### Scenario: Round-trip fixtures
-- **WHEN** each fixture under `tests/fixtures/roundtrip/` is parsed, serialized, reparsed, and serialized again
-- **THEN** the reparsed AST matches the first and the two serialized texts are identical
+The tests check serialization one flow at a time, each against one oracle:
+
+- Markdown → AST: each `.md` under `tests/fixtures/roundtrip/` with a sibling
+  `.ast` parses to the tree that golden holds (`tests/fixtures.rs`).
+- AST → Markdown: each hand-built tree in `tests/serialize_regressions.rs`
+  serializes to exactly the Markdown the test states.
+- Markdown → AST → Markdown: each `.md` with a sibling `.canonical.md`, and
+  each input in `CANONICAL_INPUTS` in `tests/fixtures.rs`, serializes to
+  exactly the Markdown its golden or entry holds.
+- Source read-back, Markdown → AST → Markdown → AST: every input of one
+  corpus, the input `.md` and `.cases` files under `tests/fixtures/roundtrip/`
+  and the inputs `tests/fixtures.rs` lists, reads back, apart from the inputs
+  `NOT_READING_BACK` in `tests/fixtures.rs` lists.
+- Tree read-back over generated documents: every document the seeded
+  generators in `tests/serialize_roundtrip_fuzz.rs` build reads back, apart
+  from the documents `NOT_READING_BACK` in that file lists.
+
+Each of the two exception lists names its inputs one by one, each with what
+the AST does not record that makes it read back as a different tree, and
+fails when a listed input reads back or no longer exists.
+
+#### Scenario: Source read-back corpus
+- **WHEN** each input of the read-back corpus is parsed, serialized, reparsed, and serialized again
+- **THEN** the reparsed AST matches the first and the two serialized texts are identical, unless `NOT_READING_BACK` in `tests/fixtures.rs` lists the input
+
+#### Scenario: Lazy continuation line
+- **WHEN** the document parsed from `"> a\n==="` is serialized
+- **THEN** `to_markdown()` returns `"> a\n> ===\n"`, which reads back as a heading inside the quote, and `NOT_READING_BACK` lists the input as a lazy line
+
+#### Scenario: Stale exception
+- **WHEN** an input `NOT_READING_BACK` lists reads back, or no input of the corpus matches an entry
+- **THEN** the read-back test fails
 
 #### Scenario: Seeded round-trip generators
 - **WHEN** the inline, block-oriented, and emphasis-heavy generators in `tests/serialize_roundtrip_fuzz.rs` run with the seeds recorded in that file
 - **THEN** every generated document round-trips, except those the file lists with a reason, which serialize without panicking
 
 ### Requirement: Serialize options
-`SerializeOptions` SHALL control the line ending and the trailing newline; a
-bullet marker, ordered-list delimiter, or code fence character other than its
-default SHALL replace the one the AST records, while the default keeps it. A
-replaced list marker SHALL yield where the list before it in the same
-container is written with the same marker: that list takes the next marker in
-the order `-`, `*`, `+`, or `.`, `)` for an ordered list. Options SHALL be
-constructed by mutating `SerializeOptions::default()`.
+`SerializeOptions` SHALL control the line ending and the trailing newline. The
+`bullet`, `ordered_delimiter`, and `fence_marker` options SHALL keep the
+marker each node records when `None`, the default, and SHALL write every
+unordered list, ordered list, or fenced code block with the marker they hold
+when `Some`, whichever marker that is; a fenced block whose info string holds a
+backtick SHALL take tildes regardless. A replaced list marker SHALL yield where
+the list before it in the same container is written with the same marker: that
+list takes the next marker in the order `-`, `*`, `+`, or `.`, `)` for an
+ordered list. Options SHALL be constructed by mutating
+`SerializeOptions::default()`.
 
 #### Scenario: CRLF without final newline
 - **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
 - **THEN** it returns `"# Title"`
 
 #### Scenario: Bullet override
-- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = ListDelimiter::Plus`
+- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Plus)`
 - **THEN** it returns `"+ a\n\n- b\n\n+ c\n"`
+
+#### Scenario: Normalizing to the dash
+- **WHEN** `parse("* a").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Dash)`
+- **THEN** it returns `"- a\n"`
+
+#### Scenario: Tilde fences
+- **WHEN** `parse("```\na\n```").document.to_markdown_with(&options)` runs with `fence_marker = Some(FenceMarker::Tilde)`
+- **THEN** it returns `"~~~\na\n~~~\n"`
+
+#### Scenario: Recorded markers by default
+- **WHEN** `parse("* a\n\n~~~\nb\n~~~").document.to_markdown()` runs
+- **THEN** it returns `"* a\n\n~~~\nb\n~~~\n"`
 
 ### Requirement: Invalid documents are rejected
 Serialization SHALL validate the document first and return
 `SerializeError::InvalidDocument` with the validation diagnostics when it is
-invalid, and `SerializeError::UnsupportedNode` for a node kind it cannot write.
+invalid. Validation is the only check that refuses a document: every valid
+document is written.
 
 #### Scenario: Empty table
 - **WHEN** a hand-built document holding a `Table` with no rows is serialized
@@ -243,7 +381,7 @@ Round-trip stability SHALL compare a reparsed document with the parsed one
 apart from spans, reading each `Escape` as a `Text` holding its char, each
 `CharacterReference` as a `Text` holding its value, and each `SoftBreak`
 inside a heading as a `Text` holding a space, and merging adjacent `Text`
-nodes; a code span compares by its `value`.
+nodes.
 
 #### Scenario: Escape against text
 - **WHEN** a paragraph holding `Escape('*')` and `Text("a")` is compared with one holding `Text("*a")`

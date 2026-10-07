@@ -50,6 +50,13 @@ serializer only renders.
   - A wiki link's content holds no unescaped `[` or `]`, so `[[[foo]]]` is
     `[`, a wiki link, and `]`. A wiki link still wins over a defined
     reference label.
+  - As in cmark-gfm, a `www.`, `http://`, or `https://` literal does not
+    form after a link or image `[` no `]` has closed yet, and a bracketed
+    IPv6 host is no URL host; an email address still links there, and an
+    inline footnote's `^[` opens no link text.
+  - Link text holds no link: an autolink inside it, image alt included,
+    reads as its text, and a wiki link, also in a text directive's label,
+    keeps the brackets around it from forming a link.
 - New AST fields record which spelling a node used:
   - `Emphasis` and `Strong` record a `*` or `_` delimiter.
   - `Link` records whether it was written inline, as an angle-bracket
@@ -95,6 +102,14 @@ serializer only renders.
     and character references included, and the HTML renderer decodes them.
   - A literal autolink trims a trailing `;` after a hex character reference
     alone, as after a decimal one.
+  - A shortcut or collapsed reference is written with its label as written;
+    indented code opening a list item stays on the marker line; a span may
+    open with a backslash break.
+  - An ordered list's item numbers stop at 999999999.
+  - An ATX heading whose content ends in a closing-like `#` run gets a
+    closing sequence; a quoted value's empty last line keeps its `>`; and
+    footnote content opening with whitespace starts on the line after the
+    label.
 - The conformance bench lists, apart from the by-design deviations, the
   known defects: cases that fail on `main` as well.
 - Decision 0007 records the one syntax and supersedes 0005. Decision 0008
@@ -148,7 +163,7 @@ Specs:
 - **Strict GFM literal autolinks.** Turning off `relaxed_autolinks` also
   turns off the extents it gave the kept forms: balanced `[]`/`{}`, links on
   an invalid host, and the short-`www.` rule. The kept forms then match
-  cmark-gfm and markdown-rs.
+  cmark-gfm, which also leaves a URL after an open `[` as text.
   - Turned down: keeping the relaxed extents for `http(s)://` and `www.`.
     They match only comrak's relaxed mode.
 - **Directive names.**
@@ -286,13 +301,13 @@ Specs:
   - full container prefixes, and heading soft breaks as spaces;
   - the value encodings, and the list-marker yield rule.
 
-  Verified by the serialization scenarios "Text is written as recorded", "Container lines take their full prefix", "Heading soft breaks", "Values are encoded by rule", "Links written in their recorded form", "Canonical output", and "Serialize options".
-- [x] 6.3 Inventory: run every fixture under `tests/fixtures/roundtrip/` through parse, render, and reparse. Settle each failure with a recorded spelling in the parser (task 4.1's rule), a fixed render rule, or a validation rule, never a search, and list each addition in this plan's What changes. Verified by `cargo test --test fixtures` and serialization "Round-trip fixtures".
+  Verified by the serialization scenarios "Text is written as recorded", "Container lines take their full prefix", "Heading soft breaks", "Values are encoded by rule", "Links and autolinks written in their recorded form", "Canonical output", and "Serialize options".
+- [x] 6.3 Inventory: run every fixture under `tests/fixtures/roundtrip/` through parse, render, and reparse. Settle each failure with a recorded spelling in the parser (task 4.1's rule), a fixed render rule, or a validation rule, never a search, and list each addition in this plan's What changes. Verified by `cargo test --test fixtures` and serialization "Source read-back corpus".
 
   Inputs that read back only with a lazy line, whitespace, or a blank line
   the AST does not record are accepted as not reading back (Risks, first
   entry): the fixtures `gfm_table_containers` and `gfm_table_edges`, the
-  derived cases listed in `tests/support/fixtures.rs`, and the inputs that
+  derived cases listed in `NOT_READING_BACK` in `tests/fixtures.rs`, and the inputs that
   `tests/serialize_regressions.rs` and `tests/serialize_roundtrip_fuzz.rs`
   list, each with its reason.
 - [x] 6.4 Seeded round trip: `tests/serialize_roundtrip_fuzz.rs` runs one syntax and lists each generated document that does not read back, with its reason. Listed documents must serialize without panicking, and a listed document that reads back fails the test. Keep every parsed input of the removed serialization scenarios in `tests/serialize_regressions.rs`, each asserting a round trip or a listed reason. Verified by serialization "Seeded round-trip generators" and `cargo test`.
@@ -342,3 +357,13 @@ The design review of this branch found the issues below; each task carries the o
 - [x] 10.14 Validation rejects the hand-built shapes that validated but were written as Markdown reading back as another tree: a span holding only a span whose delimiters join its own, adjacent strikethroughs, line endings in text, breaks after breaks and in cells and block directive labels, reference and footnote labels and identifiers the parser would not read back, a definition label that opens a footnote, task items without a paragraph, a tight item's block that cannot interrupt the paragraph before it, empty lists and inline footnotes, nested or self-fenced frontmatter, trimmed alert titles and empty info strings, empty bare destinations, and indented code with blank edge lines. Each rule calls the parser's or the serializer's own function. Verified by `tests/validate_regressions.rs` (each shape is rejected; the serializer before these rules wrote each one as Markdown that read back differently), by the read-back corpus passing, and by a throwaway probe finding no rejected parsed tree among the fixtures, the conformance cases, and about 2.2 million generated inputs.
 - [x] 10.15 A link title is one fact: `Link`, `Image`, and `Definition` hold `title: Option<Title>` with `Title { value, kind }` in place of `title` and `title_kind`, so a title without its quotes cannot be built. Verified by public-api "Link title", unchanged `.ast` goldens, and unchanged conformance numbers.
 - [x] 10.16 Oracle cases that differ by decision leave the conformance bench; their 97 inputs, with HTML verified against cmark-gfm, commonmark.js, micromark, the oracle, or the decision, live in `tests/fixtures/syntax_decisions/` and `tests/syntax_decisions.rs` checks them. Verified by `cargo test --profile ci --features html --test syntax_decisions --test html_conformance`.
+
+### 11. Verify follow-ups
+The verify review of this branch found the issues below; each task carries the fix chosen in the owner's decision style.
+- [x] 11.1 Every parsed tree validates: link text demotes autolinks inside image alt, a wiki link in a text directive's label keeps the brackets around it from forming a link, and no email starts at `www.` after an open bracket. Verified by `tests/parse_inline_regressions.rs` (`autolinks_inside_link_text`, `literal_autolinks_after_an_open_bracket`) and by random parses of about 1.2 million inputs finding no rejected parsed tree.
+- [x] 11.2 An inline footnote's `^[` opens no link text, so a URL in it links. Verified by inline-syntax "URL in an inline footnote".
+- [x] 11.3 Parsed trees read back: an ATX heading ending in a closing-like `#` run, a quoted value's empty last line, and footnote content opening with whitespace. Verified by serialization "ATX content ending in a closing-like run", "HTML block ending in an empty line inside a quote", "Footnote definition opening with indented code", and `CANONICAL_INPUTS`.
+- [x] 11.4 Wiki link hrefs take the dangerous-scheme denylist and are encoded once. Verified by html-rendering "Wiki link" and "Ampersand in a target" and `dangerous_protocol_matrix_matches_public_options`.
+- [x] 11.5 Email scanning is linear: the local part, domain, and `+` boundary of an `@` are read once per pass. Verified by `email_candidates_before_one_at_grow_linearly` and `literal_autolink_scans_match_the_reference_scan`.
+- [x] 11.6 Validation rejects more shapes with no spelling: Unicode-whitespace span edges past empty text, empty paragraphs, a loose list of one item of at most one block, a list after a paragraph in a tight item whose first item starts below its bullet, and dollar math that does not read back. Verified by `tests/validate_regressions.rs` and the random-parse probe of 11.1.
+- [x] 11.7 Docs agree with the code: the spec change files equal the delta from `main` to `docs/specs/`, decision-case provenance is numbered as at 8ba83e2, the license notices cover `syntax_decisions/`, and stale comments and test names are gone. Verified by reading them and by the spec-file comparison script of the verify round.

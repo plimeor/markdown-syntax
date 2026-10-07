@@ -10,13 +10,25 @@ input size.
 - **WHEN** an input of tens of thousands of unclosed openers of one construct (for example `[`, `==`, `^[`, or `<!X`) is parsed
 - **THEN** doubling the input at most roughly doubles the time
 
+#### Scenario: Repeated fragment combinations
+- **WHEN** any pair or triple of syntax fragments — link, image, footnote, wiki link, and directive openers and closers, literal autolinks, code, math, emphasis, strikethrough, and highlight delimiters, a backslash, a character reference, a pipe, a space, a line ending, and block quote and list markers — is repeated `n` and `2n` times, alone or after a paragraph's first word, and parsed and serialized
+- **THEN** doubling the repetitions at most roughly doubles the time of each
+
+#### Scenario: Email candidates before one `@`
+- **WHEN** a long run of local-part bytes that each could start an email, such as `"-a"` or `"a+"` repeated, is followed by one `@` and a domain, and parsed
+- **THEN** quadrupling the run at most roughly quadruples the time
+
+#### Scenario: Literal autolinks in open labels
+- **WHEN** thousands of link labels left open, each holding a literal autolink and followed by `(`, such as `"[ www.a]("` repeated, are parsed
+- **THEN** quadrupling them at most roughly quadruples the time
+
 #### Scenario: Diagnostics running to the end of a paragraph
 - **WHEN** thousands of lines each holding a malformed text directive opener, such as `" x :a{"`, are parsed, at the top level or in a block quote
 - **THEN** quadrupling the lines at most roughly quadruples the time
 
 #### Scenario: Long run of tildes
 - **WHEN** a paragraph holding tens of thousands of `~` between two words is parsed and serialized
-- **THEN** quadrupling the run at most roughly quadruples the serialization time
+- **THEN** quadrupling the run at most roughly quadruples the parse and the serialization time
 
 #### Scenario: Deeply nested emphasis
 - **WHEN** a paragraph holding 16 levels of nested emphasis and a mark around further nested emphasis is serialized
@@ -59,3 +71,12 @@ levels together; an opener past the limit SHALL stay literal text.
 #### Scenario: Deeply nested images
 - **WHEN** 40 images nested in each other's alt text are parsed
 - **THEN** at most 32 levels of `Image` are produced and the deeper brackets stay literal text
+
+### Requirement: Bounded stack
+The native stack these operations use SHALL NOT grow with how deeply the input
+nests; the deepest input SHALL fit a 2 MiB thread stack, in unoptimized builds
+too.
+
+#### Scenario: Deep nesting on a small stack
+- **WHEN** inputs nested tens of thousands of levels deep (block quotes, lists, links, emphasis) are parsed, serialized, rendered, and validated on a 2 MiB thread, in a debug or an optimized build
+- **THEN** none overflows the stack

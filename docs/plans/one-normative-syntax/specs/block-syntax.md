@@ -125,7 +125,7 @@ specification defines them.
 
 #### Scenario: CommonMark oracle cases
 - **WHEN** the block cases under `tests/fixtures/conformance/commonmark/` are parsed and rendered with the `html` feature
-- **THEN** each output matches the expected HTML, or the case is in the bench's deviation list with the reason it differs; where commonmark.js renders a case otherwise, the output matches commonmark.js: blank lines inside a fence in a list item hold no whitespace past the item's indentation, and a fence a container ends right after its opening line is empty
+- **THEN** each output matches the expected HTML, or the case differs by a decision of this syntax and is checked, with HTML verified against a reference renderer or the decision, by `tests/syntax_decisions.rs`; where commonmark.js renders a case otherwise, the output matches commonmark.js: blank lines inside a fence in a list item hold no whitespace past the item's indentation, and a fence a container ends right after its opening line is empty
 
 ### Requirement: GFM blocks
 The parser SHALL recognize GFM tables, task list items, and alerts; an
@@ -395,6 +395,20 @@ lines in its value.
 #### Scenario: Unclosed fence in a quote before a lazy line
 - **WHEN** ``"> ```\n> a\n>\nb"`` is parsed
 - **THEN** the quoted fenced `CodeBlock` value is `"a\n\n"`
+
+### Requirement: Fenced code inside a container directive
+A fenced code block inside a container directive SHALL hold its lines as code:
+a line in it that looks like a directive opener opens no nested directive,
+while a closing fence of the directive still closes it, and a fence that a
+nested directive leaves open ends with that directive.
+
+#### Scenario: Directive opener inside fenced code
+- **WHEN** `":::t\n```\n:::e\n```\n:::"` is parsed
+- **THEN** the document holds one `ContainerDirective` named `t` holding a `CodeBlock` whose value is `":::e\n"`
+
+#### Scenario: Fence left open in a nested directive
+- **WHEN** ``":::outer\n:::inner\n```\n:::\n:::other\nx\n:::\n:::\nafter"`` is parsed
+- **THEN** the `ContainerDirective` named `outer` holds the directives `inner` and `other`, a `Paragraph` holding `Text("after")` follows it, and no diagnostic is reported
 
 ## REMOVED Requirements
 
