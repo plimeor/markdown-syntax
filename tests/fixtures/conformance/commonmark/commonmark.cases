@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: commonmark
-count: 652
+count: 643
 
 --- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 8 input-bytes 14 expected-bytes 38
 Tabs (1)
@@ -1118,24 +1118,7 @@ Bar
 Bar</h2>
 
 --- end
---- case 96 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 24 expected-bytes 44
-Setext headings (96)
---- input
----
-Foo
----
-Bar
----
-Baz
-
---- expected
-<hr />
-<h2>Foo</h2>
-<h2>Bar</h2>
-<p>Baz</p>
-
---- end
---- case 97 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 6 expected-bytes 12
+--- case 96 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 6 expected-bytes 12
 Setext headings (97)
 --- input
 
@@ -1145,18 +1128,7 @@ Setext headings (97)
 <p>====</p>
 
 --- end
---- case 98 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 8 expected-bytes 14
-Setext headings (98)
---- input
----
----
-
---- expected
-<hr />
-<hr />
-
---- end
---- case 99 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 12 expected-bytes 31
+--- case 97 options allow_dangerous_html,allow_dangerous_protocol label-bytes 20 input-bytes 12 expected-bytes 31
 Setext headings (99)
 --- input
 - foo
@@ -1169,7 +1141,7 @@ Setext headings (99)
 <hr />
 
 --- end
---- case 100 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 12 expected-bytes 36
+--- case 98 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 12 expected-bytes 36
 Setext headings (100)
 --- input
     foo
@@ -1181,7 +1153,7 @@ Setext headings (100)
 <hr />
 
 --- end
---- case 101 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 12 expected-bytes 45
+--- case 99 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 12 expected-bytes 45
 Setext headings (101)
 --- input
 > foo
@@ -1194,7 +1166,7 @@ Setext headings (101)
 <hr />
 
 --- end
---- case 102 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 14 expected-bytes 18
+--- case 100 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 14 expected-bytes 18
 Setext headings (102)
 --- input
 \> foo
@@ -1204,7 +1176,7 @@ Setext headings (102)
 <h2>&gt; foo</h2>
 
 --- end
---- case 103 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 17 expected-bytes 35
+--- case 101 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 17 expected-bytes 35
 Setext headings (103)
 --- input
 Foo
@@ -1219,7 +1191,7 @@ baz
 <p>baz</p>
 
 --- end
---- case 104 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 18 expected-bytes 33
+--- case 102 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 18 expected-bytes 33
 Setext headings (104)
 --- input
 Foo
@@ -1236,7 +1208,7 @@ bar</p>
 <p>baz</p>
 
 --- end
---- case 105 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 18 expected-bytes 33
+--- case 103 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 18 expected-bytes 33
 Setext headings (105)
 --- input
 Foo
@@ -1251,7 +1223,7 @@ bar</p>
 <p>baz</p>
 
 --- end
---- case 106 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 17 expected-bytes 23
+--- case 104 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 17 expected-bytes 23
 Setext headings (106)
 --- input
 Foo
@@ -1266,7 +1238,7 @@ bar
 baz</p>
 
 --- end
---- case 107 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 39 expected-bytes 56
+--- case 105 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 39 expected-bytes 56
 Indented code blocks (107)
 --- input
     a simple
@@ -1278,7 +1250,7 @@ Indented code blocks (107)
 </code></pre>
 
 --- end
---- case 108 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 17 expected-bytes 44
+--- case 106 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 17 expected-bytes 44
 Indented code blocks (108)
 --- input
   - foo
@@ -1294,7 +1266,7 @@ Indented code blocks (108)
 </ul>
 
 --- end
---- case 109 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 19 expected-bytes 57
+--- case 107 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 19 expected-bytes 57
 Indented code blocks (109)
 --- input
 1.  foo
@@ -1312,7 +1284,7 @@ Indented code blocks (109)
 </ol>
 
 --- end
---- case 110 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 29 expected-bytes 48
+--- case 108 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 29 expected-bytes 48
 Indented code blocks (110)
 --- input
     <a/>
@@ -1328,7 +1300,7 @@ Indented code blocks (110)
 </code></pre>
 
 --- end
---- case 111 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 41 expected-bytes 50
+--- case 109 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 41 expected-bytes 50
 Indented code blocks (111)
 --- input
     chunk1
@@ -1350,7 +1322,7 @@ chunk3
 </code></pre>
 
 --- end
---- case 112 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 31 expected-bytes 44
+--- case 110 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 31 expected-bytes 44
 Indented code blocks (112)
 --- input
     chunk1
@@ -1364,7 +1336,7 @@ Indented code blocks (112)
 </code></pre>
 
 --- end
---- case 113 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 13 expected-bytes 15
+--- case 111 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 13 expected-bytes 15
 Indented code blocks (113)
 --- input
 Foo
@@ -1376,7 +1348,7 @@ Foo
 bar</p>
 
 --- end
---- case 114 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 12 expected-bytes 40
+--- case 112 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 12 expected-bytes 40
 Indented code blocks (114)
 --- input
     foo
@@ -1388,7 +1360,7 @@ bar
 <p>bar</p>
 
 --- end
---- case 115 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 46 expected-bytes 99
+--- case 113 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 46 expected-bytes 99
 Indented code blocks (115)
 --- input
 # Heading
@@ -1408,7 +1380,7 @@ Heading
 <hr />
 
 --- end
---- case 116 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 20 expected-bytes 37
+--- case 114 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 20 expected-bytes 37
 Indented code blocks (116)
 --- input
         foo
@@ -1420,7 +1392,7 @@ bar
 </code></pre>
 
 --- end
---- case 117 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 20 expected-bytes 29
+--- case 115 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 20 expected-bytes 29
 Indented code blocks (117)
 --- input
 
@@ -1434,7 +1406,7 @@ Indented code blocks (117)
 </code></pre>
 
 --- end
---- case 118 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 10 expected-bytes 31
+--- case 116 options allow_dangerous_html,allow_dangerous_protocol label-bytes 26 input-bytes 10 expected-bytes 31
 Indented code blocks (118)
 --- input
     foo  
@@ -1444,7 +1416,7 @@ Indented code blocks (118)
 </code></pre>
 
 --- end
---- case 119 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 13 expected-bytes 36
+--- case 117 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 13 expected-bytes 36
 Fenced code blocks (119)
 --- input
 ```
@@ -1458,7 +1430,7 @@ Fenced code blocks (119)
 </code></pre>
 
 --- end
---- case 120 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 13 expected-bytes 36
+--- case 118 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 13 expected-bytes 36
 Fenced code blocks (120)
 --- input
 ~~~
@@ -1472,7 +1444,7 @@ Fenced code blocks (120)
 </code></pre>
 
 --- end
---- case 121 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 10 expected-bytes 24
+--- case 119 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 10 expected-bytes 24
 Fenced code blocks (121)
 --- input
 ``
@@ -1483,7 +1455,7 @@ foo
 <p><code>foo</code></p>
 
 --- end
---- case 122 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
+--- case 120 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
 Fenced code blocks (122)
 --- input
 ```
@@ -1497,7 +1469,7 @@ aaa
 </code></pre>
 
 --- end
---- case 123 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
+--- case 121 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
 Fenced code blocks (123)
 --- input
 ~~~
@@ -1511,7 +1483,7 @@ aaa
 </code></pre>
 
 --- end
---- case 124 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 20 expected-bytes 33
+--- case 122 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 20 expected-bytes 33
 Fenced code blocks (124)
 --- input
 ````
@@ -1525,7 +1497,7 @@ aaa
 </code></pre>
 
 --- end
---- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 33
+--- case 123 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 33
 Fenced code blocks (125)
 --- input
 ~~~~
@@ -1539,7 +1511,7 @@ aaa
 </code></pre>
 
 --- end
---- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 4 expected-bytes 25
+--- case 124 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 4 expected-bytes 25
 Fenced code blocks (126)
 --- input
 ```
@@ -1548,7 +1520,7 @@ Fenced code blocks (126)
 <pre><code></code></pre>
 
 --- end
---- case 127 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 15 expected-bytes 34
+--- case 125 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 15 expected-bytes 34
 Fenced code blocks (127)
 --- input
 `````
@@ -1563,7 +1535,7 @@ aaa
 </code></pre>
 
 --- end
---- case 128 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 17 expected-bytes 67
+--- case 126 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 17 expected-bytes 67
 Fenced code blocks (128)
 --- input
 > ```
@@ -1579,7 +1551,7 @@ bbb
 <p>bbb</p>
 
 --- end
---- case 129 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 12 expected-bytes 29
+--- case 127 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 12 expected-bytes 29
 Fenced code blocks (129)
 --- input
 ```
@@ -1593,7 +1565,7 @@ Fenced code blocks (129)
 </code></pre>
 
 --- end
---- case 130 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 8 expected-bytes 25
+--- case 128 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 8 expected-bytes 25
 Fenced code blocks (130)
 --- input
 ```
@@ -1603,7 +1575,7 @@ Fenced code blocks (130)
 <pre><code></code></pre>
 
 --- end
---- case 131 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 33
+--- case 129 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 33
 Fenced code blocks (131)
 --- input
  ```
@@ -1617,7 +1589,7 @@ aaa
 </code></pre>
 
 --- end
---- case 132 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 26 expected-bytes 37
+--- case 130 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 26 expected-bytes 37
 Fenced code blocks (132)
 --- input
   ```
@@ -1633,7 +1605,7 @@ aaa
 </code></pre>
 
 --- end
---- case 133 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 35 expected-bytes 38
+--- case 131 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 35 expected-bytes 38
 Fenced code blocks (133)
 --- input
    ```
@@ -1649,7 +1621,7 @@ aaa
 </code></pre>
 
 --- end
---- case 134 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 24 expected-bytes 37
+--- case 132 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 24 expected-bytes 37
 Fenced code blocks (134)
 --- input
     ```
@@ -1663,7 +1635,7 @@ aaa
 </code></pre>
 
 --- end
---- case 135 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 14 expected-bytes 29
+--- case 133 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 14 expected-bytes 29
 Fenced code blocks (135)
 --- input
 ```
@@ -1675,7 +1647,7 @@ aaa
 </code></pre>
 
 --- end
---- case 136 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 17 expected-bytes 29
+--- case 134 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 17 expected-bytes 29
 Fenced code blocks (136)
 --- input
    ```
@@ -1687,7 +1659,7 @@ aaa
 </code></pre>
 
 --- end
---- case 137 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 37
+--- case 135 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 37
 Fenced code blocks (137)
 --- input
 ```
@@ -1700,7 +1672,7 @@ aaa
 </code></pre>
 
 --- end
---- case 138 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 12 expected-bytes 26
+--- case 136 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 12 expected-bytes 26
 Fenced code blocks (138)
 --- input
 ``` ```
@@ -1711,7 +1683,7 @@ aaa
 aaa</p>
 
 --- end
---- case 139 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 36
+--- case 137 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 18 expected-bytes 36
 Fenced code blocks (139)
 --- input
 ~~~~~~
@@ -1724,7 +1696,7 @@ aaa
 </code></pre>
 
 --- end
---- case 140 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 20 expected-bytes 51
+--- case 138 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 20 expected-bytes 51
 Fenced code blocks (140)
 --- input
 foo
@@ -1740,7 +1712,7 @@ baz
 <p>baz</p>
 
 --- end
---- case 141 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 26 expected-bytes 55
+--- case 139 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 26 expected-bytes 55
 Fenced code blocks (141)
 --- input
 foo
@@ -1757,7 +1729,7 @@ bar
 <h1>baz</h1>
 
 --- end
---- case 142 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 38 expected-bytes 73
+--- case 140 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 38 expected-bytes 73
 Fenced code blocks (142)
 --- input
 ```ruby
@@ -1773,7 +1745,7 @@ end
 </code></pre>
 
 --- end
---- case 143 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 65 expected-bytes 73
+--- case 141 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 65 expected-bytes 73
 Fenced code blocks (143)
 --- input
 ~~~~    ruby startline=3 $%@#$
@@ -1789,7 +1761,7 @@ end
 </code></pre>
 
 --- end
---- case 144 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 11 expected-bytes 44
+--- case 142 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 11 expected-bytes 44
 Fenced code blocks (144)
 --- input
 ````;
@@ -1799,7 +1771,7 @@ Fenced code blocks (144)
 <pre><code class="language-;"></code></pre>
 
 --- end
---- case 145 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 15 expected-bytes 27
+--- case 143 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 15 expected-bytes 27
 Fenced code blocks (145)
 --- input
 ``` aa ```
@@ -1810,7 +1782,7 @@ foo
 foo</p>
 
 --- end
---- case 146 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 23 expected-bytes 49
+--- case 144 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 23 expected-bytes 49
 Fenced code blocks (146)
 --- input
 ~~~ aa ``` ~~~
@@ -1822,7 +1794,7 @@ foo
 </code></pre>
 
 --- end
---- case 147 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
+--- case 145 options allow_dangerous_html,allow_dangerous_protocol label-bytes 24 input-bytes 16 expected-bytes 33
 Fenced code blocks (147)
 --- input
 ```
@@ -1834,7 +1806,7 @@ Fenced code blocks (147)
 </code></pre>
 
 --- end
---- case 148 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 69 expected-bytes 82
+--- case 146 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 69 expected-bytes 82
 HTML blocks (148)
 --- input
 <table><tr><td>
@@ -1854,7 +1826,7 @@ _world_.
 </td></tr></table>
 
 --- end
---- case 149 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 72 expected-bytes 78
+--- case 147 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 72 expected-bytes 78
 HTML blocks (149)
 --- input
 <table>
@@ -1878,7 +1850,7 @@ okay.
 <p>okay.</p>
 
 --- end
---- case 150 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 35
+--- case 148 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 35
 HTML blocks (150)
 --- input
  <div>
@@ -1891,7 +1863,7 @@ HTML blocks (150)
          <foo><a>
 
 --- end
---- case 151 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 13 expected-bytes 13
+--- case 149 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 13 expected-bytes 13
 HTML blocks (151)
 --- input
 </div>
@@ -1902,7 +1874,7 @@ HTML blocks (151)
 *foo*
 
 --- end
---- case 152 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 38 expected-bytes 50
+--- case 150 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 38 expected-bytes 50
 HTML blocks (152)
 --- input
 <DIV CLASS="foo">
@@ -1917,7 +1889,7 @@ HTML blocks (152)
 </DIV>
 
 --- end
---- case 153 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 36 expected-bytes 36
+--- case 151 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 36 expected-bytes 36
 HTML blocks (153)
 --- input
 <div id="foo"
@@ -1930,7 +1902,7 @@ HTML blocks (153)
 </div>
 
 --- end
---- case 154 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 40 expected-bytes 40
+--- case 152 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 40 expected-bytes 40
 HTML blocks (154)
 --- input
 <div id="foo" class="bar
@@ -1943,7 +1915,7 @@ HTML blocks (154)
 </div>
 
 --- end
---- case 155 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 32
+--- case 153 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 32
 HTML blocks (155)
 --- input
 <div>
@@ -1957,7 +1929,7 @@ HTML blocks (155)
 <p><em>bar</em></p>
 
 --- end
---- case 156 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 19
+--- case 154 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 19
 HTML blocks (156)
 --- input
 <div id="foo"
@@ -1968,7 +1940,7 @@ HTML blocks (156)
 *hi*
 
 --- end
---- case 157 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 15 expected-bytes 15
+--- case 155 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 15 expected-bytes 15
 HTML blocks (157)
 --- input
 <div class
@@ -1979,7 +1951,7 @@ foo
 foo
 
 --- end
---- case 158 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 25 expected-bytes 25
+--- case 156 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 25 expected-bytes 25
 HTML blocks (158)
 --- input
 <div *???-&&&-<---
@@ -1990,7 +1962,7 @@ HTML blocks (158)
 *foo*
 
 --- end
---- case 159 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 35
+--- case 157 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 35
 HTML blocks (159)
 --- input
 <div><a href="bar">*foo*</a></div>
@@ -1999,7 +1971,7 @@ HTML blocks (159)
 <div><a href="bar">*foo*</a></div>
 
 --- end
---- case 160 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 39 expected-bytes 39
+--- case 158 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 39 expected-bytes 39
 HTML blocks (160)
 --- input
 <table><tr><td>
@@ -2012,7 +1984,7 @@ foo
 </td></tr></table>
 
 --- end
---- case 161 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 34 expected-bytes 34
+--- case 159 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 34 expected-bytes 34
 HTML blocks (161)
 --- input
 <div></div>
@@ -2027,7 +1999,7 @@ int x = 33;
 ```
 
 --- end
---- case 162 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 26 expected-bytes 26
+--- case 160 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 26 expected-bytes 26
 HTML blocks (162)
 --- input
 <a href="foo">
@@ -2040,7 +2012,7 @@ HTML blocks (162)
 </a>
 
 --- end
---- case 163 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 27 expected-bytes 27
+--- case 161 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 27 expected-bytes 27
 HTML blocks (163)
 --- input
 <Warning>
@@ -2053,7 +2025,7 @@ HTML blocks (163)
 </Warning>
 
 --- end
---- case 164 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 27 expected-bytes 27
+--- case 162 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 27 expected-bytes 27
 HTML blocks (164)
 --- input
 <i class="foo">
@@ -2066,7 +2038,7 @@ HTML blocks (164)
 </i>
 
 --- end
---- case 165 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 13 expected-bytes 13
+--- case 163 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 13 expected-bytes 13
 HTML blocks (165)
 --- input
 </ins>
@@ -2077,7 +2049,7 @@ HTML blocks (165)
 *bar*
 
 --- end
---- case 166 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 19
+--- case 164 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 19
 HTML blocks (166)
 --- input
 <del>
@@ -2090,7 +2062,7 @@ HTML blocks (166)
 </del>
 
 --- end
---- case 167 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 21 expected-bytes 33
+--- case 165 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 21 expected-bytes 33
 HTML blocks (167)
 --- input
 <del>
@@ -2105,7 +2077,7 @@ HTML blocks (167)
 </del>
 
 --- end
---- case 168 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 17 expected-bytes 31
+--- case 166 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 17 expected-bytes 31
 HTML blocks (168)
 --- input
 <del>*foo*</del>
@@ -2114,7 +2086,7 @@ HTML blocks (168)
 <p><del><em>foo</em></del></p>
 
 --- end
---- case 169 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 120 expected-bytes 127
+--- case 167 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 120 expected-bytes 127
 HTML blocks (169)
 --- input
 <pre language="haskell"><code>
@@ -2135,7 +2107,7 @@ main = print $ parseTags tags
 <p>okay</p>
 
 --- end
---- case 170 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 135 expected-bytes 142
+--- case 168 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 135 expected-bytes 142
 HTML blocks (170)
 --- input
 <script type="text/javascript">
@@ -2154,7 +2126,7 @@ document.getElementById("demo").innerHTML = "Hello JavaScript!";
 <p>okay</p>
 
 --- end
---- case 171 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 38 expected-bytes 38
+--- case 169 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 38 expected-bytes 38
 HTML blocks (171)
 --- input
 <textarea>
@@ -2175,7 +2147,7 @@ _bar_
 </textarea>
 
 --- end
---- case 172 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 73 expected-bytes 80
+--- case 170 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 73 expected-bytes 80
 HTML blocks (172)
 --- input
 <style
@@ -2196,7 +2168,7 @@ p {color:blue;}
 <p>okay</p>
 
 --- end
---- case 173 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 31 expected-bytes 31
+--- case 171 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 31 expected-bytes 31
 HTML blocks (173)
 --- input
 <style
@@ -2211,7 +2183,7 @@ foo
 foo
 
 --- end
---- case 174 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 48
+--- case 172 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 48
 HTML blocks (174)
 --- input
 > <div>
@@ -2227,7 +2199,7 @@ foo
 <p>bar</p>
 
 --- end
---- case 175 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 14 expected-bytes 41
+--- case 173 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 14 expected-bytes 41
 HTML blocks (175)
 --- input
 - <div>
@@ -2242,7 +2214,7 @@ HTML blocks (175)
 </ul>
 
 --- end
---- case 176 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 49
+--- case 174 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 35 expected-bytes 49
 HTML blocks (176)
 --- input
 <style>p{color:red;}</style>
@@ -2253,7 +2225,7 @@ HTML blocks (176)
 <p><em>foo</em></p>
 
 --- end
---- case 177 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 24 expected-bytes 38
+--- case 175 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 24 expected-bytes 38
 HTML blocks (177)
 --- input
 <!-- foo -->*bar*
@@ -2264,7 +2236,7 @@ HTML blocks (177)
 <p><em>baz</em></p>
 
 --- end
---- case 178 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 31 expected-bytes 31
+--- case 176 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 31 expected-bytes 31
 HTML blocks (178)
 --- input
 <script>
@@ -2277,7 +2249,7 @@ foo
 </script>1. *bar*
 
 --- end
---- case 179 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 30 expected-bytes 37
+--- case 177 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 30 expected-bytes 37
 HTML blocks (179)
 --- input
 <!-- Foo
@@ -2294,7 +2266,7 @@ bar
 <p>okay</p>
 
 --- end
---- case 180 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 28 expected-bytes 35
+--- case 178 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 28 expected-bytes 35
 HTML blocks (180)
 --- input
 <?php
@@ -2313,7 +2285,7 @@ okay
 <p>okay</p>
 
 --- end
---- case 181 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 16 expected-bytes 16
+--- case 179 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 16 expected-bytes 16
 HTML blocks (181)
 --- input
 <!DOCTYPE html>
@@ -2322,7 +2294,7 @@ HTML blocks (181)
 <!DOCTYPE html>
 
 --- end
---- case 182 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 119 expected-bytes 126
+--- case 180 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 119 expected-bytes 126
 HTML blocks (182)
 --- input
 <![CDATA[
@@ -2355,7 +2327,7 @@ function matchwo(a,b)
 <p>okay</p>
 
 --- end
---- case 183 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 33 expected-bytes 59
+--- case 181 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 33 expected-bytes 59
 HTML blocks (183)
 --- input
   <!-- foo -->
@@ -2368,7 +2340,7 @@ HTML blocks (183)
 </code></pre>
 
 --- end
---- case 184 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 45
+--- case 182 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 19 expected-bytes 45
 HTML blocks (184)
 --- input
   <div>
@@ -2381,7 +2353,7 @@ HTML blocks (184)
 </code></pre>
 
 --- end
---- case 185 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 21 expected-bytes 28
+--- case 183 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 21 expected-bytes 28
 HTML blocks (185)
 --- input
 Foo
@@ -2396,7 +2368,7 @@ bar
 </div>
 
 --- end
---- case 186 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 23 expected-bytes 23
+--- case 184 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 23 expected-bytes 23
 HTML blocks (186)
 --- input
 <div>
@@ -2411,7 +2383,7 @@ bar
 *foo*
 
 --- end
---- case 187 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 23 expected-bytes 30
+--- case 185 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 23 expected-bytes 30
 HTML blocks (187)
 --- input
 Foo
@@ -2424,7 +2396,7 @@ baz
 baz</p>
 
 --- end
---- case 188 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 34 expected-bytes 46
+--- case 186 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 34 expected-bytes 46
 HTML blocks (188)
 --- input
 <div>
@@ -2439,7 +2411,7 @@ HTML blocks (188)
 </div>
 
 --- end
---- case 189 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 32 expected-bytes 32
+--- case 187 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 32 expected-bytes 32
 HTML blocks (189)
 --- input
 <div>
@@ -2452,7 +2424,7 @@ HTML blocks (189)
 </div>
 
 --- end
---- case 190 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 46 expected-bytes 42
+--- case 188 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 46 expected-bytes 42
 HTML blocks (190)
 --- input
 <table>
@@ -2477,7 +2449,7 @@ Hi
 </table>
 
 --- end
---- case 191 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 64 expected-bytes 85
+--- case 189 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 64 expected-bytes 85
 HTML blocks (191)
 --- input
 <table>
@@ -2503,7 +2475,7 @@ HTML blocks (191)
 </table>
 
 --- end
---- case 192 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 27 expected-bytes 44
+--- case 190 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 27 expected-bytes 44
 Link reference definitions (192)
 --- input
 [foo]: /url "title"
@@ -2514,7 +2486,7 @@ Link reference definitions (192)
 <p><a href="/url" title="title">foo</a></p>
 
 --- end
---- case 193 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 56 expected-bytes 48
+--- case 191 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 56 expected-bytes 48
 Link reference definitions (193)
 --- input
    [foo]: 
@@ -2527,7 +2499,7 @@ Link reference definitions (193)
 <p><a href="/url" title="the title">foo</a></p>
 
 --- end
---- case 194 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 56 expected-bytes 67
+--- case 192 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 56 expected-bytes 67
 Link reference definitions (194)
 --- input
 [Foo*bar\]]:my_(url) 'title (with parens)'
@@ -2538,7 +2510,7 @@ Link reference definitions (194)
 <p><a href="my_(url)" title="title (with parens)">Foo*bar]</a></p>
 
 --- end
---- case 195 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 39 expected-bytes 52
+--- case 193 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 39 expected-bytes 52
 Link reference definitions (195)
 --- input
 [Foo bar]:
@@ -2551,7 +2523,7 @@ Link reference definitions (195)
 <p><a href="my%20url" title="title">Foo bar</a></p>
 
 --- end
---- case 196 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 41 expected-bytes 58
+--- case 194 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 41 expected-bytes 58
 Link reference definitions (196)
 --- input
 [foo]: /url '
@@ -2570,7 +2542,7 @@ line2
 ">foo</a></p>
 
 --- end
---- case 197 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 44 expected-bytes 63
+--- case 195 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 44 expected-bytes 63
 Link reference definitions (197)
 --- input
 [foo]: /url 'title
@@ -2585,7 +2557,7 @@ with blank line'
 <p>[foo]</p>
 
 --- end
---- case 198 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 19 expected-bytes 30
+--- case 196 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 19 expected-bytes 30
 Link reference definitions (198)
 --- input
 [foo]:
@@ -2597,7 +2569,7 @@ Link reference definitions (198)
 <p><a href="/url">foo</a></p>
 
 --- end
---- case 199 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 14 expected-bytes 27
+--- case 197 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 14 expected-bytes 27
 Link reference definitions (199)
 --- input
 [foo]:
@@ -2609,7 +2581,7 @@ Link reference definitions (199)
 <p>[foo]</p>
 
 --- end
---- case 200 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 17 expected-bytes 26
+--- case 198 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 17 expected-bytes 26
 Link reference definitions (200)
 --- input
 [foo]: <>
@@ -2620,7 +2592,7 @@ Link reference definitions (200)
 <p><a href="">foo</a></p>
 
 --- end
---- case 201 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 25 expected-bytes 38
+--- case 199 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 25 expected-bytes 38
 Link reference definitions (201)
 --- input
 [foo]: <bar>(baz)
@@ -2632,7 +2604,7 @@ Link reference definitions (201)
 <p>[foo]</p>
 
 --- end
---- case 202 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 43 expected-bytes 65
+--- case 200 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 43 expected-bytes 65
 Link reference definitions (202)
 --- input
 [foo]: /url\bar\*baz "foo\"bar\baz"
@@ -2643,7 +2615,7 @@ Link reference definitions (202)
 <p><a href="/url%5Cbar*baz" title="foo&quot;bar\baz">foo</a></p>
 
 --- end
---- case 203 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 18 expected-bytes 29
+--- case 201 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 18 expected-bytes 29
 Link reference definitions (203)
 --- input
 [foo]
@@ -2654,7 +2626,7 @@ Link reference definitions (203)
 <p><a href="url">foo</a></p>
 
 --- end
---- case 204 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 34 expected-bytes 31
+--- case 202 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 34 expected-bytes 31
 Link reference definitions (204)
 --- input
 [foo]
@@ -2666,7 +2638,7 @@ Link reference definitions (204)
 <p><a href="first">foo</a></p>
 
 --- end
---- case 205 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 19 expected-bytes 30
+--- case 203 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 19 expected-bytes 30
 Link reference definitions (205)
 --- input
 [FOO]: /url
@@ -2677,7 +2649,7 @@ Link reference definitions (205)
 <p><a href="/url">Foo</a></p>
 
 --- end
---- case 206 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 28 expected-bytes 48
+--- case 204 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 28 expected-bytes 48
 Link reference definitions (206)
 --- input
 [ΑΓΩ]: /φου
@@ -2688,7 +2660,7 @@ Link reference definitions (206)
 <p><a href="/%CF%86%CE%BF%CF%85">αγω</a></p>
 
 --- end
---- case 207 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 12 expected-bytes 0
+--- case 205 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 12 expected-bytes 0
 Link reference definitions (207)
 --- input
 [foo]: /url
@@ -2696,7 +2668,7 @@ Link reference definitions (207)
 --- expected
 
 --- end
---- case 208 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 18 expected-bytes 11
+--- case 206 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 18 expected-bytes 11
 Link reference definitions (208)
 --- input
 [
@@ -2708,7 +2680,7 @@ bar
 <p>bar</p>
 
 --- end
---- case 209 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 40
+--- case 207 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 40
 Link reference definitions (209)
 --- input
 [foo]: /url "title" ok
@@ -2717,7 +2689,7 @@ Link reference definitions (209)
 <p>[foo]: /url &quot;title&quot; ok</p>
 
 --- end
---- case 210 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 28
+--- case 208 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 28
 Link reference definitions (210)
 --- input
 [foo]: /url
@@ -2727,7 +2699,7 @@ Link reference definitions (210)
 <p>&quot;title&quot; ok</p>
 
 --- end
---- case 211 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 31 expected-bytes 68
+--- case 209 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 31 expected-bytes 68
 Link reference definitions (211)
 --- input
     [foo]: /url "title"
@@ -2740,7 +2712,7 @@ Link reference definitions (211)
 <p>[foo]</p>
 
 --- end
---- case 212 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 27 expected-bytes 50
+--- case 210 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 27 expected-bytes 50
 Link reference definitions (212)
 --- input
 ```
@@ -2755,7 +2727,7 @@ Link reference definitions (212)
 <p>[foo]</p>
 
 --- end
---- case 213 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 36
+--- case 211 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 23 expected-bytes 36
 Link reference definitions (213)
 --- input
 Foo
@@ -2769,7 +2741,7 @@ Foo
 <p>[bar]</p>
 
 --- end
---- case 214 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 26 expected-bytes 70
+--- case 212 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 26 expected-bytes 70
 Link reference definitions (214)
 --- input
 # [Foo]
@@ -2783,7 +2755,7 @@ Link reference definitions (214)
 </blockquote>
 
 --- end
---- case 215 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 26 expected-bytes 43
+--- case 213 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 26 expected-bytes 43
 Link reference definitions (215)
 --- input
 [foo]: /url
@@ -2796,7 +2768,7 @@ bar
 <p><a href="/url">foo</a></p>
 
 --- end
---- case 216 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 22 expected-bytes 34
+--- case 214 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 22 expected-bytes 34
 Link reference definitions (216)
 --- input
 [foo]: /url
@@ -2808,7 +2780,7 @@ Link reference definitions (216)
 <a href="/url">foo</a></p>
 
 --- end
---- case 217 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 83 expected-bytes 114
+--- case 215 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 83 expected-bytes 114
 Link reference definitions (217)
 --- input
 [foo]: /foo-url "foo"
@@ -2826,7 +2798,7 @@ Link reference definitions (217)
 <a href="/baz-url">baz</a></p>
 
 --- end
---- case 218 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 21 expected-bytes 57
+--- case 216 options allow_dangerous_html,allow_dangerous_protocol label-bytes 32 input-bytes 21 expected-bytes 57
 Link reference definitions (218)
 --- input
 [foo]
@@ -2839,7 +2811,7 @@ Link reference definitions (218)
 </blockquote>
 
 --- end
---- case 219 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 22
+--- case 217 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 22
 Paragraphs (219)
 --- input
 aaa
@@ -2851,7 +2823,7 @@ bbb
 <p>bbb</p>
 
 --- end
---- case 220 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 30
+--- case 218 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 30
 Paragraphs (220)
 --- input
 aaa
@@ -2867,7 +2839,7 @@ bbb</p>
 ddd</p>
 
 --- end
---- case 221 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 10 expected-bytes 22
+--- case 219 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 10 expected-bytes 22
 Paragraphs (221)
 --- input
 aaa
@@ -2880,7 +2852,7 @@ bbb
 <p>bbb</p>
 
 --- end
---- case 222 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 15
+--- case 220 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 15
 Paragraphs (222)
 --- input
   aaa
@@ -2891,7 +2863,7 @@ Paragraphs (222)
 bbb</p>
 
 --- end
---- case 223 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 64 expected-bytes 19
+--- case 221 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 64 expected-bytes 19
 Paragraphs (223)
 --- input
 aaa
@@ -2904,7 +2876,7 @@ bbb
 ccc</p>
 
 --- end
---- case 224 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 15
+--- case 222 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 15
 Paragraphs (224)
 --- input
    aaa
@@ -2915,7 +2887,7 @@ bbb
 bbb</p>
 
 --- end
---- case 225 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 40
+--- case 223 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 40
 Paragraphs (225)
 --- input
     aaa
@@ -2927,7 +2899,7 @@ bbb
 <p>bbb</p>
 
 --- end
---- case 226 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 18 expected-bytes 21
+--- case 224 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 18 expected-bytes 21
 Paragraphs (226)
 --- input
 aaa     
@@ -2938,7 +2910,7 @@ bbb
 bbb</p>
 
 --- end
---- case 227 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 22 expected-bytes 24
+--- case 225 options allow_dangerous_html,allow_dangerous_protocol label-bytes 17 input-bytes 22 expected-bytes 24
 Blank lines (227)
 --- input
   
@@ -2955,7 +2927,7 @@ aaa
 <h1>aaa</h1>
 
 --- end
---- case 228 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 20 expected-bytes 55
+--- case 226 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 20 expected-bytes 55
 Block quotes (228)
 --- input
 > # Foo
@@ -2970,7 +2942,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 229 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 55
+--- case 227 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 55
 Block quotes (229)
 --- input
 ># Foo
@@ -2985,7 +2957,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 230 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 27 expected-bytes 55
+--- case 228 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 27 expected-bytes 55
 Block quotes (230)
 --- input
    > # Foo
@@ -3000,7 +2972,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 231 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 32 expected-bytes 54
+--- case 229 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 32 expected-bytes 54
 Block quotes (231)
 --- input
     > # Foo
@@ -3014,7 +2986,7 @@ Block quotes (231)
 </code></pre>
 
 --- end
---- case 232 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 55
+--- case 230 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 55
 Block quotes (232)
 --- input
 > # Foo
@@ -3029,7 +3001,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 233 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 46
+--- case 231 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 46
 Block quotes (233)
 --- input
 > bar
@@ -3044,7 +3016,7 @@ foo</p>
 </blockquote>
 
 --- end
---- case 234 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 45
+--- case 232 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 45
 Block quotes (234)
 --- input
 > foo
@@ -3057,7 +3029,7 @@ Block quotes (234)
 <hr />
 
 --- end
---- case 235 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 75
+--- case 233 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 75
 Block quotes (235)
 --- input
 > - foo
@@ -3074,7 +3046,7 @@ Block quotes (235)
 </ul>
 
 --- end
---- case 236 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 85
+--- case 234 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 18 expected-bytes 85
 Block quotes (236)
 --- input
 >     foo
@@ -3089,7 +3061,7 @@ Block quotes (236)
 </code></pre>
 
 --- end
---- case 237 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 88
+--- case 235 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 88
 Block quotes (237)
 --- input
 > ```
@@ -3104,7 +3076,7 @@ foo
 <pre><code></code></pre>
 
 --- end
---- case 238 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 44
+--- case 236 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 44
 Block quotes (238)
 --- input
 > foo
@@ -3117,7 +3089,7 @@ Block quotes (238)
 </blockquote>
 
 --- end
---- case 239 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 2 expected-bytes 27
+--- case 237 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 2 expected-bytes 27
 Block quotes (239)
 --- input
 >
@@ -3127,7 +3099,7 @@ Block quotes (239)
 </blockquote>
 
 --- end
---- case 240 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 9 expected-bytes 27
+--- case 238 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 9 expected-bytes 27
 Block quotes (240)
 --- input
 >
@@ -3139,7 +3111,7 @@ Block quotes (240)
 </blockquote>
 
 --- end
---- case 241 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 38
+--- case 239 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 38
 Block quotes (241)
 --- input
 >
@@ -3152,7 +3124,7 @@ Block quotes (241)
 </blockquote>
 
 --- end
---- case 242 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 13 expected-bytes 76
+--- case 240 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 13 expected-bytes 76
 Block quotes (242)
 --- input
 > foo
@@ -3168,7 +3140,7 @@ Block quotes (242)
 </blockquote>
 
 --- end
---- case 243 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 42
+--- case 241 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 42
 Block quotes (243)
 --- input
 > foo
@@ -3181,7 +3153,7 @@ bar</p>
 </blockquote>
 
 --- end
---- case 244 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 49
+--- case 242 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 49
 Block quotes (244)
 --- input
 > foo
@@ -3195,7 +3167,7 @@ Block quotes (244)
 </blockquote>
 
 --- end
---- case 245 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 49
+--- case 243 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 49
 Block quotes (245)
 --- input
 foo
@@ -3208,7 +3180,7 @@ foo
 </blockquote>
 
 --- end
---- case 246 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 83
+--- case 244 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 16 expected-bytes 83
 Block quotes (246)
 --- input
 > aaa
@@ -3225,7 +3197,7 @@ Block quotes (246)
 </blockquote>
 
 --- end
---- case 247 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 42
+--- case 245 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 10 expected-bytes 42
 Block quotes (247)
 --- input
 > bar
@@ -3238,7 +3210,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 248 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 11 expected-bytes 49
+--- case 246 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 11 expected-bytes 49
 Block quotes (248)
 --- input
 > bar
@@ -3252,7 +3224,7 @@ baz
 <p>baz</p>
 
 --- end
---- case 249 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 49
+--- case 247 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 12 expected-bytes 49
 Block quotes (249)
 --- input
 > bar
@@ -3266,7 +3238,7 @@ baz
 <p>baz</p>
 
 --- end
---- case 250 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 96
+--- case 248 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 14 expected-bytes 96
 Block quotes (250)
 --- input
 > > > foo
@@ -3283,7 +3255,7 @@ bar</p>
 </blockquote>
 
 --- end
---- case 251 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 20 expected-bytes 100
+--- case 249 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 20 expected-bytes 100
 Block quotes (251)
 --- input
 >>> foo
@@ -3302,7 +3274,7 @@ baz</p>
 </blockquote>
 
 --- end
---- case 252 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 26 expected-bytes 100
+--- case 250 options allow_dangerous_html,allow_dangerous_protocol label-bytes 18 input-bytes 26 expected-bytes 100
 Block quotes (252)
 --- input
 >     code
@@ -3319,7 +3291,7 @@ Block quotes (252)
 </blockquote>
 
 --- end
---- case 253 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 65 expected-bytes 123
+--- case 251 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 65 expected-bytes 123
 List items (253)
 --- input
 A paragraph
@@ -3339,7 +3311,7 @@ with two lines.</p>
 </blockquote>
 
 --- end
---- case 254 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 81 expected-bytes 145
+--- case 252 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 81 expected-bytes 145
 List items (254)
 --- input
 1.  A paragraph
@@ -3363,7 +3335,7 @@ with two lines.</p>
 </ol>
 
 --- end
---- case 255 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 35
+--- case 253 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 35
 List items (255)
 --- input
 - one
@@ -3377,7 +3349,7 @@ List items (255)
 <p>two</p>
 
 --- end
---- case 256 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 13 expected-bytes 44
+--- case 254 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 13 expected-bytes 44
 List items (256)
 --- input
 - one
@@ -3393,7 +3365,7 @@ List items (256)
 </ul>
 
 --- end
---- case 257 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 20 expected-bytes 54
+--- case 255 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 20 expected-bytes 54
 List items (257)
 --- input
  -    one
@@ -3408,7 +3380,7 @@ List items (257)
 </code></pre>
 
 --- end
---- case 258 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 21 expected-bytes 44
+--- case 256 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 21 expected-bytes 44
 List items (258)
 --- input
  -    one
@@ -3424,7 +3396,7 @@ List items (258)
 </ul>
 
 --- end
---- case 259 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 29 expected-bytes 98
+--- case 257 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 29 expected-bytes 98
 List items (259)
 --- input
    > > 1.  one
@@ -3444,7 +3416,7 @@ List items (259)
 </blockquote>
 
 --- end
---- case 260 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 22 expected-bytes 89
+--- case 258 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 22 expected-bytes 89
 List items (260)
 --- input
 >>- one
@@ -3462,7 +3434,7 @@ List items (260)
 </blockquote>
 
 --- end
---- case 261 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 25
+--- case 259 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 25
 List items (261)
 --- input
 -one
@@ -3474,7 +3446,7 @@ List items (261)
 <p>2.two</p>
 
 --- end
---- case 262 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 44
+--- case 260 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 44
 List items (262)
 --- input
 - foo
@@ -3491,7 +3463,7 @@ List items (262)
 </ul>
 
 --- end
---- case 263 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 53 expected-bytes 111
+--- case 261 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 53 expected-bytes 111
 List items (263)
 --- input
 1.  foo
@@ -3518,7 +3490,7 @@ List items (263)
 </ol>
 
 --- end
---- case 264 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 29 expected-bytes 68
+--- case 262 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 29 expected-bytes 68
 List items (264)
 --- input
 - Foo
@@ -3541,7 +3513,7 @@ baz
 </ul>
 
 --- end
---- case 265 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 41
+--- case 263 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 41
 List items (265)
 --- input
 123456789. ok
@@ -3552,7 +3524,7 @@ List items (265)
 </ol>
 
 --- end
---- case 266 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 19 expected-bytes 26
+--- case 264 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 19 expected-bytes 26
 List items (266)
 --- input
 1234567890. not ok
@@ -3561,7 +3533,7 @@ List items (266)
 <p>1234567890. not ok</p>
 
 --- end
---- case 267 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 6 expected-bytes 33
+--- case 265 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 6 expected-bytes 33
 List items (267)
 --- input
 0. ok
@@ -3572,7 +3544,7 @@ List items (267)
 </ol>
 
 --- end
---- case 268 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 33
+--- case 266 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 33
 List items (268)
 --- input
 003. ok
@@ -3583,7 +3555,7 @@ List items (268)
 </ol>
 
 --- end
---- case 269 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 18
+--- case 267 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 18
 List items (269)
 --- input
 -1. not ok
@@ -3592,7 +3564,7 @@ List items (269)
 <p>-1. not ok</p>
 
 --- end
---- case 270 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 62
+--- case 268 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 62
 List items (270)
 --- input
 - foo
@@ -3609,7 +3581,7 @@ List items (270)
 </ul>
 
 --- end
---- case 271 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 27 expected-bytes 73
+--- case 269 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 27 expected-bytes 73
 List items (271)
 --- input
   10.  foo
@@ -3626,7 +3598,7 @@ List items (271)
 </ol>
 
 --- end
---- case 272 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 44 expected-bytes 91
+--- case 270 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 44 expected-bytes 91
 List items (272)
 --- input
     indented code
@@ -3643,7 +3615,7 @@ paragraph
 </code></pre>
 
 --- end
---- case 273 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 53 expected-bytes 113
+--- case 271 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 53 expected-bytes 113
 List items (273)
 --- input
 1.     indented code
@@ -3664,7 +3636,7 @@ List items (273)
 </ol>
 
 --- end
---- case 274 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 54 expected-bytes 114
+--- case 272 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 54 expected-bytes 114
 List items (274)
 --- input
 1.      indented code
@@ -3685,7 +3657,7 @@ List items (274)
 </ol>
 
 --- end
---- case 275 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 22
+--- case 273 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 22
 List items (275)
 --- input
    foo
@@ -3697,7 +3669,7 @@ bar
 <p>bar</p>
 
 --- end
---- case 276 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 16 expected-bytes 35
+--- case 274 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 16 expected-bytes 35
 List items (276)
 --- input
 -    foo
@@ -3711,7 +3683,7 @@ List items (276)
 <p>bar</p>
 
 --- end
---- case 277 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 44
+--- case 275 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 44
 List items (277)
 --- input
 -  foo
@@ -3727,7 +3699,7 @@ List items (277)
 </ul>
 
 --- end
---- case 278 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 40 expected-bytes 104
+--- case 276 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 40 expected-bytes 104
 List items (278)
 --- input
 -
@@ -3753,7 +3725,7 @@ List items (278)
 </ul>
 
 --- end
---- case 279 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 24
+--- case 277 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 24
 List items (279)
 --- input
 -   
@@ -3765,7 +3737,7 @@ List items (279)
 </ul>
 
 --- end
---- case 280 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 32
+--- case 278 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 32
 List items (280)
 --- input
 -
@@ -3779,7 +3751,7 @@ List items (280)
 <p>foo</p>
 
 --- end
---- case 281 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 47
+--- case 279 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 47
 List items (281)
 --- input
 - foo
@@ -3794,7 +3766,7 @@ List items (281)
 </ul>
 
 --- end
---- case 282 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 47
+--- case 280 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 47
 List items (282)
 --- input
 - foo
@@ -3809,7 +3781,7 @@ List items (282)
 </ul>
 
 --- end
---- case 283 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 47
+--- case 281 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 47
 List items (283)
 --- input
 1. foo
@@ -3824,7 +3796,7 @@ List items (283)
 </ol>
 
 --- end
---- case 284 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 2 expected-bytes 21
+--- case 282 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 2 expected-bytes 21
 List items (284)
 --- input
 *
@@ -3835,7 +3807,7 @@ List items (284)
 </ul>
 
 --- end
---- case 285 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 27
+--- case 283 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 27
 List items (285)
 --- input
 foo
@@ -3851,7 +3823,7 @@ foo
 1.</p>
 
 --- end
---- case 286 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 85 expected-bytes 145
+--- case 284 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 85 expected-bytes 145
 List items (286)
 --- input
  1.  A paragraph
@@ -3875,7 +3847,7 @@ with two lines.</p>
 </ol>
 
 --- end
---- case 287 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 89 expected-bytes 145
+--- case 285 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 89 expected-bytes 145
 List items (287)
 --- input
   1.  A paragraph
@@ -3899,7 +3871,7 @@ with two lines.</p>
 </ol>
 
 --- end
---- case 288 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 93 expected-bytes 145
+--- case 286 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 93 expected-bytes 145
 List items (288)
 --- input
    1.  A paragraph
@@ -3923,7 +3895,7 @@ with two lines.</p>
 </ol>
 
 --- end
---- case 289 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 97 expected-bytes 109
+--- case 287 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 97 expected-bytes 109
 List items (289)
 --- input
     1.  A paragraph
@@ -3943,7 +3915,7 @@ List items (289)
 </code></pre>
 
 --- end
---- case 290 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 83 expected-bytes 145
+--- case 288 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 83 expected-bytes 145
 List items (290)
 --- input
   1.  A paragraph
@@ -3967,7 +3939,7 @@ with two lines.</p>
 </ol>
 
 --- end
---- case 291 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 38 expected-bytes 48
+--- case 289 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 38 expected-bytes 48
 List items (291)
 --- input
   1.  A paragraph
@@ -3980,7 +3952,7 @@ with two lines.</li>
 </ol>
 
 --- end
---- case 292 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 34 expected-bytes 110
+--- case 290 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 34 expected-bytes 110
 List items (292)
 --- input
 > 1. > Blockquote
@@ -3999,7 +3971,7 @@ continued here.</p>
 </blockquote>
 
 --- end
---- case 293 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 36 expected-bytes 110
+--- case 291 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 36 expected-bytes 110
 List items (293)
 --- input
 > 1. > Blockquote
@@ -4018,7 +3990,7 @@ continued here.</p>
 </blockquote>
 
 --- end
---- case 294 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 36 expected-bytes 99
+--- case 292 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 36 expected-bytes 99
 List items (294)
 --- input
 - foo
@@ -4044,7 +4016,7 @@ List items (294)
 </ul>
 
 --- end
---- case 295 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 30 expected-bytes 63
+--- case 293 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 30 expected-bytes 63
 List items (295)
 --- input
 - foo
@@ -4061,7 +4033,7 @@ List items (295)
 </ul>
 
 --- end
---- case 296 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 18 expected-bytes 60
+--- case 294 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 18 expected-bytes 60
 List items (296)
 --- input
 10) foo
@@ -4077,7 +4049,7 @@ List items (296)
 </ol>
 
 --- end
---- case 297 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 59
+--- case 295 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 59
 List items (297)
 --- input
 10) foo
@@ -4092,7 +4064,7 @@ List items (297)
 </ul>
 
 --- end
---- case 298 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 46
+--- case 296 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 46
 List items (298)
 --- input
 - - foo
@@ -4107,7 +4079,7 @@ List items (298)
 </ul>
 
 --- end
---- case 299 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 78
+--- case 297 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 78
 List items (299)
 --- input
 1. - 2. foo
@@ -4126,7 +4098,7 @@ List items (299)
 </ol>
 
 --- end
---- case 300 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 26 expected-bytes 62
+--- case 298 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 26 expected-bytes 62
 List items (300)
 --- input
 - # Foo
@@ -4145,7 +4117,7 @@ baz</li>
 </ul>
 
 --- end
---- case 301 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 61
+--- case 299 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 61
 Lists (301)
 --- input
 - foo
@@ -4162,7 +4134,7 @@ Lists (301)
 </ul>
 
 --- end
---- case 302 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 71
+--- case 300 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 71
 Lists (302)
 --- input
 1. foo
@@ -4179,7 +4151,7 @@ Lists (302)
 </ol>
 
 --- end
---- case 303 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 48
+--- case 301 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 48
 Lists (303)
 --- input
 Foo
@@ -4194,7 +4166,7 @@ Foo
 </ul>
 
 --- end
---- case 304 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 68 expected-bytes 75
+--- case 302 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 68 expected-bytes 75
 Lists (304)
 --- input
 The number of windows in my house is
@@ -4205,7 +4177,7 @@ The number of windows in my house is
 14.  The number of doors is 6.</p>
 
 --- end
---- case 305 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 67 expected-bytes 90
+--- case 303 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 67 expected-bytes 90
 Lists (305)
 --- input
 The number of windows in my house is
@@ -4218,7 +4190,7 @@ The number of windows in my house is
 </ol>
 
 --- end
---- case 306 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 77
+--- case 304 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 77
 Lists (306)
 --- input
 - foo
@@ -4242,7 +4214,7 @@ Lists (306)
 </ul>
 
 --- end
---- case 307 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 36 expected-bytes 94
+--- case 305 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 36 expected-bytes 94
 Lists (307)
 --- input
 - foo
@@ -4269,7 +4241,7 @@ Lists (307)
 </ul>
 
 --- end
---- case 308 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 35 expected-bytes 83
+--- case 306 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 35 expected-bytes 83
 Lists (308)
 --- input
 - foo
@@ -4292,7 +4264,7 @@ Lists (308)
 </ul>
 
 --- end
---- case 309 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 50 expected-bytes 109
+--- case 307 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 50 expected-bytes 109
 Lists (309)
 --- input
 -   foo
@@ -4320,7 +4292,7 @@ Lists (309)
 </code></pre>
 
 --- end
---- case 310 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 37 expected-bytes 88
+--- case 308 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 37 expected-bytes 88
 Lists (310)
 --- input
 - a
@@ -4343,7 +4315,7 @@ Lists (310)
 </ul>
 
 --- end
---- case 311 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 71
+--- case 309 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 71
 Lists (311)
 --- input
 1. a
@@ -4366,7 +4338,7 @@ Lists (311)
 </ol>
 
 --- end
---- case 312 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 59
+--- case 310 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 59
 Lists (312)
 --- input
 - a
@@ -4385,7 +4357,7 @@ Lists (312)
 </ul>
 
 --- end
---- case 313 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 81
+--- case 311 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 81
 Lists (313)
 --- input
 1. a
@@ -4407,7 +4379,7 @@ Lists (313)
 </code></pre>
 
 --- end
---- case 314 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 71
+--- case 312 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 71
 Lists (314)
 --- input
 - a
@@ -4429,7 +4401,7 @@ Lists (314)
 </ul>
 
 --- end
---- case 315 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 61
+--- case 313 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 61
 Lists (315)
 --- input
 * a
@@ -4449,7 +4421,7 @@ Lists (315)
 </ul>
 
 --- end
---- case 316 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 80
+--- case 314 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 80
 Lists (316)
 --- input
 - a
@@ -4473,7 +4445,7 @@ Lists (316)
 </ul>
 
 --- end
---- case 317 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 71
+--- case 315 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 71
 Lists (317)
 --- input
 - a
@@ -4496,7 +4468,7 @@ Lists (317)
 </ul>
 
 --- end
---- case 318 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 73
+--- case 316 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 73
 Lists (318)
 --- input
 - a
@@ -4520,7 +4492,7 @@ Lists (318)
 </ul>
 
 --- end
---- case 319 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 74
+--- case 317 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 74
 Lists (319)
 --- input
 - a
@@ -4543,7 +4515,7 @@ Lists (319)
 </ul>
 
 --- end
---- case 320 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 70
+--- case 318 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 70
 Lists (320)
 --- input
 * a
@@ -4562,7 +4534,7 @@ Lists (320)
 </ul>
 
 --- end
---- case 321 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 97
+--- case 319 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 97
 Lists (321)
 --- input
 - a
@@ -4585,7 +4557,7 @@ Lists (321)
 </ul>
 
 --- end
---- case 322 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 4 expected-bytes 22
+--- case 320 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 4 expected-bytes 22
 Lists (322)
 --- input
 - a
@@ -4596,7 +4568,7 @@ Lists (322)
 </ul>
 
 --- end
---- case 323 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 10 expected-bytes 45
+--- case 321 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 10 expected-bytes 45
 Lists (323)
 --- input
 - a
@@ -4612,7 +4584,7 @@ Lists (323)
 </ul>
 
 --- end
---- case 324 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 62
+--- case 322 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 62
 Lists (324)
 --- input
 1. ```
@@ -4631,7 +4603,7 @@ Lists (324)
 </ol>
 
 --- end
---- case 325 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 68
+--- case 323 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 68
 Lists (325)
 --- input
 * foo
@@ -4651,7 +4623,7 @@ Lists (325)
 </ul>
 
 --- end
---- case 326 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 117
+--- case 324 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 117
 Lists (326)
 --- input
 - a
@@ -4681,7 +4653,7 @@ Lists (326)
 </ul>
 
 --- end
---- case 327 options allow_dangerous_html,allow_dangerous_protocol label-bytes 13 input-bytes 8 expected-bytes 26
+--- case 325 options allow_dangerous_html,allow_dangerous_protocol label-bytes 13 input-bytes 8 expected-bytes 26
 Inlines (327)
 --- input
 `hi`lo`
@@ -4690,7 +4662,7 @@ Inlines (327)
 <p><code>hi</code>lo`</p>
 
 --- end
---- case 328 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 6 expected-bytes 24
+--- case 326 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 6 expected-bytes 24
 Code spans (328)
 --- input
 `foo`
@@ -4699,7 +4671,7 @@ Code spans (328)
 <p><code>foo</code></p>
 
 --- end
---- case 329 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 16 expected-bytes 30
+--- case 327 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 16 expected-bytes 30
 Code spans (329)
 --- input
 `` foo ` bar ``
@@ -4708,7 +4680,7 @@ Code spans (329)
 <p><code>foo ` bar</code></p>
 
 --- end
---- case 330 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 7 expected-bytes 23
+--- case 328 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 7 expected-bytes 23
 Code spans (330)
 --- input
 ` `` `
@@ -4717,7 +4689,7 @@ Code spans (330)
 <p><code>``</code></p>
 
 --- end
---- case 331 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 25
+--- case 329 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 25
 Code spans (331)
 --- input
 `  ``  `
@@ -4726,7 +4698,7 @@ Code spans (331)
 <p><code> `` </code></p>
 
 --- end
---- case 332 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 5 expected-bytes 23
+--- case 330 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 5 expected-bytes 23
 Code spans (332)
 --- input
 ` a`
@@ -4735,7 +4707,7 @@ Code spans (332)
 <p><code> a</code></p>
 
 --- end
---- case 333 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 26
+--- case 331 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 26
 Code spans (333)
 --- input
 ` b `
@@ -4744,7 +4716,7 @@ Code spans (333)
 <p><code> b </code></p>
 
 --- end
---- case 334 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 10 expected-bytes 39
+--- case 332 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 10 expected-bytes 39
 Code spans (334)
 --- input
 ` `
@@ -4755,7 +4727,7 @@ Code spans (334)
 <code>  </code></p>
 
 --- end
---- case 335 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 20 expected-bytes 34
+--- case 333 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 20 expected-bytes 34
 Code spans (335)
 --- input
 ``
@@ -4768,7 +4740,7 @@ baz
 <p><code>foo bar   baz</code></p>
 
 --- end
---- case 336 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 25
+--- case 334 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 25
 Code spans (336)
 --- input
 ``
@@ -4779,7 +4751,7 @@ foo
 <p><code>foo </code></p>
 
 --- end
---- case 337 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 35
+--- case 335 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 17 expected-bytes 35
 Code spans (337)
 --- input
 `foo   bar 
@@ -4789,7 +4761,7 @@ baz`
 <p><code>foo   bar  baz</code></p>
 
 --- end
---- case 338 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 29
+--- case 336 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 11 expected-bytes 29
 Code spans (338)
 --- input
 `foo\`bar`
@@ -4798,7 +4770,7 @@ Code spans (338)
 <p><code>foo\</code>bar`</p>
 
 --- end
---- case 339 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 28
+--- case 337 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 28
 Code spans (339)
 --- input
 ``foo`bar``
@@ -4807,7 +4779,7 @@ Code spans (339)
 <p><code>foo`bar</code></p>
 
 --- end
---- case 340 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 31
+--- case 338 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 31
 Code spans (340)
 --- input
 ` foo `` bar `
@@ -4816,7 +4788,7 @@ Code spans (340)
 <p><code>foo `` bar</code></p>
 
 --- end
---- case 341 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 26
+--- case 339 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 8 expected-bytes 26
 Code spans (341)
 --- input
 *foo`*`
@@ -4825,7 +4797,7 @@ Code spans (341)
 <p>*foo<code>*</code></p>
 
 --- end
---- case 342 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 21 expected-bytes 39
+--- case 340 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 21 expected-bytes 39
 Code spans (342)
 --- input
 [not a `link](/foo`)
@@ -4834,7 +4806,7 @@ Code spans (342)
 <p>[not a <code>link](/foo</code>)</p>
 
 --- end
---- case 343 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 49
+--- case 341 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 15 expected-bytes 49
 Code spans (343)
 --- input
 `<a href="`">`
@@ -4843,7 +4815,7 @@ Code spans (343)
 <p><code>&lt;a href=&quot;</code>&quot;&gt;`</p>
 
 --- end
---- case 344 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 21
+--- case 342 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 14 expected-bytes 21
 Code spans (344)
 --- input
 <a href="`">`
@@ -4852,7 +4824,7 @@ Code spans (344)
 <p><a href="`">`</p>
 
 --- end
---- case 345 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 25 expected-bytes 49
+--- case 343 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 25 expected-bytes 49
 Code spans (345)
 --- input
 `<https://foo.bar.`baz>`
@@ -4861,7 +4833,7 @@ Code spans (345)
 <p><code>&lt;https://foo.bar.</code>baz&gt;`</p>
 
 --- end
---- case 346 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 24 expected-bytes 66
+--- case 344 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 24 expected-bytes 66
 Code spans (346)
 --- input
 <https://foo.bar.`baz>`
@@ -4870,7 +4842,7 @@ Code spans (346)
 <p><a href="https://foo.bar.%60baz">https://foo.bar.`baz</a>`</p>
 
 --- end
---- case 347 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 16
+--- case 345 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 9 expected-bytes 16
 Code spans (347)
 --- input
 ```foo``
@@ -4879,7 +4851,7 @@ Code spans (347)
 <p>```foo``</p>
 
 --- end
---- case 348 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 5 expected-bytes 12
+--- case 346 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 5 expected-bytes 12
 Code spans (348)
 --- input
 `foo
@@ -4888,7 +4860,7 @@ Code spans (348)
 <p>`foo</p>
 
 --- end
---- case 349 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 28
+--- case 347 options allow_dangerous_html,allow_dangerous_protocol label-bytes 16 input-bytes 12 expected-bytes 28
 Code spans (349)
 --- input
 `foo``bar``
@@ -4897,7 +4869,7 @@ Code spans (349)
 <p>`foo<code>bar</code></p>
 
 --- end
---- case 350 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
+--- case 348 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
 Emphasis and strong emphasis (350)
 --- input
 *foo bar*
@@ -4906,7 +4878,7 @@ Emphasis and strong emphasis (350)
 <p><em>foo bar</em></p>
 
 --- end
---- case 351 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 349 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (351)
 --- input
 a * foo bar*
@@ -4915,7 +4887,7 @@ a * foo bar*
 <p>a * foo bar*</p>
 
 --- end
---- case 352 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 26
+--- case 350 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 26
 Emphasis and strong emphasis (352)
 --- input
 a*"foo"*
@@ -4924,7 +4896,7 @@ a*"foo"*
 <p>a*&quot;foo&quot;*</p>
 
 --- end
---- case 353 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
+--- case 351 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
 Emphasis and strong emphasis (353)
 --- input
 * a *
@@ -4933,7 +4905,7 @@ Emphasis and strong emphasis (353)
 <p>* a *</p>
 
 --- end
---- case 354 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 56
+--- case 352 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 56
 Emphasis and strong emphasis (354)
 --- input
 *$*alpha.
@@ -4948,7 +4920,7 @@ Emphasis and strong emphasis (354)
 <p>*€*charlie.</p>
 
 --- end
---- case 355 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 353 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (355)
 --- input
 foo*bar*
@@ -4957,7 +4929,7 @@ foo*bar*
 <p>foo<em>bar</em></p>
 
 --- end
---- case 356 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
+--- case 354 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
 Emphasis and strong emphasis (356)
 --- input
 5*6*78
@@ -4966,7 +4938,7 @@ Emphasis and strong emphasis (356)
 <p>5<em>6</em>78</p>
 
 --- end
---- case 357 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
+--- case 355 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
 Emphasis and strong emphasis (357)
 --- input
 _foo bar_
@@ -4975,7 +4947,7 @@ _foo bar_
 <p><em>foo bar</em></p>
 
 --- end
---- case 358 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 356 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (358)
 --- input
 _ foo bar_
@@ -4984,7 +4956,7 @@ _ foo bar_
 <p>_ foo bar_</p>
 
 --- end
---- case 359 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 26
+--- case 357 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 26
 Emphasis and strong emphasis (359)
 --- input
 a_"foo"_
@@ -4993,7 +4965,7 @@ a_"foo"_
 <p>a_&quot;foo&quot;_</p>
 
 --- end
---- case 360 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
+--- case 358 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
 Emphasis and strong emphasis (360)
 --- input
 foo_bar_
@@ -5002,7 +4974,7 @@ foo_bar_
 <p>foo_bar_</p>
 
 --- end
---- case 361 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 14
+--- case 359 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 14
 Emphasis and strong emphasis (361)
 --- input
 5_6_78
@@ -5011,7 +4983,7 @@ Emphasis and strong emphasis (361)
 <p>5_6_78</p>
 
 --- end
---- case 362 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 39 expected-bytes 46
+--- case 360 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 39 expected-bytes 46
 Emphasis and strong emphasis (362)
 --- input
 пристаням_стремятся_
@@ -5020,7 +4992,7 @@ Emphasis and strong emphasis (362)
 <p>пристаням_стремятся_</p>
 
 --- end
---- case 363 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
+--- case 361 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
 Emphasis and strong emphasis (363)
 --- input
 aa_"bb"_cc
@@ -5029,7 +5001,7 @@ aa_"bb"_cc
 <p>aa_&quot;bb&quot;_cc</p>
 
 --- end
---- case 364 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 26
+--- case 362 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 26
 Emphasis and strong emphasis (364)
 --- input
 foo-_(bar)_
@@ -5038,7 +5010,7 @@ foo-_(bar)_
 <p>foo-<em>(bar)</em></p>
 
 --- end
---- case 365 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 6 expected-bytes 13
+--- case 363 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 6 expected-bytes 13
 Emphasis and strong emphasis (365)
 --- input
 _foo*
@@ -5047,7 +5019,7 @@ _foo*
 <p>_foo*</p>
 
 --- end
---- case 366 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 364 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (366)
 --- input
 *foo bar *
@@ -5056,7 +5028,7 @@ Emphasis and strong emphasis (366)
 <p>*foo bar *</p>
 
 --- end
---- case 367 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 365 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (367)
 --- input
 *foo bar
@@ -5067,7 +5039,7 @@ Emphasis and strong emphasis (367)
 *</p>
 
 --- end
---- case 368 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
+--- case 366 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
 Emphasis and strong emphasis (368)
 --- input
 *(*foo)
@@ -5076,7 +5048,7 @@ Emphasis and strong emphasis (368)
 <p>*(*foo)</p>
 
 --- end
---- case 369 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 31
+--- case 367 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 31
 Emphasis and strong emphasis (369)
 --- input
 *(*foo*)*
@@ -5085,7 +5057,7 @@ Emphasis and strong emphasis (369)
 <p><em>(<em>foo</em>)</em></p>
 
 --- end
---- case 370 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 368 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (370)
 --- input
 *foo*bar
@@ -5094,7 +5066,7 @@ Emphasis and strong emphasis (370)
 <p><em>foo</em>bar</p>
 
 --- end
---- case 371 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 369 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (371)
 --- input
 _foo bar _
@@ -5103,7 +5075,7 @@ _foo bar _
 <p>_foo bar _</p>
 
 --- end
---- case 372 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
+--- case 370 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
 Emphasis and strong emphasis (372)
 --- input
 _(_foo)
@@ -5112,7 +5084,7 @@ _(_foo)
 <p>_(_foo)</p>
 
 --- end
---- case 373 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 31
+--- case 371 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 31
 Emphasis and strong emphasis (373)
 --- input
 _(_foo_)_
@@ -5121,7 +5093,7 @@ _(_foo_)_
 <p><em>(<em>foo</em>)</em></p>
 
 --- end
---- case 374 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
+--- case 372 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
 Emphasis and strong emphasis (374)
 --- input
 _foo_bar
@@ -5130,7 +5102,7 @@ _foo_bar
 <p>_foo_bar</p>
 
 --- end
---- case 375 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 39 expected-bytes 46
+--- case 373 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 39 expected-bytes 46
 Emphasis and strong emphasis (375)
 --- input
 _пристаням_стремятся
@@ -5139,7 +5111,7 @@ _пристаням_стремятся
 <p>_пристаням_стремятся</p>
 
 --- end
---- case 376 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 28
+--- case 374 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 28
 Emphasis and strong emphasis (376)
 --- input
 _foo_bar_baz_
@@ -5148,7 +5120,7 @@ _foo_bar_baz_
 <p><em>foo_bar_baz</em></p>
 
 --- end
---- case 377 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 375 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (377)
 --- input
 _(bar)_.
@@ -5157,7 +5129,7 @@ _(bar)_.
 <p><em>(bar)</em>.</p>
 
 --- end
---- case 378 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
+--- case 376 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
 Emphasis and strong emphasis (378)
 --- input
 **foo bar**
@@ -5166,7 +5138,7 @@ Emphasis and strong emphasis (378)
 <p><strong>foo bar</strong></p>
 
 --- end
---- case 379 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 377 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (379)
 --- input
 ** foo bar**
@@ -5175,7 +5147,7 @@ Emphasis and strong emphasis (379)
 <p>** foo bar**</p>
 
 --- end
---- case 380 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
+--- case 378 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
 Emphasis and strong emphasis (380)
 --- input
 a**"foo"**
@@ -5184,7 +5156,7 @@ a**"foo"**
 <p>a**&quot;foo&quot;**</p>
 
 --- end
---- case 381 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
+--- case 379 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
 Emphasis and strong emphasis (381)
 --- input
 foo**bar**
@@ -5193,7 +5165,7 @@ foo**bar**
 <p>foo<strong>bar</strong></p>
 
 --- end
---- case 382 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
+--- case 380 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
 Emphasis and strong emphasis (382)
 --- input
 __foo bar__
@@ -5202,7 +5174,7 @@ __foo bar__
 <p><strong>foo bar</strong></p>
 
 --- end
---- case 383 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 381 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (383)
 --- input
 __ foo bar__
@@ -5211,7 +5183,7 @@ __ foo bar__
 <p>__ foo bar__</p>
 
 --- end
---- case 384 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 382 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (384)
 --- input
 __
@@ -5222,7 +5194,7 @@ foo bar__
 foo bar__</p>
 
 --- end
---- case 385 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
+--- case 383 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 28
 Emphasis and strong emphasis (385)
 --- input
 a__"foo"__
@@ -5231,7 +5203,7 @@ a__"foo"__
 <p>a__&quot;foo&quot;__</p>
 
 --- end
---- case 386 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 384 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (386)
 --- input
 foo__bar__
@@ -5240,7 +5212,7 @@ foo__bar__
 <p>foo__bar__</p>
 
 --- end
---- case 387 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
+--- case 385 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 16
 Emphasis and strong emphasis (387)
 --- input
 5__6__78
@@ -5249,7 +5221,7 @@ Emphasis and strong emphasis (387)
 <p>5__6__78</p>
 
 --- end
---- case 388 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 41 expected-bytes 48
+--- case 386 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 41 expected-bytes 48
 Emphasis and strong emphasis (388)
 --- input
 пристаням__стремятся__
@@ -5258,7 +5230,7 @@ Emphasis and strong emphasis (388)
 <p>пристаням__стремятся__</p>
 
 --- end
---- case 389 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 22 expected-bytes 55
+--- case 387 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 22 expected-bytes 55
 Emphasis and strong emphasis (389)
 --- input
 __foo, __bar__, baz__
@@ -5267,7 +5239,7 @@ __foo, __bar__, baz__
 <p><strong>foo, <strong>bar</strong>, baz</strong></p>
 
 --- end
---- case 390 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 34
+--- case 388 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 34
 Emphasis and strong emphasis (390)
 --- input
 foo-__(bar)__
@@ -5276,7 +5248,7 @@ foo-__(bar)__
 <p>foo-<strong>(bar)</strong></p>
 
 --- end
---- case 391 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 389 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (391)
 --- input
 **foo bar **
@@ -5285,7 +5257,7 @@ Emphasis and strong emphasis (391)
 <p>**foo bar **</p>
 
 --- end
---- case 392 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
+--- case 390 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
 Emphasis and strong emphasis (392)
 --- input
 **(**foo)
@@ -5294,7 +5266,7 @@ Emphasis and strong emphasis (392)
 <p>**(**foo)</p>
 
 --- end
---- case 393 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 39
+--- case 391 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 39
 Emphasis and strong emphasis (393)
 --- input
 *(**foo**)*
@@ -5303,7 +5275,7 @@ Emphasis and strong emphasis (393)
 <p><em>(<strong>foo</strong>)</em></p>
 
 --- end
---- case 394 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 75 expected-bytes 109
+--- case 392 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 75 expected-bytes 109
 Emphasis and strong emphasis (394)
 --- input
 **Gomphocarpus (*Gomphocarpus physocarpus*, syn.
@@ -5314,7 +5286,7 @@ Emphasis and strong emphasis (394)
 <em>Asclepias physocarpa</em>)</strong></p>
 
 --- end
---- case 395 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 57
+--- case 393 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 57
 Emphasis and strong emphasis (395)
 --- input
 **foo "*bar*" foo**
@@ -5323,7 +5295,7 @@ Emphasis and strong emphasis (395)
 <p><strong>foo &quot;<em>bar</em>&quot; foo</strong></p>
 
 --- end
---- case 396 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
+--- case 394 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
 Emphasis and strong emphasis (396)
 --- input
 **foo**bar
@@ -5332,7 +5304,7 @@ Emphasis and strong emphasis (396)
 <p><strong>foo</strong>bar</p>
 
 --- end
---- case 397 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
+--- case 395 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 20
 Emphasis and strong emphasis (397)
 --- input
 __foo bar __
@@ -5341,7 +5313,7 @@ __foo bar __
 <p>__foo bar __</p>
 
 --- end
---- case 398 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
+--- case 396 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
 Emphasis and strong emphasis (398)
 --- input
 __(__foo)
@@ -5350,7 +5322,7 @@ __(__foo)
 <p>__(__foo)</p>
 
 --- end
---- case 399 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 39
+--- case 397 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 39
 Emphasis and strong emphasis (399)
 --- input
 _(__foo__)_
@@ -5359,7 +5331,7 @@ _(__foo__)_
 <p><em>(<strong>foo</strong>)</em></p>
 
 --- end
---- case 400 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
+--- case 398 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 18
 Emphasis and strong emphasis (400)
 --- input
 __foo__bar
@@ -5368,7 +5340,7 @@ __foo__bar
 <p>__foo__bar</p>
 
 --- end
---- case 401 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 41 expected-bytes 48
+--- case 399 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 41 expected-bytes 48
 Emphasis and strong emphasis (401)
 --- input
 __пристаням__стремятся
@@ -5377,7 +5349,7 @@ __пристаням__стремятся
 <p>__пристаням__стремятся</p>
 
 --- end
---- case 402 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 38
+--- case 400 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 38
 Emphasis and strong emphasis (402)
 --- input
 __foo__bar__baz__
@@ -5386,7 +5358,7 @@ __foo__bar__baz__
 <p><strong>foo__bar__baz</strong></p>
 
 --- end
---- case 403 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
+--- case 401 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 31
 Emphasis and strong emphasis (403)
 --- input
 __(bar)__.
@@ -5395,7 +5367,7 @@ __(bar)__.
 <p><strong>(bar)</strong>.</p>
 
 --- end
---- case 404 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 43
+--- case 402 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 43
 Emphasis and strong emphasis (404)
 --- input
 *foo [bar](/url)*
@@ -5404,7 +5376,7 @@ Emphasis and strong emphasis (404)
 <p><em>foo <a href="/url">bar</a></em></p>
 
 --- end
---- case 405 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
+--- case 403 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 24
 Emphasis and strong emphasis (405)
 --- input
 *foo
@@ -5415,7 +5387,7 @@ bar*
 bar</em></p>
 
 --- end
---- case 406 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
+--- case 404 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
 Emphasis and strong emphasis (406)
 --- input
 _foo __bar__ baz_
@@ -5424,7 +5396,7 @@ _foo __bar__ baz_
 <p><em>foo <strong>bar</strong> baz</em></p>
 
 --- end
---- case 407 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 37
+--- case 405 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 37
 Emphasis and strong emphasis (407)
 --- input
 _foo _bar_ baz_
@@ -5433,7 +5405,7 @@ _foo _bar_ baz_
 <p><em>foo <em>bar</em> baz</em></p>
 
 --- end
---- case 408 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 33
+--- case 406 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 33
 Emphasis and strong emphasis (408)
 --- input
 __foo_ bar_
@@ -5442,7 +5414,7 @@ __foo_ bar_
 <p><em><em>foo</em> bar</em></p>
 
 --- end
---- case 409 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 33
+--- case 407 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 33
 Emphasis and strong emphasis (409)
 --- input
 *foo *bar**
@@ -5451,7 +5423,7 @@ Emphasis and strong emphasis (409)
 <p><em>foo <em>bar</em></em></p>
 
 --- end
---- case 410 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
+--- case 408 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
 Emphasis and strong emphasis (410)
 --- input
 *foo **bar** baz*
@@ -5460,7 +5432,7 @@ Emphasis and strong emphasis (410)
 <p><em>foo <strong>bar</strong> baz</em></p>
 
 --- end
---- case 411 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
+--- case 409 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
 Emphasis and strong emphasis (411)
 --- input
 *foo**bar**baz*
@@ -5469,7 +5441,7 @@ Emphasis and strong emphasis (411)
 <p><em>foo<strong>bar</strong>baz</em></p>
 
 --- end
---- case 412 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 25
+--- case 410 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 25
 Emphasis and strong emphasis (412)
 --- input
 *foo**bar*
@@ -5478,7 +5450,7 @@ Emphasis and strong emphasis (412)
 <p><em>foo**bar</em></p>
 
 --- end
---- case 413 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
+--- case 411 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
 Emphasis and strong emphasis (413)
 --- input
 ***foo** bar*
@@ -5487,7 +5459,7 @@ Emphasis and strong emphasis (413)
 <p><em><strong>foo</strong> bar</em></p>
 
 --- end
---- case 414 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
+--- case 412 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
 Emphasis and strong emphasis (414)
 --- input
 *foo **bar***
@@ -5496,7 +5468,7 @@ Emphasis and strong emphasis (414)
 <p><em>foo <strong>bar</strong></em></p>
 
 --- end
---- case 415 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 40
+--- case 413 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 13 expected-bytes 40
 Emphasis and strong emphasis (415)
 --- input
 *foo**bar***
@@ -5505,7 +5477,7 @@ Emphasis and strong emphasis (415)
 <p><em>foo<strong>bar</strong></em></p>
 
 --- end
---- case 416 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
+--- case 414 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
 Emphasis and strong emphasis (416)
 --- input
 foo***bar***baz
@@ -5514,7 +5486,7 @@ foo***bar***baz
 <p>foo<em><strong>bar</strong></em>baz</p>
 
 --- end
---- case 417 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 25 expected-bytes 71
+--- case 415 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 25 expected-bytes 71
 Emphasis and strong emphasis (417)
 --- input
 foo******bar*********baz
@@ -5523,7 +5495,7 @@ foo******bar*********baz
 <p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>
 
 --- end
---- case 418 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 62
+--- case 416 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 62
 Emphasis and strong emphasis (418)
 --- input
 *foo **bar *baz* bim** bop*
@@ -5532,7 +5504,7 @@ Emphasis and strong emphasis (418)
 <p><em>foo <strong>bar <em>baz</em> bim</strong> bop</em></p>
 
 --- end
---- case 419 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 52
+--- case 417 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 52
 Emphasis and strong emphasis (419)
 --- input
 *foo [*bar*](/url)*
@@ -5541,7 +5513,7 @@ Emphasis and strong emphasis (419)
 <p><em>foo <a href="/url"><em>bar</em></a></em></p>
 
 --- end
---- case 420 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
+--- case 418 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
 Emphasis and strong emphasis (420)
 --- input
 ** is not an empty emphasis
@@ -5550,7 +5522,7 @@ Emphasis and strong emphasis (420)
 <p>** is not an empty emphasis</p>
 
 --- end
---- case 421 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 44
+--- case 419 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 44
 Emphasis and strong emphasis (421)
 --- input
 **** is not an empty strong emphasis
@@ -5559,7 +5531,7 @@ Emphasis and strong emphasis (421)
 <p>**** is not an empty strong emphasis</p>
 
 --- end
---- case 422 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 51
+--- case 420 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 51
 Emphasis and strong emphasis (422)
 --- input
 **foo [bar](/url)**
@@ -5568,7 +5540,7 @@ Emphasis and strong emphasis (422)
 <p><strong>foo <a href="/url">bar</a></strong></p>
 
 --- end
---- case 423 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
+--- case 421 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 32
 Emphasis and strong emphasis (423)
 --- input
 **foo
@@ -5579,7 +5551,7 @@ bar**
 bar</strong></p>
 
 --- end
---- case 424 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
+--- case 422 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
 Emphasis and strong emphasis (424)
 --- input
 __foo _bar_ baz__
@@ -5588,7 +5560,7 @@ __foo _bar_ baz__
 <p><strong>foo <em>bar</em> baz</strong></p>
 
 --- end
---- case 425 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 53
+--- case 423 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 20 expected-bytes 53
 Emphasis and strong emphasis (425)
 --- input
 __foo __bar__ baz__
@@ -5597,7 +5569,7 @@ __foo __bar__ baz__
 <p><strong>foo <strong>bar</strong> baz</strong></p>
 
 --- end
---- case 426 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 49
+--- case 424 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 49
 Emphasis and strong emphasis (426)
 --- input
 ____foo__ bar__
@@ -5606,7 +5578,7 @@ ____foo__ bar__
 <p><strong><strong>foo</strong> bar</strong></p>
 
 --- end
---- case 427 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 49
+--- case 425 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 49
 Emphasis and strong emphasis (427)
 --- input
 **foo **bar****
@@ -5615,7 +5587,7 @@ Emphasis and strong emphasis (427)
 <p><strong>foo <strong>bar</strong></strong></p>
 
 --- end
---- case 428 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
+--- case 426 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 45
 Emphasis and strong emphasis (428)
 --- input
 **foo *bar* baz**
@@ -5624,7 +5596,7 @@ Emphasis and strong emphasis (428)
 <p><strong>foo <em>bar</em> baz</strong></p>
 
 --- end
---- case 429 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
+--- case 427 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 43
 Emphasis and strong emphasis (429)
 --- input
 **foo*bar*baz**
@@ -5633,7 +5605,7 @@ Emphasis and strong emphasis (429)
 <p><strong>foo<em>bar</em>baz</strong></p>
 
 --- end
---- case 430 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
+--- case 428 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
 Emphasis and strong emphasis (430)
 --- input
 ***foo* bar**
@@ -5642,7 +5614,7 @@ Emphasis and strong emphasis (430)
 <p><strong><em>foo</em> bar</strong></p>
 
 --- end
---- case 431 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
+--- case 429 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 41
 Emphasis and strong emphasis (431)
 --- input
 **foo *bar***
@@ -5651,7 +5623,7 @@ Emphasis and strong emphasis (431)
 <p><strong>foo <em>bar</em></strong></p>
 
 --- end
---- case 432 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 30 expected-bytes 70
+--- case 430 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 30 expected-bytes 70
 Emphasis and strong emphasis (432)
 --- input
 **foo *bar **baz**
@@ -5662,7 +5634,7 @@ bim* bop**
 bim</em> bop</strong></p>
 
 --- end
---- case 433 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 22 expected-bytes 60
+--- case 431 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 22 expected-bytes 60
 Emphasis and strong emphasis (433)
 --- input
 **foo [*bar*](/url)**
@@ -5671,7 +5643,7 @@ Emphasis and strong emphasis (433)
 <p><strong>foo <a href="/url"><em>bar</em></a></strong></p>
 
 --- end
---- case 434 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
+--- case 432 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
 Emphasis and strong emphasis (434)
 --- input
 __ is not an empty emphasis
@@ -5680,7 +5652,7 @@ __ is not an empty emphasis
 <p>__ is not an empty emphasis</p>
 
 --- end
---- case 435 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 44
+--- case 433 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 37 expected-bytes 44
 Emphasis and strong emphasis (435)
 --- input
 ____ is not an empty strong emphasis
@@ -5689,7 +5661,7 @@ ____ is not an empty strong emphasis
 <p>____ is not an empty strong emphasis</p>
 
 --- end
---- case 436 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
+--- case 434 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
 Emphasis and strong emphasis (436)
 --- input
 foo ***
@@ -5698,7 +5670,7 @@ foo ***
 <p>foo ***</p>
 
 --- end
---- case 437 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 22
+--- case 435 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 22
 Emphasis and strong emphasis (437)
 --- input
 foo *\**
@@ -5707,7 +5679,7 @@ foo *\**
 <p>foo <em>*</em></p>
 
 --- end
---- case 438 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 22
+--- case 436 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 22
 Emphasis and strong emphasis (438)
 --- input
 foo *_*
@@ -5716,7 +5688,7 @@ foo *_*
 <p>foo <em>_</em></p>
 
 --- end
---- case 439 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
+--- case 437 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
 Emphasis and strong emphasis (439)
 --- input
 foo *****
@@ -5725,7 +5697,7 @@ foo *****
 <p>foo *****</p>
 
 --- end
---- case 440 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 30
+--- case 438 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 30
 Emphasis and strong emphasis (440)
 --- input
 foo **\***
@@ -5734,7 +5706,7 @@ foo **\***
 <p>foo <strong>*</strong></p>
 
 --- end
---- case 441 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 30
+--- case 439 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 30
 Emphasis and strong emphasis (441)
 --- input
 foo **_**
@@ -5743,7 +5715,7 @@ foo **_**
 <p>foo <strong>_</strong></p>
 
 --- end
---- case 442 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
+--- case 440 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
 Emphasis and strong emphasis (442)
 --- input
 **foo*
@@ -5752,7 +5724,7 @@ Emphasis and strong emphasis (442)
 <p>*<em>foo</em></p>
 
 --- end
---- case 443 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
+--- case 441 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
 Emphasis and strong emphasis (443)
 --- input
 *foo**
@@ -5761,7 +5733,7 @@ Emphasis and strong emphasis (443)
 <p><em>foo</em>*</p>
 
 --- end
---- case 444 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
+--- case 442 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
 Emphasis and strong emphasis (444)
 --- input
 ***foo**
@@ -5770,7 +5742,7 @@ Emphasis and strong emphasis (444)
 <p>*<strong>foo</strong></p>
 
 --- end
---- case 445 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 443 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (445)
 --- input
 ****foo*
@@ -5779,7 +5751,7 @@ Emphasis and strong emphasis (445)
 <p>***<em>foo</em></p>
 
 --- end
---- case 446 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
+--- case 444 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
 Emphasis and strong emphasis (446)
 --- input
 **foo***
@@ -5788,7 +5760,7 @@ Emphasis and strong emphasis (446)
 <p><strong>foo</strong>*</p>
 
 --- end
---- case 447 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 445 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (447)
 --- input
 *foo****
@@ -5797,7 +5769,7 @@ Emphasis and strong emphasis (447)
 <p><em>foo</em>***</p>
 
 --- end
---- case 448 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
+--- case 446 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 15
 Emphasis and strong emphasis (448)
 --- input
 foo ___
@@ -5806,7 +5778,7 @@ foo ___
 <p>foo ___</p>
 
 --- end
---- case 449 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 22
+--- case 447 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 22
 Emphasis and strong emphasis (449)
 --- input
 foo _\__
@@ -5815,7 +5787,7 @@ foo _\__
 <p>foo <em>_</em></p>
 
 --- end
---- case 450 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 22
+--- case 448 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 22
 Emphasis and strong emphasis (450)
 --- input
 foo _*_
@@ -5824,7 +5796,7 @@ foo _*_
 <p>foo <em>*</em></p>
 
 --- end
---- case 451 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
+--- case 449 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 17
 Emphasis and strong emphasis (451)
 --- input
 foo _____
@@ -5833,7 +5805,7 @@ foo _____
 <p>foo _____</p>
 
 --- end
---- case 452 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 30
+--- case 450 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 11 expected-bytes 30
 Emphasis and strong emphasis (452)
 --- input
 foo __\___
@@ -5842,7 +5814,7 @@ foo __\___
 <p>foo <strong>_</strong></p>
 
 --- end
---- case 453 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 30
+--- case 451 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 30
 Emphasis and strong emphasis (453)
 --- input
 foo __*__
@@ -5851,7 +5823,7 @@ foo __*__
 <p>foo <strong>*</strong></p>
 
 --- end
---- case 454 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
+--- case 452 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
 Emphasis and strong emphasis (454)
 --- input
 __foo_
@@ -5860,7 +5832,7 @@ __foo_
 <p>_<em>foo</em></p>
 
 --- end
---- case 455 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
+--- case 453 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 7 expected-bytes 21
 Emphasis and strong emphasis (455)
 --- input
 _foo__
@@ -5869,7 +5841,7 @@ _foo__
 <p><em>foo</em>_</p>
 
 --- end
---- case 456 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
+--- case 454 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
 Emphasis and strong emphasis (456)
 --- input
 ___foo__
@@ -5878,7 +5850,7 @@ ___foo__
 <p>_<strong>foo</strong></p>
 
 --- end
---- case 457 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 455 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (457)
 --- input
 ____foo_
@@ -5887,7 +5859,7 @@ ____foo_
 <p>___<em>foo</em></p>
 
 --- end
---- case 458 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
+--- case 456 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 29
 Emphasis and strong emphasis (458)
 --- input
 __foo___
@@ -5896,7 +5868,7 @@ __foo___
 <p><strong>foo</strong>_</p>
 
 --- end
---- case 459 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
+--- case 457 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 9 expected-bytes 23
 Emphasis and strong emphasis (459)
 --- input
 _foo____
@@ -5905,7 +5877,7 @@ _foo____
 <p><em>foo</em>___</p>
 
 --- end
---- case 460 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 28
+--- case 458 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 28
 Emphasis and strong emphasis (460)
 --- input
 **foo**
@@ -5914,7 +5886,7 @@ Emphasis and strong emphasis (460)
 <p><strong>foo</strong></p>
 
 --- end
---- case 461 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 29
+--- case 459 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 29
 Emphasis and strong emphasis (461)
 --- input
 *_foo_*
@@ -5923,7 +5895,7 @@ Emphasis and strong emphasis (461)
 <p><em><em>foo</em></em></p>
 
 --- end
---- case 462 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 28
+--- case 460 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 28
 Emphasis and strong emphasis (462)
 --- input
 __foo__
@@ -5932,7 +5904,7 @@ __foo__
 <p><strong>foo</strong></p>
 
 --- end
---- case 463 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 29
+--- case 461 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 29
 Emphasis and strong emphasis (463)
 --- input
 _*foo*_
@@ -5941,7 +5913,7 @@ _*foo*_
 <p><em><em>foo</em></em></p>
 
 --- end
---- case 464 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 45
+--- case 462 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 45
 Emphasis and strong emphasis (464)
 --- input
 ****foo****
@@ -5950,7 +5922,7 @@ Emphasis and strong emphasis (464)
 <p><strong><strong>foo</strong></strong></p>
 
 --- end
---- case 465 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 45
+--- case 463 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 12 expected-bytes 45
 Emphasis and strong emphasis (465)
 --- input
 ____foo____
@@ -5959,7 +5931,7 @@ ____foo____
 <p><strong><strong>foo</strong></strong></p>
 
 --- end
---- case 466 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 62
+--- case 464 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 62
 Emphasis and strong emphasis (466)
 --- input
 ******foo******
@@ -5968,7 +5940,7 @@ Emphasis and strong emphasis (466)
 <p><strong><strong><strong>foo</strong></strong></strong></p>
 
 --- end
---- case 467 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 37
+--- case 465 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 10 expected-bytes 37
 Emphasis and strong emphasis (467)
 --- input
 ***foo***
@@ -5977,7 +5949,7 @@ Emphasis and strong emphasis (467)
 <p><em><strong>foo</strong></em></p>
 
 --- end
---- case 468 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 54
+--- case 466 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 54
 Emphasis and strong emphasis (468)
 --- input
 _____foo_____
@@ -5986,7 +5958,7 @@ _____foo_____
 <p><em><strong><strong>foo</strong></strong></em></p>
 
 --- end
---- case 469 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 30
+--- case 467 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 30
 Emphasis and strong emphasis (469)
 --- input
 *foo _bar* baz_
@@ -5995,7 +5967,7 @@ Emphasis and strong emphasis (469)
 <p><em>foo _bar</em> baz_</p>
 
 --- end
---- case 470 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 54
+--- case 468 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 54
 Emphasis and strong emphasis (470)
 --- input
 *foo __bar *baz bim__ bam*
@@ -6004,7 +5976,7 @@ Emphasis and strong emphasis (470)
 <p><em>foo <strong>bar *baz bim</strong> bam</em></p>
 
 --- end
---- case 471 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 38
+--- case 469 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 38
 Emphasis and strong emphasis (471)
 --- input
 **foo **bar baz**
@@ -6013,7 +5985,7 @@ Emphasis and strong emphasis (471)
 <p>**foo <strong>bar baz</strong></p>
 
 --- end
---- case 472 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 15 expected-bytes 29
+--- case 470 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 15 expected-bytes 29
 Emphasis and strong emphasis (472)
 --- input
 *foo *bar baz*
@@ -6022,7 +5994,7 @@ Emphasis and strong emphasis (472)
 <p>*foo <em>bar baz</em></p>
 
 --- end
---- case 473 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 32
+--- case 471 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 14 expected-bytes 32
 Emphasis and strong emphasis (473)
 --- input
 *[bar*](/url)
@@ -6031,7 +6003,7 @@ Emphasis and strong emphasis (473)
 <p>*<a href="/url">bar*</a></p>
 
 --- end
---- case 474 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 36
+--- case 472 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 18 expected-bytes 36
 Emphasis and strong emphasis (474)
 --- input
 _foo [bar_](/url)
@@ -6040,7 +6012,7 @@ _foo [bar_](/url)
 <p>_foo <a href="/url">bar_</a></p>
 
 --- end
---- case 475 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
+--- case 473 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 28 expected-bytes 35
 Emphasis and strong emphasis (475)
 --- input
 *<img src="foo" title="*"/>
@@ -6049,7 +6021,7 @@ Emphasis and strong emphasis (475)
 <p>*<img src="foo" title="*"/></p>
 
 --- end
---- case 476 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 23
+--- case 474 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 23
 Emphasis and strong emphasis (476)
 --- input
 **<a href="**">
@@ -6058,7 +6030,7 @@ Emphasis and strong emphasis (476)
 <p>**<a href="**"></p>
 
 --- end
---- case 477 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 23
+--- case 475 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 16 expected-bytes 23
 Emphasis and strong emphasis (477)
 --- input
 __<a href="__">
@@ -6067,7 +6039,7 @@ __<a href="__">
 <p>__<a href="__"></p>
 
 --- end
---- case 478 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 33
+--- case 476 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 33
 Emphasis and strong emphasis (478)
 --- input
 *a `*`*
@@ -6076,7 +6048,7 @@ Emphasis and strong emphasis (478)
 <p><em>a <code>*</code></em></p>
 
 --- end
---- case 479 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 33
+--- case 477 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 8 expected-bytes 33
 Emphasis and strong emphasis (479)
 --- input
 _a `_`_
@@ -6085,7 +6057,7 @@ _a `_`_
 <p><em>a <code>_</code></em></p>
 
 --- end
---- case 480 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 68
+--- case 478 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 68
 Emphasis and strong emphasis (480)
 --- input
 **a<https://foo.bar/?q=**>
@@ -6094,7 +6066,7 @@ Emphasis and strong emphasis (480)
 <p>**a<a href="https://foo.bar/?q=**">https://foo.bar/?q=**</a></p>
 
 --- end
---- case 481 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 68
+--- case 479 options allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 27 expected-bytes 68
 Emphasis and strong emphasis (481)
 --- input
 __a<https://foo.bar/?q=__>
@@ -6103,7 +6075,7 @@ __a<https://foo.bar/?q=__>
 <p>__a<a href="https://foo.bar/?q=__">https://foo.bar/?q=__</a></p>
 
 --- end
---- case 482 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 45
+--- case 480 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 45
 Links (482)
 --- input
 [link](/uri "title")
@@ -6112,7 +6084,7 @@ Links (482)
 <p><a href="/uri" title="title">link</a></p>
 
 --- end
---- case 483 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 31
+--- case 481 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 31
 Links (483)
 --- input
 [link](/uri)
@@ -6121,7 +6093,7 @@ Links (483)
 <p><a href="/uri">link</a></p>
 
 --- end
---- case 484 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 34
+--- case 482 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 34
 Links (484)
 --- input
 [](./target.md)
@@ -6130,7 +6102,7 @@ Links (484)
 <p><a href="./target.md"></a></p>
 
 --- end
---- case 485 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 9 expected-bytes 27
+--- case 483 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 9 expected-bytes 27
 Links (485)
 --- input
 [link]()
@@ -6139,7 +6111,7 @@ Links (485)
 <p><a href="">link</a></p>
 
 --- end
---- case 486 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 27
+--- case 484 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 27
 Links (486)
 --- input
 [link](<>)
@@ -6148,7 +6120,7 @@ Links (486)
 <p><a href="">link</a></p>
 
 --- end
---- case 487 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 5 expected-bytes 23
+--- case 485 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 5 expected-bytes 23
 Links (487)
 --- input
 []()
@@ -6157,7 +6129,7 @@ Links (487)
 <p><a href=""></a></p>
 
 --- end
---- case 488 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 23
+--- case 486 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 23
 Links (488)
 --- input
 [link](/my uri)
@@ -6166,7 +6138,7 @@ Links (488)
 <p>[link](/my uri)</p>
 
 --- end
---- case 489 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 36
+--- case 487 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 36
 Links (489)
 --- input
 [link](</my uri>)
@@ -6175,7 +6147,7 @@ Links (489)
 <p><a href="/my%20uri">link</a></p>
 
 --- end
---- case 490 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 23
+--- case 488 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 23
 Links (490)
 --- input
 [link](foo
@@ -6186,7 +6158,7 @@ bar)
 bar)</p>
 
 --- end
---- case 491 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 25
+--- case 489 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 25
 Links (491)
 --- input
 [link](<foo
@@ -6197,7 +6169,7 @@ bar>)
 bar>)</p>
 
 --- end
---- case 492 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 27
+--- case 490 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 11 expected-bytes 27
 Links (492)
 --- input
 [a](<b)c>)
@@ -6206,7 +6178,7 @@ Links (492)
 <p><a href="b)c">a</a></p>
 
 --- end
---- case 493 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 15 expected-bytes 27
+--- case 491 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 15 expected-bytes 27
 Links (493)
 --- input
 [link](<foo\>)
@@ -6215,7 +6187,7 @@ Links (493)
 <p>[link](&lt;foo&gt;)</p>
 
 --- end
---- case 494 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 45
+--- case 492 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 45
 Links (494)
 --- input
 [a](<b)c
@@ -6228,7 +6200,7 @@ Links (494)
 [a](<b>c)</p>
 
 --- end
---- case 495 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 32
+--- case 493 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 32
 Links (495)
 --- input
 [link](\(foo\))
@@ -6237,7 +6209,7 @@ Links (495)
 <p><a href="(foo)">link</a></p>
 
 --- end
---- case 496 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 40
+--- case 494 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 40
 Links (496)
 --- input
 [link](foo(and(bar)))
@@ -6246,7 +6218,7 @@ Links (496)
 <p><a href="foo(and(bar))">link</a></p>
 
 --- end
---- case 497 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 28
+--- case 495 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 21 expected-bytes 28
 Links (497)
 --- input
 [link](foo(and(bar))
@@ -6255,7 +6227,7 @@ Links (497)
 <p>[link](foo(and(bar))</p>
 
 --- end
---- case 498 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 24 expected-bytes 39
+--- case 496 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 24 expected-bytes 39
 Links (498)
 --- input
 [link](foo\(and\(bar\))
@@ -6264,7 +6236,7 @@ Links (498)
 <p><a href="foo(and(bar)">link</a></p>
 
 --- end
---- case 499 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 39
+--- case 497 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 39
 Links (499)
 --- input
 [link](<foo(and(bar)>)
@@ -6273,7 +6245,7 @@ Links (499)
 <p><a href="foo(and(bar)">link</a></p>
 
 --- end
---- case 500 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 32
+--- case 498 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 32
 Links (500)
 --- input
 [link](foo\)\:)
@@ -6282,7 +6254,7 @@ Links (500)
 <p><a href="foo):">link</a></p>
 
 --- end
---- case 501 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 96 expected-bytes 148
+--- case 499 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 96 expected-bytes 148
 Links (501)
 --- input
 [link](#fragment)
@@ -6297,7 +6269,7 @@ Links (501)
 <p><a href="https://example.com?foo=3#frag">link</a></p>
 
 --- end
---- case 502 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 36
+--- case 500 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 36
 Links (502)
 --- input
 [link](foo\bar)
@@ -6306,7 +6278,7 @@ Links (502)
 <p><a href="foo%5Cbar">link</a></p>
 
 --- end
---- case 503 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 40
+--- case 501 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 40
 Links (503)
 --- input
 [link](foo%20b&auml;)
@@ -6315,7 +6287,7 @@ Links (503)
 <p><a href="foo%20b%C3%A4">link</a></p>
 
 --- end
---- case 504 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 38
+--- case 502 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 38
 Links (504)
 --- input
 [link]("title")
@@ -6324,7 +6296,7 @@ Links (504)
 <p><a href="%22title%22">link</a></p>
 
 --- end
---- case 505 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 63 expected-bytes 121
+--- case 503 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 63 expected-bytes 121
 Links (505)
 --- input
 [link](/url "title")
@@ -6337,7 +6309,7 @@ Links (505)
 <a href="/url" title="title">link</a></p>
 
 --- end
---- case 506 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 58
+--- case 504 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 58
 Links (506)
 --- input
 [link](/url "title \"&quot;")
@@ -6346,7 +6318,7 @@ Links (506)
 <p><a href="/url" title="title &quot;&quot;">link</a></p>
 
 --- end
---- case 507 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 48
+--- case 505 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 48
 Links (507)
 --- input
 [link](/url "title")
@@ -6355,7 +6327,7 @@ Links (507)
 <p><a href="/url%C2%A0%22title%22">link</a></p>
 
 --- end
---- case 508 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 60
+--- case 506 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 60
 Links (508)
 --- input
 [link](/url "title "and" title")
@@ -6364,7 +6336,7 @@ Links (508)
 <p>[link](/url &quot;title &quot;and&quot; title&quot;)</p>
 
 --- end
---- case 509 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 67
+--- case 507 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 67
 Links (509)
 --- input
 [link](/url 'title "and" title')
@@ -6373,7 +6345,7 @@ Links (509)
 <p><a href="/url" title="title &quot;and&quot; title">link</a></p>
 
 --- end
---- case 510 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 45
+--- case 508 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 45
 Links (510)
 --- input
 [link](   /uri
@@ -6383,7 +6355,7 @@ Links (510)
 <p><a href="/uri" title="title">link</a></p>
 
 --- end
---- case 511 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 21
+--- case 509 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 21
 Links (511)
 --- input
 [link] (/uri)
@@ -6392,7 +6364,7 @@ Links (511)
 <p>[link] (/uri)</p>
 
 --- end
---- case 512 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 43
+--- case 510 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 43
 Links (512)
 --- input
 [link [foo [bar]]](/uri)
@@ -6401,7 +6373,7 @@ Links (512)
 <p><a href="/uri">link [foo [bar]]</a></p>
 
 --- end
---- case 513 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 25
+--- case 511 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 25
 Links (513)
 --- input
 [link] bar](/uri)
@@ -6410,7 +6382,7 @@ Links (513)
 <p>[link] bar](/uri)</p>
 
 --- end
---- case 514 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 36
+--- case 512 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 36
 Links (514)
 --- input
 [link [bar](/uri)
@@ -6419,7 +6391,7 @@ Links (514)
 <p>[link <a href="/uri">bar</a></p>
 
 --- end
---- case 515 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 19 expected-bytes 36
+--- case 513 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 19 expected-bytes 36
 Links (515)
 --- input
 [link \[bar](/uri)
@@ -6428,7 +6400,7 @@ Links (515)
 <p><a href="/uri">link [bar</a></p>
 
 --- end
---- case 516 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 80
+--- case 514 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 80
 Links (516)
 --- input
 [link *foo **bar** `#`*](/uri)
@@ -6437,7 +6409,7 @@ Links (516)
 <p><a href="/uri">link <em>foo <strong>bar</strong> <code>#</code></em></a></p>
 
 --- end
---- case 517 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 60
+--- case 515 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 60
 Links (517)
 --- input
 [![moon](moon.jpg)](/uri)
@@ -6446,7 +6418,7 @@ Links (517)
 <p><a href="/uri"><img src="moon.jpg" alt="moon" /></a></p>
 
 --- end
---- case 518 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 24 expected-bytes 42
+--- case 516 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 24 expected-bytes 42
 Links (518)
 --- input
 [foo [bar](/uri)](/uri)
@@ -6455,7 +6427,7 @@ Links (518)
 <p>[foo <a href="/uri">bar</a>](/uri)</p>
 
 --- end
---- case 519 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 63
+--- case 517 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 63
 Links (519)
 --- input
 [foo *[bar [baz](/uri)](/uri)*](/uri)
@@ -6464,7 +6436,7 @@ Links (519)
 <p>[foo <em>[bar <a href="/uri">baz</a>](/uri)</em>](/uri)</p>
 
 --- end
---- case 520 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
+--- case 518 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
 Links (520)
 --- input
 ![[[foo](uri1)](uri2)](uri3)
@@ -6473,7 +6445,7 @@ Links (520)
 <p><img src="uri3" alt="[foo](uri2)" /></p>
 
 --- end
---- case 521 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 32
+--- case 519 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 32
 Links (521)
 --- input
 *[foo*](/uri)
@@ -6482,7 +6454,7 @@ Links (521)
 <p>*<a href="/uri">foo*</a></p>
 
 --- end
---- case 522 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 35
+--- case 520 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 35
 Links (522)
 --- input
 [foo *bar](baz*)
@@ -6491,7 +6463,7 @@ Links (522)
 <p><a href="baz*">foo *bar</a></p>
 
 --- end
---- case 523 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 30
+--- case 521 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 16 expected-bytes 30
 Links (523)
 --- input
 *foo [bar* baz]
@@ -6500,7 +6472,7 @@ Links (523)
 <p><em>foo [bar</em> baz]</p>
 
 --- end
---- case 524 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 32
+--- case 522 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 32
 Links (524)
 --- input
 [foo <bar attr="](baz)">
@@ -6509,7 +6481,7 @@ Links (524)
 <p>[foo <bar attr="](baz)"></p>
 
 --- end
---- case 525 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 32
+--- case 523 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 14 expected-bytes 32
 Links (525)
 --- input
 [foo`](/uri)`
@@ -6518,7 +6490,7 @@ Links (525)
 <p>[foo<code>](/uri)</code></p>
 
 --- end
---- case 526 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 97
+--- case 524 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 97
 Links (526)
 --- input
 [foo<https://example.com/?search=](uri)>
@@ -6527,7 +6499,7 @@ Links (526)
 <p>[foo<a href="https://example.com/?search=%5D(uri)">https://example.com/?search=](uri)</a></p>
 
 --- end
---- case 527 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 44
+--- case 525 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 44
 Links (527)
 --- input
 [foo][bar]
@@ -6538,7 +6510,7 @@ Links (527)
 <p><a href="/url" title="title">foo</a></p>
 
 --- end
---- case 528 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 37 expected-bytes 43
+--- case 526 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 37 expected-bytes 43
 Links (528)
 --- input
 [link [foo [bar]]][ref]
@@ -6549,7 +6521,7 @@ Links (528)
 <p><a href="/uri">link [foo [bar]]</a></p>
 
 --- end
---- case 529 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 36
+--- case 527 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 36
 Links (529)
 --- input
 [link \[bar][ref]
@@ -6560,7 +6532,7 @@ Links (529)
 <p><a href="/uri">link [bar</a></p>
 
 --- end
---- case 530 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 80
+--- case 528 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 80
 Links (530)
 --- input
 [link *foo **bar** `#`*][ref]
@@ -6571,7 +6543,7 @@ Links (530)
 <p><a href="/uri">link <em>foo <strong>bar</strong> <code>#</code></em></a></p>
 
 --- end
---- case 531 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 60
+--- case 529 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 60
 Links (531)
 --- input
 [![moon](moon.jpg)][ref]
@@ -6582,7 +6554,7 @@ Links (531)
 <p><a href="/uri"><img src="moon.jpg" alt="moon" /></a></p>
 
 --- end
---- case 532 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 36 expected-bytes 58
+--- case 530 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 36 expected-bytes 58
 Links (532)
 --- input
 [foo [bar](/uri)][ref]
@@ -6593,7 +6565,7 @@ Links (532)
 <p>[foo <a href="/uri">bar</a>]<a href="/uri">ref</a></p>
 
 --- end
---- case 533 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 71
+--- case 531 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 71
 Links (533)
 --- input
 [foo *bar [baz][ref]*][ref]
@@ -6604,7 +6576,7 @@ Links (533)
 <p>[foo <em>bar <a href="/uri">baz</a></em>]<a href="/uri">ref</a></p>
 
 --- end
---- case 534 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 32
+--- case 532 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 32
 Links (534)
 --- input
 *[foo*][ref]
@@ -6615,7 +6587,7 @@ Links (534)
 <p>*<a href="/uri">foo*</a></p>
 
 --- end
---- case 535 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 36
+--- case 533 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 30 expected-bytes 36
 Links (535)
 --- input
 [foo *bar][ref]*
@@ -6626,7 +6598,7 @@ Links (535)
 <p><a href="/uri">foo *bar</a>*</p>
 
 --- end
---- case 536 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 32
+--- case 534 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 32
 Links (536)
 --- input
 [foo <bar attr="][ref]">
@@ -6637,7 +6609,7 @@ Links (536)
 <p>[foo <bar attr="][ref]"></p>
 
 --- end
---- case 537 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 31
+--- case 535 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 31
 Links (537)
 --- input
 [foo`][ref]`
@@ -6648,7 +6620,7 @@ Links (537)
 <p>[foo<code>][ref]</code></p>
 
 --- end
---- case 538 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 54 expected-bytes 101
+--- case 536 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 54 expected-bytes 101
 Links (538)
 --- input
 [foo<https://example.com/?search=][ref]>
@@ -6659,7 +6631,7 @@ Links (538)
 <p>[foo<a href="https://example.com/?search=%5D%5Bref%5D">https://example.com/?search=][ref]</a></p>
 
 --- end
---- case 539 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 44
+--- case 537 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 44
 Links (539)
 --- input
 [foo][BaR]
@@ -6670,7 +6642,7 @@ Links (539)
 <p><a href="/url" title="title">foo</a></p>
 
 --- end
---- case 540 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 30
+--- case 538 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 18 expected-bytes 30
 Links (540)
 --- input
 [ẞ]
@@ -6681,7 +6653,7 @@ Links (540)
 <p><a href="/url">ẞ</a></p>
 
 --- end
---- case 541 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 34 expected-bytes 30
+--- case 539 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 34 expected-bytes 30
 Links (541)
 --- input
 [Foo
@@ -6693,7 +6665,7 @@ Links (541)
 <p><a href="/url">Baz</a></p>
 
 --- end
---- case 542 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 50
+--- case 540 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 50
 Links (542)
 --- input
 [foo] [bar]
@@ -6704,7 +6676,7 @@ Links (542)
 <p>[foo] <a href="/url" title="title">bar</a></p>
 
 --- end
---- case 543 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 50
+--- case 541 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 33 expected-bytes 50
 Links (543)
 --- input
 [foo]
@@ -6717,7 +6689,7 @@ Links (543)
 <a href="/url" title="title">bar</a></p>
 
 --- end
---- case 544 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 39 expected-bytes 31
+--- case 542 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 39 expected-bytes 31
 Links (544)
 --- input
 [foo]: /url1
@@ -6730,7 +6702,7 @@ Links (544)
 <p><a href="/url1">bar</a></p>
 
 --- end
---- case 545 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 19
+--- case 543 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 19
 Links (545)
 --- input
 [bar][foo\!]
@@ -6741,7 +6713,7 @@ Links (545)
 <p>[bar][foo!]</p>
 
 --- end
---- case 546 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 39
+--- case 544 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 26 expected-bytes 39
 Links (546)
 --- input
 [foo][ref[]
@@ -6753,7 +6725,7 @@ Links (546)
 <p>[ref[]: /uri</p>
 
 --- end
---- case 547 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 34 expected-bytes 47
+--- case 545 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 34 expected-bytes 47
 Links (547)
 --- input
 [foo][ref[bar]]
@@ -6765,19 +6737,7 @@ Links (547)
 <p>[ref[bar]]: /uri</p>
 
 --- end
---- case 548 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 40
-Links (548)
---- input
-[[[foo]]]
-
-[[[foo]]]: /url
-
---- expected
-<p>[[[foo]]]</p>
-<p>[[[foo]]]: /url</p>
-
---- end
---- case 549 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 30
+--- case 546 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 30
 Links (549)
 --- input
 [foo][ref\[]
@@ -6788,7 +6748,7 @@ Links (549)
 <p><a href="/uri">foo</a></p>
 
 --- end
---- case 550 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 31
+--- case 547 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 31
 Links (550)
 --- input
 [bar\\]: /uri
@@ -6799,7 +6759,7 @@ Links (550)
 <p><a href="/uri">bar\</a></p>
 
 --- end
---- case 551 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 26
+--- case 548 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 13 expected-bytes 26
 Links (551)
 --- input
 []
@@ -6811,7 +6771,7 @@ Links (551)
 <p>[]: /uri</p>
 
 --- end
---- case 552 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 28
+--- case 549 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 17 expected-bytes 28
 Links (552)
 --- input
 [
@@ -6827,7 +6787,7 @@ Links (552)
 ]: /uri</p>
 
 --- end
---- case 553 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
+--- case 550 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
 Links (553)
 --- input
 [foo][]
@@ -6838,7 +6798,7 @@ Links (553)
 <p><a href="/url" title="title">foo</a></p>
 
 --- end
---- case 554 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 57
+--- case 551 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 57
 Links (554)
 --- input
 [*foo* bar][]
@@ -6849,7 +6809,7 @@ Links (554)
 <p><a href="/url" title="title"><em>foo</em> bar</a></p>
 
 --- end
---- case 555 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
+--- case 552 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 44
 Links (555)
 --- input
 [Foo][]
@@ -6860,7 +6820,7 @@ Links (555)
 <p><a href="/url" title="title">Foo</a></p>
 
 --- end
---- case 556 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 47
+--- case 553 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 31 expected-bytes 47
 Links (556)
 --- input
 [foo] 
@@ -6873,7 +6833,7 @@ Links (556)
 []</p>
 
 --- end
---- case 557 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 44
+--- case 554 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 44
 Links (557)
 --- input
 [foo]
@@ -6884,7 +6844,7 @@ Links (557)
 <p><a href="/url" title="title">foo</a></p>
 
 --- end
---- case 558 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 39 expected-bytes 57
+--- case 555 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 39 expected-bytes 57
 Links (558)
 --- input
 [*foo* bar]
@@ -6895,18 +6855,7 @@ Links (558)
 <p><a href="/url" title="title"><em>foo</em> bar</a></p>
 
 --- end
---- case 559 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 41 expected-bytes 59
-Links (559)
---- input
-[[*foo* bar]]
-
-[*foo* bar]: /url "title"
-
---- expected
-<p>[<a href="/url" title="title"><em>foo</em> bar</a>]</p>
-
---- end
---- case 560 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 36
+--- case 556 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 25 expected-bytes 36
 Links (560)
 --- input
 [[bar [foo]
@@ -6917,7 +6866,7 @@ Links (560)
 <p>[[bar <a href="/url">foo</a></p>
 
 --- end
---- case 561 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 44
+--- case 557 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 27 expected-bytes 44
 Links (561)
 --- input
 [Foo]
@@ -6928,7 +6877,7 @@ Links (561)
 <p><a href="/url" title="title">Foo</a></p>
 
 --- end
---- case 562 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 34
+--- case 558 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 23 expected-bytes 34
 Links (562)
 --- input
 [foo] bar
@@ -6939,7 +6888,7 @@ Links (562)
 <p><a href="/url">foo</a> bar</p>
 
 --- end
---- case 563 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 13
+--- case 559 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 28 expected-bytes 13
 Links (563)
 --- input
 \[foo]
@@ -6950,7 +6899,7 @@ Links (563)
 <p>[foo]</p>
 
 --- end
---- case 564 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 32
+--- case 560 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 32
 Links (564)
 --- input
 [foo*]: /url
@@ -6961,7 +6910,7 @@ Links (564)
 <p>*<a href="/url">foo*</a></p>
 
 --- end
---- case 565 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 31
+--- case 561 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 38 expected-bytes 31
 Links (565)
 --- input
 [foo][bar]
@@ -6973,7 +6922,7 @@ Links (565)
 <p><a href="/url2">foo</a></p>
 
 --- end
---- case 566 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 31
+--- case 562 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 31
 Links (566)
 --- input
 [foo][]
@@ -6984,7 +6933,7 @@ Links (566)
 <p><a href="/url1">foo</a></p>
 
 --- end
---- case 567 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 26
+--- case 563 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 22 expected-bytes 26
 Links (567)
 --- input
 [foo]()
@@ -6995,7 +6944,7 @@ Links (567)
 <p><a href="">foo</a></p>
 
 --- end
---- case 568 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 43
+--- case 564 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 32 expected-bytes 43
 Links (568)
 --- input
 [foo](not a link)
@@ -7006,7 +6955,7 @@ Links (568)
 <p><a href="/url1">foo</a>(not a link)</p>
 
 --- end
---- case 569 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 35
+--- case 565 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 29 expected-bytes 35
 Links (569)
 --- input
 [foo][bar][baz]
@@ -7017,7 +6966,7 @@ Links (569)
 <p>[foo]<a href="/url">bar</a></p>
 
 --- end
---- case 570 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 54
+--- case 566 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 54
 Links (570)
 --- input
 [foo][bar][baz]
@@ -7029,7 +6978,7 @@ Links (570)
 <p><a href="/url2">foo</a><a href="/url1">baz</a></p>
 
 --- end
---- case 571 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 36
+--- case 567 options allow_dangerous_html,allow_dangerous_protocol label-bytes 11 input-bytes 43 expected-bytes 36
 Links (571)
 --- input
 [foo][bar][baz]
@@ -7041,7 +6990,7 @@ Links (571)
 <p>[foo]<a href="/url1">bar</a></p>
 
 --- end
---- case 572 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 21 expected-bytes 50
+--- case 568 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 21 expected-bytes 50
 Images (572)
 --- input
 ![foo](/url "title")
@@ -7050,7 +6999,7 @@ Images (572)
 <p><img src="/url" alt="foo" title="title" /></p>
 
 --- end
---- case 573 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 54 expected-bytes 72
+--- case 569 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 54 expected-bytes 72
 Images (573)
 --- input
 ![foo *bar*]
@@ -7061,7 +7010,7 @@ Images (573)
 <p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 
 --- end
---- case 574 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 27 expected-bytes 41
+--- case 570 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 27 expected-bytes 41
 Images (574)
 --- input
 ![foo ![bar](/url)](/url2)
@@ -7070,7 +7019,7 @@ Images (574)
 <p><img src="/url2" alt="foo bar" /></p>
 
 --- end
---- case 575 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 26 expected-bytes 41
+--- case 571 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 26 expected-bytes 41
 Images (575)
 --- input
 ![foo [bar](/url)](/url2)
@@ -7079,7 +7028,7 @@ Images (575)
 <p><img src="/url2" alt="foo bar" /></p>
 
 --- end
---- case 576 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 56 expected-bytes 72
+--- case 572 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 56 expected-bytes 72
 Images (576)
 --- input
 ![foo *bar*][]
@@ -7090,7 +7039,7 @@ Images (576)
 <p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 
 --- end
---- case 577 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 59 expected-bytes 72
+--- case 573 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 59 expected-bytes 72
 Images (577)
 --- input
 ![foo *bar*][foobar]
@@ -7101,7 +7050,7 @@ Images (577)
 <p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
 
 --- end
---- case 578 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 18 expected-bytes 41
+--- case 574 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 18 expected-bytes 41
 Images (578)
 --- input
 ![foo](train.jpg)
@@ -7110,7 +7059,7 @@ Images (578)
 <p><img src="train.jpg" alt="foo" /></p>
 
 --- end
---- case 579 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 46 expected-bytes 71
+--- case 575 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 46 expected-bytes 71
 Images (579)
 --- input
 My ![foo bar](/path/to/train.jpg  "title"   )
@@ -7119,7 +7068,7 @@ My ![foo bar](/path/to/train.jpg  "title"   )
 <p>My <img src="/path/to/train.jpg" alt="foo bar" title="title" /></p>
 
 --- end
---- case 580 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 14 expected-bytes 35
+--- case 576 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 14 expected-bytes 35
 Images (580)
 --- input
 ![foo](<url>)
@@ -7128,7 +7077,7 @@ Images (580)
 <p><img src="url" alt="foo" /></p>
 
 --- end
---- case 581 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 10 expected-bytes 33
+--- case 577 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 10 expected-bytes 33
 Images (581)
 --- input
 ![](/url)
@@ -7137,7 +7086,7 @@ Images (581)
 <p><img src="/url" alt="" /></p>
 
 --- end
---- case 582 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 25 expected-bytes 36
+--- case 578 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 25 expected-bytes 36
 Images (582)
 --- input
 ![foo][bar]
@@ -7148,7 +7097,7 @@ Images (582)
 <p><img src="/url" alt="foo" /></p>
 
 --- end
---- case 583 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 25 expected-bytes 36
+--- case 579 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 25 expected-bytes 36
 Images (583)
 --- input
 ![foo][bar]
@@ -7159,7 +7108,7 @@ Images (583)
 <p><img src="/url" alt="foo" /></p>
 
 --- end
---- case 584 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 30 expected-bytes 50
+--- case 580 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 30 expected-bytes 50
 Images (584)
 --- input
 ![foo][]
@@ -7170,7 +7119,7 @@ Images (584)
 <p><img src="/url" alt="foo" title="title" /></p>
 
 --- end
---- case 585 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 42 expected-bytes 54
+--- case 581 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 42 expected-bytes 54
 Images (585)
 --- input
 ![*foo* bar][]
@@ -7181,7 +7130,7 @@ Images (585)
 <p><img src="/url" alt="foo bar" title="title" /></p>
 
 --- end
---- case 586 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 30 expected-bytes 50
+--- case 582 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 30 expected-bytes 50
 Images (586)
 --- input
 ![Foo][]
@@ -7192,7 +7141,7 @@ Images (586)
 <p><img src="/url" alt="Foo" title="title" /></p>
 
 --- end
---- case 587 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 32 expected-bytes 53
+--- case 583 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 32 expected-bytes 53
 Images (587)
 --- input
 ![foo] 
@@ -7205,7 +7154,7 @@ Images (587)
 []</p>
 
 --- end
---- case 588 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 28 expected-bytes 50
+--- case 584 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 28 expected-bytes 50
 Images (588)
 --- input
 ![foo]
@@ -7216,7 +7165,7 @@ Images (588)
 <p><img src="/url" alt="foo" title="title" /></p>
 
 --- end
---- case 589 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 40 expected-bytes 54
+--- case 585 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 40 expected-bytes 54
 Images (589)
 --- input
 ![*foo* bar]
@@ -7227,19 +7176,7 @@ Images (589)
 <p><img src="/url" alt="foo bar" title="title" /></p>
 
 --- end
---- case 590 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 32 expected-bytes 55
-Images (590)
---- input
-![[foo]]
-
-[[foo]]: /url "title"
-
---- expected
-<p>![[foo]]</p>
-<p>[[foo]]: /url &quot;title&quot;</p>
-
---- end
---- case 591 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 28 expected-bytes 50
+--- case 586 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 28 expected-bytes 50
 Images (591)
 --- input
 ![Foo]
@@ -7250,7 +7187,7 @@ Images (591)
 <p><img src="/url" alt="Foo" title="title" /></p>
 
 --- end
---- case 592 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 29 expected-bytes 14
+--- case 587 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 29 expected-bytes 14
 Images (592)
 --- input
 !\[foo]
@@ -7261,7 +7198,7 @@ Images (592)
 <p>![foo]</p>
 
 --- end
---- case 593 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 29 expected-bytes 45
+--- case 588 options allow_dangerous_html,allow_dangerous_protocol label-bytes 12 input-bytes 29 expected-bytes 45
 Images (593)
 --- input
 \![foo]
@@ -7272,7 +7209,7 @@ Images (593)
 <p>!<a href="/url" title="title">foo</a></p>
 
 --- end
---- case 594 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
+--- case 589 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
 Autolinks (594)
 --- input
 <http://foo.bar.baz>
@@ -7281,7 +7218,7 @@ Autolinks (594)
 <p><a href="http://foo.bar.baz">http://foo.bar.baz</a></p>
 
 --- end
---- case 595 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 49 expected-bytes 131
+--- case 590 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 49 expected-bytes 131
 Autolinks (595)
 --- input
 <https://foo.bar.baz/test?q=hello&id=22&boolean>
@@ -7290,7 +7227,7 @@ Autolinks (595)
 <p><a href="https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>
 
 --- end
---- case 596 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 25 expected-bytes 67
+--- case 591 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 25 expected-bytes 67
 Autolinks (596)
 --- input
 <irc://foo.bar:2233/baz>
@@ -7299,7 +7236,7 @@ Autolinks (596)
 <p><a href="irc://foo.bar:2233/baz">irc://foo.bar:2233/baz</a></p>
 
 --- end
---- case 597 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
+--- case 592 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
 Autolinks (597)
 --- input
 <MAILTO:FOO@BAR.BAZ>
@@ -7308,7 +7245,7 @@ Autolinks (597)
 <p><a href="MAILTO:FOO@BAR.BAZ">MAILTO:FOO@BAR.BAZ</a></p>
 
 --- end
---- case 598 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 10 expected-bytes 37
+--- case 593 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 10 expected-bytes 37
 Autolinks (598)
 --- input
 <a+b+c:d>
@@ -7317,7 +7254,7 @@ Autolinks (598)
 <p><a href="a+b+c:d">a+b+c:d</a></p>
 
 --- end
---- case 599 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 27 expected-bytes 71
+--- case 594 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 27 expected-bytes 71
 Autolinks (599)
 --- input
 <made-up-scheme://foo,bar>
@@ -7326,7 +7263,7 @@ Autolinks (599)
 <p><a href="made-up-scheme://foo,bar">made-up-scheme://foo,bar</a></p>
 
 --- end
---- case 600 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 14 expected-bytes 45
+--- case 595 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 14 expected-bytes 45
 Autolinks (600)
 --- input
 <https://../>
@@ -7335,7 +7272,7 @@ Autolinks (600)
 <p><a href="https://../">https://../</a></p>
 
 --- end
---- case 601 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
+--- case 596 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 21 expected-bytes 59
 Autolinks (601)
 --- input
 <localhost:5001/foo>
@@ -7344,16 +7281,7 @@ Autolinks (601)
 <p><a href="localhost:5001/foo">localhost:5001/foo</a></p>
 
 --- end
---- case 602 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 26 expected-bytes 39
-Autolinks (602)
---- input
-<https://foo.bar/baz bim>
-
---- expected
-<p>&lt;https://foo.bar/baz bim&gt;</p>
-
---- end
---- case 603 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 26 expected-bytes 75
+--- case 597 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 26 expected-bytes 75
 Autolinks (603)
 --- input
 <https://example.com/\[\>
@@ -7362,7 +7290,7 @@ Autolinks (603)
 <p><a href="https://example.com/%5C%5B%5C">https://example.com/\[\</a></p>
 
 --- end
---- case 604 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 22 expected-bytes 68
+--- case 598 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 22 expected-bytes 68
 Autolinks (604)
 --- input
 <foo@bar.example.com>
@@ -7371,7 +7299,7 @@ Autolinks (604)
 <p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>
 
 --- end
---- case 605 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 31 expected-bytes 86
+--- case 599 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 31 expected-bytes 86
 Autolinks (605)
 --- input
 <foo+special@Bar.baz-bar0.com>
@@ -7380,7 +7308,7 @@ Autolinks (605)
 <p><a href="mailto:foo+special@Bar.baz-bar0.com">foo+special@Bar.baz-bar0.com</a></p>
 
 --- end
---- case 606 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 24 expected-bytes 36
+--- case 600 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 24 expected-bytes 36
 Autolinks (606)
 --- input
 <foo\+@bar.example.com>
@@ -7389,7 +7317,7 @@ Autolinks (606)
 <p>&lt;foo+@bar.example.com&gt;</p>
 
 --- end
---- case 607 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 3 expected-bytes 16
+--- case 601 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 3 expected-bytes 16
 Autolinks (607)
 --- input
 <>
@@ -7398,16 +7326,7 @@ Autolinks (607)
 <p>&lt;&gt;</p>
 
 --- end
---- case 608 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 20 expected-bytes 33
-Autolinks (608)
---- input
-< https://foo.bar >
-
---- expected
-<p>&lt; https://foo.bar &gt;</p>
-
---- end
---- case 609 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 8 expected-bytes 21
+--- case 602 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 8 expected-bytes 21
 Autolinks (609)
 --- input
 <m:abc>
@@ -7416,7 +7335,7 @@ Autolinks (609)
 <p>&lt;m:abc&gt;</p>
 
 --- end
---- case 610 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 14 expected-bytes 27
+--- case 603 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 14 expected-bytes 27
 Autolinks (610)
 --- input
 <foo.bar.baz>
@@ -7425,25 +7344,7 @@ Autolinks (610)
 <p>&lt;foo.bar.baz&gt;</p>
 
 --- end
---- case 611 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 20 expected-bytes 27
-Autolinks (611)
---- input
-https://example.com
-
---- expected
-<p>https://example.com</p>
-
---- end
---- case 612 options allow_dangerous_html,allow_dangerous_protocol label-bytes 15 input-bytes 20 expected-bytes 27
-Autolinks (612)
---- input
-foo@bar.example.com
-
---- expected
-<p>foo@bar.example.com</p>
-
---- end
---- case 613 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 14 expected-bytes 21
+--- case 604 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 14 expected-bytes 21
 Raw HTML (613)
 --- input
 <a><bab><c2c>
@@ -7452,7 +7353,7 @@ Raw HTML (613)
 <p><a><bab><c2c></p>
 
 --- end
---- case 614 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 10 expected-bytes 17
+--- case 605 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 10 expected-bytes 17
 Raw HTML (614)
 --- input
 <a/><b2/>
@@ -7461,7 +7362,7 @@ Raw HTML (614)
 <p><a/><b2/></p>
 
 --- end
---- case 615 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 23 expected-bytes 30
+--- case 606 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 23 expected-bytes 30
 Raw HTML (615)
 --- input
 <a  /><b2
@@ -7472,7 +7373,7 @@ data="foo" >
 data="foo" ></p>
 
 --- end
---- case 616 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 64 expected-bytes 71
+--- case 607 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 64 expected-bytes 71
 Raw HTML (616)
 --- input
 <a foo="bar" bam = 'baz <em>"</em>'
@@ -7483,7 +7384,7 @@ _boolean zoop:33=zoop:33 />
 _boolean zoop:33=zoop:33 /></p>
 
 --- end
---- case 617 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 39 expected-bytes 46
+--- case 608 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 39 expected-bytes 46
 Raw HTML (617)
 --- input
 Foo <responsive-image src="foo.jpg" />
@@ -7492,7 +7393,7 @@ Foo <responsive-image src="foo.jpg" />
 <p>Foo <responsive-image src="foo.jpg" /></p>
 
 --- end
---- case 618 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 10 expected-bytes 29
+--- case 609 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 10 expected-bytes 29
 Raw HTML (618)
 --- input
 <33> <__>
@@ -7501,7 +7402,7 @@ Raw HTML (618)
 <p>&lt;33&gt; &lt;__&gt;</p>
 
 --- end
---- case 619 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 16 expected-bytes 39
+--- case 610 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 16 expected-bytes 39
 Raw HTML (619)
 --- input
 <a h*#ref="hi">
@@ -7510,7 +7411,7 @@ Raw HTML (619)
 <p>&lt;a h*#ref=&quot;hi&quot;&gt;</p>
 
 --- end
---- case 620 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 27 expected-bytes 51
+--- case 611 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 27 expected-bytes 51
 Raw HTML (620)
 --- input
 <a href="hi'> <a href=hi'>
@@ -7519,7 +7420,7 @@ Raw HTML (620)
 <p>&lt;a href=&quot;hi'&gt; &lt;a href=hi'&gt;</p>
 
 --- end
---- case 621 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 42 expected-bytes 73
+--- case 612 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 42 expected-bytes 73
 Raw HTML (621)
 --- input
 < a><
@@ -7534,7 +7435,7 @@ foo&gt;&lt;bar/ &gt;
 bim!bop /&gt;</p>
 
 --- end
---- case 622 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 26 expected-bytes 39
+--- case 613 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 26 expected-bytes 39
 Raw HTML (622)
 --- input
 <a href='bar'title=title>
@@ -7543,7 +7444,7 @@ Raw HTML (622)
 <p>&lt;a href='bar'title=title&gt;</p>
 
 --- end
---- case 623 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 12 expected-bytes 19
+--- case 614 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 12 expected-bytes 19
 Raw HTML (623)
 --- input
 </a></foo >
@@ -7552,7 +7453,7 @@ Raw HTML (623)
 <p></a></foo ></p>
 
 --- end
---- case 624 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 16 expected-bytes 39
+--- case 615 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 16 expected-bytes 39
 Raw HTML (624)
 --- input
 </a href="foo">
@@ -7561,7 +7462,7 @@ Raw HTML (624)
 <p>&lt;/a href=&quot;foo&quot;&gt;</p>
 
 --- end
---- case 625 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 49 expected-bytes 56
+--- case 616 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 49 expected-bytes 56
 Raw HTML (625)
 --- input
 foo <!-- this is a --
@@ -7572,7 +7473,7 @@ comment - with hyphens -->
 comment - with hyphens --></p>
 
 --- end
---- case 626 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 38 expected-bytes 57
+--- case 617 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 38 expected-bytes 57
 Raw HTML (626)
 --- input
 foo <!--> foo -->
@@ -7584,7 +7485,7 @@ foo <!---> foo -->
 <p>foo <!---> foo --&gt;</p>
 
 --- end
---- case 627 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 22 expected-bytes 29
+--- case 618 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 22 expected-bytes 29
 Raw HTML (627)
 --- input
 foo <?php echo $a; ?>
@@ -7593,7 +7494,7 @@ foo <?php echo $a; ?>
 <p>foo <?php echo $a; ?></p>
 
 --- end
---- case 628 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 24 expected-bytes 31
+--- case 619 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 24 expected-bytes 31
 Raw HTML (628)
 --- input
 foo <!ELEMENT br EMPTY>
@@ -7602,7 +7503,7 @@ foo <!ELEMENT br EMPTY>
 <p>foo <!ELEMENT br EMPTY></p>
 
 --- end
---- case 629 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 20 expected-bytes 27
+--- case 620 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 20 expected-bytes 27
 Raw HTML (629)
 --- input
 foo <![CDATA[>&<]]>
@@ -7611,7 +7512,7 @@ foo <![CDATA[>&<]]>
 <p>foo <![CDATA[>&<]]></p>
 
 --- end
---- case 630 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 22 expected-bytes 29
+--- case 621 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 22 expected-bytes 29
 Raw HTML (630)
 --- input
 foo <a href="&ouml;">
@@ -7620,7 +7521,7 @@ foo <a href="&ouml;">
 <p>foo <a href="&ouml;"></p>
 
 --- end
---- case 631 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 18 expected-bytes 25
+--- case 622 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 18 expected-bytes 25
 Raw HTML (631)
 --- input
 foo <a href="\*">
@@ -7629,7 +7530,7 @@ foo <a href="\*">
 <p>foo <a href="\*"></p>
 
 --- end
---- case 632 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 14 expected-bytes 41
+--- case 623 options allow_dangerous_html,allow_dangerous_protocol label-bytes 14 input-bytes 14 expected-bytes 41
 Raw HTML (632)
 --- input
 <a href="\"">
@@ -7638,7 +7539,7 @@ Raw HTML (632)
 <p>&lt;a href=&quot;&quot;&quot;&gt;</p>
 
 --- end
---- case 633 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 21
+--- case 624 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 21
 Hard line breaks (633)
 --- input
 foo  
@@ -7649,7 +7550,7 @@ baz
 baz</p>
 
 --- end
---- case 634 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 9 expected-bytes 21
+--- case 625 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 9 expected-bytes 21
 Hard line breaks (634)
 --- input
 foo\
@@ -7660,7 +7561,7 @@ baz
 baz</p>
 
 --- end
---- case 635 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 15 expected-bytes 21
+--- case 626 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 15 expected-bytes 21
 Hard line breaks (635)
 --- input
 foo       
@@ -7671,7 +7572,7 @@ baz
 baz</p>
 
 --- end
---- case 636 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 15 expected-bytes 21
+--- case 627 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 15 expected-bytes 21
 Hard line breaks (636)
 --- input
 foo  
@@ -7682,7 +7583,7 @@ foo
 bar</p>
 
 --- end
---- case 637 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 14 expected-bytes 21
+--- case 628 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 14 expected-bytes 21
 Hard line breaks (637)
 --- input
 foo\
@@ -7693,7 +7594,7 @@ foo\
 bar</p>
 
 --- end
---- case 638 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 12 expected-bytes 30
+--- case 629 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 12 expected-bytes 30
 Hard line breaks (638)
 --- input
 *foo  
@@ -7704,7 +7605,7 @@ bar*
 bar</em></p>
 
 --- end
---- case 639 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 11 expected-bytes 30
+--- case 630 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 11 expected-bytes 30
 Hard line breaks (639)
 --- input
 *foo\
@@ -7715,7 +7616,7 @@ bar*
 bar</em></p>
 
 --- end
---- case 640 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 14 expected-bytes 32
+--- case 631 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 14 expected-bytes 32
 Hard line breaks (640)
 --- input
 `code  
@@ -7725,7 +7626,7 @@ span`
 <p><code>code   span</code></p>
 
 --- end
---- case 641 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 13 expected-bytes 31
+--- case 632 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 13 expected-bytes 31
 Hard line breaks (641)
 --- input
 `code\
@@ -7735,7 +7636,7 @@ span`
 <p><code>code\ span</code></p>
 
 --- end
---- case 642 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 21 expected-bytes 28
+--- case 633 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 21 expected-bytes 28
 Hard line breaks (642)
 --- input
 <a href="foo  
@@ -7746,7 +7647,7 @@ bar">
 bar"></p>
 
 --- end
---- case 643 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 20 expected-bytes 27
+--- case 634 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 20 expected-bytes 27
 Hard line breaks (643)
 --- input
 <a href="foo\
@@ -7757,7 +7658,7 @@ bar">
 bar"></p>
 
 --- end
---- case 644 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 5 expected-bytes 12
+--- case 635 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 5 expected-bytes 12
 Hard line breaks (644)
 --- input
 foo\
@@ -7766,7 +7667,7 @@ foo\
 <p>foo\</p>
 
 --- end
---- case 645 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 6 expected-bytes 11
+--- case 636 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 6 expected-bytes 11
 Hard line breaks (645)
 --- input
 foo  
@@ -7775,7 +7676,7 @@ foo
 <p>foo</p>
 
 --- end
---- case 646 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 9 expected-bytes 14
+--- case 637 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 9 expected-bytes 14
 Hard line breaks (646)
 --- input
 ### foo\
@@ -7784,7 +7685,7 @@ Hard line breaks (646)
 <h3>foo\</h3>
 
 --- end
---- case 647 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 13
+--- case 638 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 13
 Hard line breaks (647)
 --- input
 ### foo  
@@ -7793,7 +7694,7 @@ Hard line breaks (647)
 <h3>foo</h3>
 
 --- end
---- case 648 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 8 expected-bytes 15
+--- case 639 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 8 expected-bytes 15
 Soft line breaks (648)
 --- input
 foo
@@ -7804,7 +7705,7 @@ baz
 baz</p>
 
 --- end
---- case 649 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 15
+--- case 640 options allow_dangerous_html,allow_dangerous_protocol label-bytes 22 input-bytes 10 expected-bytes 15
 Soft line breaks (649)
 --- input
 foo 
@@ -7815,7 +7716,7 @@ foo
 baz</p>
 
 --- end
---- case 650 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 16 expected-bytes 23
+--- case 641 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 16 expected-bytes 23
 Textual content (650)
 --- input
 hello $.;'there
@@ -7824,7 +7725,7 @@ hello $.;'there
 <p>hello $.;'there</p>
 
 --- end
---- case 651 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 14 expected-bytes 21
+--- case 642 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 14 expected-bytes 21
 Textual content (651)
 --- input
 Foo χρῆν
@@ -7833,7 +7734,7 @@ Foo χρῆν
 <p>Foo χρῆν</p>
 
 --- end
---- case 652 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 20 expected-bytes 27
+--- case 643 options allow_dangerous_html,allow_dangerous_protocol label-bytes 21 input-bytes 20 expected-bytes 27
 Textual content (652)
 --- input
 Multiple     spaces

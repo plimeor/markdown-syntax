@@ -1,6 +1,6 @@
 # 0003: Test corpus boundaries
 
-Status: Accepted
+Status: Superseded by 0010
 Date: 2026-06-20
 
 ## Context

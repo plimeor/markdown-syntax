@@ -4,45 +4,44 @@ commit: 1506572
 source: upstream-tests/definition.rs
 role: upstream-input
 count: 79
-profiles: commonmark
 
---- case 1 profile commonmark bytes 26
+--- case 1 bytes 26
 [foo]: /url "title"
 
 [foo]
 --- end
---- case 2 profile commonmark bytes 19
+--- case 2 bytes 19
 [foo]:
 
 /url
 
 [foo]
 --- end
---- case 3 profile commonmark bytes 55
+--- case 3 bytes 55
    [foo]: 
       /url  
            'the title'  
 
 [foo]
 --- end
---- case 4 profile commonmark bytes 14
+--- case 4 bytes 14
 [a]:b 'c'
 
 [a]
 --- end
---- case 5 profile commonmark bytes 55
+--- case 5 bytes 55
 [Foo*bar\]]:my_(url) 'title (with parens)'
 
 [Foo*bar\]]
 --- end
---- case 6 profile commonmark bytes 38
+--- case 6 bytes 38
 [Foo bar]:
 <my url>
 'title'
 
 [Foo bar]
 --- end
---- case 7 profile commonmark bytes 40
+--- case 7 bytes 40
 [foo]: /url '
 title
 line1
@@ -51,146 +50,146 @@ line2
 
 [foo]
 --- end
---- case 8 profile commonmark bytes 43
+--- case 8 bytes 43
 [foo]: /url 'title
 
 with blank line'
 
 [foo]
 --- end
---- case 9 profile commonmark bytes 18
+--- case 9 bytes 18
 [foo]:
 /url
 
 [foo]
 --- end
---- case 10 profile commonmark bytes 13
+--- case 10 bytes 13
 [foo]:
 
 [foo]
 --- end
---- case 11 profile commonmark bytes 16
+--- case 11 bytes 16
 [foo]: <>
 
 [foo]
 --- end
---- case 12 profile commonmark bytes 24
+--- case 12 bytes 24
 [foo]: <bar>(baz)
 
 [foo]
 --- end
---- case 13 profile commonmark bytes 42
+--- case 13 bytes 42
 [foo]: /url\bar\*baz "foo\"bar\baz"
 
 [foo]
 --- end
---- case 14 profile commonmark bytes 17
+--- case 14 bytes 17
 [foo]
 
 [foo]: url
 --- end
---- case 15 profile commonmark bytes 33
+--- case 15 bytes 33
 [foo]: first
 [foo]: second
 
 [foo]
 --- end
---- case 16 profile commonmark bytes 18
+--- case 16 bytes 18
 [FOO]: /url
 
 [Foo]
 --- end
---- case 17 profile commonmark bytes 27
+--- case 17 bytes 27
 [ΑΓΩ]: /φου
 
 [αγω]
 --- end
---- case 18 profile commonmark bytes 12
+--- case 18 bytes 12
 [ı]: a
 
 [I]
 --- end
---- case 19 profile commonmark bytes 12
+--- case 19 bytes 12
 [I]: a
 
 [ı]
 --- end
---- case 20 profile commonmark bytes 12
+--- case 20 bytes 12
 [i]: a
 
 [İ]
 --- end
---- case 21 profile commonmark bytes 12
+--- case 21 bytes 12
 [İ]: a
 
 [i]
 --- end
---- case 22 profile commonmark bytes 11
+--- case 22 bytes 11
 [foo]: /url
 --- end
---- case 23 profile commonmark bytes 17
+--- case 23 bytes 17
 [
 foo
 ]: /url
 bar
 --- end
---- case 24 profile commonmark bytes 28
+--- case 24 bytes 28
 [foo]: /url "title"  
 
 [foo]
 --- end
---- case 25 profile commonmark bytes 28
+--- case 25 bytes 28
 [foo]: /url
 "title"  
 
 [foo]
 --- end
---- case 26 profile commonmark bytes 22
+--- case 26 bytes 22
 [foo]: /url "title" ok
 --- end
---- case 27 profile commonmark bytes 22
+--- case 27 bytes 22
 [foo]: /url
 "title" ok
 --- end
---- case 28 profile commonmark bytes 30
+--- case 28 bytes 30
     [foo]: /url "title"
 
 [foo]
 --- end
---- case 29 profile commonmark bytes 26
+--- case 29 bytes 26
 ```
 [foo]: /url
 ```
 
 [foo]
 --- end
---- case 30 profile commonmark bytes 22
+--- case 30 bytes 22
 Foo
 [bar]: /baz
 
 [bar]
 --- end
---- case 31 profile commonmark bytes 25
+--- case 31 bytes 25
 # [Foo]
 [foo]: /url
 > bar
 --- end
---- case 32 profile commonmark bytes 25
+--- case 32 bytes 25
 [foo]: /url
 bar
 ===
 [foo]
 --- end
---- case 33 profile commonmark bytes 8
+--- case 33 bytes 8
 [a]: b
 =
 --- end
---- case 34 profile commonmark bytes 21
+--- case 34 bytes 21
 [foo]: /url
 ===
 [foo]
 --- end
---- case 35 profile commonmark bytes 82
+--- case 35 bytes 82
 [foo]: /foo-url "foo"
 [bar]: /bar-url
   "bar"
@@ -200,163 +199,163 @@ bar
 [bar],
 [baz]
 --- end
---- case 36 profile commonmark bytes 20
+--- case 36 bytes 20
 > [foo]: /url
 
 [foo]
 --- end
---- case 37 profile commonmark bytes 17
+--- case 37 bytes 17
 > [a]: <> 'b
 > c'
 --- end
---- case 38 profile commonmark bytes 18
+--- case 38 bytes 18
 > [a]
 
 [a]: b (c
 )
 --- end
---- case 39 profile commonmark bytes 38
+--- case 39 bytes 38
 [\[\+\]]: example.com
 
 Link: [\[\+\]].
 --- end
---- case 40 profile commonmark bytes 24
+--- case 40 bytes 24
 [x]: \"&#x20;\(\)\"
 
 [x]
 --- end
---- case 41 profile commonmark bytes 24
+--- case 41 bytes 24
 [x]: <\>&#x20;\+\>>
 
 [x]
 --- end
---- case 42 profile commonmark bytes 11
+--- case 42 bytes 11
 [x]: <
 
 [x]
 --- end
---- case 43 profile commonmark bytes 12
+--- case 43 bytes 12
 [x]: <x
 
 [x]
 --- end
---- case 44 profile commonmark bytes 12
+--- case 44 bytes 12
 [x]: a
 
 [x]
 --- end
---- case 45 profile commonmark bytes 13
+--- case 45 bytes 13
 [x]: ab
 
 [x]
 --- end
---- case 46 profile commonmark bytes 14
+--- case 46 bytes 14
 [x]: <a>
 
 [x]
 --- end
---- case 47 profile commonmark bytes 15
+--- case 47 bytes 15
 [x]: <ab>
 
 [x]
 --- end
---- case 48 profile commonmark bytes 16
+--- case 48 bytes 16
 [x]: a "\""
 
 [x]
 --- end
---- case 49 profile commonmark bytes 15
+--- case 49 bytes 15
 [x]: a "'"
 
 [x]
 --- end
---- case 50 profile commonmark bytes 15
+--- case 50 bytes 15
 [x]: a '"'
 
 [x]
 --- end
---- case 51 profile commonmark bytes 16
+--- case 51 bytes 16
 [x]: a ("')
 
 [x]
 --- end
---- case 52 profile commonmark bytes 14
+--- case 52 bytes 14
 [x]: a(()
 
 [x]
 --- end
---- case 53 profile commonmark bytes 15
+--- case 53 bytes 15
 [x]: a(())
 
 [x]
 --- end
---- case 54 profile commonmark bytes 14
+--- case 54 bytes 14
 [x]: a())
 
 [x]
 --- end
---- case 55 profile commonmark bytes 14
+--- case 55 bytes 14
 [x]: a  	
 
 [x]
 --- end
---- case 56 profile commonmark bytes 17
+--- case 56 bytes 17
 [x]: a "X" 	
 
 [x]
 --- end
---- case 57 profile commonmark bytes 71
+--- case 57 bytes 71
 [&amp;&copy;&]: example.com/&amp;&copy;& "&amp;&copy;&"
 
 [&amp;&copy;&]
 --- end
---- case 58 profile commonmark bytes 21
+--- case 58 bytes 21
 [x]:
 example.com
 
 [x]
 --- end
---- case 59 profile commonmark bytes 23
+--- case 59 bytes 23
 [x]: 	
 example.com
 
 [x]
 --- end
---- case 60 profile commonmark bytes 16
+--- case 60 bytes 16
 [x]: <> ""
 [][x]
 --- end
---- case 61 profile commonmark bytes 15
+--- case 61 bytes 15
 [a]
 
 [a]: <b<c>
 --- end
---- case 62 profile commonmark bytes 13
+--- case 62 bytes 13
 [a]
 
 [a]: b(c
 --- end
---- case 63 profile commonmark bytes 13
+--- case 63 bytes 13
 [a]
 
 [a]: b)c
 --- end
---- case 64 profile commonmark bytes 26
+--- case 64 bytes 26
 [a]
 
 [a]: a(1(2(3(4()))))b
 --- end
---- case 65 profile commonmark bytes 14
+--- case 65 bytes 14
 [a]
 
 [a]: aaa)
 --- end
---- case 66 profile commonmark bytes 18
+--- case 66 bytes 18
 [a]
 
 [a]: aaa) "a"
 --- end
---- case 67 profile commonmark bytes 67
+--- case 67 bytes 67
  [a]: b "c"
   [d]: e
    [f]: g "h"
@@ -364,63 +363,63 @@ example.com
 	[k]: l (m)
 	 n [k] o
 --- end
---- case 68 profile commonmark bytes 19
+--- case 68 bytes 19
 [a
   b]: c
 
 [a
   b]
 --- end
---- case 69 profile commonmark bytes 11
+--- case 69 bytes 11
 [a]: )
 
 [a]
 --- end
---- case 70 profile commonmark bytes 12
+--- case 70 bytes 12
 [a]: )b
 
 [a]
 --- end
---- case 71 profile commonmark bytes 12
+--- case 71 bytes 12
 [a]: b)
 
 [a]
 --- end
---- case 72 profile commonmark bytes 10
+--- case 72 bytes 10
 [
 a
 =
 ]: b
 --- end
---- case 73 profile commonmark bytes 14
+--- case 73 bytes 14
 [a]: b '
 c
 =
 '
 --- end
---- case 74 profile commonmark bytes 10
+--- case 74 bytes 10
 [
 ***
 ]: b
 --- end
---- case 75 profile commonmark bytes 14
+--- case 75 bytes 14
 [a]: b '
 ***
 '
 --- end
---- case 76 profile commonmark bytes 10
+--- case 76 bytes 10
 [
 ```
 ]: b
 --- end
---- case 77 profile commonmark bytes 14
+--- case 77 bytes 14
 [a]: b '
 ```
 '
 --- end
---- case 78 profile commonmark bytes 19
+--- case 78 bytes 19
 [foo]: /url "title"
 --- end
---- case 79 profile commonmark bytes 12
+--- case 79 bytes 12
 [a]: <b> 'c'
 --- end

@@ -85,11 +85,26 @@ fn nul_is_punctuation_for_emphasis_flanking() {
 
 #[test]
 fn nul_in_uri_autolink_reads_as_replacement_character() {
-    let document = SyntaxOptions::commonmark().parse("<ab:c\u{0}d>").document;
-    let [Inline::Link(autolink)] = paragraph_inlines(&document) else {
+    let document = parse("<ab:c\u{0}d>").document;
+    let [Inline::Autolink(autolink)] = paragraph_inlines(&document) else {
         panic!("expected an autolink, got {:?}", document.children);
     };
-    assert_eq!(autolink.destination, "ab:c\u{FFFD}d");
+    assert_eq!(autolink.text, "ab:c\u{FFFD}d");
+    assert_eq!(autolink.destination().as_deref(), Some("ab:c\u{FFFD}d"));
+    assert!(document.validate().is_empty());
+}
+
+#[test]
+fn nul_in_a_literal_autolink_reads_as_replacement_character() {
+    let document = parse("http://a.b/c\u{0}d").document;
+    let [Inline::Autolink(autolink)] = paragraph_inlines(&document) else {
+        panic!("expected an autolink, got {:?}", document.children);
+    };
+    assert_eq!(
+        autolink.destination().as_deref(),
+        Some("http://a.b/c\u{FFFD}d")
+    );
+    assert!(document.validate().is_empty());
 }
 
 #[test]
@@ -113,7 +128,7 @@ fn nul_in_a_literal_autolink_host_reads_as_replacement_character() {
     let is_autolink = |document: &Document| {
         paragraph_inlines(document)
             .iter()
-            .any(|inline| matches!(inline, Inline::Link(_)))
+            .any(|inline| matches!(inline, Inline::Autolink(_)))
     };
     assert_eq!(is_autolink(&with_nul), is_autolink(&with_replacement));
 }

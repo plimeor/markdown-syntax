@@ -7,8 +7,8 @@
 //! block is a paragraph the line did not reach, or is added to the open leaf
 //! block. A block that a line does not continue is closed with every block
 //! inside it. The crate's extension containers (container directives,
-//! footnote definitions, HTML containers, and description details) sit on the
-//! same stack as block quotes and list items.
+//! footnote definitions, and HTML containers) sit on the same stack as block
+//! quotes and list items.
 //!
 //! Inline content is parsed after every line is read, once all link reference
 //! definitions are known.
@@ -20,13 +20,8 @@ use super::*;
 use crate::memo::BracketMemo;
 
 /// Reads the blocks of the document split into `lines`.
-pub(super) fn parse_document(
-    lines: &[Line<'_>],
-    options: &SyntaxOptions,
-    known: &[String],
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<Block> {
-    let mut parser = BlockParser::new(lines, options);
+pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
+    let mut parser = BlockParser::new(lines);
     for index in 0..lines.len() {
         parser.read_line(index);
     }
@@ -43,11 +38,7 @@ pub(super) fn parse_document(
     definitions.dedup();
     let mut found = parser.diagnostics;
     let finish = Finish {
-        options,
-        definitions: Definitions {
-            own: &definitions,
-            known,
-        },
+        definitions: Definitions { own: &definitions },
     };
     let blocks = document
         .children
@@ -281,8 +272,6 @@ struct ParagraphLine<'a> {
     start: usize,
     /// The columns of that indentation.
     indent: usize,
-    /// The line reached the paragraph as a lazy continuation line.
-    lazy: bool,
     index: usize,
 }
 
@@ -306,9 +295,8 @@ struct Frame<'a> {
     depth: usize,
     children: Vec<Child<'a>>,
     /// The lines ahead that reach this container, for blocks that need to see
-    /// their end before they open: without lazy lines, and with them.
+    /// their end before they open.
     lookahead: Option<Box<Lookahead<'a>>>,
-    lazy_lookahead: Option<Box<Lookahead<'a>>>,
 }
 
 enum Kind<'a> {
@@ -340,8 +328,6 @@ enum Kind<'a> {
         /// The first content line may still be a `<summary>`.
         summary_pending: bool,
     },
-    DescriptionList(Box<OpenDescriptionList<'a>>),
-    Details,
     Paragraph(ParagraphState<'a>),
     Code(CodeState),
     HtmlBlock {
@@ -350,11 +336,6 @@ enum Kind<'a> {
         lines: usize,
     },
     Table(TableState),
-    MdxEsm {
-        value: String,
-        state: MdxEsmState,
-        lines: usize,
-    },
     /// A block read whole when it opened, which takes its lines up to `until`.
     Swallow {
         until: usize,
@@ -371,53 +352,11 @@ struct OpenDirective {
     closed: bool,
 }
 
-struct OpenDescriptionList<'a> {
-    /// Items of a list this one continues after blank lines.
-    prior: Vec<PendingDescriptionItem<'a>>,
-    prior_tight: bool,
-    items: Vec<OpenDescriptionItem>,
-}
-
-struct OpenDescriptionItem {
-    term: DerivedText,
-    start: usize,
-    term_last_line: usize,
-    /// The first of the list's children that are this item's details.
-    details_from: usize,
-}
-
 #[derive(Default)]
 struct ParagraphState<'a> {
     lines: Vec<ParagraphLine<'a>>,
     /// The first of the trailing lines that reached the paragraph lazily.
     lazy_from: Option<usize>,
-    /// The fewest open blocks those lines continued.
-    lazy_depth: usize,
-    /// How far the lines were read as term lines: the input line index of
-    /// the first line and of the last line read, and whether all read are.
-    term_lines: Option<(usize, usize, bool)>,
-}
-
-impl ParagraphState<'_> {
-    /// Whether every line could be a description term. Lines are appended
-    /// or taken from the front, so the lines read before are not read again
-    /// while the first and last line read are still in place.
-    fn all_term_lines(&mut self) -> bool {
-        let (Some(first), Some(last)) = (self.lines.first(), self.lines.last()) else {
-            return false;
-        };
-        let (first, last) = (first.index, last.index);
-        let resume = self.term_lines.and_then(|(from, through, all)| {
-            let position = self.lines.iter().rposition(|line| line.index == through)?;
-            (from == first).then_some((position + 1, all))
-        });
-        let (next, mut all) = resume.unwrap_or((0, true));
-        if all {
-            all = self.lines[next..].iter().all(is_term_line);
-        }
-        self.term_lines = Some((first, last, all));
-        all
-    }
 }
 
 struct CodeState {
@@ -454,7 +393,6 @@ struct TableState {
 struct Lookahead<'a> {
     first: usize,
     lines: Vec<Line<'a>>,
-    mdx: MdxFlowScan,
     closes: BracketMemo,
 }
 
@@ -502,15 +440,6 @@ enum Pending<'a> {
         checked: Option<bool>,
         children: Vec<Child<'a>>,
     },
-    DescriptionList {
-        span: Span,
-        tight: bool,
-        items: Vec<PendingDescriptionItem<'a>>,
-    },
-    Details {
-        span: Span,
-        children: Vec<Child<'a>>,
-    },
     FootnoteDefinition {
         span: Span,
         label: String,
@@ -543,13 +472,6 @@ enum Pending<'a> {
     },
 }
 
-/// A description item whose details are closed.
-struct PendingDescriptionItem<'a> {
-    span: Span,
-    term: DerivedText,
-    details: Vec<Child<'a>>,
-}
-
 impl Frame<'_> {
     fn is_leaf(&self) -> bool {
         matches!(
@@ -558,7 +480,6 @@ impl Frame<'_> {
                 | Kind::Code(_)
                 | Kind::HtmlBlock { .. }
                 | Kind::Table(_)
-                | Kind::MdxEsm { .. }
                 | Kind::Swallow { .. }
         )
     }
@@ -573,7 +494,7 @@ impl Frame<'_> {
         matches!(self.kind, Kind::Paragraph(_) | Kind::Table(_))
     }
 
-    /// Whether the block can hold blocks other than list items and details.
+    /// Whether the block can hold blocks other than list items.
     fn holds_blocks(&self) -> bool {
         matches!(
             self.kind,
@@ -583,21 +504,18 @@ impl Frame<'_> {
                 | Kind::ContainerDirective(_)
                 | Kind::FootnoteDefinition { .. }
                 | Kind::HtmlContainer { .. }
-                | Kind::Details
         )
     }
 
     fn can_contain(&self, kind: &Kind<'_>) -> bool {
         match self.kind {
             Kind::List { .. } => matches!(kind, Kind::Item { .. }),
-            Kind::DescriptionList(_) => matches!(kind, Kind::Details),
             Kind::Document
             | Kind::BlockQuote { .. }
             | Kind::Item { .. }
             | Kind::ContainerDirective(_)
             | Kind::FootnoteDefinition { .. }
-            | Kind::HtmlContainer { .. }
-            | Kind::Details => !matches!(kind, Kind::Item { .. } | Kind::Details),
+            | Kind::HtmlContainer { .. } => !matches!(kind, Kind::Item { .. }),
             _ => false,
         }
     }
@@ -629,9 +547,8 @@ enum LeafStep {
     Done,
 }
 
-struct BlockParser<'a, 'o> {
+struct BlockParser<'a> {
     lines: &'a [Line<'a>],
-    options: &'o SyntaxOptions,
     stack: Vec<Frame<'a>>,
     diagnostics: Vec<Diagnostic>,
     /// The open blocks the current line continued: `stack[..matched]`.
@@ -642,11 +559,10 @@ struct BlockParser<'a, 'o> {
     /// paragraph's first line, so no indented code interrupts it.
     after_alert_marker: bool,
     /// The lookaheads of closed containers, with what their open blocks
-    /// read of a line and whether they take lazy lines. A container that
-    /// opens later under blocks that read lines alike takes one over, so
-    /// containers opening one after another do not each read the lines
-    /// ahead again.
-    retired: Vec<(Vec<ReachKey>, bool, Box<Lookahead<'a>>)>,
+    /// read of a line. A container that opens later under blocks that read
+    /// lines alike takes one over, so containers opening one after another do
+    /// not each read the lines ahead again.
+    retired: Vec<(Vec<ReachKey>, Box<Lookahead<'a>>)>,
 }
 
 /// What `reach` reads of an open block: its kind, and the column or line it
@@ -658,18 +574,17 @@ fn reach_key(kind: &Kind<'_>) -> ReachKey {
         Kind::BlockQuote { .. } => (1, 0),
         Kind::Item { indent, .. } => (2, *indent),
         Kind::ContainerDirective(directive) => (3, directive.fence),
-        Kind::FootnoteDefinition { .. } | Kind::Details => (4, 0),
+        Kind::FootnoteDefinition { .. } => (4, 0),
         Kind::HtmlContainer { close_line, .. } => (5, *close_line),
         _ => (0, 0),
     }
 }
 
-impl<'a, 'o> BlockParser<'a, 'o> {
-    fn new(lines: &'a [Line<'a>], options: &'o SyntaxOptions) -> Self {
+impl<'a> BlockParser<'a> {
+    fn new(lines: &'a [Line<'a>]) -> Self {
         let start = lines.first().map_or(0, |line| line.start);
         BlockParser {
             lines,
-            options,
             stack: alloc::vec![Frame {
                 kind: Kind::Document,
                 first_line: 0,
@@ -679,7 +594,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 depth: 0,
                 children: Vec::new(),
                 lookahead: None,
-                lazy_lookahead: None,
             }],
             diagnostics: Vec::new(),
             matched: 1,
@@ -728,12 +642,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 break;
             }
             // A list's span is its items'.
-            if !blank
-                && !matches!(
-                    self.stack[matched].kind,
-                    Kind::List { .. } | Kind::DescriptionList(_)
-                )
-            {
+            if !blank && !matches!(self.stack[matched].kind, Kind::List { .. }) {
                 extended.push(matched);
             }
             matched += 1;
@@ -839,7 +748,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         self.close_unmatched();
         let in_container = self.stack.len() > 2;
         let top = self.stack.len() - 1;
-        let options = self.options;
         let frame = &mut self.stack[top];
         match &mut frame.kind {
             Kind::Paragraph(paragraph) => {
@@ -847,7 +755,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     content: cursor.content(),
                     start: block_start,
                     indent,
-                    lazy: false,
                     index,
                 });
                 paragraph.lazy_from = None;
@@ -895,7 +802,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             Kind::Table(table) => {
                 let row = cursor.rest();
                 let row_line = cursor.rest_view();
-                let mut cells = table_row_cells(&row_line, row, options.constructs.spoiler);
+                let mut cells = table_row_cells(&row_line, row);
                 cells.truncate(table.alignments.len());
                 while cells.len() < table.alignments.len() {
                     cells.push(TableCellSource {
@@ -906,21 +813,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 }
                 table.rows.push((Span::new(block_start, line.end), cells));
                 frame.extend(index, line.end_with_eol);
-            }
-            Kind::MdxEsm {
-                value,
-                state,
-                lines,
-            } => {
-                let text = cursor.rest();
-                if *lines > 0 {
-                    value.push('\n');
-                }
-                value.push_str(text);
-                update_mdx_esm_state(text, state);
-                *lines += 1;
-                frame.last_line = index;
-                frame.end = line.end;
             }
             Kind::Swallow { until, .. } => {
                 if *until == index {
@@ -936,7 +828,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                                 content,
                                 start: block_start,
                                 indent,
-                                lazy: false,
                                 index,
                             }],
                             ..ParagraphState::default()
@@ -964,7 +855,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         indent: usize,
     ) {
         let line = cursor.line;
-        let matched = self.matched;
         let top = self.stack.len() - 1;
         for frame in &mut self.stack[..top] {
             frame.extend(index, line.end_with_eol);
@@ -980,12 +870,9 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                         content,
                         start: block_start,
                         indent,
-                        lazy: true,
                         index,
                     }],
                     lazy_from: Some(0),
-                    lazy_depth: matched,
-                    term_lines: None,
                 }),
                 block_start,
                 index,
@@ -996,18 +883,13 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         frame.last_line = index;
         frame.end = line.end;
         if let Kind::Paragraph(paragraph) = &mut frame.kind {
-            match paragraph.lazy_from {
-                Some(_) => paragraph.lazy_depth = paragraph.lazy_depth.min(matched),
-                None => {
-                    paragraph.lazy_from = Some(paragraph.lines.len());
-                    paragraph.lazy_depth = matched;
-                }
+            if paragraph.lazy_from.is_none() {
+                paragraph.lazy_from = Some(paragraph.lines.len());
             }
             paragraph.lines.push(ParagraphLine {
                 content: cursor.content(),
                 start: block_start,
                 indent,
-                lazy: true,
                 index,
             });
         }
@@ -1016,7 +898,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
     /// Continues the open leaf block with the line, which reached it.
     fn continue_leaf(&mut self, cursor: &mut Cursor<'a>, index: usize) -> LeafStep {
         let line = cursor.line;
-        let indented_code = self.options.constructs.indented_code;
         let top = self.stack.len() - 1;
         let frame = &mut self.stack[top];
         match &mut frame.kind {
@@ -1035,8 +916,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                         indent,
                         ..
                     } => (
-                        (!cursor.indented() || !indented_code)
-                            && fence_close(cursor.nonspace_rest(), *marker, *length),
+                        !cursor.indented() && fence_close(cursor.nonspace_rest(), *marker, *length),
                         *indent,
                     ),
                     CodeKind::Math { length, indent } => (
@@ -1080,13 +960,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     LeafStep::Matched
                 }
             }
-            Kind::MdxEsm { state, .. } => {
-                if is_mdx_esm_continuation(cursor.rest(), state) {
-                    LeafStep::Matched
-                } else {
-                    LeafStep::Failed
-                }
-            }
             Kind::Swallow { until, .. } => {
                 if index <= *until {
                     LeafStep::Matched
@@ -1121,7 +994,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 | Kind::ContainerDirective(_)
                 | Kind::FootnoteDefinition { .. }
                 | Kind::HtmlContainer { .. }
-                | Kind::Details
         );
         let depth = parent.depth + usize::from(nests);
         self.stack.push(Frame {
@@ -1133,7 +1005,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             depth,
             children: Vec::new(),
             lookahead: None,
-            lazy_lookahead: None,
         });
     }
 
@@ -1158,8 +1029,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
 
     /// Tries each block start on the rest of the line, in order.
     fn start(&mut self, cursor: &mut Cursor<'a>, container: usize, index: usize) -> Started {
-        let options = self.options;
-        let constructs = &options.constructs;
         let line = cursor.line;
         let start = cursor.position();
         let interrupting = self.stack[container].is_paragraph();
@@ -1190,7 +1059,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
         }
 
-        if index == 0 && self.stack.len() == 1 && constructs.frontmatter {
+        if index == 0 && self.stack.len() == 1 {
             if let Some(started) = self.start_frontmatter(index) {
                 return started;
             }
@@ -1209,7 +1078,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 cursor.advance_offset(1, true);
             }
             self.close_unmatched();
-            let alert = if constructs.gfm_alert && !cursor.partial {
+            let alert = if !cursor.partial {
                 parse_alert_marker(cursor.rest())
             } else {
                 None
@@ -1252,10 +1121,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Fenced code.
-        if (!indented || !constructs.indented_code) && matches!(byte, Some(b'`' | b'~')) {
+        if !indented && matches!(byte, Some(b'`' | b'~')) {
             if let Some((marker, length)) = fence_start(cursor.nonspace_rest()) {
                 let info = cursor.nonspace_rest()[length..].trim_matches([' ', '\t']);
-                let info = (!info.is_empty()).then(|| unescape_string(info));
+                let info = (!info.is_empty()).then(|| decode_escapes_and_references(info));
                 let indent = cursor.indent;
                 self.close_unmatched();
                 self.add_frame(
@@ -1280,7 +1149,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Math block.
-        if constructs.math_block && !indented && byte == Some(b'$') {
+        if !indented && byte == Some(b'$') {
             if let Some(length) = math_block_fence_length(cursor.nonspace_rest()) {
                 let indent = cursor.indent;
                 self.close_unmatched();
@@ -1301,10 +1170,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Container directive.
-        if constructs.directive_container && !indented && byte == Some(b':') {
+        if !indented && byte == Some(b':') {
             if let Some((fence, rest)) = directive_container_opener_prefix(cursor.nonspace_rest()) {
-                match parse_directive_opener(rest) {
-                    Some(opener) if nesting => {
+                match parse_directive_opener(rest, |_, _, _| true) {
+                    Ok(opener) if nesting => {
                         let source = cursor.view(cursor.next_nonspace);
                         let label = opener.label.map(|label| {
                             let mut text = DerivedText::default();
@@ -1335,8 +1204,10 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                         cursor.skip_to_end();
                         return Started::Container;
                     }
-                    Some(_) => {}
-                    None => {
+                    Ok(_) => {}
+                    // A bad name or an unclosed `[` / `{`: nothing is refused
+                    // for what follows the opener.
+                    Err(_) => {
                         if !tip_holds_text {
                             self.diagnostics.push(Diagnostic::new(
                                 DiagnosticSeverity::Error,
@@ -1351,16 +1222,16 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // HTML container.
-        if constructs.html_container && !indented && nesting && byte == Some(b'<') {
+        if !indented && nesting && byte == Some(b'<') {
             if let Some(started) = self.start_html_container(cursor, container, index) {
                 return started;
             }
         }
 
         // HTML block.
-        if constructs.html_block && !indented && byte == Some(b'<') {
+        if !indented && byte == Some(b'<') {
             if let Some(kind) = html_block_start(cursor.nonspace_rest()) {
-                if kind != HtmlBlockKind::UntilBlank || !interrupting {
+                if !interrupting || html_block_may_interrupt(kind) {
                     self.close_unmatched();
                     self.add_frame(
                         Kind::HtmlBlock {
@@ -1377,13 +1248,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
         }
 
-        // MDX flow constructs, which interrupt no paragraph.
-        if !tip_holds_text {
-            if let Some(started) = self.start_mdx(cursor, container, index) {
-                return started;
-            }
-        }
-
         // Setext heading.
         if interrupting && !indented && matches!(byte, Some(b'=' | b'-')) {
             if let Some(depth) = setext_underline_depth(cursor.nonspace_rest()) {
@@ -1394,11 +1258,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Table.
-        if interrupting
-            && constructs.gfm_table
-            && (!indented || !constructs.indented_code)
-            && matches!(byte, Some(b'|' | b':' | b'-'))
-        {
+        if interrupting && !indented && matches!(byte, Some(b'|' | b':' | b'-')) {
             if let Some(started) = self.start_table(cursor, index) {
                 return started;
             }
@@ -1423,7 +1283,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Footnote definition.
-        if constructs.footnote_definition && !indented && nesting && byte == Some(b'[') {
+        if !indented && nesting && byte == Some(b'[') {
             let text = cursor.nonspace_rest();
             if text.starts_with("[^") {
                 if let Some(close) = find_footnote_definition_label_end(text) {
@@ -1481,40 +1341,40 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
 
         // Leaf directive.
-        if constructs.directive_leaf && !indented && byte == Some(b':') {
+        if !indented && byte == Some(b':') {
             let text = cursor.nonspace_rest();
             if text.starts_with("::") && !text.starts_with(":::") {
-                match parse_directive_opener(&text[2..]) {
-                    Some(opener) => {
-                        if is_blank(&text[2 + opener.consumed..]) {
-                            let source = cursor.view(cursor.next_nonspace);
-                            let label = opener.label.map(|label| {
-                                let mut derived = DerivedText::default();
-                                derived.append(&source, label);
-                                derived
-                            });
-                            let at = cursor.next_nonspace + 2;
-                            opener.report_dropped(&mut self.diagnostics, |start, end| {
-                                Span::new(line.source_start(at + start), line.source_end(at + end))
-                            });
-                            let DirectiveOpener {
-                                name, attributes, ..
-                            } = opener;
-                            self.close_unmatched();
-                            self.add_block(
-                                Pending::LeafDirective {
-                                    span: Span::new(start, line.end),
-                                    name,
-                                    label,
-                                    attributes,
-                                },
-                                index,
-                                line.end,
-                            );
-                            return Started::Line;
-                        }
+                // Only whitespace may follow a leaf directive's opener.
+                match parse_directive_opener(&text[2..], |_, _, rest| is_blank(rest)) {
+                    Ok(opener) => {
+                        let source = cursor.view(cursor.next_nonspace);
+                        let label = opener.label.map(|label| {
+                            let mut derived = DerivedText::default();
+                            derived.append(&source, label);
+                            derived
+                        });
+                        let at = cursor.next_nonspace + 2;
+                        opener.report_dropped(&mut self.diagnostics, |start, end| {
+                            Span::new(line.source_start(at + start), line.source_end(at + end))
+                        });
+                        let DirectiveOpener {
+                            name, attributes, ..
+                        } = opener;
+                        self.close_unmatched();
+                        self.add_block(
+                            Pending::LeafDirective {
+                                span: Span::new(start, line.end),
+                                name,
+                                label,
+                                attributes,
+                            },
+                            index,
+                            line.end,
+                        );
+                        return Started::Line;
                     }
-                    None => {
+                    Err(Refused::Follow) => {}
+                    Err(Refused::Name | Refused::Unclosed) => {
                         if !tip_holds_text {
                             self.diagnostics.push(Diagnostic::new(
                                 DiagnosticSeverity::Error,
@@ -1528,16 +1388,8 @@ impl<'a, 'o> BlockParser<'a, 'o> {
             }
         }
 
-        // Description details.
-        if constructs.description_list && cursor.indent <= 2 && matches!(byte, Some(b':' | b'~')) {
-            if let Some(started) = self.start_details(cursor, container, index) {
-                return started;
-            }
-        }
-
         // Indented code.
         if indented
-            && constructs.indented_code
             && !self.after_alert_marker
             && !self.stack.last().is_some_and(Frame::is_paragraph)
         {
@@ -1602,7 +1454,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let source = cursor.view(cursor.next_nonspace);
         let (opening, summary) = details_opening(&source)?;
         let first = cursor.rest_view();
-        let lookahead = self.lookahead(container, index, first, false);
+        let lookahead = self.lookahead(container, index, first);
         let from = index - lookahead.first;
         let Lookahead { lines, closes, .. } = lookahead;
         let close = closes.resolve(lines.len() + 1, from + 1, |cursor| {
@@ -1664,138 +1516,11 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         });
     }
 
-    fn start_mdx(
-        &mut self,
-        cursor: &mut Cursor<'a>,
-        container: usize,
-        index: usize,
-    ) -> Option<Started> {
-        let options = self.options;
-        let constructs = &options.constructs;
-        let line = cursor.line;
-        let start = cursor.position();
-        if constructs.mdx_esm && is_mdx_esm_start(cursor.rest()) {
-            self.close_unmatched();
-            self.add_frame(
-                Kind::MdxEsm {
-                    value: String::new(),
-                    state: MdxEsmState::default(),
-                    lines: 0,
-                },
-                start,
-                index,
-                line.end,
-            );
-            return Some(Started::Leaf);
-        }
-        let byte = cursor.nonspace_byte();
-        let open_byte = cursor.next_nonspace - cursor.offset;
-        if constructs.mdx_expression_block && byte == Some(b'{') {
-            let first = cursor.rest_view();
-            let lookahead = self.lookahead(container, index, first, true);
-            let from = index - lookahead.first;
-            let Lookahead {
-                lines, mdx, first, ..
-            } = lookahead;
-            let first = *first;
-            match mdx.expression_close(lines, from, open_byte) {
-                Some((close, close_byte)) => {
-                    let block = Block::MdxExpression(MdxExpression {
-                        meta: NodeMeta::new(Some(Span::new(start, lines[close].end))),
-                        value: collect_mdx_expression_value(
-                            lines, from, open_byte, close, close_byte,
-                        ),
-                    });
-                    let end = lines[close].end;
-                    return Some(self.swallow(block, start, index, first + close, end));
-                }
-                None => {
-                    let end = lines
-                        .last()
-                        .map_or(line.end_with_eol, |last| last.end_with_eol);
-                    self.diagnostics.push(Diagnostic::new(
-                        DiagnosticSeverity::Error,
-                        DiagnosticCode::InvalidMdx,
-                        Span::new(line.source_start(cursor.next_nonspace), end),
-                        "MDX expression block is missing a closing brace",
-                    ));
-                }
-            }
-        }
-        if constructs.mdx_jsx_block && byte == Some(b'<') {
-            let first = cursor.rest_view();
-            let lookahead = self.lookahead(container, index, first, true);
-            let from = index - lookahead.first;
-            let Lookahead {
-                lines, mdx, first, ..
-            } = lookahead;
-            let first = *first;
-            if let Some(close) = mdx.jsx_close_line(lines, from, open_byte) {
-                let block = Block::MdxJsx(MdxJsx {
-                    meta: NodeMeta::new(Some(Span::new(start, lines[close].end))),
-                    value: collect_line_range(lines, from, close),
-                });
-                let end = lines[close].end;
-                return Some(self.swallow(block, start, index, first + close, end));
-            }
-            if let Some(root) = mdx_jsx_tag_start(lines[from].text, open_byte) {
-                if !root.closing && mdx.jsx_tag_self_closing(lines, from, open_byte) == Some(false)
-                {
-                    let end = lines
-                        .last()
-                        .map_or(line.end_with_eol, |last| last.end_with_eol);
-                    self.diagnostics.push(Diagnostic::new(
-                        DiagnosticSeverity::Error,
-                        DiagnosticCode::InvalidMdx,
-                        Span::new(line.source_start(cursor.next_nonspace), end),
-                        "MDX JSX block is missing a closing tag",
-                    ));
-                }
-            }
-        }
-        None
-    }
-
-    /// Opens a block read whole, which takes its lines through `until`.
-    fn swallow(
-        &mut self,
-        block: Block,
-        start: usize,
-        index: usize,
-        until: usize,
-        end: usize,
-    ) -> Started {
-        self.close_unmatched();
-        self.add_frame(
-            Kind::Swallow {
-                until,
-                block: Some(block),
-            },
-            start,
-            index,
-            end,
-        );
-        let top = self.stack.last_mut().expect("just opened");
-        top.last_line = until;
-        Started::Leaf
-    }
-
     /// The lines from `index` on that reach the container `container` opens
     /// a block in, each from where the containers leave it: `first` is the
     /// current line. A line that a container does not continue ends them;
     /// lazy lines continue only paragraphs, so none is counted.
-    ///
-    /// With `lazy`, a line that is not blank also counts where a block quote,
-    /// list item, footnote definition, or description details does not
-    /// continue on it, as it would continue a paragraph: flow MDX reads such
-    /// lines as its own.
-    fn lookahead(
-        &mut self,
-        container: usize,
-        index: usize,
-        first: Line<'a>,
-        lazy: bool,
-    ) -> &mut Lookahead<'a> {
+    fn lookahead(&mut self, container: usize, index: usize, first: Line<'a>) -> &mut Lookahead<'a> {
         let frame = if self.stack[container].is_leaf() {
             container - 1
         } else {
@@ -1806,79 +1531,49 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 lookahead.first <= index && index < lookahead.first + lookahead.lines.len()
             })
         };
-        let open = &self.stack[frame];
-        let valid = if lazy {
-            cached(&open.lazy_lookahead)
-        } else {
-            cached(&open.lookahead)
-        };
-        if !valid {
+        if !cached(&self.stack[frame].lookahead) {
             let keys: Vec<ReachKey> = self.stack[1..=frame]
                 .iter()
                 .map(|open| reach_key(&open.kind))
                 .collect();
-            let reusable =
-                self.retired
-                    .iter()
-                    .position(|(retired_keys, retired_lazy, lookahead)| {
-                        *retired_lazy == lazy
-                            && *retired_keys == keys
-                            && index >= lookahead.first
-                            && lookahead
-                                .lines
-                                .get(index - lookahead.first)
-                                .is_some_and(|line| {
-                                    core::ptr::eq(line.text, first.text)
-                                        && line.column == first.column
-                                })
-                    });
+            let reusable = self.retired.iter().position(|(retired_keys, lookahead)| {
+                *retired_keys == keys
+                    && index >= lookahead.first
+                    && lookahead
+                        .lines
+                        .get(index - lookahead.first)
+                        .is_some_and(|line| {
+                            core::ptr::eq(line.text, first.text) && line.column == first.column
+                        })
+            });
             if let Some(position) = reusable {
-                let (_, _, lookahead) = self.retired.swap_remove(position);
-                if lazy {
-                    self.stack[frame].lazy_lookahead = Some(lookahead);
-                } else {
-                    self.stack[frame].lookahead = Some(lookahead);
-                }
+                let (_, lookahead) = self.retired.swap_remove(position);
+                self.stack[frame].lookahead = Some(lookahead);
             }
         }
-        let open = &self.stack[frame];
-        let valid = if lazy {
-            cached(&open.lazy_lookahead)
-        } else {
-            cached(&open.lookahead)
-        };
-        if !valid {
+        if !cached(&self.stack[frame].lookahead) {
             let mut lines = alloc::vec![first];
             for next in index + 1..self.lines.len() {
-                match self.reach(frame, next, lazy) {
+                match self.reach(frame, next) {
                     Some(line) => lines.push(line),
                     None => break,
                 }
             }
-            let built = Some(Box::new(Lookahead {
+            self.stack[frame].lookahead = Some(Box::new(Lookahead {
                 first: index,
                 lines,
-                mdx: MdxFlowScan::default(),
                 closes: BracketMemo::default(),
             }));
-            if lazy {
-                self.stack[frame].lazy_lookahead = built;
-            } else {
-                self.stack[frame].lookahead = built;
-            }
         }
-        let open = &mut self.stack[frame];
-        if lazy {
-            open.lazy_lookahead.as_deref_mut()
-        } else {
-            open.lookahead.as_deref_mut()
-        }
-        .expect("the lookahead is built")
+        self.stack[frame]
+            .lookahead
+            .as_deref_mut()
+            .expect("the lookahead is built")
     }
 
     /// Line `index` from where the containers `stack[..=frame]` leave it, when
-    /// they all continue on it, or, with `lazy`, when it can be a lazy line.
-    fn reach(&self, frame: usize, index: usize, lazy: bool) -> Option<Line<'a>> {
+    /// they all continue on it.
+    fn reach(&self, frame: usize, index: usize) -> Option<Line<'a>> {
         let mut cursor = Cursor::new(self.lines[index]);
         for open in &self.stack[1..=frame] {
             cursor.find_next_nonspace();
@@ -1904,7 +1599,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 Continuation::HtmlClose => return None,
             };
             if !continues {
-                return (lazy && !cursor.blank).then(|| cursor.rest_view());
+                return None;
             }
         }
         Some(cursor.rest_view())
@@ -1972,8 +1667,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
     }
 
     fn start_table(&mut self, cursor: &Cursor<'a>, index: usize) -> Option<Started> {
-        let options = self.options;
-        let spoiler = options.constructs.spoiler;
         let delimiter = cursor.nonspace_rest();
         // A delimiter row of dashes alone is a setext underline, which wins,
         // and a list marker opens a list.
@@ -1986,14 +1679,14 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         let header = *paragraph.lines.last()?;
         // A header row indented four columns or more is a paragraph's
         // continuation text, as markdown-it and micromark read it.
-        if header.indent > 3 && options.constructs.indented_code {
+        if header.indent > 3 {
             return None;
         }
-        if !table_has_separator(header.text(), delimiter, spoiler) {
+        if !table_has_separator(header.text(), delimiter) {
             return None;
         }
-        let alignments = parse_table_delimiter(delimiter, spoiler)?;
-        if table_row_cell_ranges(header.text(), spoiler).len() != alignments.len() {
+        let alignments = parse_table_delimiter(delimiter)?;
+        if table_row_cell_ranges(header.text()).len() != alignments.len() {
             return None;
         }
         // Definitions the paragraph starts with are not its rows. They are
@@ -2008,7 +1701,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         }
         let line = cursor.line;
         let header_line = header.content.view();
-        let cells = table_row_cells(&header_line, header_line.text, spoiler);
+        let cells = table_row_cells(&header_line, header_line.text);
         let header_row = (Span::new(header.start, header.content.line.end), cells);
 
         // The header row leaves the paragraph, which closes with what is left.
@@ -2034,213 +1727,17 @@ impl<'a, 'o> BlockParser<'a, 'o> {
         Some(Started::Line)
     }
 
-    fn start_details(
-        &mut self,
-        cursor: &mut Cursor<'a>,
-        container: usize,
-        index: usize,
-    ) -> Option<Started> {
-        let text = cursor.nonspace_rest();
-        if !is_description_marker(text) {
-            return None;
-        }
-        // Details hold content: on the marker's line, or on an indented line
-        // after it.
-        if is_blank(&text[1..]) && !self.indented_line_follows(container, index) {
-            return None;
-        }
-        let line = cursor.line;
-        let start = cursor.position();
-
-        if matches!(self.stack[container].kind, Kind::DescriptionList(_)) {
-            // The details before did not continue on this line. Lines that
-            // reached their paragraph lazily right before it are the next
-            // item's term.
-            if !self.nesting_allows(container) {
-                return None;
-            }
-            let tail = self.lazy_term_tail(container + 1);
-            self.close_unmatched();
-            if let Some(term) = tail {
-                self.open_description_item(container, &term);
-            }
-        } else {
-            let (term, before) = if self.stack[container].is_paragraph() {
-                // The open paragraph is the term.
-                self.take_paragraph_definitions();
-                let Kind::Paragraph(paragraph) = &mut self.stack[container].kind else {
-                    return None;
-                };
-                if !paragraph.all_term_lines() {
-                    return None;
-                }
-                if !self.nesting_allows(container - 1) {
-                    return None;
-                }
-                let frame = self.stack.pop().expect("the paragraph is open");
-                let Kind::Paragraph(paragraph) = frame.kind else {
-                    unreachable!("the paragraph is open");
-                };
-                (paragraph.lines, container - 1)
-            } else if container == self.stack.len() - 1 {
-                // A paragraph that blank lines closed is the term.
-                let Some(Child {
-                    block: Pending::Paragraph { lines, .. },
-                    ..
-                }) = self.stack[container].children.last()
-                else {
-                    return None;
-                };
-                if !lines.iter().all(is_term_line) || !self.nesting_allows(container) {
-                    return None;
-                }
-                let Some(Child {
-                    block: Pending::Paragraph { lines, .. },
-                    ..
-                }) = self.stack[container].children.pop()
-                else {
-                    unreachable!("the paragraph was checked");
-                };
-                (lines, container)
-            } else {
-                return None;
-            };
-            // A list right before, past blank lines, continues.
-            let list = match self.stack[before].children.last() {
-                Some(Child {
-                    block: Pending::DescriptionList { .. },
-                    ..
-                }) => {
-                    let Some(Child {
-                        block: Pending::DescriptionList { span, tight, items },
-                        first_line,
-                        ..
-                    }) = self.stack[before].children.pop()
-                    else {
-                        unreachable!("the list was checked");
-                    };
-                    Some((span.start, first_line, tight, items))
-                }
-                _ => None,
-            };
-            let (list_start, list_line, prior_tight, prior) =
-                list.unwrap_or_else(|| (term[0].start, term[0].index, true, Vec::new()));
-            self.add_frame(
-                Kind::DescriptionList(Box::new(OpenDescriptionList {
-                    prior,
-                    prior_tight,
-                    items: Vec::new(),
-                })),
-                list_start,
-                list_line,
-                line.end_with_eol,
-            );
-            let list = self.stack.len() - 1;
-            self.open_description_item(list, &term);
-        }
-
-        let list = self.stack.len() - 1;
-        if !matches!(self.stack[list].kind, Kind::DescriptionList(_)) {
-            return None;
-        }
-        self.add_frame(Kind::Details, start, index, line.end_with_eol);
-        cursor.advance_next_nonspace();
-        cursor.advance_offset(1, false);
-        cursor.find_next_nonspace();
-        cursor.advance_next_nonspace();
-        Some(Started::Container)
-    }
-
-    /// Whether the next line that reaches the containers around `container`,
-    /// past blank lines, is indented four columns.
-    fn indented_line_follows(&self, container: usize, index: usize) -> bool {
-        let frame = if self.stack[container].is_leaf() {
-            container - 1
-        } else {
-            container
-        };
-        for next in index + 1..self.lines.len() {
-            let Some(line) = self.reach(frame, next, false) else {
-                return false;
-            };
-            let cursor = Cursor::new(line);
-            if !cursor.blank {
-                return cursor.indented();
-            }
-        }
-        false
-    }
-
-    /// The lines at the end of the innermost open paragraph that reached it
-    /// lazily past the open block `stack[block]`, removed from it, when they
-    /// can be a description term.
-    fn lazy_term_tail(&mut self, block: usize) -> Option<Vec<ParagraphLine<'a>>> {
-        let top = self.stack.last_mut()?;
-        let Kind::Paragraph(paragraph) = &mut top.kind else {
-            return None;
-        };
-        let from = paragraph.lazy_from?;
-        if paragraph.lazy_depth > block || from == 0 {
-            return None;
-        }
-        let tail = &paragraph.lines[from..];
-        if !tail
-            .iter()
-            .all(|line| line.indent <= 3 && !is_description_marker(line.text()))
-        {
-            return None;
-        }
-        let tail = paragraph.lines.split_off(from);
-        paragraph.lazy_from = None;
-        let last = *paragraph.lines.last().expect("the paragraph keeps a line");
-        top.last_line = last.index;
-        top.end = last.content.line.end;
-        // The blocks the tail reached lazily end where the paragraph now does.
-        let count = self.stack.len();
-        for frame in &mut self.stack[block..count - 1] {
-            frame.last_line = last.index;
-            frame.end = last.content.line.end_with_eol;
-        }
-        Some(tail)
-    }
-
-    fn open_description_item(&mut self, list: usize, term: &[ParagraphLine<'a>]) {
-        let mut text = DerivedText::default();
-        for term_line in term {
-            let content = term_line.text().trim_end_matches([' ', '\t']);
-            text.push_line(&term_line.content.line, content);
-        }
-        let frame = &mut self.stack[list];
-        let details_from = frame.children.len();
-        if let Kind::DescriptionList(open) = &mut frame.kind {
-            open.items.push(OpenDescriptionItem {
-                term: text,
-                start: term[0].start,
-                term_last_line: term[term.len() - 1].index,
-                details_from,
-            });
-        }
-    }
-
     /// Closes the innermost open block.
     fn close_top(&mut self) {
         let mut frame = self.stack.pop().expect("the document stays open");
-        if frame.lookahead.is_some() || frame.lazy_lookahead.is_some() {
+        if let Some(lookahead) = frame.lookahead.take() {
             let mut keys: Vec<ReachKey> = self.stack[1..]
                 .iter()
                 .map(|open| reach_key(&open.kind))
                 .collect();
             keys.push(reach_key(&frame.kind));
-            for (lazy, lookahead) in [
-                (false, frame.lookahead.take()),
-                (true, frame.lazy_lookahead.take()),
-            ] {
-                if let Some(lookahead) = lookahead {
-                    self.retired
-                        .retain(|(_, retired_lazy, _)| *retired_lazy != lazy);
-                    self.retired.push((keys.clone(), lazy, lookahead));
-                }
-            }
+            self.retired.clear();
+            self.retired.push((keys, lookahead));
         }
         let fresh_item = matches!(
             self.stack.last().map(|top| &top.kind),
@@ -2281,7 +1778,7 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 if lines.is_empty() {
                     return found;
                 }
-                if fresh_item && self.options.constructs.gfm_task_list_item {
+                if fresh_item {
                     *checked = take_task_marker(&mut lines);
                 }
                 let first = &lines[0];
@@ -2362,20 +1859,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                 alignments: table.alignments,
                 rows: table.rows,
             },
-            Kind::MdxEsm { value, state, .. } => {
-                if state_has_open_mdx_esm_construct(&state) {
-                    self.diagnostics.push(Diagnostic::new(
-                        DiagnosticSeverity::Error,
-                        DiagnosticCode::InvalidMdx,
-                        Span::new(start, self.lines[last_line].end_with_eol),
-                        "MDX ESM block is missing a closing delimiter",
-                    ));
-                }
-                Pending::Done(Block::MdxEsm(MdxEsm {
-                    meta: NodeMeta::new(Some(Span::new(start, end))),
-                    value,
-                }))
-            }
             Kind::Swallow { block, .. } => Pending::Done(block.expect("a swallowed block")),
             Kind::BlockQuote { alert, .. } => {
                 return alloc::vec![Child {
@@ -2430,66 +1913,6 @@ impl<'a, 'o> BlockParser<'a, 'o> {
                     first_line,
                     last_line: children_last_line,
                     end: children_end,
-                }];
-            }
-            Kind::Details => {
-                return alloc::vec![Child {
-                    block: Pending::Details {
-                        span: Span::new(start, children_end),
-                        children,
-                    },
-                    first_line,
-                    last_line: children_last_line,
-                    end: children_end,
-                }];
-            }
-            Kind::DescriptionList(open) => {
-                let OpenDescriptionList {
-                    mut prior,
-                    prior_tight,
-                    items,
-                } = *open;
-                let mut tight = prior_tight;
-                let mut details = children;
-                let mut closed = Vec::with_capacity(items.len());
-                for item in items.into_iter().rev() {
-                    let held = details.split_off(item.details_from.min(details.len()));
-                    let end = held.last().map_or(item.start, |child| child.end);
-                    if let Some(first) = held.first() {
-                        tight &= item.term_last_line + 1 == first.first_line;
-                    }
-                    tight &= held
-                        .windows(2)
-                        .all(|pair| pair[0].last_line + 1 == pair[1].first_line);
-                    for child in &held {
-                        if let Pending::Details { children, .. } = &child.block {
-                            tight &= children
-                                .windows(2)
-                                .all(|pair| pair[0].last_line + 1 == pair[1].first_line);
-                        }
-                    }
-                    closed.push(PendingDescriptionItem {
-                        span: Span::new(item.start, end),
-                        term: item.term,
-                        details: held,
-                    });
-                }
-                closed.reverse();
-                let last_line = closed
-                    .last()
-                    .and_then(|item| item.details.last())
-                    .map_or(last_line, |child| child.last_line);
-                let end = closed.last().map_or(end, |item| item.span.end);
-                prior.extend(closed);
-                return alloc::vec![Child {
-                    block: Pending::DescriptionList {
-                        span: Span::new(start, end),
-                        tight,
-                        items: prior,
-                    },
-                    first_line,
-                    last_line,
-                    end,
                 }];
             }
             Kind::FootnoteDefinition { label } => Pending::FootnoteDefinition {
@@ -2578,11 +2001,11 @@ fn continuation(
     index: usize,
 ) -> Continuation {
     let continues = match kind {
-        Kind::Document | Kind::List { .. } | Kind::DescriptionList(_) => true,
+        Kind::Document | Kind::List { .. } => true,
         Kind::BlockQuote { .. } => quote_continues(cursor),
         Kind::Item { indent, .. } => item_continues(cursor, *indent, has_children),
         Kind::ContainerDirective(_) => return Continuation::Directive,
-        Kind::FootnoteDefinition { .. } | Kind::Details => indent_continues(cursor),
+        Kind::FootnoteDefinition { .. } => indent_continues(cursor),
         Kind::HtmlContainer { close_line, .. } => {
             if *close_line == index {
                 return Continuation::HtmlClose;
@@ -2612,8 +2035,8 @@ fn item_continues(cursor: &mut Cursor<'_>, indent: usize, has_children: bool) ->
     true
 }
 
-/// The continuation of a footnote definition or description details: a
-/// blank line or a line indented four columns.
+/// The continuation of a footnote definition: a blank line or a line
+/// indented four columns.
 fn indent_continues(cursor: &mut Cursor<'_>) -> bool {
     if cursor.blank {
         cursor.advance_next_nonspace();
@@ -2644,15 +2067,11 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
     let (delimiter, width) = list_marker_head(rest)?;
     let ordered = matches!(delimiter, ListDelimiter::Period | ListDelimiter::Paren);
     let start = if ordered {
-        let number: u64 = rest[..width - 1].parse().ok()?;
-        if interrupting && number != 1 {
-            return None;
-        }
-        Some(number)
+        Some(rest[..width - 1].parse().ok()?)
     } else {
         None
     };
-    if interrupting && is_blank(&rest[width..]) {
+    if interrupting && !marker_may_interrupt(start, is_blank(&rest[width..])) {
         return None;
     }
     let marker_offset = cursor.indent;
@@ -2691,6 +2110,49 @@ fn list_marker(cursor: &mut Cursor<'_>, interrupting: bool) -> Option<ListMarker
         delimiter,
         indent: marker_offset + padding,
     })
+}
+
+/// Whether a list item marker numbered `number` (`None` for a bullet), with
+/// `blank` saying whether nothing follows it on its line, may interrupt a
+/// paragraph: it needs content and, when ordered, the number 1.
+fn marker_may_interrupt(number: Option<u64>, blank: bool) -> bool {
+    !blank && number.is_none_or(|number| number == 1)
+}
+
+/// Whether an HTML block of `kind` may interrupt a paragraph: every kind but
+/// a lone tag's, which ends at a blank line.
+fn html_block_may_interrupt(kind: HtmlBlockKind) -> bool {
+    kind != HtmlBlockKind::UntilBlank
+}
+
+/// Whether `block`, written on the line right after a paragraph's, starts
+/// there instead of continuing the paragraph, by the checks `start` makes on
+/// a line that would interrupt one: paragraph text continues the paragraph,
+/// a definition starts only a paragraph, indented code and a frontmatter
+/// fence cannot start in one (`---` underlines it), a list needs its first
+/// item's marker to interrupt, and an HTML block its first line. Whether a
+/// heading is written as a setext heading, whose text line would continue
+/// the paragraph, is the serializer's choice and is not judged here.
+pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
+    match block {
+        Block::Paragraph(_) | Block::Definition(_) | Block::Frontmatter(_) => false,
+        Block::CodeBlock(node) => node.kind != CodeBlockKind::Indented,
+        Block::List(list) => {
+            let number = list.ordered.then(|| list.start.unwrap_or(1));
+            let blank = list
+                .children
+                .first()
+                .is_none_or(|item| item.children.is_empty());
+            marker_may_interrupt(number, blank)
+        }
+        Block::HtmlBlock(node) => {
+            let first_line = node.value.split(['\n', '\r']).next().unwrap_or_default();
+            // The columns a leading tab reaches depend on where the block is
+            // written, so the indentation is not judged.
+            html_block_start(trim_ascii_start(first_line)).is_some_and(html_block_may_interrupt)
+        }
+        _ => true,
+    }
 }
 
 /// The delimiter and width of the list item marker `rest` opens with, when
@@ -2831,11 +2293,6 @@ fn push_paragraph_line(text: &mut DerivedText, line: &ParagraphLine<'_>) {
     text.push_line(&line.content.line, line.text());
 }
 
-/// Whether a paragraph line can be a line of a description term.
-fn is_term_line(line: &ParagraphLine<'_>) -> bool {
-    !line.lazy && line.indent <= 3 && !(line.indent <= 2 && is_description_marker(line.text()))
-}
-
 /// The link reference definitions a paragraph's lines start with, and how
 /// many lines they take.
 fn take_definitions<'a>(lines: &[ParagraphLine<'a>]) -> (Vec<Child<'a>>, usize) {
@@ -2938,9 +2395,6 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
         | Pending::Item {
             children: inner, ..
         }
-        | Pending::Details {
-            children: inner, ..
-        }
         | Pending::FootnoteDefinition {
             children: inner, ..
         }
@@ -2951,30 +2405,18 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
             children: inner, ..
         } => children(inner, definitions),
         Pending::List { items, .. } => children(items, definitions),
-        Pending::DescriptionList { items, .. } => {
-            for item in items {
-                children(&item.details, definitions);
-            }
-        }
         _ => {}
     }
 }
 
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
-    options: &'o SyntaxOptions,
     definitions: Definitions<'o>,
 }
 
 impl Finish<'_> {
     fn inlines(&self, text: &DerivedText, diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
-        parse_inlines(
-            &text.text,
-            text.map(),
-            self.options,
-            Some(self.definitions),
-            diagnostics,
-        )
+        parse_inlines(&text.text, text.map(), Some(self.definitions), diagnostics)
     }
 
     fn blocks(&self, children: Vec<Child<'_>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
@@ -3030,7 +2472,6 @@ impl Finish<'_> {
                                     &cell.text.text,
                                     cell.text.map(),
                                     cell.escaped_pipes,
-                                    self.options,
                                     Some(self.definitions),
                                     diagnostics,
                                 ),
@@ -3087,35 +2528,7 @@ impl Finish<'_> {
                     })
                     .collect(),
             }),
-            Pending::Item { .. } | Pending::Details { .. } => {
-                unreachable!("items and details only sit in their lists")
-            }
-            Pending::DescriptionList { span, tight, items } => {
-                Block::DescriptionList(DescriptionList {
-                    meta: meta(span),
-                    tight,
-                    children: items
-                        .into_iter()
-                        .map(|item| DescriptionItem {
-                            meta: meta(item.span),
-                            term: self.inlines(&item.term, diagnostics),
-                            details: item
-                                .details
-                                .into_iter()
-                                .filter_map(|child| match child.block {
-                                    Pending::Details { span, children } => {
-                                        Some(DescriptionDetails {
-                                            meta: meta(span),
-                                            children: self.blocks(children, diagnostics),
-                                        })
-                                    }
-                                    _ => None,
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                })
-            }
+            Pending::Item { .. } => unreachable!("items only sit in their lists"),
             Pending::FootnoteDefinition {
                 span,
                 label,

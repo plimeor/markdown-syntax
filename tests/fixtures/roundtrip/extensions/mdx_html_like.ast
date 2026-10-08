@@ -1,9 +1,12 @@
 Document
-  MdxJsx "<div data-x=\"1\">\n  <span>{value}</span>\n</div>"
+  HtmlBlock "<div data-x=\"1\">\n  <span>{value}</span>\n</div>"
   Paragraph
     Text "Text "
-    MdxJsx "<em>{value}</em>"
+    HtmlInline "<em>"
+    Text "{value}"
+    HtmlInline "</em>"
     Text " and "
-    MdxJsx "<br />"
+    HtmlInline "<br />"
     Text "."
-  MdxExpression "foo ? {bar: \"}\"} : /* } */ baz"
+  Paragraph
+    Text "{foo ? {bar: \"}\"} : /* } */ baz}"

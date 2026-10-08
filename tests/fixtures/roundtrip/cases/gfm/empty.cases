@@ -4,17 +4,16 @@ commit: d2da7a0
 source: upstream-tests/empty.rs
 role: upstream-input
 count: 4
-profiles: commonmark
 
---- case 1 profile commonmark bytes 46
+--- case 1 bytes 46
 [](https://example.com/evil-link-for-seo-spam)
 --- end
---- case 2 profile commonmark bytes 50
+--- case 2 bytes 50
 [    ](https://example.com/evil-link-for-seo-spam)
 --- end
---- case 3 profile commonmark bytes 50
+--- case 3 bytes 50
 ![   ](https://example.com/evil-link-for-seo-spam)
 --- end
---- case 4 profile commonmark bytes 58
+--- case 4 bytes 58
 [![](https://example.com/image.png)](https://example.com/)
 --- end

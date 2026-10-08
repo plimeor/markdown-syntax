@@ -16,7 +16,7 @@ Document
         Escape "|"
         Text "y"
       Cell
-        Code value="a|b" raw="a|b" fence=1
+        Code value="a|b"
       Cell
         Link destination=https://example.com title=none
           Text "p"

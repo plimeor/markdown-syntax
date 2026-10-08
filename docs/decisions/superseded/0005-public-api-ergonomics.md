@@ -1,6 +1,6 @@
 # 0005: Public API ergonomics
 
-Status: Accepted
+Status: Superseded by 0007, 0009
 Date: 2026-06-20
 
 ## Context

@@ -1,13 +1,13 @@
 Document
   Paragraph
-    Code value="foo ` bar" raw=" foo ` bar " fence=2
+    Code value="foo ` bar"
     SoftBreak
-    Code value="foo bar" raw="\nfoo\nbar\n" fence=2
+    Code value="foo bar"
     SoftBreak
-    Code value=" both " raw="  both  " fence=1
+    Code value=" both "
     SoftBreak
-    Code value="`code`" raw=" `code` " fence=2
+    Code value="`code`"
     SoftBreak
-    Code value="``" raw=" `` " fence=3
+    Code value="``"
     SoftBreak
-    Code value="a``b" raw="a``b" fence=3
+    Code value="a``b"

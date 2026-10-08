@@ -5,9 +5,7 @@ use alloc::string::String;
 
 use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
 
-use super::escape::{
-    attr_escape, attr_escape_gfm, encode_href, escape_text, filter_img_protocol, filter_protocol,
-};
+use super::escape::{attr_escape, encode_href, escape_text, filter_img_protocol, filter_protocol};
 use super::footnotes;
 use super::refs::{escaped_alt, flatten_alt};
 use super::{Ctx, SafeRawHtmlForm};
@@ -34,8 +32,8 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             escape_text(e.value.encode_utf8(&mut buf))
         }
 
-        // 3. CharacterReference — `value` is the decoded scalar(s); re-escape.
-        Inline::CharacterReference(c) => escape_text(&c.value),
+        // 3. CharacterReference — the decoded scalar(s), re-escaped.
+        Inline::CharacterReference(c) => escape_text(&c.value().unwrap_or_default()),
 
         // 4. Emphasis.
         Inline::Emphasis(n) => format!("<em>{}</em>", render_inlines(&n.children, ctx)),
@@ -43,57 +41,47 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
         // 5. Strong.
         Inline::Strong(n) => format!("<strong>{}</strong>", render_inlines(&n.children, ctx)),
 
-        // 6. Underline (GFM `__x__`).
-        Inline::Underline(n) => format!("<u>{}</u>", render_inlines(&n.children, ctx)),
-
-        // 7. Delete — both markers render identically.
+        // 6. Delete.
         Inline::Delete(n) => format!("<del>{}</del>", render_inlines(&n.children, ctx)),
 
-        // 8. Insert (GFM `++x++`).
-        Inline::Insert(n) => format!("<ins>{}</ins>", render_inlines(&n.children, ctx)),
-
-        // 9. Mark (GFM `==x==`).
+        // 7. Mark (GFM `==x==`).
         Inline::Mark(n) => format!("<mark>{}</mark>", render_inlines(&n.children, ctx)),
 
-        // 10. Subscript (GFM `~x~`).
-        Inline::Subscript(n) => format!("<sub>{}</sub>", render_inlines(&n.children, ctx)),
-
-        // 11. Superscript (GFM `^x^`, bare, no class).
-        Inline::Superscript(n) => format!("<sup>{}</sup>", render_inlines(&n.children, ctx)),
-
-        // 12. Spoiler (GFM `||x||`).
-        Inline::Spoiler(n) => {
-            format!(
-                "<span class=\"spoiler\">{}</span>",
-                render_inlines(&n.children, ctx)
-            )
-        }
-
-        // 13. Shortcode — its gemoji glyph, text-escaped, no wrapper; a
+        // 8. Shortcode — its gemoji glyph, text-escaped, no wrapper; a
         // name gemoji does not hold stays as written.
         Inline::Shortcode(s) => match s.glyph() {
             Some(glyph) => escape_text(glyph),
             None => escape_text(&format!(":{}:", s.name)),
         },
 
-        // 14. Code — `value` already code-span-normalized; text-escape only.
+        // 9. Code — `value` already code-span-normalized; text-escape only.
         Inline::Code(c) => format!("<code>{}</code>", escape_text(&c.value)),
 
-        // 15. Link.
+        // 10. Link.
         Inline::Link(n) => {
             let href = encode_href(&filter_protocol(
                 &n.destination,
                 ctx.allow_dangerous_protocol,
                 ctx.gfm_url_denylist(),
             ));
-            let title = title_attr(n.title.as_deref());
+            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
             format!(
                 "<a href=\"{href}\"{title}>{}</a>",
                 render_inlines(&n.children, ctx)
             )
         }
 
-        // 16. Image.
+        // 10a. Autolink — its derived destination, its text as the link text.
+        Inline::Autolink(n) => {
+            let href = encode_href(&filter_protocol(
+                &n.destination().unwrap_or_default(),
+                ctx.allow_dangerous_protocol,
+                ctx.gfm_url_denylist(),
+            ));
+            format!("<a href=\"{href}\">{}</a>", escape_text(&n.text))
+        }
+
+        // 11. Image.
         Inline::Image(n) => {
             let src = encode_href(&filter_img_protocol(
                 &n.destination,
@@ -101,11 +89,11 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                 ctx.allow_any_img_src,
             ));
             let alt = escaped_alt(&n.alt);
-            let title = title_attr(n.title.as_deref());
+            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
             format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
         }
 
-        // 17. LinkReference — resolve against the definition map.
+        // 12. LinkReference — resolve against the definition map.
         Inline::LinkReference(n) => match ctx.defs.resolve(&n.identifier) {
             Some(def) => {
                 let href = encode_href(&filter_protocol(
@@ -113,7 +101,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                     ctx.allow_dangerous_protocol,
                     ctx.gfm_url_denylist(),
                 ));
-                let title = title_attr(def.title.as_deref());
+                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
                 format!(
                     "<a href=\"{href}\"{title}>{}</a>",
                     render_inlines(&n.children, ctx)
@@ -122,7 +110,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             None => link_reference_fallback(n, ctx),
         },
 
-        // 18. ImageReference — resolve against the definition map.
+        // 13. ImageReference — resolve against the definition map.
         Inline::ImageReference(n) => match ctx.defs.resolve(&n.identifier) {
             Some(def) => {
                 let src = encode_href(&filter_img_protocol(
@@ -131,22 +119,22 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
                     ctx.allow_any_img_src,
                 ));
                 let alt = escaped_alt(&n.alt);
-                let title = title_attr(def.title.as_deref());
+                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
                 format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
             }
             None => image_reference_fallback(n),
         },
 
-        // 19. Html — verbatim under danger (with tagfilter), else text-escape.
+        // 14. Html — verbatim under danger (with tagfilter), else text-escape.
         Inline::Html(h) => render_raw_html(&h.value, ctx),
 
-        // 20. SoftBreak.
+        // 15. SoftBreak.
         Inline::SoftBreak(_) => String::from("\n"),
 
-        // 21. LineBreak — both kinds identical.
+        // 16. LineBreak — both kinds identical.
         Inline::LineBreak(_) => String::from("<br />\n"),
 
-        // 22. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
+        // 17. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
         //     inline, and `$`…`$` code-math is an inline `<code>`.
         Inline::Math(m) => match m.kind {
             MathInlineKind::Code => format!(
@@ -163,7 +151,7 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             ),
         },
 
-        // 23. FootnoteReference (GFM shape). An undefined reference renders
+        // 18. FootnoteReference (GFM shape). An undefined reference renders
         //     as its literal `[^label]` source text.
         Inline::FootnoteReference(fr) => {
             if ctx.footnotes.is_defined(&fr.identifier) {
@@ -173,16 +161,19 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             }
         }
 
-        // 24. InlineFootnote — renders like a footnote reference; its body was
+        // 19. InlineFootnote — renders like a footnote reference; its body was
         //     harvested into the doc-end section during the pre-pass.
         Inline::InlineFootnote(_) => {
             let id = footnotes::next_inline_id(ctx.footnotes);
             footnote_marker(&id, ctx)
         }
 
-        // 25. WikiLink — GFM shape; both label orders identical output.
+        // 20. WikiLink — GFM shape. A note name like `Note: x` reads as a
+        //     scheme, so the target takes the scheme denylist, never the
+        //     allowlist: only a dangerous scheme is blanked.
         Inline::WikiLink(w) => {
-            let href = attr_escape_gfm(&encode_href(&w.target));
+            let target = filter_protocol(&w.decoded_target(), ctx.allow_dangerous_protocol, true);
+            let href = encode_href(&target);
             let embed = if w.embed {
                 " data-wikilink-embed=\"true\""
             } else {
@@ -190,17 +181,11 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             };
             format!(
                 "<a href=\"{href}\" data-wikilink=\"true\"{embed}>{}</a>",
-                escape_text(&w.label)
+                escape_text(&w.decoded_label())
             )
         }
 
-        // 26. MDX expression (inline) — no HTML.
-        Inline::MdxExpression(_) => String::new(),
-
-        // 27. MDX JSX (inline) — no HTML (node carries no children).
-        Inline::MdxJsx(_) => String::new(),
-
-        // 28. TextDirective [CONV] — classed span carrying name + attrs.
+        // 21. TextDirective [CONV] — classed span carrying name + attrs.
         Inline::TextDirective(d) => {
             let attrs = directive_attrs(&d.attributes);
             format!(

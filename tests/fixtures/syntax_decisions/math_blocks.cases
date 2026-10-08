@@ -1,0 +1,35 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: math_blocks
+decision: A `$$` line is a math fence.
+count: 3
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 120 input-bytes 14 expected-bytes 91
+from gfm/math.cases #19; micromark-extension-math reads the same blocks: a `$$` line is a math fence, as a code fence is
+--- input
+test $$
+2+2
+$$
+--- expected
+<p>test $$
+2+2</p>
+<pre><code class="language-math" data-math-style="display"></code></pre>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 120 input-bytes 13 expected-bytes 80
+from gfm/math.cases #23; micromark-extension-math reads the same blocks: a `$$` line is a math fence, as a code fence is
+--- input
+$$
+2+2
+4+4
+$$
+--- expected
+<pre><code class="language-math" data-math-style="display">2+2
+4+4
+</code></pre>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 120 input-bytes 3 expected-bytes 72
+from gfm/math.cases #36; micromark-extension-math reads the same blocks: a `$$` line is a math fence, as a code fence is
+--- input
+$$$
+--- expected
+<pre><code class="language-math" data-math-style="display"></code></pre>
+--- end

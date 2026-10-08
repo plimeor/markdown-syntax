@@ -1,0 +1,78 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: fences
+decision: Fence edges follow commonmark.js, as block-syntax "CommonMark oracle cases" requires.
+count: 6
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 84 input-bytes 7 expected-bytes 25
+from commonmark/code_fenced.cases #35; verified: cmark-gfm, commonmark.js, micromark
+--- input
+  ```
+ 
+--- expected
+<pre><code>
+</code></pre>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 76 input-bytes 6 expected-bytes 51
+from commonmark/fuzz.cases #8; verified: cmark-gfm, commonmark.js, micromark
+--- input
+> ```
+
+--- expected
+<blockquote>
+<pre><code></code></pre>
+</blockquote>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 76 input-bytes 6 expected-bytes 46
+from commonmark/fuzz.cases #9; verified: cmark-gfm, commonmark.js, micromark
+--- input
+- ```
+
+--- expected
+<ul>
+<li>
+<pre><code></code></pre>
+</li>
+</ul>
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 15 expected-bytes 47
+from commonmark/list.cases #85; verified: cmark-gfm, commonmark.js, micromark
+--- input
+- ```
+   
+  ```
+--- expected
+<ul>
+<li>
+<pre><code>
+</code></pre>
+</li>
+</ul>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 16 expected-bytes 47
+from commonmark/list.cases #86; verified: cmark-gfm, commonmark.js, micromark
+--- input
+- ```
+    
+  ```
+--- expected
+<ul>
+<li>
+<pre><code>
+</code></pre>
+</li>
+</ul>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 77 input-bytes 13 expected-bytes 47
+from commonmark/list.cases #87; verified: cmark-gfm, commonmark.js, micromark
+--- input
+- ```
+	
+  ```
+--- expected
+<ul>
+<li>
+<pre><code>
+</code></pre>
+</li>
+</ul>
+--- end

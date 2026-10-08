@@ -1,6 +1,6 @@
 Document
   Paragraph
-    Emphasis
+    Emphasis delimiter=*
       Text "foo bar"
   Paragraph
     Text "a * foo bar*"
@@ -8,11 +8,11 @@ Document
     Text "a*\"foo\"*"
   Paragraph
     Text "foo"
-    Emphasis
+    Emphasis delimiter=*
       Text "bar"
   Paragraph
     Text "5"
-    Emphasis
+    Emphasis delimiter=*
       Text "6"
     Text "78"
   Paragraph
@@ -21,28 +21,28 @@ Document
     Text "foo_bar_"
   Paragraph
     Text "foo-"
-    Emphasis
+    Emphasis delimiter=_
       Text "(bar)"
   Paragraph
     Text "*foo bar *"
   Paragraph
-    Emphasis
+    Emphasis delimiter=*
       Text "("
-      Emphasis
+      Emphasis delimiter=*
         Text "foo"
       Text ")"
   Paragraph
     Text "__foo__bar"
   Paragraph
     Text "foo-"
-    Strong
+    Strong delimiter=_
       Text "(bar)"
   Paragraph
-    Emphasis
+    Emphasis delimiter=*
       Text "foo"
-      Strong
+      Strong delimiter=*
         Text "bar"
       Text "baz"
   Paragraph
-    Emphasis
+    Emphasis delimiter=*
       Text "foo**bar"

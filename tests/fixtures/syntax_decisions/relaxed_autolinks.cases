@@ -1,0 +1,194 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: relaxed_autolinks
+decision: Relaxed literal autolinks are not part of the syntax: strict GFM extents and schemes.
+count: 26
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 41 expected-bytes 104
+from gfm/autolink.cases #10; verified: cmark-gfm, micromark
+--- input
+http://www.pokemon.com/Pikachu_(Electric)
+--- expected
+<p><a href="http://www.pokemon.com/Pikachu_(Electric)">http://www.pokemon.com/Pikachu_(Electric)</a></p>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 42 expected-bytes 106
+from gfm/autolink.cases #11; verified: cmark-gfm, micromark
+--- input
+http://www.pokemon.com/Pikachu_((Electric)
+--- expected
+<p><a href="http://www.pokemon.com/Pikachu_((Electric)">http://www.pokemon.com/Pikachu_((Electric)</a></p>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 42 expected-bytes 105
+from gfm/autolink.cases #12; verified: cmark-gfm, micromark
+--- input
+http://www.pokemon.com/Pikachu_(Electric))
+--- expected
+<p><a href="http://www.pokemon.com/Pikachu_(Electric)">http://www.pokemon.com/Pikachu_(Electric)</a>)</p>
+--- end
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 43 expected-bytes 108
+from gfm/autolink.cases #13; verified: cmark-gfm, micromark
+--- input
+http://www.pokemon.com/Pikachu_((Electric))
+--- expected
+<p><a href="http://www.pokemon.com/Pikachu_((Electric))">http://www.pokemon.com/Pikachu_((Electric))</a></p>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 17 expected-bytes 24
+from gfm/autolink.cases #19; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[https://foo.com]
+--- expected
+<p>[https://foo.com]</p>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 19 expected-bytes 54
+from gfm/autolink.cases #22; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[<https://foo.com>]
+--- expected
+<p>[<a href="https://foo.com">https://foo.com</a>]</p>
+--- end
+--- case 7 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 22 expected-bytes 40
+from gfm/autolink.cases #23; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[http://foo.com/](url)
+--- expected
+<p><a href="url">http://foo.com/</a></p>
+--- end
+--- case 8 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 21 expected-bytes 28
+from gfm/autolink.cases #24; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[http://foo.com/](url
+--- expected
+<p>[http://foo.com/](url</p>
+--- end
+--- case 9 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 19 expected-bytes 37
+from gfm/autolink.cases #25; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[www.foo.com/](url)
+--- expected
+<p><a href="url">www.foo.com/</a></p>
+--- end
+--- case 10 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 17 expected-bytes 57
+from gfm/autolink.cases #26; verified: cmark-gfm, micromark
+--- input
+{https://foo.com}
+--- expected
+<p>{<a href="https://foo.com%7D">https://foo.com}</a></p>
+--- end
+--- case 11 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 31 expected-bytes 49
+from gfm/autolink.cases #27; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[this http://and.com that](url)
+--- expected
+<p><a href="url">this http://and.com that</a></p>
+--- end
+--- case 12 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 31 expected-bytes 67
+from gfm/autolink.cases #29; verified: cmark-gfm, micromark
+--- input
+{this http://and.com that}(url)
+--- expected
+<p>{this <a href="http://and.com">http://and.com</a> that}(url)</p>
+--- end
+--- case 13 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 78 expected-bytes 89
+from gfm/autolink.cases #30; verified: cmark-gfm, commonmark.js, micromark
+--- input
+[http://foo.com](url)
+[http://bar.com]
+
+[http://bar.com]: http://bar.com/extra
+--- expected
+<p><a href="url">http://foo.com</a>
+<a href="http://bar.com/extra">http://bar.com</a></p>
+--- end
+--- case 14 options allow_dangerous_html,allow_dangerous_protocol label-bytes 48 input-bytes 29 expected-bytes 81
+from gfm/autolink.cases #31; verified: cmark-gfm
+--- input
+http://example.com/[abc]]...
+
+--- expected
+<p><a href="http://example.com/%5Babc%5D%5D">http://example.com/[abc]]</a>...</p>
+--- end
+--- case 15 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 29 expected-bytes 81
+from gfm/autolink.cases #32; verified: cmark-gfm, micromark
+--- input
+http://example.com/{abc}}...
+
+--- expected
+<p><a href="http://example.com/%7Babc%7D%7D">http://example.com/{abc}}</a>...</p>
+--- end
+--- case 16 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 29 expected-bytes 74
+from gfm/autolink.cases #33; verified: cmark-gfm, micromark
+--- input
+http://example.com/(abc))...
+
+--- expected
+<p><a href="http://example.com/(abc)">http://example.com/(abc)</a>)...</p>
+--- end
+--- case 17 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 15 expected-bytes 52
+from gfm/autolink.cases #34; verified: cmark-gfm, micromark
+--- input
+https://foo.com
+--- expected
+<p><a href="https://foo.com">https://foo.com</a></p>
+--- end
+--- case 18 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 29 expected-bytes 36
+from gfm/autolink.cases #35; verified: cmark-gfm, commonmark.js, micromark
+--- input
+smb:///Volumes/shared/foo.pdf
+--- expected
+<p>smb:///Volumes/shared/foo.pdf</p>
+--- end
+--- case 19 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 26 expected-bytes 33
+from gfm/autolink.cases #36; verified: cmark-gfm, commonmark.js, micromark
+--- input
+irc://irc.freenode.net/git
+--- expected
+<p>irc://irc.freenode.net/git</p>
+--- end
+--- case 20 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 25 expected-bytes 32
+from gfm/autolink.cases #37; verified: cmark-gfm, commonmark.js, micromark
+--- input
+rdar://localhost.com/blah
+--- expected
+<p>rdar://localhost.com/blah</p>
+--- end
+--- case 21 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 4 expected-bytes 11
+from gfm/autolink.cases #44; verified: cmark-gfm, commonmark.js, micromark
+--- input
+://-
+--- expected
+<p>://-</p>
+--- end
+--- case 22 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 6 expected-bytes 13
+from gfm/autolink.cases #45; verified: cmark-gfm, commonmark.js, micromark
+--- input
+we://w
+--- expected
+<p>we://w</p>
+--- end
+--- case 23 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 48 expected-bytes 55
+from gfm/autolink.cases #55; verified: cmark-gfm, commonmark.js, micromark
+--- input
+scoped https://[fe80::1ff:fe23:4567:890a%25eth2]
+--- expected
+<p>scoped https://[fe80::1ff:fe23:4567:890a%25eth2]</p>
+--- end
+--- case 24 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 47 expected-bytes 54
+from gfm/autolink.cases #57; verified: cmark-gfm, commonmark.js, micromark
+--- input
+hi: nex://[fe80::1ff:fe23:4567:890a%25eth2]/z/x
+--- expected
+<p>hi: nex://[fe80::1ff:fe23:4567:890a%25eth2]/z/x</p>
+--- end
+--- case 25 options allow_dangerous_html,allow_dangerous_protocol label-bytes 52 input-bytes 12 expected-bytes 19
+from gfm/autolink.cases #59; verified: commonmark.js
+--- input
+foo www. foo
+--- expected
+<p>foo www. foo</p>
+--- end
+--- case 26 options allow_dangerous_html,allow_dangerous_protocol label-bytes 74 input-bytes 15 expected-bytes 22
+from gfm/autolink.cases #61; verified: cmark-gfm, commonmark.js, micromark
+--- input
+foo http:// foo
+--- expected
+<p>foo http:// foo</p>
+--- end

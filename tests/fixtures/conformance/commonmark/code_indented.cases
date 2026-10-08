@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: code_indented
-count: 26
+count: 24
 
 --- case 1 options - label-bytes 28 input-bytes 38 expected-bytes 55
 should support indented code
@@ -225,14 +225,7 @@ should not support lazyness (7)
 <pre><code>  b
 </code></pre>
 --- end
---- case 19 options code_indented_off label-bytes 45 input-bytes 5 expected-bytes 8
-should support turning off code (indented, 1)
---- input
-    a
---- expected
-<p>a</p>
---- end
---- case 20 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 37
+--- case 19 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 37
 should support turning off code (indented, 2)
 --- input
 > a
@@ -243,7 +236,7 @@ should support turning off code (indented, 2)
 b</p>
 </blockquote>
 --- end
---- case 21 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 23
+--- case 20 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 23
 should support turning off code (indented, 3)
 --- input
 - a
@@ -254,7 +247,7 @@ should support turning off code (indented, 3)
 b</li>
 </ul>
 --- end
---- case 22 options code_indented_off label-bytes 45 input-bytes 11 expected-bytes 44
+--- case 21 options code_indented_off label-bytes 45 input-bytes 11 expected-bytes 44
 should support turning off code (indented, 4)
 --- input
 - a
@@ -268,17 +261,7 @@ should support turning off code (indented, 4)
 </li>
 </ul>
 --- end
---- case 23 options code_indented_off label-bytes 45 input-bytes 13 expected-bytes 26
-should support turning off code (indented, 6)
---- input
-```
-a
-    ```
---- expected
-<pre><code>a
-</code></pre>
---- end
---- case 24 options allow_dangerous_html,code_indented_off label-bytes 45 input-bytes 11 expected-bytes 14
+--- case 22 options allow_dangerous_html,code_indented_off label-bytes 45 input-bytes 11 expected-bytes 14
 should support turning off code (indented, 7)
 --- input
 a <?
@@ -287,7 +270,7 @@ a <?
 <p>a <?
 ?></p>
 --- end
---- case 25 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 30
+--- case 23 options code_indented_off label-bytes 45 input-bytes 9 expected-bytes 30
 should support turning off code (indented, 8)
 --- input
 - Foo
@@ -298,7 +281,7 @@ should support turning off code (indented, 8)
 </ul>
 <hr />
 --- end
---- case 26 options code_indented_off label-bytes 45 input-bytes 14 expected-bytes 34
+--- case 24 options code_indented_off label-bytes 45 input-bytes 14 expected-bytes 34
 should support turning off code (indented, 9)
 --- input
 - Foo

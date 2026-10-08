@@ -1,19 +1,20 @@
-//! Markdown source to AST. The entry points are the free [`parse`] function
-//! (maximal default dialect) and the [`SyntaxOptions::parse`] /
-//! [`SyntaxOptions::parse_strict`] methods. Parsing is tolerant: problems are
+//! Markdown source to AST. The entry point is the free [`parse`] function,
+//! which reads the crate's one syntax. Parsing is tolerant: problems are
 //! collected as [`Diagnostic`]s rather than aborting.
 
 use alloc::{borrow::Cow, collections::BTreeMap, string::String, vec, vec::Vec};
 
 use crate::{
     ast::*,
-    diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
-    entities::named_character_reference,
-    memo::{
-        bracket_walk, path_walk, pattern_starts, BracketMemo, BracketStep, PathMemo, PersistentMap,
-        Positions, Step,
+    decode::{
+        decode_escapes_and_references, decode_selected_escapes_and_references,
+        parse_character_reference,
     },
-    options::{SyntaxConfigError, SyntaxOptions},
+    diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
+    memo::{
+        bracket_walk, path_walk, pattern_starts, BracketMemo, BracketStep, PathMemo, Positions,
+        Step,
+    },
     span::Span,
     validate::is_directive_name,
 };
@@ -24,7 +25,11 @@ mod nul_replacement;
 mod scan_tests;
 mod source_map;
 
+pub(crate) use blocks::interrupts_paragraph;
 use source_map::{DerivedText, Segment, SourceMap};
+
+/// The largest ordered-list item number: a marker holds at most 9 digits.
+pub(crate) const MAX_ORDERED_NUMBER: u64 = 999_999_999;
 
 /// The result of a tolerant parse: the document plus any diagnostics gathered
 /// along the way (empty on a clean parse).
@@ -36,21 +41,11 @@ pub struct ParseOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// The error returned by [`SyntaxOptions::parse_strict`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ParseStrictError {
-    /// The options themselves were contradictory.
-    Config(SyntaxConfigError),
-    /// An error-severity diagnostic was promoted to a hard failure.
-    Diagnostic(Diagnostic),
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ParsedLinkResource {
     destination: String,
     destination_kind: LinkDestinationKind,
-    title: Option<String>,
-    title_kind: Option<LinkTitleKind>,
+    title: Option<Title>,
 }
 
 const REFERENCE_LABEL_MAX_CHARS: usize = 999;
@@ -132,63 +127,9 @@ enum HtmlBlockKind {
     UntilBlank,
 }
 
-/// Parse `input` under the maximal default dialect ([`SyntaxOptions::default`]).
-/// Infallible and tolerant; sugar for `SyntaxOptions::default().parse(input)`.
+/// Parse `input`. Infallible and tolerant: problems are reported as
+/// diagnostics in the returned [`ParseOutput`].
 pub fn parse(input: &str) -> ParseOutput {
-    SyntaxOptions::default().parse(input)
-}
-
-impl SyntaxOptions {
-    /// Parse `input` under these options. Infallible and tolerant: a config
-    /// conflict (reachable only by hand-building contradictory `Constructs`) is
-    /// surfaced as an error diagnostic rather than a hard error. Call
-    /// [`SyntaxOptions::validate`] first for fail-fast config checking.
-    pub fn parse(&self, input: &str) -> ParseOutput {
-        match parse_checked(input, self) {
-            Ok(output) => output,
-            Err(error) => ParseOutput {
-                document: Document::default(),
-                diagnostics: vec![Diagnostic::new(
-                    DiagnosticSeverity::Error,
-                    DiagnosticCode::StrictParse,
-                    Span::new(0, input.len()),
-                    error.message(),
-                )],
-            },
-        }
-    }
-
-    /// Parse `input`, promoting a config conflict or any error-severity
-    /// diagnostic to a hard [`ParseStrictError`].
-    pub fn parse_strict(&self, input: &str) -> Result<ParseOutput, ParseStrictError> {
-        let output = parse_checked(input, self).map_err(ParseStrictError::Config)?;
-        if let Some(diagnostic) = output
-            .diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        {
-            return Err(ParseStrictError::Diagnostic(diagnostic.clone()));
-        }
-        Ok(output)
-    }
-}
-
-fn parse_checked(input: &str, options: &SyntaxOptions) -> Result<ParseOutput, SyntaxConfigError> {
-    options.validate()?;
-    Ok(parse_with_definitions(input, options, &[]))
-}
-
-/// Parses `input` as if it also held a definition of each label in `known`,
-/// sorted and deduplicated identifiers: the serializer reads its own output
-/// back this way, as the document it was written from resolves its
-/// references. Options are not validated.
-/// Parses `input` with each identifier in `known`, sorted and deduplicated,
-/// read as defined.
-pub(crate) fn parse_with_definitions(
-    input: &str,
-    options: &SyntaxOptions,
-    known: &[String],
-) -> ParseOutput {
     let mut diagnostics = Vec::new();
     // A leading byte order mark is not content; parsing starts after it while
     // spans keep counting from the start of `input`.
@@ -200,7 +141,7 @@ pub(crate) fn parse_with_definitions(
     let source = &input[start..];
     let map = SourceMap::verbatim(source.len(), start);
     let lines = collect_lines(source, &map);
-    let children = blocks::parse_document(&lines, options, known, &mut diagnostics);
+    let children = blocks::parse_document(&lines, &mut diagnostics);
     let mut document = Document {
         meta: NodeMeta::new(Some(Span::new(0, input.len()))),
         children,
@@ -227,10 +168,9 @@ fn source_char(char: char) -> char {
 }
 
 /// The deepest block-container nesting (block quotes, list items, container
-/// directives, footnote definitions, HTML containers, description details) the
-/// parser opens. Deeper container markers stay leaf-block text, so recursion
+/// directives, footnote definitions, HTML containers) the parser opens. Deeper container markers stay leaf-block text, so recursion
 /// and the native stack it uses stay bounded.
-const MAX_BLOCK_NESTING: usize = 32;
+pub(crate) const MAX_BLOCK_NESTING: usize = 32;
 
 /// Parses the blocks of a container's derived content.
 /// The column `text` reaches from column `column`, with tab stops every four.
@@ -324,7 +264,7 @@ impl<'a> LineSegments<'a> {
     }
 }
 
-fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
+pub(crate) fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
     match line.trim_end_matches([' ', '\t']) {
         "---" => Some(FrontmatterKind::Yaml),
         "+++" => Some(FrontmatterKind::Toml),
@@ -397,21 +337,14 @@ fn parse_alert_marker(line: &str) -> Option<(AlertKind, Option<String>)> {
         "caution" => AlertKind::Caution,
         _ => return None,
     };
-    let title = line[close + 1..].trim_matches([' ', '\t']);
-    Some((
-        kind,
-        if title.is_empty() {
-            None
-        } else {
-            Some(title.into())
-        },
-    ))
+    Some((kind, alert_title(&line[close + 1..])))
 }
 
-/// Whether `text` starts with a description details marker.
-fn is_description_marker(text: &str) -> bool {
-    matches!(text.as_bytes().first(), Some(b':' | b'~'))
-        && matches!(text.as_bytes().get(1), None | Some(b' ' | b'\t'))
+/// The title an alert marker line gives with `text` after its `]`: the text
+/// without the spaces and tabs around it, or none when nothing else is left.
+pub(crate) fn alert_title(text: &str) -> Option<String> {
+    let title = text.trim_matches([' ', '\t']);
+    (!title.is_empty()).then(|| title.into())
 }
 
 fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
@@ -444,35 +377,58 @@ fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
     }
 }
 
+/// The label of a definition starting paragraph line `index`, followed by
+/// `:`: the text of the lines up to the one the label closes on, joined by
+/// `\n`, the offset of the label's `]` in it, and that line.
+///
+/// A label may span lines (CommonMark §4.7), up to its length limit. The
+/// walk to its `]` (`find_reference_label_end`) goes on from where the lines
+/// before left it, so that a long label is walked once.
+fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, usize)> {
+    let text = trim_ascii_start(lines[index].text);
+    if !text.starts_with('[') {
+        return None;
+    }
+    let mut accumulated = String::from(text);
+    let mut label_end_line = index;
+    let mut cursor = 1;
+    loop {
+        let bytes = accumulated.as_bytes();
+        // The walk has run out of text: it goes on at the `\n` the next line
+        // is joined with. A `\` that ended the text escapes that `\n`, and
+        // both step to the next line's start.
+        if cursor >= bytes.len() {
+            let next = label_end_line + 1;
+            if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
+                return None;
+            }
+            accumulated.push('\n');
+            accumulated.push_str(lines[next].text);
+            label_end_line = next;
+            continue;
+        }
+        match reference_label_step(&accumulated, cursor) {
+            Step::Next(next) => cursor = next,
+            Step::Done(Some(close)) if reference_label_is_within_limit(&accumulated[1..close]) => {
+                // A closed label not followed by `:` is not a definition.
+                if bytes.get(close + 1) != Some(&b':') {
+                    return None;
+                }
+                return Some((accumulated, close, label_end_line));
+            }
+            // An unescaped `[`, or a label over the length limit: no line
+            // after it makes a definition.
+            Step::Done(_) => return None,
+        }
+    }
+}
+
 /// The link reference definition that starts paragraph line `index`, and
 /// the line after it. The lines are a paragraph's, each from where the
 /// containers around it leave it; the definition's span is left to the
 /// caller.
 fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usize)> {
-    let text = trim_ascii_start(lines[index].text);
-    if !text.starts_with('[') {
-        return None;
-    }
-
-    // A label may span lines (CommonMark §4.7), up to its length limit.
-    let mut accumulated = String::from(text);
-    let mut label_end_line = index;
-    let close = loop {
-        if let Some(close) = find_reference_label_end(&accumulated, 0) {
-            if accumulated.as_bytes().get(close + 1) == Some(&b':') {
-                break close;
-            }
-            // A closed label not followed by `:` is not a definition.
-            return None;
-        }
-        let next = label_end_line + 1;
-        if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
-            return None;
-        }
-        accumulated.push('\n');
-        accumulated.push_str(lines[next].text);
-        label_end_line = next;
-    };
+    let (accumulated, close, label_end_line) = definition_label(lines, index)?;
     let label = String::from(&accumulated[1..close]);
     if normalize_label(&label).is_empty() {
         return None;
@@ -530,7 +486,6 @@ fn definition_node(label: &str, resource: ParsedLinkResource) -> Definition {
         destination: resource.destination,
         destination_kind: resource.destination_kind,
         title: resource.title,
-        title_kind: resource.title_kind,
     }
 }
 
@@ -895,572 +850,6 @@ fn is_declaration_start(input: &str) -> bool {
         .is_some_and(|byte| input.starts_with("<!") && byte.is_ascii_alphabetic())
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct MdxEsmState {
-    brace_depth: usize,
-    bracket_depth: usize,
-    paren_depth: usize,
-    block_comment: bool,
-    quote: Option<u8>,
-    escaped: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum MdxJsxTag<'a> {
-    Fragment,
-    Named(&'a str),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct MdxJsxTagStart<'a> {
-    tag: MdxJsxTag<'a>,
-    closing: bool,
-}
-
-fn is_mdx_esm_start(line: &str) -> bool {
-    line.starts_with("import ") || line.starts_with("export ")
-}
-
-fn is_mdx_esm_continuation(line: &str, state: &MdxEsmState) -> bool {
-    if state_has_open_mdx_esm_construct(state) {
-        return true;
-    }
-    let trimmed = line.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    is_mdx_esm_start(line) || trimmed.starts_with("//") || trimmed.starts_with("/*")
-}
-
-fn state_has_open_mdx_esm_construct(state: &MdxEsmState) -> bool {
-    state.brace_depth > 0
-        || state.bracket_depth > 0
-        || state.paren_depth > 0
-        || state.block_comment
-        || state.quote == Some(b'`')
-}
-
-fn update_mdx_esm_state(line: &str, state: &mut MdxEsmState) {
-    let bytes = line.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if state.block_comment {
-            if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                state.block_comment = false;
-                index += 1;
-            }
-            index += 1;
-            continue;
-        }
-
-        if let Some(delimiter) = state.quote {
-            if state.escaped {
-                state.escaped = false;
-            } else if byte == b'\\' {
-                state.escaped = true;
-            } else if byte == delimiter {
-                state.quote = None;
-            }
-            index += 1;
-            continue;
-        }
-
-        match byte {
-            b'\'' | b'"' | b'`' => state.quote = Some(byte),
-            b'/' if bytes.get(index + 1) == Some(&b'/') => break,
-            b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                state.block_comment = true;
-                index += 1;
-            }
-            b'{' => state.brace_depth += 1,
-            b'}' => state.brace_depth = state.brace_depth.saturating_sub(1),
-            b'[' => state.bracket_depth += 1,
-            b']' => state.bracket_depth = state.bracket_depth.saturating_sub(1),
-            b'(' => state.paren_depth += 1,
-            b')' => state.paren_depth = state.paren_depth.saturating_sub(1),
-            _ => {}
-        }
-        index += 1;
-    }
-}
-/// Lexical states of the walk to an inline MDX expression's closing `}`.
-const MDX_BRACE_STATES: usize = 6;
-const MDX_NORMAL: usize = 0;
-const MDX_SINGLE_QUOTED: usize = 1;
-const MDX_DOUBLE_QUOTED: usize = 2;
-const MDX_TEMPLATE: usize = 3;
-const MDX_LINE_COMMENT: usize = 4;
-const MDX_BLOCK_COMMENT: usize = 5;
-
-/// One step of the walk to an inline MDX expression's closing `}`, over nodes
-/// `byte position * MDX_BRACE_STATES + lexical state`: braces nest outside
-/// strings and comments, and `\` escapes the next byte inside strings.
-/// The position after the byte a `\` at `escape` escapes. In block lines joined
-/// by `\n` (`lines_joined`), a `\` ending a line escapes the first byte of the
-/// next non-empty line, as the line-by-line scan it stands for does, rather
-/// than the line break.
-fn after_escaped_byte(text: &str, escape: usize, lines_joined: bool) -> usize {
-    let mut escaped = escape + 1;
-    if lines_joined {
-        while text.as_bytes().get(escaped) == Some(&b'\n') {
-            escaped += 1;
-        }
-    }
-    (escaped + 1).min(text.len())
-}
-
-fn mdx_expression_step(input: &str, node: usize, lines_joined: bool) -> BracketStep {
-    let bytes = input.as_bytes();
-    let (cursor, state) = (node / MDX_BRACE_STATES, node % MDX_BRACE_STATES);
-    let at = |position: usize, state: usize| position.min(bytes.len()) * MDX_BRACE_STATES + state;
-    let Some(&byte) = bytes.get(cursor) else {
-        return BracketStep::End;
-    };
-    let following = bytes.get(cursor + 1).copied();
-    match state {
-        MDX_NORMAL => match byte {
-            b'\'' => BracketStep::Pass(at(cursor + 1, MDX_SINGLE_QUOTED)),
-            b'"' => BracketStep::Pass(at(cursor + 1, MDX_DOUBLE_QUOTED)),
-            b'`' => BracketStep::Pass(at(cursor + 1, MDX_TEMPLATE)),
-            b'/' if following == Some(b'/') => BracketStep::Pass(at(cursor + 2, MDX_LINE_COMMENT)),
-            b'/' if following == Some(b'*') => BracketStep::Pass(at(cursor + 2, MDX_BLOCK_COMMENT)),
-            b'{' => BracketStep::Open(at(cursor + 1, MDX_NORMAL)),
-            b'}' => BracketStep::Close(at(cursor + 1, MDX_NORMAL)),
-            _ => BracketStep::Pass(at(cursor + 1, MDX_NORMAL)),
-        },
-        MDX_LINE_COMMENT => BracketStep::Pass(at(
-            cursor + 1,
-            if byte == b'\n' {
-                MDX_NORMAL
-            } else {
-                MDX_LINE_COMMENT
-            },
-        )),
-        MDX_BLOCK_COMMENT => {
-            if byte == b'*' && following == Some(b'/') {
-                BracketStep::Pass(at(cursor + 2, MDX_NORMAL))
-            } else {
-                BracketStep::Pass(at(cursor + 1, MDX_BLOCK_COMMENT))
-            }
-        }
-        quoted => {
-            let delimiter = [b'\'', b'"', b'`'][quoted - MDX_SINGLE_QUOTED];
-            if byte == b'\\' {
-                BracketStep::Pass(at(after_escaped_byte(input, cursor, lines_joined), quoted))
-            } else if byte == delimiter {
-                BracketStep::Pass(at(cursor + 1, MDX_NORMAL))
-            } else {
-                BracketStep::Pass(at(cursor + 1, quoted))
-            }
-        }
-    }
-}
-
-fn collect_mdx_expression_value(
-    lines: &[Line<'_>],
-    start_line: usize,
-    open_byte: usize,
-    close_line: usize,
-    close_byte: usize,
-) -> String {
-    let mut value = String::new();
-    let mut cursor = start_line;
-    while cursor <= close_line {
-        if cursor > start_line {
-            value.push('\n');
-        }
-        let line = lines[cursor].text;
-        let segment = if cursor == start_line && cursor == close_line {
-            &line[open_byte + 1..close_byte]
-        } else if cursor == start_line {
-            &line[open_byte + 1..]
-        } else if cursor == close_line {
-            &line[..close_byte]
-        } else {
-            line
-        };
-        value.push_str(segment);
-        cursor += 1;
-    }
-    value
-}
-
-fn mdx_jsx_tag_start(input: &str, start: usize) -> Option<MdxJsxTagStart<'_>> {
-    let bytes = input.as_bytes();
-    if bytes.get(start) != Some(&b'<') {
-        return None;
-    }
-
-    match bytes.get(start + 1) {
-        Some(b'>') => {
-            return Some(MdxJsxTagStart {
-                tag: MdxJsxTag::Fragment,
-                closing: false,
-            });
-        }
-        Some(b'/') if bytes.get(start + 2) == Some(&b'>') => {
-            return Some(MdxJsxTagStart {
-                tag: MdxJsxTag::Fragment,
-                closing: true,
-            });
-        }
-        Some(b'!' | b'?') | None => return None,
-        _ => {}
-    }
-
-    let closing = bytes.get(start + 1) == Some(&b'/');
-    let name_start = start + if closing { 2 } else { 1 };
-    if !bytes
-        .get(name_start)
-        .is_some_and(|byte| is_mdx_jsx_name_start_byte(*byte))
-    {
-        return None;
-    }
-
-    let mut name_end = name_start + 1;
-    while bytes
-        .get(name_end)
-        .is_some_and(|byte| is_mdx_jsx_name_byte(*byte))
-    {
-        name_end += 1;
-    }
-    if name_end == name_start {
-        return None;
-    }
-    if bytes
-        .get(name_end)
-        .is_some_and(|byte| !is_mdx_jsx_name_delimiter(*byte))
-    {
-        return None;
-    }
-    Some(MdxJsxTagStart {
-        tag: MdxJsxTag::Named(&input[name_start..name_end]),
-        closing,
-    })
-}
-
-fn previous_nonspace_before_text(input: &str, byte_index: usize) -> Option<u8> {
-    input.as_bytes()[..byte_index]
-        .iter()
-        .rev()
-        .copied()
-        .find(|byte| !byte.is_ascii_whitespace())
-}
-
-/// Quote states of the walk to an MDX JSX tag's closing `>`: outside quotes,
-/// inside `'…'`, inside `"…"`.
-const JSX_TAG_QUOTE_STATES: usize = 3;
-
-/// One step of the walk to an MDX JSX tag's closing `>`, over nodes
-/// `byte position * JSX_TAG_QUOTE_STATES + quote state`: quoted attribute
-/// values and `{…}` expressions (stepped over whole via `expression_close`)
-/// cannot close the tag.
-fn jsx_tag_end_step(
-    text: &str,
-    node: usize,
-    lines_joined: bool,
-    expression_close: &mut impl FnMut(usize) -> Option<usize>,
-) -> Step {
-    let (cursor, quote) = (node / JSX_TAG_QUOTE_STATES, node % JSX_TAG_QUOTE_STATES);
-    let at = |position: usize, quote: usize| Step::Next(position * JSX_TAG_QUOTE_STATES + quote);
-    let Some(&byte) = text.as_bytes().get(cursor) else {
-        return Step::Done(None);
-    };
-    if quote != 0 {
-        let delimiter = if quote == 1 { b'\'' } else { b'"' };
-        return if byte == b'\\' {
-            at(after_escaped_byte(text, cursor, lines_joined), quote)
-        } else if byte == delimiter {
-            at(cursor + 1, 0)
-        } else {
-            at(cursor + 1, quote)
-        };
-    }
-    match byte {
-        b'\'' => at(cursor + 1, 1),
-        b'"' => at(cursor + 1, 2),
-        b'{' => match expression_close(cursor) {
-            Some(close) => at(close + 1, 0),
-            None => Step::Done(None),
-        },
-        b'>' => Step::Done(Some(cursor)),
-        _ => at(cursor + 1, 0),
-    }
-}
-
-/// Closing-tag lookups for MDX JSX over one text. A tag's closing tag is found
-/// by walking from tag to tag (each stepped over whole, to its `>`) and
-/// counting only tags with its name. Every tag is indexed once: where it ends,
-/// and the next tag with its name along the walk after it, read from
-/// persistent per-name maps built from the last tag back. Matching then walks
-/// only same-name tags, memoized, so all closing-tag questions about one text
-/// cost `O(n log n)` together.
-struct JsxIndex {
-    starts: Vec<usize>,
-    closing: Vec<bool>,
-    ends: Vec<Option<usize>>,
-    self_closing: Vec<bool>,
-    /// Per tag, the index of the next tag with its name along the walk after
-    /// it, or `starts.len()` when the walk ends (or reaches a tag without an
-    /// end) first.
-    next_same_name: Vec<usize>,
-    matches: BracketMemo,
-}
-
-impl JsxIndex {
-    fn new(text: &str, lines_joined: bool, expressions: &mut BracketMemo) -> Self {
-        let bytes = text.as_bytes();
-        let mut starts = Vec::new();
-        let mut closing = Vec::new();
-        let mut names = Vec::new();
-        for (position, byte) in bytes.iter().enumerate() {
-            if *byte == b'<' {
-                if let Some(tag) = mdx_jsx_tag_start(text, position) {
-                    starts.push(position);
-                    closing.push(tag.closing);
-                    names.push(match tag.tag {
-                        MdxJsxTag::Fragment => None,
-                        MdxJsxTag::Named(name) => Some(name),
-                    });
-                }
-            }
-        }
-
-        let mut tag_ends = PathMemo::default();
-        let mut self_closing_by_end = BTreeMap::new();
-        let mut ends = Vec::with_capacity(starts.len());
-        let mut self_closing = Vec::with_capacity(starts.len());
-        for &start in &starts {
-            let end = tag_ends.resolve(
-                (text.len() + 1) * JSX_TAG_QUOTE_STATES,
-                (start + 1) * JSX_TAG_QUOTE_STATES,
-                |node| {
-                    jsx_tag_end_step(text, node, lines_joined, &mut |open| {
-                        expressions
-                            .resolve(
-                                (text.len() + 1) * MDX_BRACE_STATES,
-                                (open + 1) * MDX_BRACE_STATES,
-                                |node| mdx_expression_step(text, node, lines_joined),
-                            )
-                            .map(|node| node / MDX_BRACE_STATES)
-                    })
-                },
-            );
-            ends.push(end);
-            self_closing.push(end.is_some_and(|end| {
-                *self_closing_by_end
-                    .entry(end)
-                    .or_insert_with(|| previous_nonspace_before_text(text, end) == Some(b'/'))
-            }));
-        }
-
-        let mut name_ids = BTreeMap::new();
-        for name in &names {
-            let next_id = name_ids.len();
-            name_ids.entry(*name).or_insert(next_id);
-        }
-        let count = starts.len();
-        let mut maps = PersistentMap::new(name_ids.len());
-        let mut versions = alloc::vec![PersistentMap::EMPTY; count];
-        let mut next_same_name = alloc::vec![count; count];
-        for tag in (0..count).rev() {
-            // A tag without an end stops every walk that reaches it.
-            let Some(end) = ends[tag] else {
-                continue;
-            };
-            let after = starts.partition_point(|start| *start <= end);
-            let rest = versions.get(after).copied().unwrap_or(PersistentMap::EMPTY);
-            let name = name_ids[&names[tag]];
-            next_same_name[tag] = maps.get(rest, name).unwrap_or(count);
-            versions[tag] = maps.insert(rest, name, tag);
-        }
-
-        Self {
-            starts,
-            closing,
-            ends,
-            self_closing,
-            next_same_name,
-            matches: BracketMemo::default(),
-        }
-    }
-
-    /// The `>` ending the element whose opening tag starts at `start`: its own
-    /// `>` when self-closing, else the `>` of its matching closing tag.
-    fn element_end(&mut self, start: usize) -> Option<usize> {
-        let tag = self.starts.binary_search(&start).ok()?;
-        if self.closing[tag] {
-            return None;
-        }
-        let end = self.ends[tag]?;
-        if self.self_closing[tag] {
-            return Some(end);
-        }
-        let count = self.starts.len();
-        let (closing, self_closing, next) =
-            (&self.closing, &self.self_closing, &self.next_same_name);
-        let close = self.matches.resolve(count + 1, next[tag], |tag| {
-            if tag == count {
-                BracketStep::End
-            } else if closing[tag] {
-                BracketStep::Close(next[tag])
-            } else if self_closing[tag] {
-                BracketStep::Pass(next[tag])
-            } else {
-                BracketStep::Open(next[tag])
-            }
-        })?;
-        self.ends[close]
-    }
-
-    /// The `>` ending the tag that starts at `start`, and whether the tag is
-    /// self-closing.
-    fn tag_end(&self, start: usize) -> Option<(usize, bool)> {
-        let tag = self.starts.binary_search(&start).ok()?;
-        Some((self.ends[tag]?, self.self_closing[tag]))
-    }
-}
-
-/// MDX flow lookups over one run of block lines, joined by `\n` into one text
-/// on first use so JSX and expression closes are found by the same memoized
-/// walks as inline ones.
-#[derive(Default)]
-struct MdxFlowScan {
-    joined: Option<JoinedLines>,
-}
-
-struct JoinedLines {
-    text: String,
-    line_starts: Vec<usize>,
-    expressions: BracketMemo,
-    jsx: Option<JsxIndex>,
-}
-
-impl JoinedLines {
-    fn new(lines: &[Line<'_>]) -> Self {
-        let mut text = String::new();
-        let mut line_starts = Vec::with_capacity(lines.len());
-        for (index, line) in lines.iter().enumerate() {
-            if index > 0 {
-                text.push('\n');
-            }
-            line_starts.push(text.len());
-            text.push_str(line.text);
-        }
-        Self {
-            text,
-            line_starts,
-            expressions: BracketMemo::default(),
-            jsx: None,
-        }
-    }
-
-    /// The line holding byte `position`, and the byte's offset in that line.
-    fn locate(&self, position: usize) -> (usize, usize) {
-        let line = self.line_starts.partition_point(|start| *start <= position) - 1;
-        (line, position - self.line_starts[line])
-    }
-
-    fn jsx(&mut self) -> &mut JsxIndex {
-        let Self {
-            text,
-            expressions,
-            jsx,
-            ..
-        } = self;
-        jsx.get_or_insert_with(|| JsxIndex::new(text, true, expressions))
-    }
-}
-
-impl MdxFlowScan {
-    fn joined(&mut self, lines: &[Line<'_>]) -> &mut JoinedLines {
-        self.joined.get_or_insert_with(|| JoinedLines::new(lines))
-    }
-
-    /// The line and byte of the `}` closing the expression block opening at
-    /// `open_byte` of line `index`, when nothing but whitespace follows it on
-    /// its line.
-    fn expression_close(
-        &mut self,
-        lines: &[Line<'_>],
-        index: usize,
-        open_byte: usize,
-    ) -> Option<(usize, usize)> {
-        let joined = self.joined(lines);
-        let open = joined.line_starts[index] + open_byte;
-        let text = &joined.text;
-        let start = (open + 1) * MDX_BRACE_STATES;
-        let close =
-            joined
-                .expressions
-                .resolve((text.len() + 1) * MDX_BRACE_STATES, start, |node| {
-                    mdx_expression_step(text, node, true)
-                })?
-                / MDX_BRACE_STATES;
-        let (line, byte) = joined.locate(close);
-        lines[line].text[byte + 1..]
-            .trim()
-            .is_empty()
-            .then_some((line, byte))
-    }
-
-    /// The last line of the JSX element block opening at `start_byte` of line
-    /// `index`.
-    fn jsx_close_line(
-        &mut self,
-        lines: &[Line<'_>],
-        index: usize,
-        start_byte: usize,
-    ) -> Option<usize> {
-        let joined = self.joined(lines);
-        let start = joined.line_starts[index] + start_byte;
-        let end = joined.jsx().element_end(start)?;
-        Some(joined.locate(end).0)
-    }
-
-    /// Whether the JSX tag opening at `start_byte` of line `index` ends, and if
-    /// so whether it is self-closing.
-    fn jsx_tag_self_closing(
-        &mut self,
-        lines: &[Line<'_>],
-        index: usize,
-        start_byte: usize,
-    ) -> Option<bool> {
-        let joined = self.joined(lines);
-        let start = joined.line_starts[index] + start_byte;
-        joined
-            .jsx()
-            .tag_end(start)
-            .map(|(_, self_closing)| self_closing)
-    }
-}
-
-fn is_mdx_jsx_name_start_byte(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$')
-}
-
-fn is_mdx_jsx_name_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'_' | b'-' | b'$')
-}
-
-fn is_mdx_jsx_name_delimiter(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>' | b'{' | b'}')
-}
-
-fn collect_line_range(lines: &[Line<'_>], start: usize, end: usize) -> String {
-    let mut value = String::new();
-    let mut cursor = start;
-    while cursor <= end {
-        if cursor > start {
-            value.push('\n');
-        }
-        value.push_str(lines[cursor].text);
-        cursor += 1;
-    }
-    value
-}
-
 fn setext_underline_depth(input: &str) -> Option<u8> {
     let underline = trim_up_to_three_spaces(input)?.trim_matches([' ', '\t']);
     match underline {
@@ -1471,15 +860,9 @@ fn setext_underline_depth(input: &str) -> Option<u8> {
 }
 
 /// A delimiter run recorded during the inline scan for later resolution by the
-/// delimiter-stack algorithm (`process_emphasis`).
-///
-/// Marks pair in one of two ways. *Nested* roles (`can_open` / `can_close`)
-/// pair a closer with the nearest compatible opener before it, so same-mark
-/// spans nest: `*` and `_` (CommonMark), `~~` strikethrough, `++` insert, and
-/// `==` highlight. *First-closer* roles pair an opener with the first closer of
-/// its kind on the same line and never nest: `||` spoiler (through `can_open`
-/// / `can_close`) and the one-character `~` subscript and `^` superscript
-/// (through `single_open` / `single_close`).
+/// delimiter-stack algorithm (`process_emphasis`). A closer pairs with the
+/// nearest compatible opener before it, so same-mark spans nest: `*` and `_`
+/// (CommonMark), `~~` strikethrough, and `==` highlight.
 #[derive(Clone, Copy)]
 struct DelimMarker {
     /// Index of the placeholder text node in the flat node list. The text node
@@ -1493,32 +876,17 @@ struct DelimMarker {
     /// `openers_bottom` key that caches its verdicts, read this rather than
     /// what is left after earlier pairings.
     run_length: usize,
+    /// Whether the run can open and close; settled by `assign_emphasis_roles`.
     can_open: bool,
     can_close: bool,
-    /// The `~` subscript / `^` superscript roles of a run.
-    single_open: bool,
-    single_close: bool,
-    /// A `~` run that can pair as strikethrough.
-    strike: bool,
-    /// How many more times a long `++` / `==` run closes, two characters at a
-    /// time, after closing with its first two.
+    /// How many more times a long `==` run closes, two characters at a time,
+    /// after closing with its first two.
     recloses: usize,
-    /// The opener of the latest-starting mark span enclosing this run (see
+    /// The opener of the latest-starting `==` span enclosing this run (see
     /// `assign_emphasis_roles`), or `NIL`.
     enclosed_from: usize,
     /// Offset of the run in the inline input, for adjacency checks.
     position: usize,
-    /// How many line breaks precede the run in the inline input; first-closer
-    /// spans cannot cross a line break.
-    line: usize,
-}
-
-impl DelimMarker {
-    /// Whether `can_open` / `can_close` are nested roles. A `||` spoiler uses
-    /// them as first-closer roles instead.
-    fn nests(&self) -> bool {
-        self.marker != b'|'
-    }
 }
 
 /// End-of-list marker for the index-linked lists used by `process_emphasis`.
@@ -1679,38 +1047,6 @@ impl InlineList {
     }
 }
 
-/// Counts the line breaks before each recorded run. Runs are recorded in
-/// source order, so the count advances incrementally.
-#[derive(Default)]
-struct LineCounter {
-    position: usize,
-    line: usize,
-}
-
-impl LineCounter {
-    fn line_at(&mut self, input: &str, position: usize) -> usize {
-        self.line += input.as_bytes()[self.position..position]
-            .iter()
-            .filter(|byte| matches!(byte, b'\n' | b'\r'))
-            .count();
-        self.position = position;
-        self.line
-    }
-}
-
-/// The roles a recorded run can play; see `DelimMarker`.
-#[derive(Clone, Copy, Default)]
-struct DelimRoles {
-    can_open: bool,
-    can_close: bool,
-    single_open: bool,
-    single_close: bool,
-    /// A `~` run that can pair as strikethrough; its roles are settled by
-    /// `assign_emphasis_roles`.
-    strike: bool,
-    recloses: usize,
-}
-
 /// Pushes a literal text node for `value` starting at `start` of the block-level
 /// inline input.
 fn push_text(nodes: &mut Vec<Inline>, start: usize, value: &str) {
@@ -1728,7 +1064,6 @@ fn close_bracket(
     input: &str,
     base_offset: usize,
     close: usize,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
@@ -1744,12 +1079,8 @@ fn close_bracket(
 
     if opener.kind == BracketKind::InlineFootnote {
         if !input[opener.position + 2..close].trim().is_empty() {
-            let (children, marks) =
-                take_label(input, options, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
             nodes.truncate(opener.node_index - 1);
-            if let Some(caret) = opener.caret {
-                delimiters.truncate(caret);
-            }
             nodes.push(Inline::InlineFootnote(InlineFootnote {
                 meta: NodeMeta::new(Some(Span::new(
                     base_offset + opener.position,
@@ -1760,11 +1091,7 @@ fn close_bracket(
             brackets.formed.push((nodes.len() - 1, marks + 1));
             return Some(close + 1);
         }
-        // An empty inline footnote is a `^` that may close a superscript, then
-        // a plain `[`.
-        if let Some(caret) = opener.caret {
-            delimiters[caret].single_close = true;
-        }
+        // An empty inline footnote is a literal `^`, then a plain `[`.
         opener.kind = BracketKind::Link;
         opener.position += 1;
     }
@@ -1778,8 +1105,7 @@ fn close_bracket(
             definitions,
         );
         if let Some((end, target)) = target {
-            let (children, marks) =
-                take_label(input, options, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
             nodes.truncate(opener.node_index - 1);
             let span = Span::new(base_offset + opener.position, base_offset + end);
             nodes.push(link_node(target, true, span, children));
@@ -1800,8 +1126,7 @@ fn close_bracket(
             definitions,
         );
         if let Some((end, target)) = target {
-            let (children, marks) =
-                take_label(input, options, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
             nodes.truncate(opener.node_index);
             let span = Span::new(base_offset + opener.position, base_offset + end);
             nodes.push(link_node(target, false, span, children));
@@ -1818,10 +1143,7 @@ fn close_bracket(
         .formed
         .last()
         .is_some_and(|&(node, _)| node > opener.node_index);
-    if options.constructs.footnote_reference
-        && !holds_formed
-        && input[opener.position + 1..].starts_with('^')
-    {
+    if !holds_formed && input[opener.position + 1..].starts_with('^') {
         let label = &input[opener.position + 2..close];
         if is_footnote_label(label) {
             drop_label(nodes, delimiters, brackets, &opener);
@@ -1855,18 +1177,14 @@ fn drop_label(
 }
 
 /// Pushes the `length`-byte run of `marker` at `index` as a literal text node
-/// plus a delimiter entry with `roles`.
-#[allow(clippy::too_many_arguments)]
+/// plus a delimiter entry, whose roles `assign_emphasis_roles` settles.
 fn push_delimiter(
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
-    lines: &mut LineCounter,
-    input: &str,
     index: usize,
     base_offset: usize,
     marker: u8,
     length: usize,
-    roles: DelimRoles,
 ) {
     let node_index = nodes.len();
     nodes.push(Inline::Text(Text {
@@ -1881,15 +1199,11 @@ fn push_delimiter(
         marker,
         length,
         run_length: length,
-        can_open: roles.can_open,
-        can_close: roles.can_close,
-        single_open: roles.single_open,
-        single_close: roles.single_close,
-        strike: roles.strike,
-        recloses: roles.recloses,
+        can_open: false,
+        can_close: false,
+        recloses: 0,
         enclosed_from: NIL,
         position: index,
-        line: lines.line_at(input, index),
     });
 }
 
@@ -1899,8 +1213,7 @@ fn push_delimiter(
 /// as a property of the run, not of an individual delimiter), including the
 /// `_` intraword punctuation rules.
 ///
-/// `strikethrough` enables the GFM cross-marker bonus: when strikethrough is an
-/// active construct, a `*` run immediately adjacent to a `~` counts as
+/// GFM's cross-marker bonus: a `*` run immediately adjacent to a `~` counts as
 /// openable/closeable even though `~` is a punctuation character (this is what
 /// makes `a*~b~*c` emphasize). A `_` run or a `~` run gets plain CommonMark
 /// flanking beside a `~`.
@@ -1912,7 +1225,6 @@ fn emphasis_roles(
     index: usize,
     length: usize,
     marker: u8,
-    strikethrough: bool,
     bounded_before: bool,
     bounded_after: bool,
 ) -> (bool, bool) {
@@ -1931,7 +1243,7 @@ fn emphasis_roles(
     // GFM: a `*` run touching a `~` strikethrough marker may open/close even
     // when ordinary flanking refuses it (the `~` would otherwise be a blocking
     // punctuation neighbour).
-    if strikethrough && marker == b'*' {
+    if marker == b'*' {
         if flanking.next == Some('~') {
             can_open = true;
         }
@@ -1942,89 +1254,42 @@ fn emphasis_roles(
     (can_open, can_close)
 }
 
-/// Settles the roles of every `*`, `_`, and `~~` run once the mark spans are
-/// known. The mark runs (`++`, `==`, `||`, `~`, `^`, and with `underline` the
-/// `__` runs) are paired among themselves first; an emphasis run touching the
-/// inner side of such a span's delimiter then flanks as the edge of that span's
-/// content.
-fn assign_emphasis_roles(
-    input: &str,
-    delimiters: &mut [DelimMarker],
-    strikethrough: bool,
-    underline: bool,
-) {
-    let underline_mark = |run: &DelimMarker| underline && run.marker == b'_' && run.length == 2;
+/// Settles the roles of every recorded run. The `==` runs take theirs first
+/// and are paired among themselves; each `*`, `_`, and `~~` run then takes its
+/// roles once the `==` spans are known, flanking as the edge of a span's
+/// content where it touches the inner side of the span's delimiter.
+fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
     let mut opens_span = alloc::vec![false; delimiters.len()];
     let mut closes_span = alloc::vec![false; delimiters.len()];
-    let mut open_marks: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    let mut pending: [Option<usize>; 3] = [None; 3];
+    let mut open_marks: Vec<usize> = Vec::new();
     // The run each span opened by a run closes at (a run opens at most one).
     let mut span_close = alloc::vec![NIL; delimiters.len()];
-    for (index, run) in delimiters.iter().enumerate() {
-        if underline_mark(run) {
-            let open = &mut open_marks[2];
-            if can_close_underscore(input, run.position, 2) {
-                if let Some(opener) = open.pop() {
-                    opens_span[opener] = true;
-                    closes_span[index] = true;
-                    span_close[opener] = index;
-                    continue;
-                }
-            }
-            if can_open_underscore(input, run.position, 2) {
-                open.push(index);
-            }
+    for (index, run) in delimiters.iter_mut().enumerate() {
+        if run.marker != b'=' {
             continue;
         }
-        if matches!(run.marker, b'+' | b'=') {
-            let open = &mut open_marks[usize::from(run.marker == b'=')];
-            let mut closed = 0;
-            if run.can_close {
-                while closed <= run.recloses {
-                    let Some(opener) = open.pop() else {
-                        break;
-                    };
-                    opens_span[opener] = true;
-                    closes_span[index] = true;
-                    span_close[opener] = index;
-                    closed += 1;
-                }
-            }
-            // What is left of the run after closing may still open.
-            if run.can_open && run.length >= 2 * closed + 2 {
-                open.push(index);
-            }
-            continue;
-        }
-        let Some(kind) = first_closer_kind(run) else {
-            continue;
-        };
-        if let Some(opener) = pending[kind] {
-            let opener_run = &delimiters[opener];
-            if opener_run.line != run.line {
-                pending[kind] = None;
-            } else if first_closer_can_close(run) {
-                pending[kind] = None;
-                if opener_run.position + opener_run.length != run.position {
-                    opens_span[opener] = true;
-                    closes_span[index] = true;
-                    span_close[opener] = index;
-                    // A long `||` run opens again with what it has left.
-                    if run.marker == b'|' && run.can_open && run.length >= 4 {
-                        pending[kind] = Some(index);
-                    }
-                    continue;
-                }
+        assign_double_mark_roles(input, run);
+        let mut closed = 0;
+        if run.can_close {
+            while closed <= run.recloses {
+                let Some(opener) = open_marks.pop() else {
+                    break;
+                };
+                opens_span[opener] = true;
+                closes_span[index] = true;
+                span_close[opener] = index;
+                closed += 1;
             }
         }
-        if pending[kind].is_none() && first_closer_can_open(run) {
-            pending[kind] = Some(index);
+        // What is left of the run after closing may still open.
+        if run.can_open && run.length >= 2 * closed + 2 {
+            open_marks.push(index);
         }
     }
 
     for index in 0..delimiters.len() {
         let run = delimiters[index];
-        if !matches!(run.marker, b'*' | b'_') && !run.strike {
+        if run.marker == b'=' {
             continue;
         }
         let bounded_before = index > 0 && {
@@ -2040,7 +1305,6 @@ fn assign_emphasis_roles(
             run.position,
             run.length,
             run.marker,
-            strikethrough,
             bounded_before,
             bounded_after,
         );
@@ -2068,37 +1332,23 @@ fn assign_emphasis_roles(
     }
 }
 
-/// The roles of a `++` / `==` run of `length` bytes at `index`: it opens with
-/// its last two characters and closes with its first two (and then the next
-/// two), each subject to CommonMark flanking of that two-character delimiter.
-/// A run right after an escaped character of the same mark never closes.
-fn double_mark_roles(input: &str, index: usize, length: usize, marker: u8) -> DelimRoles {
+/// Sets the roles of a `==` run: it opens with its last two characters and
+/// closes with its first two (and then the next two), each subject to
+/// CommonMark flanking of that two-character delimiter. A run right after an
+/// escaped character of the same mark never closes.
+fn assign_double_mark_roles(input: &str, run: &mut DelimMarker) {
+    let (index, length) = (run.position, run.length);
     let after_escaped_mark =
-        index > 0 && input.as_bytes()[index - 1] == marker && is_escaped_at(input, index - 1);
-    let can_close = !after_escaped_mark && can_close_delimited(input, index, 2);
-    let recloses = if can_close {
+        index > 0 && input.as_bytes()[index - 1] == run.marker && is_escaped_at(input, index - 1);
+    run.can_close = !after_escaped_mark && can_close_delimited(input, index, 2);
+    run.recloses = if run.can_close {
         (1..length / 2)
             .take_while(|pair| can_close_delimited(input, index + 2 * pair, 2))
             .count()
     } else {
         0
     };
-    DelimRoles {
-        can_open: can_open_delimited(input, index + length - 2, 2),
-        can_close,
-        recloses,
-        ..DelimRoles::default()
-    }
-}
-
-/// What resolving one delimiter pair needs to know beyond the runs themselves.
-#[derive(Clone, Copy)]
-struct EmphasisContext {
-    /// `__` pairs form `Underline` instead of `Strong`.
-    underline: bool,
-    /// How many nesting levels enclose these runs: the inline passes around
-    /// this one, plus the open brackets around a bracket label.
-    depth: usize,
+    run.can_open = can_open_delimited(input, index + length - 2, 2);
 }
 
 /// Resolves recorded delimiter runs into emphasis and mark nodes using the
@@ -2109,10 +1359,13 @@ struct EmphasisContext {
 /// `formed` lists the link, image, footnote, and directive nodes already built
 /// among `nodes`, with their nesting depth, so spans around them count it.
 /// Returns the nodes and the deepest nesting among them.
+///
+/// `depth` counts the nesting levels enclosing these runs: the inline passes
+/// around this one, plus the open brackets around a bracket label.
 fn process_emphasis(
     nodes: Vec<Inline>,
     mut delimiters: Vec<DelimMarker>,
-    context: EmphasisContext,
+    depth: usize,
     formed: &[(usize, usize)],
 ) -> (Vec<Inline>, usize) {
     let mut deepest = formed.iter().map(|&(_, depth)| depth).max().unwrap_or(0);
@@ -2141,65 +1394,27 @@ fn process_emphasis(
     // opener.
     let mut openers_bottom: [Option<usize>; NESTED_MARKERS * 6] = [None; NESTED_MARKERS * 6];
     let mut span_bottom: Vec<Vec<(usize, usize)>> = Vec::new();
-    // The opener each first-closer kind (`||`, `~`, `^`) is waiting to close.
-    let mut pending: [Option<usize>; 3] = [None; 3];
     let mut closer_idx = 0;
-    // The closer whose first-closer bookkeeping has already run, so a closer
-    // revisited for leftover delimiters does not run it twice.
-    let mut visited = NIL;
 
     // Every run at or after `closer_idx` is still linked: runs are only ever
     // unlinked at or before the current closer.
     while closer_idx < delimiters.len() {
         let closer = delimiters[closer_idx];
 
-        let mut first = None;
-        let kind = first_closer_kind(&closer);
-        if let Some(kind) = kind {
-            if visited != closer_idx {
-                if let Some(opener) = pending[kind] {
-                    let opener_run = delimiters[opener];
-                    let usable = links.live[opener]
-                        && first_closer_can_open(&opener_run)
-                        && opener_run.line == closer.line;
-                    if !usable {
-                        pending[kind] = None;
-                    } else if first_closer_can_close(&closer) {
-                        if opener_run.position + opener_run.length == closer.position {
-                            // An empty span: the opener fails for good.
-                            pending[kind] = None;
-                        } else {
-                            first = Some(opener);
-                        }
-                    }
-                }
-            }
-        }
-        visited = closer_idx;
-
-        // A nested opener wins only when it is nearer than the first-closer
-        // opener, so the search stops there.
-        let mut nested = None;
-        if closer.can_close && closer.nests() {
-            nested = nested_opener(
+        let opener = if closer.can_close {
+            nested_opener(
                 &delimiters,
                 &links,
                 &openers_bottom,
                 &span_bottom,
                 closer_idx,
-                first.map(|opener| opener + 1),
-            );
-        }
-
-        let choice = match (nested, first) {
-            (Some(nested), Some(first)) => Some((nested.max(first), nested > first)),
-            (Some(nested), None) => Some((nested, true)),
-            (None, Some(first)) => Some((first, false)),
-            (None, None) => None,
+            )
+        } else {
+            None
         };
 
-        let Some((opener_idx, is_nested)) = choice else {
-            if closer.can_close && closer.nests() {
+        let Some(opener_idx) = opener else {
+            if closer.can_close {
                 // No opener found: remember how far we searched so future
                 // closers of the same key skip the same dead range.
                 let key = openers_bottom_key(&closer);
@@ -2216,34 +1431,19 @@ fn process_emphasis(
                     None => openers_bottom[key] = Some(closer_idx),
                 }
             }
-            if let Some(kind) = kind {
-                if pending[kind].is_none() && first_closer_can_open(&closer) {
-                    pending[kind] = Some(closer_idx);
-                }
-            }
-            if !closer.can_open && !closer.single_open {
+            if !closer.can_open {
                 links.unlink(closer_idx);
             }
             closer_idx += 1;
             continue;
         };
 
-        if !is_nested {
-            if let Some(kind) = kind {
-                pending[kind] = None;
-            }
-        }
-        let (used, wrap) = pair_shape(
-            &delimiters[opener_idx],
-            &delimiters[closer_idx],
-            is_nested,
-            context,
-        );
+        let (used, wrap) = pair_shape(&delimiters[opener_idx], &delimiters[closer_idx]);
 
         // Drop delimiters strictly between the opener and closer: they could not
         // match outward across this newly closed span.
         let inner = links.close_span(opener_idx, closer_idx);
-        let fits = context.depth + inner.total < MAX_INLINE_NESTING
+        let fits = depth + inner.total < MAX_INLINE_NESTING
             && (wrap.is_mark() || inner.emphasis < MAX_EMPHASIS_NESTING);
         if fits {
             apply_emphasis(
@@ -2271,50 +1471,25 @@ fn process_emphasis(
             delimiters[closer_idx].length = 0;
             links.nesting_after[opener_idx] = inner;
         }
-        if matches!(delimiters[opener_idx].marker, b'+' | b'=' | b'|') {
-            // These runs open only with their last two characters.
+        if closer.marker == b'=' {
+            // `==` runs open only with their last two characters, and a long
+            // run closes a second time only with its next two characters.
             delimiters[opener_idx].can_open = false;
-        }
-        if is_nested && matches!(closer.marker, b'+' | b'=') {
-            // A long run closes a second time only with its next two
-            // characters.
             let run = &mut delimiters[closer_idx];
             run.can_close = run.recloses > 0;
             run.recloses = run.recloses.saturating_sub(1);
-        }
-        if !is_nested {
-            // A run consumed as a one-character subscript/superscript closer
-            // leaves its other characters literal.
-            if closer.marker == b'~' {
-                delimiters[closer_idx].can_open = false;
-                delimiters[closer_idx].can_close = false;
-            }
-            delimiters[closer_idx].single_close = false;
         }
 
         if delimiters[opener_idx].length == 0 {
             links.unlink(opener_idx);
         }
-        let leftover = delimiters[closer_idx];
-        if leftover.length == 0 {
+        if delimiters[closer_idx].length == 0 {
             links.unlink(closer_idx);
             closer_idx += 1;
-        } else if !is_nested {
-            // A first-closer run whose leftover can still open waits for the
-            // next closer of its kind.
-            if let Some(kind) = kind {
-                if first_closer_can_open(&leftover) {
-                    pending[kind] = Some(closer_idx);
-                }
-            }
-            if !first_closer_can_open(&leftover) {
-                links.unlink(closer_idx);
-            }
-            closer_idx += 1;
         }
-        // When a nested closer still has delimiters left it stays the active
-        // closer so the leftover can match an earlier opener (e.g. `***foo*`
-        // keeps `**`).
+        // When a closer still has delimiters left it stays the active closer
+        // so the leftover can match an earlier opener (e.g. `***foo*` keeps
+        // `**`).
     }
 
     // Adjacent text nodes can appear where unmatched delimiter runs ended up
@@ -2326,26 +1501,24 @@ fn process_emphasis(
 }
 
 /// The markers that pair through nested roles, in `openers_bottom` order.
-const NESTED_MARKERS: usize = 5;
+const NESTED_MARKERS: usize = 4;
 
 /// The nearest live opener before `closer_idx` that the nested closer there can
 /// pair with, searching no lower than its `openers_bottom` bound.
 ///
-/// A closer that can also open does not close across a mark span enclosing it:
+/// A closer that can also open does not close across a `==` span enclosing it:
 /// it searches no lower than that span's opener, bounded per span by
-/// `span_bottom` the way `openers_bottom` bounds the whole list. `floor` stops
-/// the search at a nearer first-closer opener.
+/// `span_bottom` the way `openers_bottom` bounds the whole list.
 fn nested_opener(
     delimiters: &[DelimMarker],
     links: &DelimiterLinks,
     openers_bottom: &[Option<usize>],
     span_bottom: &[Vec<(usize, usize)>],
     closer_idx: usize,
-    floor: Option<usize>,
 ) -> Option<usize> {
     let closer = &delimiters[closer_idx];
     let key = openers_bottom_key(closer);
-    let mut bottom = openers_bottom[key].max(floor);
+    let mut bottom = openers_bottom[key];
     if let Some(span) = span_floor(closer) {
         let span_floor = span_bottom
             .get(span)
@@ -2376,63 +1549,22 @@ fn span_floor(closer: &DelimMarker) -> Option<usize> {
     (closer.can_open && closer.enclosed_from != NIL).then_some(closer.enclosed_from)
 }
 
-/// The `pending` slot of a run with first-closer roles: `||`, `~`, or `^`.
-fn first_closer_kind(run: &DelimMarker) -> Option<usize> {
-    match run.marker {
-        b'|' => Some(0),
-        b'~' if run.single_open || run.single_close => Some(1),
-        b'^' => Some(2),
-        _ => None,
-    }
-}
-
-fn first_closer_can_open(run: &DelimMarker) -> bool {
-    if run.marker == b'|' {
-        run.can_open && run.length >= 2
-    } else {
-        run.single_open
-    }
-}
-
-fn first_closer_can_close(run: &DelimMarker) -> bool {
-    if run.marker == b'|' {
-        run.can_close && run.length >= 2
-    } else {
-        run.single_close
-    }
-}
-
 /// How many characters a pair consumes from each run, and the node it forms.
-fn pair_shape(
-    opener: &DelimMarker,
-    closer: &DelimMarker,
-    nested: bool,
-    context: EmphasisContext,
-) -> (usize, EmphasisWrap) {
+fn pair_shape(opener: &DelimMarker, closer: &DelimMarker) -> (usize, EmphasisWrap) {
     match closer.marker {
-        b'~' if nested => {
-            // Strikethrough consumes the whole (equal-length) run on each side at
-            // once; the marker width selects the `Delete` flavour.
-            let marker = if closer.length >= 2 {
-                DeleteMarker::DoubleTilde
-            } else {
-                DeleteMarker::SingleTilde
-            };
-            (closer.length, EmphasisWrap::Delete(marker))
-        }
-        b'~' => (1, EmphasisWrap::Subscript),
-        b'^' => (1, EmphasisWrap::Superscript),
-        b'+' => (2, EmphasisWrap::Insert),
+        // Strikethrough consumes the whole `~~` run on each side.
+        b'~' => (2, EmphasisWrap::Delete),
         b'=' => (2, EmphasisWrap::Mark),
-        b'|' => (2, EmphasisWrap::Spoiler),
         marker => {
-            let strong = opener.length >= 2 && closer.length >= 2;
-            if !strong {
-                (1, EmphasisWrap::Emphasis)
-            } else if marker == b'_' && context.underline {
-                (2, EmphasisWrap::Underline)
+            let delimiter = if marker == b'_' {
+                EmphasisDelimiter::Underscore
             } else {
-                (2, EmphasisWrap::Strong)
+                EmphasisDelimiter::Asterisk
+            };
+            if opener.length >= 2 && closer.length >= 2 {
+                (2, EmphasisWrap::Strong(delimiter))
+            } else {
+                (1, EmphasisWrap::Emphasis(delimiter))
             }
         }
     }
@@ -2470,12 +1602,7 @@ fn merge_adjacent_text(nodes: &mut Vec<Inline>) {
             Inline::Emphasis(node) => merge_adjacent_text(&mut node.children),
             Inline::Strong(node) => merge_adjacent_text(&mut node.children),
             Inline::Delete(node) => merge_adjacent_text(&mut node.children),
-            Inline::Underline(node) => merge_adjacent_text(&mut node.children),
-            Inline::Insert(node) => merge_adjacent_text(&mut node.children),
             Inline::Mark(node) => merge_adjacent_text(&mut node.children),
-            Inline::Spoiler(node) => merge_adjacent_text(&mut node.children),
-            Inline::Subscript(node) => merge_adjacent_text(&mut node.children),
-            Inline::Superscript(node) => merge_adjacent_text(&mut node.children),
             _ => {}
         }
     }
@@ -2487,8 +1614,7 @@ fn openers_bottom_key(closer: &DelimMarker) -> usize {
     let marker = match closer.marker {
         b'_' => 1,
         b'~' => 2,
-        b'+' => 3,
-        b'=' => 4,
+        b'=' => 3,
         _ => 0,
     };
     let both = usize::from(closer.can_open && closer.can_close);
@@ -2506,11 +1632,12 @@ fn openers_bottom_key(closer: &DelimMarker) -> usize {
 /// Nested opener/closer compatibility, including CommonMark's rule of three.
 fn emphasis_delimiters_match(opener: &DelimMarker, closer: &DelimMarker) -> bool {
     match opener.marker {
-        // GFM strikethrough: opener and closer runs must be the same length (a
-        // `~` never pairs with `~~`). The rule of three does not apply to `~`.
-        b'~' => opener.length == closer.length,
-        // `++` / `==` pair two characters from each run.
-        b'+' | b'=' => opener.length >= 2 && closer.length >= 2,
+        // GFM strikethrough: only runs of exactly two `~` are recorded, and a
+        // pair consumes both whole, so any two live runs match. The rule of
+        // three does not apply to `~`.
+        b'~' => true,
+        // `==` pairs two characters from each run.
+        b'=' => opener.length >= 2 && closer.length >= 2,
         _ => {
             // Rule of three: if either delimiter can both open and close, the
             // sum of the lengths of the runs containing them must not be a
@@ -2533,22 +1660,17 @@ fn emphasis_delimiters_match(opener: &DelimMarker, closer: &DelimMarker) -> bool
 /// The node a matched delimiter pair collapses into.
 #[derive(Clone, Copy)]
 enum EmphasisWrap {
-    Emphasis,
-    Strong,
-    Delete(DeleteMarker),
-    Underline,
-    Insert,
+    Emphasis(EmphasisDelimiter),
+    Strong(EmphasisDelimiter),
+    Delete,
     Mark,
-    Spoiler,
-    Subscript,
-    Superscript,
 }
 
 impl EmphasisWrap {
     /// Whether the node counts toward `MAX_INLINE_NESTING` rather than
     /// `MAX_EMPHASIS_NESTING`.
     fn is_mark(self) -> bool {
-        !matches!(self, Self::Emphasis | Self::Strong | Self::Delete(_))
+        matches!(self, Self::Mark)
     }
 }
 
@@ -2593,19 +1715,18 @@ fn apply_emphasis(
             .map(|(start, end)| Span::new(start, end)),
     );
     nodes.wrap_between(opener_node, closer_node, |children| match wrap {
-        EmphasisWrap::Strong => Inline::Strong(Strong { meta, children }),
-        EmphasisWrap::Emphasis => Inline::Emphasis(Emphasis { meta, children }),
-        EmphasisWrap::Delete(marker) => Inline::Delete(Delete {
+        EmphasisWrap::Strong(delimiter) => Inline::Strong(Strong {
             meta,
-            marker,
+            delimiter,
             children,
         }),
-        EmphasisWrap::Underline => Inline::Underline(Underline { meta, children }),
-        EmphasisWrap::Insert => Inline::Insert(Insert { meta, children }),
+        EmphasisWrap::Emphasis(delimiter) => Inline::Emphasis(Emphasis {
+            meta,
+            delimiter,
+            children,
+        }),
+        EmphasisWrap::Delete => Inline::Delete(Delete { meta, children }),
         EmphasisWrap::Mark => Inline::Mark(Mark { meta, children }),
-        EmphasisWrap::Spoiler => Inline::Spoiler(Spoiler { meta, children }),
-        EmphasisWrap::Subscript => Inline::Subscript(Subscript { meta, children }),
-        EmphasisWrap::Superscript => Inline::Superscript(Superscript { meta, children }),
     });
 
     // Drop any placeholder text node that has been fully consumed so leftover
@@ -2637,9 +1758,6 @@ struct BracketOpener {
     /// `delimiters.len()` when the opener was pushed: later runs are in its
     /// label.
     delimiter_bottom: usize,
-    /// For an inline footnote, the dormant `^` superscript run recorded before
-    /// it, woken if the footnote does not form.
-    caret: Option<usize>,
 }
 
 /// What a `]` resolves a link-kind opener to.
@@ -2730,7 +1848,6 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
             destination: resource.destination,
             destination_kind: resource.destination_kind,
             title: resource.title,
-            title_kind: resource.title_kind,
             children,
         }),
         (LinkTarget::Resource(resource), true) => Inline::Image(Image {
@@ -2738,7 +1855,6 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
             destination: resource.destination,
             destination_kind: resource.destination_kind,
             title: resource.title,
-            title_kind: resource.title_kind,
             alt: children,
         }),
         (LinkTarget::Reference { identifier, kind }, false) => {
@@ -2762,19 +1878,12 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
     }
 }
 
-/// An autolink: a `Link` spanning `span` to `destination`, whose one child is
-/// the URL as written, `text`, spanning `text_span`.
-fn autolink_node(span: Span, text_span: Span, destination: String, text: &str) -> Inline {
-    Inline::Link(Link {
+/// An autolink written in `form` as `text`, spanning `span`.
+fn autolink_node(form: AutolinkForm, span: Span, text: &str) -> Inline {
+    Inline::Autolink(Autolink {
         meta: NodeMeta::new(Some(span)),
-        destination,
-        destination_kind: LinkDestinationKind::Bare,
-        title: None,
-        title_kind: None,
-        children: vec![Inline::Text(Text {
-            meta: NodeMeta::new(Some(text_span)),
-            value: text.into(),
-        })],
+        form,
+        text: text.into(),
     })
 }
 
@@ -2784,31 +1893,20 @@ fn autolink_node(span: Span, text_span: Span, destination: String, text: &str) -
 fn demote_links(nodes: &mut Vec<Inline>) {
     for node in nodes.iter_mut() {
         match node {
-            Inline::Link(link) => {
-                let value = link
-                    .children
-                    .iter()
-                    .map(|child| match child {
-                        Inline::Text(text) => text.value.as_str(),
-                        _ => "",
-                    })
-                    .collect::<String>();
+            Inline::Autolink(autolink) => {
                 *node = Inline::Text(Text {
-                    meta: link.meta.clone(),
-                    value,
+                    meta: autolink.meta.clone(),
+                    value: core::mem::take(&mut autolink.text),
                 });
             }
             Inline::Emphasis(node) => demote_links(&mut node.children),
             Inline::Strong(node) => demote_links(&mut node.children),
-            Inline::Underline(node) => demote_links(&mut node.children),
             Inline::Delete(node) => demote_links(&mut node.children),
-            Inline::Insert(node) => demote_links(&mut node.children),
             Inline::Mark(node) => demote_links(&mut node.children),
-            Inline::Spoiler(node) => demote_links(&mut node.children),
-            Inline::Subscript(node) => demote_links(&mut node.children),
-            Inline::Superscript(node) => demote_links(&mut node.children),
             Inline::InlineFootnote(node) => demote_links(&mut node.children),
             Inline::TextDirective(node) => demote_links(&mut node.label),
+            Inline::Image(node) => demote_links(&mut node.alt),
+            Inline::ImageReference(node) => demote_links(&mut node.alt),
             _ => {}
         }
     }
@@ -2839,6 +1937,18 @@ impl Brackets {
         }
     }
 
+    /// Whether a `[` is open: pushed and not yet closed by a `]`, as a link or
+    /// image opener or as text left for want of nesting room. An inline
+    /// footnote's `^[` opens no link text. The stack is at most the nesting
+    /// limit deep.
+    fn open(&self) -> bool {
+        self.overflow > 0
+            || self
+                .openers
+                .iter()
+                .any(|opener| !matches!(opener.kind, BracketKind::InlineFootnote))
+    }
+
     /// Keeps every open `[` from forming a link around what follows.
     fn close_links(&mut self) {
         self.link_floor = self.openers.len();
@@ -2850,7 +1960,6 @@ impl Brackets {
 /// depth.
 fn take_label(
     input: &str,
-    options: &SyntaxOptions,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
@@ -2870,21 +1979,8 @@ fn take_label(
         .into_iter()
         .map(|(node, marks)| (node - first, marks))
         .collect();
-    assign_emphasis_roles(
-        input,
-        &mut runs,
-        options.constructs.gfm_strikethrough,
-        options.constructs.underline,
-    );
-    process_emphasis(
-        children,
-        runs,
-        EmphasisContext {
-            underline: options.constructs.underline,
-            depth,
-        },
-        &formed,
-    )
+    assign_emphasis_roles(input, &mut runs);
+    process_emphasis(children, runs, depth, &formed)
 }
 
 /// Removes `count` trailing delimiter characters from a placeholder text node.
@@ -2923,6 +2019,8 @@ trait Lookups {
     fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize>;
     /// The first unescaped `<` or `>`, or line break, at or after `from`.
     fn angle_destination_stop(&mut self, from: usize) -> Option<usize>;
+    /// The first `$` not right after a `\` at or after `from`.
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize>;
 }
 
 struct DirectLookups<'a> {
@@ -2941,10 +2039,14 @@ impl Lookups for DirectLookups<'_> {
     fn angle_destination_stop(&mut self, from: usize) -> Option<usize> {
         (from..self.input.len()).find(|index| is_angle_destination_stop(self.input, *index))
     }
+
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize> {
+        (from..self.input.len()).find(|index| is_unescaped_dollar(self.input, *index))
+    }
 }
 
 /// The patterns `InlineLookups::find` keeps position tables for.
-const CACHED_PATTERNS: [&str; 7] = [">", "-->", "?>", "]]>", "\"", "'", "`$"];
+const CACHED_PATTERNS: [&str; 8] = [">", "-->", "?>", "]]>", "\"", "'", "`$", "$$"];
 
 /// `Lookups` over one inline input, each answered from a table built on first
 /// use.
@@ -2953,6 +2055,7 @@ struct InlineLookups<'a> {
     patterns: [Positions; CACHED_PATTERNS.len()],
     backtick_runs: Option<BTreeMap<usize, Vec<usize>>>,
     angle_destination_stops: Positions,
+    unescaped_dollars: Positions,
 }
 
 impl<'a> InlineLookups<'a> {
@@ -2962,6 +2065,7 @@ impl<'a> InlineLookups<'a> {
             patterns: Default::default(),
             backtick_runs: None,
             angle_destination_stops: Positions::default(),
+            unescaped_dollars: Positions::default(),
         }
     }
 }
@@ -2994,6 +2098,15 @@ impl Lookups for InlineLookups<'_> {
                 .collect()
         })
     }
+
+    fn unescaped_dollar(&mut self, from: usize) -> Option<usize> {
+        let input = self.input;
+        self.unescaped_dollars.first_at_or_after(from, || {
+            (0..input.len())
+                .filter(|index| is_unescaped_dollar(input, *index))
+                .collect()
+        })
+    }
 }
 
 /// Start offsets of every maximal backtick run, grouped by run length.
@@ -3019,6 +2132,13 @@ fn backtick_run_len(input: &str, index: usize) -> usize {
         .count()
 }
 
+/// A `$` that single-dollar math reads as a delimiter: one right after a `\`
+/// is content, whether or not that `\` is itself escaped.
+fn is_unescaped_dollar(input: &str, index: usize) -> bool {
+    let bytes = input.as_bytes();
+    bytes[index] == b'$' && (index == 0 || bytes[index - 1] != b'\\')
+}
+
 fn is_angle_destination_stop(input: &str, index: usize) -> bool {
     match input.as_bytes()[index] {
         b'<' | b'>' => !is_escaped_at(input, index),
@@ -3036,9 +2156,6 @@ struct InlineScan<'a> {
     reference_label_ends: PathMemo,
     wikilink_closes: PathMemo,
     directive_attribute_closes: PathMemo,
-    mdx_expression_closes: BracketMemo,
-    jsx: Option<JsxIndex>,
-    single_tilde_delete_closes: Positions,
     literal_autolinks: LiteralAutolinkScan,
 }
 
@@ -3051,9 +2168,6 @@ impl<'a> InlineScan<'a> {
             reference_label_ends: PathMemo::default(),
             wikilink_closes: PathMemo::default(),
             directive_attribute_closes: PathMemo::default(),
-            mdx_expression_closes: BracketMemo::default(),
-            jsx: None,
-            single_tilde_delete_closes: Positions::default(),
             literal_autolinks: LiteralAutolinkScan::default(),
         }
     }
@@ -3095,42 +2209,6 @@ impl<'a> InlineScan<'a> {
             })
     }
 
-    /// The `}` closing the inline MDX expression opening at `open`.
-    fn mdx_expression_close(&mut self, open: usize) -> Option<usize> {
-        let input = self.input;
-        if input.as_bytes().get(open) != Some(&b'{') {
-            return None;
-        }
-        self.mdx_expression_closes
-            .resolve(
-                (input.len() + 1) * MDX_BRACE_STATES,
-                (open + 1) * MDX_BRACE_STATES,
-                |node| mdx_expression_step(input, node, false),
-            )
-            .map(|node| node / MDX_BRACE_STATES)
-    }
-
-    /// The end of the inline MDX JSX element opening at `start`.
-    fn mdx_jsx_end(&mut self, start: usize) -> Option<usize> {
-        let input = self.input;
-        let expressions = &mut self.mdx_expression_closes;
-        self.jsx
-            .get_or_insert_with(|| JsxIndex::new(input, false, expressions))
-            .element_end(start)
-            .map(|end| end + 1)
-    }
-
-    /// The first `~` at or after `start` that can close a single-tilde delete.
-    fn single_tilde_delete_close(&mut self, start: usize) -> Option<usize> {
-        let input = self.input;
-        self.single_tilde_delete_closes
-            .first_at_or_after(start, || {
-                (0..input.len())
-                    .filter(|index| is_single_tilde_delete_close(input, *index))
-                    .collect()
-            })
-    }
-
     /// `find_directive_attributes_close`, memoized.
     fn directive_attributes_close(&mut self, open: usize) -> Option<usize> {
         let input = self.input;
@@ -3151,18 +2229,10 @@ impl<'a> InlineScan<'a> {
 fn parse_inlines(
     input: &str,
     map: &SourceMap,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
-    parse_inlines_in(
-        input,
-        map,
-        InlineState::default(),
-        options,
-        definitions,
-        diagnostics,
-    )
+    parse_inlines_in(input, map, InlineState::default(), definitions, diagnostics)
 }
 
 /// The inline content of a table cell, whose input reads each `\|` as `|`:
@@ -3172,7 +2242,6 @@ fn parse_cell_inlines(
     input: &str,
     map: &SourceMap,
     escaped_pipes: Vec<usize>,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
@@ -3180,14 +2249,13 @@ fn parse_cell_inlines(
         escaped_pipes,
         ..InlineState::default()
     };
-    parse_inlines_in(input, map, state, options, definitions, diagnostics)
+    parse_inlines_in(input, map, state, definitions, diagnostics)
 }
 
 fn parse_inlines_in(
     input: &str,
     map: &SourceMap,
     mut state: InlineState,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
@@ -3196,8 +2264,7 @@ fn parse_inlines_in(
         return Vec::new();
     }
     let first_diagnostic = diagnostics.len();
-    let mut nodes =
-        parse_inlines_with_context(input, 0, options, definitions, diagnostics, &mut state);
+    let mut nodes = parse_inlines_with_context(input, 0, definitions, diagnostics, &mut state);
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
     nodes
 }
@@ -3236,7 +2303,6 @@ struct InlinePass<'p, 'a> {
 fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
@@ -3251,7 +2317,7 @@ fn parse_inlines_with_context(
         })];
     }
     state.depth += 1;
-    let nodes = parse_inline_content(input, base_offset, options, definitions, diagnostics, state);
+    let nodes = parse_inline_content(input, base_offset, definitions, diagnostics, state);
     state.depth -= 1;
     nodes
 }
@@ -3259,7 +2325,6 @@ fn parse_inlines_with_context(
 fn parse_inline_content(
     input: &str,
     base_offset: usize,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
@@ -3274,23 +2339,18 @@ fn parse_inline_content(
     // literal text node and record it here so `process_emphasis` can rewrite the
     // flat node list into emphasis and mark nodes (or leave it as text).
     let mut delimiters: Vec<DelimMarker> = Vec::new();
-    let mut lines = LineCounter::default();
     let mut brackets = Brackets::new();
-    // The run and offset of the `^` a superscript is waiting to close.
-    let mut superscript_open: Option<(usize, usize)> = None;
     let mut pass = InlinePass {
         state,
         scan: InlineScan::new(input),
     };
     // A literal autolink holds `://`, `www.`, or an email's `@`; content
     // without any of them is not scanned for one at each position.
-    let literal_autolinks = (options.constructs.gfm_autolink_literal
-        || options.constructs.relaxed_autolinks)
-        && (bytes.contains(&b'@')
-            || input.contains("://")
-            || bytes
-                .windows(4)
-                .any(|window| window.eq_ignore_ascii_case(b"www.")));
+    let literal_autolinks = bytes.contains(&b'@')
+        || input.contains("://")
+        || bytes
+            .windows(4)
+            .any(|window| window.eq_ignore_ascii_case(b"www."));
 
     while index < bytes.len() {
         if bytes[index] == b'\\' {
@@ -3312,12 +2372,11 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'&' {
-            if let Some((end, value)) = parse_character_reference(input, index) {
+            if let Some((end, _)) = parse_character_reference(input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::CharacterReference(CharacterReference {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     reference: input[index..end].into(),
-                    value,
                 }));
                 index = end;
                 text_start = index;
@@ -3325,7 +2384,7 @@ fn parse_inline_content(
             }
         }
 
-        // A cell's `|` read from `\|` is an escape, never a spoiler bar.
+        // A cell's `|` read from `\|` is an escape.
         if bytes[index] == b'|' && pass.state.is_escaped_pipe(base_offset + index) {
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
             nodes.push(Inline::Escape(Escape {
@@ -3403,15 +2462,11 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'`' {
-            if let Some((end, code_span)) =
-                parse_code_span_with(&mut pass.scan.lookups, input, index)
-            {
+            if let Some((end, value)) = parse_code_span_with(&mut pass.scan.lookups, input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Code(CodeInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
-                    value: code_span.value,
-                    raw: code_span.raw,
-                    fence_length: code_span.fence_length,
+                    value,
                 }));
                 index = end;
                 text_start = index;
@@ -3437,55 +2492,16 @@ fn parse_inline_content(
             }
         }
 
-        if options.constructs.spoiler && bytes[index] == b'|' {
-            // A cell's escaped pipe ends the run and is no bar before it.
-            let bars = delimiter_byte_run_len(input, index, b'|');
-            let run_len = (index..index + bars)
-                .position(|at| pass.state.is_escaped_pipe(base_offset + at))
-                .unwrap_or(bars);
-            if run_len >= 2 {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                // A spoiler run opens with its last two bars and closes with
-                // its first two, unless a bar precedes it.
-                let roles = DelimRoles {
-                    can_open: true,
-                    can_close: index == 0
-                        || bytes[index - 1] != b'|'
-                        || pass.state.is_escaped_pipe(base_offset + index - 1),
-                    ..DelimRoles::default()
-                };
-                push_delimiter(
-                    &mut nodes,
-                    &mut delimiters,
-                    &mut lines,
-                    input,
-                    index,
-                    base_offset,
-                    b'|',
-                    run_len,
-                    roles,
-                );
-                index += run_len;
-                text_start = index;
-                continue;
-            }
-        }
-
-        if bytes[index] == b'*' && delimiter_byte_run_start(input, index, b'*') == index {
+        if bytes[index] == b'*' && starts_delimiter_run(input, index, b'*') {
             let run_len = delimiter_byte_run_len(input, index, b'*');
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            // Roles are settled by `assign_emphasis_roles`.
-            let roles = DelimRoles::default();
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
-                &mut lines,
-                input,
                 index,
                 base_offset,
                 b'*',
                 run_len,
-                roles,
             );
             index += run_len;
             text_start = index;
@@ -3493,25 +2509,25 @@ fn parse_inline_content(
         }
 
         // Core `_` emphasis/strong is resolved by the delimiter stack, just like
-        // `*`; with underline enabled, a `__` pair forms `Underline` instead of
-        // `Strong`.
-        if bytes[index] == b'_' && delimiter_byte_run_start(input, index, b'_') == index {
+        // `*`.
+        if bytes[index] == b'_' && starts_delimiter_run(input, index, b'_') {
             // A leading `_` can begin a GFM email local part (`_a@b.c`); try the
             // literal autolink before recording the `_` as an emphasis
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
             if literal_autolinks {
-                if let Some((end, destination)) = parse_literal_autolink(
+                if let Some((end, _)) = parse_literal_autolink(
                     input,
                     index,
-                    options.constructs.gfm_autolink_literal,
-                    options.constructs.relaxed_autolinks,
-                    wikilinks_enabled(options),
                     &mut pass.scan.literal_autolinks,
+                    !brackets.open(),
                 ) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    let span = Span::new(base_offset + index, base_offset + end);
-                    nodes.push(autolink_node(span, span, destination, &input[index..end]));
+                    nodes.push(autolink_node(
+                        AutolinkForm::Literal,
+                        Span::new(base_offset + index, base_offset + end),
+                        &input[index..end],
+                    ));
                     index = end;
                     text_start = index;
                     continue;
@@ -3519,42 +2535,30 @@ fn parse_inline_content(
             }
             let run_len = delimiter_byte_run_len(input, index, b'_');
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            // Roles are settled by `assign_emphasis_roles`.
-            let roles = DelimRoles::default();
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
-                &mut lines,
-                input,
                 index,
                 base_offset,
                 b'_',
                 run_len,
-                roles,
             );
             index += run_len;
             text_start = index;
             continue;
         }
 
-        if (options.constructs.insert && bytes[index] == b'+')
-            || (options.constructs.highlight && bytes[index] == b'=')
-        {
-            let marker = bytes[index];
-            let run_len = delimiter_byte_run_len(input, index, marker);
+        if bytes[index] == b'=' {
+            let run_len = delimiter_byte_run_len(input, index, b'=');
             if run_len >= 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                let roles = double_mark_roles(input, index, run_len, marker);
                 push_delimiter(
                     &mut nodes,
                     &mut delimiters,
-                    &mut lines,
-                    input,
                     index,
                     base_offset,
-                    marker,
+                    b'=',
                     run_len,
-                    roles,
                 );
                 index += run_len;
                 text_start = index;
@@ -3564,122 +2568,36 @@ fn parse_inline_content(
 
         let bracket_room = pass.state.depth - 1 + brackets.openers.len() < MAX_INLINE_NESTING;
 
-        // A `^` that a superscript on its line is waiting for closes it, even
-        // before a `[`.
-        let closes_superscript = options.constructs.superscript
-            && bytes[index] == b'^'
-            && superscript_open.is_some_and(|(run, position)| {
-                // A run taken into or dropped with a bracket label is gone.
-                delimiters.get(run).is_some_and(|run| {
-                    run.position == position && run.line == lines.line_at(input, index)
-                }) && position + 1 != index
-            });
-
-        // `^[` opens an inline footnote. Its `^` is recorded as a dormant
-        // superscript run, woken if the footnote does not form.
-        if options.constructs.inline_footnote
-            && options.constructs.footnote_reference
-            && bracket_room
-            && !closes_superscript
-            && bytes[index] == b'^'
-            && bytes.get(index + 1) == Some(&b'[')
-        {
+        // `^[` opens an inline footnote.
+        if bracket_room && bytes[index] == b'^' && bytes.get(index + 1) == Some(&b'[') {
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            let caret = if options.constructs.superscript {
-                push_delimiter(
-                    &mut nodes,
-                    &mut delimiters,
-                    &mut lines,
-                    input,
-                    index,
-                    base_offset,
-                    b'^',
-                    1,
-                    DelimRoles::default(),
-                );
-                Some(delimiters.len() - 1)
-            } else {
-                push_text(&mut nodes, base_offset + index, "^");
-                None
-            };
+            push_text(&mut nodes, base_offset + index, "^");
             push_text(&mut nodes, base_offset + index + 1, "[");
             brackets.openers.push(BracketOpener {
                 kind: BracketKind::InlineFootnote,
                 node_index: nodes.len() - 1,
                 position: index,
                 delimiter_bottom: delimiters.len(),
-                caret,
             });
             index += 2;
             text_start = index;
             continue;
         }
 
-        // A `^` opens a superscript unless it starts an inline footnote, and
-        // closes one at the next `^` on its line.
-        if options.constructs.superscript && bytes[index] == b'^' {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            let roles = DelimRoles {
-                single_open: !(options.constructs.inline_footnote
-                    && bytes.get(index + 1) == Some(&b'[')),
-                single_close: true,
-                ..DelimRoles::default()
-            };
-            push_delimiter(
-                &mut nodes,
-                &mut delimiters,
-                &mut lines,
-                input,
-                index,
-                base_offset,
-                b'^',
-                1,
-                roles,
-            );
-            // Track the superscript this run leaves open, as the stack will
-            // pair it, so a later `^[` knows whether its `^` closes one.
-            superscript_open = if !closes_superscript && roles.single_open {
-                Some((delimiters.len() - 1, index))
-            } else {
-                None
-            };
-            index += 1;
-            text_start = index;
-            continue;
-        }
-
-        // A `~` run is recorded once for both of its possible roles: GFM
-        // strikethrough pairs runs of equal length (2, or 1 in single-tilde
-        // mode) like `*`/`_`; a subscript opens with a lone `~` and closes at
-        // the first `~` that follows on its line.
-        if (options.constructs.gfm_strikethrough || options.constructs.subscript)
-            && bytes[index] == b'~'
-        {
+        // A run of exactly two `~` may open or close GFM strikethrough.
+        // The run is measured only from its start, so the bytes of a longer
+        // run, which go on as text one at a time, are not measured again.
+        if bytes[index] == b'~' && starts_delimiter_run(input, index, b'~') {
             let run_len = delimiter_byte_run_len(input, index, b'~');
-            let mut roles = DelimRoles::default();
-            if options.constructs.gfm_strikethrough
-                && delimiter_byte_run_start(input, index, b'~') == index
-                && (run_len == 2 || (run_len == 1 && options.parse.single_tilde_strikethrough))
-            {
-                roles.strike = true;
-            }
-            if options.constructs.subscript {
-                roles.single_open = starts_exact_byte_run(input, index, b'~', 1)
-                    && !single_tilde_delete_takes_precedence(options, input, index, &mut pass.scan);
-                roles.single_close = true;
-            }
-            if roles.strike || roles.single_open || roles.single_close {
+            if run_len == 2 {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 push_delimiter(
                     &mut nodes,
                     &mut delimiters,
-                    &mut lines,
-                    input,
                     index,
                     base_offset,
                     b'~',
                     run_len,
-                    roles,
                 );
                 index += run_len;
                 text_start = index;
@@ -3692,10 +2610,12 @@ fn parse_inline_content(
             // link at a lone `[`, and the `!` makes it an embed; it takes no
             // bracket nesting, so it forms past the limit too.
             if let Some((end, wikilink)) =
-                parse_wikilink(input, index + 1, base_offset, options, &mut pass.scan)
+                parse_wikilink(input, index + 1, base_offset, &mut pass.scan)
             {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(embed(wikilink, base_offset + index));
+                // A wikilink is a link: no open bracket forms a link around it.
+                brackets.close_links();
                 index = end;
                 text_start = index;
                 continue;
@@ -3711,7 +2631,6 @@ fn parse_inline_content(
                 node_index: nodes.len() - 1,
                 position: index,
                 delimiter_bottom: delimiters.len(),
-                caret: None,
             });
             index += 2;
             text_start = index;
@@ -3719,11 +2638,11 @@ fn parse_inline_content(
         }
 
         if bytes[index] == b'[' {
-            if let Some((end, wikilink)) =
-                parse_wikilink(input, index, base_offset, options, &mut pass.scan)
+            if let Some((end, wikilink)) = parse_wikilink(input, index, base_offset, &mut pass.scan)
             {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(wikilink);
+                brackets.close_links();
                 index = end;
                 text_start = index;
                 continue;
@@ -3736,7 +2655,6 @@ fn parse_inline_content(
                     node_index: nodes.len() - 1,
                     position: index,
                     delimiter_bottom: delimiters.len(),
-                    caret: None,
                 });
                 index += 1;
                 text_start = index;
@@ -3754,7 +2672,6 @@ fn parse_inline_content(
                 input,
                 base_offset,
                 index,
-                options,
                 definitions,
                 &mut nodes,
                 &mut delimiters,
@@ -3767,7 +2684,7 @@ fn parse_inline_content(
             }
         }
 
-        if bytes[index] == b'$' && options.constructs.math_inline {
+        if bytes[index] == b'$' {
             if let Some((end, value, kind)) =
                 parse_math_inline(&mut pass.scan.lookups, input, index)
             {
@@ -3801,20 +2718,21 @@ fn parse_inline_content(
             }
         }
 
-        // A bare URL is an autolink even inside an open bracket; if the bracket
+        // Inside an open `[` only an email address links; if the bracket
         // forms a link, `demote_links` turns it back into text.
         if literal_autolinks {
-            if let Some((end, destination)) = parse_literal_autolink(
+            if let Some((end, _)) = parse_literal_autolink(
                 input,
                 index,
-                options.constructs.gfm_autolink_literal,
-                options.constructs.relaxed_autolinks,
-                wikilinks_enabled(options),
                 &mut pass.scan.literal_autolinks,
+                !brackets.open(),
             ) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                let span = Span::new(base_offset + index, base_offset + end);
-                nodes.push(autolink_node(span, span, destination, &input[index..end]));
+                nodes.push(autolink_node(
+                    AutolinkForm::Literal,
+                    Span::new(base_offset + index, base_offset + end),
+                    &input[index..end],
+                ));
                 index = end;
                 text_start = index;
                 continue;
@@ -3824,12 +2742,11 @@ fn parse_inline_content(
         if bytes[index] == b'<' {
             if let Some(end) = pass.scan.lookups.find(">", index).map(|close| close + 1) {
                 let uri = &input[index + 1..end - 1];
-                if let Some(destination) = angle_autolink_destination(uri) {
+                if is_angle_autolink(uri) {
                     flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                     nodes.push(autolink_node(
+                        AutolinkForm::Angle,
                         Span::new(base_offset + index, base_offset + end),
-                        Span::new(base_offset + index + 1, base_offset + end - 1),
-                        destination,
                         uri,
                     ));
                     index = end;
@@ -3837,66 +2754,19 @@ fn parse_inline_content(
                     continue;
                 }
             }
-            if options.constructs.mdx_jsx_inline {
-                if let Some((end, raw)) = pass
-                    .scan
-                    .mdx_jsx_end(index)
-                    .map(|end| (end, String::from(&input[index..end])))
-                {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::MdxJsx(MdxJsxInline {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        value: raw,
-                    }));
-                    index = end;
-                    text_start = index;
-                    continue;
-                }
-            }
-            if options.constructs.html_inline {
-                if let Some(end) = html_inline_end(&mut pass.scan.lookups, input, index) {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                    nodes.push(Inline::Html(HtmlInline {
-                        meta: NodeMeta::new(Some(Span::new(
-                            base_offset + index,
-                            base_offset + end,
-                        ))),
-                        value: input[index..end].into(),
-                    }));
-                    index = end;
-                    text_start = index;
-                    continue;
-                }
-            }
-        }
-
-        if bytes[index] == b'{' && options.constructs.mdx_expression_inline {
-            if let Some(end) = pass.scan.mdx_expression_close(index) {
+            if let Some(end) = html_inline_end(&mut pass.scan.lookups, input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                nodes.push(Inline::MdxExpression(MdxExpressionInline {
-                    meta: NodeMeta::new(Some(Span::new(
-                        base_offset + index,
-                        base_offset + end + 1,
-                    ))),
-                    value: input[index + 1..end].into(),
+                nodes.push(Inline::Html(HtmlInline {
+                    meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
+                    value: input[index..end].into(),
                 }));
-                index = end + 1;
+                index = end;
                 text_start = index;
                 continue;
-            } else {
-                diagnostics.push(Diagnostic::new(
-                    DiagnosticSeverity::Error,
-                    DiagnosticCode::InvalidMdx,
-                    Span::new(base_offset + index, base_offset + input.len()),
-                    "MDX expression is missing a closing brace",
-                ));
             }
         }
 
-        if bytes[index] == b':' && options.constructs.shortcode {
+        if bytes[index] == b':' {
             if let Some((end, name)) = parse_shortcode(input, index) {
                 flush_text(&mut nodes, &mut text, text_start, base_offset + index);
                 nodes.push(Inline::Shortcode(Shortcode {
@@ -3911,10 +2781,7 @@ fn parse_inline_content(
 
         // A directive counts one nesting level for itself, on top of the
         // enclosing passes and open brackets.
-        if bytes[index] == b':'
-            && options.constructs.directive_text
-            && pass.state.depth + brackets.openers.len() <= MAX_INLINE_NESTING
-        {
+        if bytes[index] == b':' && pass.state.depth + brackets.openers.len() <= MAX_INLINE_NESTING {
             // The label parses one pass deeper than the open brackets around
             // it.
             pass.state.depth += brackets.openers.len();
@@ -3922,7 +2789,6 @@ fn parse_inline_content(
                 input,
                 index,
                 base_offset,
-                options,
                 definitions,
                 diagnostics,
                 &mut pass,
@@ -3955,29 +2821,8 @@ fn parse_inline_content(
     }
 
     flush_text(&mut nodes, &mut text, text_start, base_offset + input.len());
-    // An inline footnote that never closed leaves its `^` free to close a
-    // superscript.
-    for opener in &brackets.openers {
-        if let Some(caret) = opener.caret {
-            delimiters[caret].single_close = true;
-        }
-    }
-    assign_emphasis_roles(
-        input,
-        &mut delimiters,
-        options.constructs.gfm_strikethrough,
-        options.constructs.underline,
-    );
-    process_emphasis(
-        nodes,
-        delimiters,
-        EmphasisContext {
-            underline: options.constructs.underline,
-            depth: pass.state.depth - 1,
-        },
-        &brackets.formed,
-    )
-    .0
+    assign_emphasis_roles(input, &mut delimiters);
+    process_emphasis(nodes, delimiters, pass.state.depth - 1, &brackets.formed).0
 }
 
 /// A `:name:` shortcode at `index`: `name` is in the gemoji table, and the
@@ -4021,16 +2866,8 @@ fn parse_wikilink(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &SyntaxOptions,
     scan: &mut InlineScan,
 ) -> Option<(usize, Inline)> {
-    let configured_order = if options.constructs.wikilink_title_after_pipe {
-        WikiLinkLabelOrder::AfterPipe
-    } else if options.constructs.wikilink_title_before_pipe {
-        WikiLinkLabelOrder::BeforePipe
-    } else {
-        return None;
-    };
     if input.as_bytes().get(index) != Some(&b'[') || input.as_bytes().get(index + 1) != Some(&b'[')
     {
         return None;
@@ -4042,29 +2879,18 @@ fn parse_wikilink(
         return None;
     }
 
-    let (target_source, label_source, label_order) =
-        if let Some(separator) = find_wikilink_separator(source) {
-            match configured_order {
-                WikiLinkLabelOrder::AfterPipe => (
-                    &source[..separator],
-                    &source[separator + 1..],
-                    WikiLinkLabelOrder::AfterPipe,
-                ),
-                WikiLinkLabelOrder::BeforePipe => (
-                    &source[separator + 1..],
-                    &source[..separator],
-                    WikiLinkLabelOrder::BeforePipe,
-                ),
-            }
-        } else {
-            (source, source, configured_order)
-        };
+    let (target_source, label_source) = match find_wikilink_separator(source) {
+        Some(separator) => (&source[..separator], &source[separator + 1..]),
+        None => (source, source),
+    };
 
-    let target = unescape_string(target_source);
-    if target.is_empty() {
+    // Target and label keep their escapes and character references as
+    // written.
+    if target_source.is_empty() {
         return None;
     }
-    let label = unescape_string(label_source);
+    let target = String::from(target_source);
+    let label = String::from(label_source);
     let end = close + 2;
     Some((
         end,
@@ -4072,7 +2898,6 @@ fn parse_wikilink(
             meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
             target,
             label,
-            label_order,
             embed: false,
         }),
     ))
@@ -4088,16 +2913,17 @@ fn embed(mut wikilink: Inline, bang: usize) -> Inline {
 }
 
 /// One step of the walk to a wikilink's closing `]]`, which must be on the
-/// opener's line.
+/// opener's line. The content holds no unescaped `[` or `]`.
 fn wikilink_close_step(input: &str, cursor: usize) -> Step {
     let bytes = input.as_bytes();
     match bytes.get(cursor) {
-        None | Some(b'\n' | b'\r') => Step::Done(None),
+        None | Some(b'\n' | b'\r' | b'[') => Step::Done(None),
         Some(b'\\') => {
             let escaped = cursor + 1;
             Step::Next(next_char(input, escaped).map_or(escaped, |(after_escape, _)| after_escape))
         }
         Some(b']') if bytes.get(cursor + 1) == Some(&b']') => Step::Done(Some(cursor)),
+        Some(b']') => Step::Done(None),
         Some(_) => Step::Next(next_char(input, cursor).map_or(input.len(), |(next, _)| next)),
     }
 }
@@ -4140,6 +2966,9 @@ fn is_hard_break_suffix(input: &str, trailing: usize) -> bool {
             .all(|byte| *byte == b' ')
 }
 
+/// The walk `InlineScan::reference_label_end` and `definition_label` take in
+/// steps, run once from the start; the scan tests hold them to it.
+#[cfg(test)]
 fn find_reference_label_end(input: &str, open: usize) -> Option<usize> {
     // A reference/definition link label does not nest: it ends at the first
     // unescaped `]`, and an unescaped interior `[` disqualifies it.
@@ -4183,13 +3012,8 @@ fn is_inline_container(inline: &Inline) -> bool {
         inline,
         Inline::Emphasis(_)
             | Inline::Strong(_)
-            | Inline::Underline(_)
             | Inline::Delete(_)
-            | Inline::Insert(_)
             | Inline::Mark(_)
-            | Inline::Subscript(_)
-            | Inline::Superscript(_)
-            | Inline::Spoiler(_)
             | Inline::Link(_)
             | Inline::Image(_)
             | Inline::LinkReference(_)
@@ -4203,27 +3027,11 @@ fn is_inline_container(inline: &Inline) -> bool {
 /// autolink, which keeps open brackets from nothing, does not count.
 fn contains_link_inline(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| {
-        let formed = match inline {
-            Inline::Link(link) => !is_autolink(link),
-            Inline::LinkReference(_) => true,
-            _ => false,
-        };
-        formed || contains_link_inline(inline.children())
+        matches!(
+            inline,
+            Inline::Link(_) | Inline::LinkReference(_) | Inline::WikiLink(_)
+        ) || contains_link_inline(inline.children())
     })
-}
-
-/// Whether `link`, as parsed, is an autolink: its one text child spans the
-/// whole link, as a literal autolink's does, or all of it but the angle
-/// brackets around it.
-fn is_autolink(link: &Link) -> bool {
-    let [Inline::Text(text)] = link.children.as_slice() else {
-        return false;
-    };
-    let (Some(outer), Some(inner)) = (link.meta.span, text.meta.span) else {
-        return false;
-    };
-    (inner.start == outer.start && inner.end == outer.end)
-        || (inner.start == outer.start + 1 && inner.end + 1 == outer.end)
 }
 
 fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
@@ -4263,7 +3071,6 @@ fn parse_text_directive(
     input: &str,
     index: usize,
     base_offset: usize,
-    options: &SyntaxOptions,
     definitions: Option<Definitions<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     pass: &mut InlinePass,
@@ -4277,35 +3084,35 @@ fn parse_text_directive(
             return None;
         }
     }
-    let opener_source = &input[index + 1..];
     let opener_offset = index + 1;
-    // A name followed by a colon, as in `:word:`, opens no directive.
-    let name_len = opener_source
-        .bytes()
-        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        .count();
-    if opener_source.as_bytes().get(name_len) == Some(&b':') {
-        return None;
-    }
-    let opener = parse_directive_opener_with(opener_source, |close, open| {
-        let found = match close {
-            DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
-            DirectiveClose::Attributes => {
-                pass.scan.directive_attributes_close(opener_offset + open)
+    let opener = parse_directive_opener_with(
+        &input[opener_offset..],
+        |close, open| {
+            let found = match close {
+                DirectiveClose::Label => pass.scan.link_label_end(opener_offset + open),
+                DirectiveClose::Attributes => {
+                    pass.scan.directive_attributes_close(opener_offset + open)
+                }
+            };
+            found.map(|position| position - opener_offset)
+        },
+        |label, attributes, rest| text_directive_ends(label, attributes, rest.bytes().next()),
+    );
+    let opener = match opener {
+        Ok(opener) => opener,
+        Err(refused) => {
+            // A `[` or `{` left open after a valid name is malformed; a bad
+            // name, or an opener refused for what follows it, is plain text.
+            if refused == Refused::Unclosed {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticSeverity::Error,
+                    DiagnosticCode::InvalidDirectiveName,
+                    Span::new(base_offset + index, base_offset + input.len()),
+                    "text directive opener is malformed",
+                ));
             }
-        };
-        found.map(|position| position - opener_offset)
-    });
-    let Some(opener) = opener else {
-        if directive_opener_looks_malformed(opener_source) {
-            diagnostics.push(Diagnostic::new(
-                DiagnosticSeverity::Error,
-                DiagnosticCode::InvalidDirectiveName,
-                Span::new(base_offset + index, base_offset + input.len()),
-                "text directive opener is malformed",
-            ));
+            return None;
         }
-        return None;
     };
     let label = opener
         .label
@@ -4313,7 +3120,6 @@ fn parse_text_directive(
             parse_inlines_with_context(
                 source,
                 base_offset + index + 1 + opener.name.len() + 1,
-                options,
                 definitions,
                 diagnostics,
                 pass.state,
@@ -4340,6 +3146,24 @@ fn parse_text_directive(
             attributes,
         }),
     ))
+}
+
+/// Whether a text directive with this label and attribute source ends before
+/// `next`: whitespace or the end of the content, or ASCII punctuation when the
+/// label is not empty or the attributes hold a non-space char. So `:e[a].` is
+/// a directive, while `:word:`, `:a@b.c`, `(:note)`, `:e{}x`, `:e{}.`, and
+/// `:e[a]b` stay text. Deciding from the sources keeps a refused opener from
+/// parsing its attributes.
+fn text_directive_ends(label: Option<&str>, attributes: Option<&str>, next: Option<u8>) -> bool {
+    match next {
+        None | Some(b' ' | b'\t' | b'\n' | b'\r') => true,
+        Some(byte) if byte.is_ascii_punctuation() => {
+            label.is_some_and(|label| !label.is_empty())
+                || attributes
+                    .is_some_and(|source| source.bytes().any(|byte| !byte.is_ascii_whitespace()))
+        }
+        Some(_) => false,
+    }
 }
 
 /// A directive's name, label, and attributes, read from the text after its
@@ -4372,11 +3196,31 @@ impl DirectiveOpener<'_> {
     }
 }
 
-fn parse_directive_opener(input: &str) -> Option<DirectiveOpener<'_>> {
-    parse_directive_opener_with(input, |close, open| match close {
-        DirectiveClose::Label => find_link_label_end(input, open),
-        DirectiveClose::Attributes => find_directive_attributes_close(input, open),
-    })
+/// Why `parse_directive_opener_with` read no opener.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Refused {
+    /// The text after the colons does not start with a valid directive name.
+    Name,
+    /// The `[` or `{` after the name has no closing `]` or `}`.
+    Unclosed,
+    /// `accept` refused the opener for its label, attributes, or what follows.
+    Follow,
+}
+
+/// `parse_directive_opener_with` for a block directive line, finding closing
+/// brackets in `input` alone.
+fn parse_directive_opener<'a>(
+    input: &'a str,
+    accept: impl FnOnce(Option<&str>, Option<&str>, &str) -> bool,
+) -> Result<DirectiveOpener<'a>, Refused> {
+    parse_directive_opener_with(
+        input,
+        |close, open| match close {
+            DirectiveClose::Label => find_link_label_end(input, open),
+            DirectiveClose::Attributes => find_directive_attributes_close(input, open),
+        },
+        accept,
+    )
 }
 
 /// Which closing position `parse_directive_opener_with` asks its finder for.
@@ -4388,10 +3232,23 @@ enum DirectiveClose {
     Attributes,
 }
 
-fn parse_directive_opener_with(
-    input: &str,
+/// Reads the directive opener at the start of `input`, the text after the
+/// colons: a name, then an optional `[label]`, then optional `{attributes}`.
+/// `find_close` gives the `]` or `}` closing the bracket at a position.
+///
+/// `accept` sees the label source, the attribute source, and the text after
+/// the opener, and runs before the attributes are parsed. That order keeps
+/// refused openers linear-time: `:a{` repeated, then `}x`, refuses every
+/// opener without parsing the attribute source each one spans to the end.
+/// The cost is that acceptance reads the attribute source, not the parsed
+/// attributes: `:e{!}.` is a text directive, since its attribute source is not
+/// blank, whose invalid attribute is dropped, so it is written `:e.`, which
+/// reads back as text.
+fn parse_directive_opener_with<'a>(
+    input: &'a str,
     mut find_close: impl FnMut(DirectiveClose, usize) -> Option<usize>,
-) -> Option<DirectiveOpener<'_>> {
+    accept: impl FnOnce(Option<&str>, Option<&str>, &str) -> bool,
+) -> Result<DirectiveOpener<'a>, Refused> {
     let mut index = 0;
     while let Some((next, char)) = next_char(input, index) {
         if char.is_ascii_alphanumeric() || char == '_' || char == '-' {
@@ -4402,49 +3259,47 @@ fn parse_directive_opener_with(
     }
     let name = &input[..index];
     if !is_directive_name(name) {
-        return None;
+        return Err(Refused::Name);
     }
 
     let mut label = None;
-    let mut attributes = Vec::new();
-    let mut dropped = Vec::new();
+    let mut attribute_source = None;
     let mut consumed = index;
     if input.as_bytes().get(consumed) == Some(&b'[') {
-        let close = find_close(DirectiveClose::Label, consumed)?;
+        let close = find_close(DirectiveClose::Label, consumed).ok_or(Refused::Unclosed)?;
         label = Some(&input[consumed + 1..close]);
         consumed = close + 1;
     }
     if input.as_bytes().get(consumed) == Some(&b'{') {
-        let close = find_close(DirectiveClose::Attributes, consumed)?;
-        let start = consumed + 1;
-        (attributes, dropped) = parse_attributes(&input[start..close]);
-        for range in &mut dropped {
-            *range = (range.0 + start, range.1 + start);
-        }
+        let close = find_close(DirectiveClose::Attributes, consumed).ok_or(Refused::Unclosed)?;
+        attribute_source = Some((consumed + 1, &input[consumed + 1..close]));
         consumed = close + 1;
     }
+    if !accept(
+        label,
+        attribute_source.map(|(_, source)| source),
+        &input[consumed..],
+    ) {
+        return Err(Refused::Follow);
+    }
+    let (attributes, dropped) = match attribute_source {
+        Some((start, source)) => {
+            let (attributes, mut dropped) = parse_attributes(source);
+            for range in &mut dropped {
+                *range = (range.0 + start, range.1 + start);
+            }
+            (attributes, dropped)
+        }
+        None => (Vec::new(), Vec::new()),
+    };
 
-    Some(DirectiveOpener {
+    Ok(DirectiveOpener {
         name: name.into(),
         label,
         attributes,
         dropped,
         consumed,
     })
-}
-
-fn directive_opener_looks_malformed(input: &str) -> bool {
-    let mut index = 0;
-    while let Some((next, char)) = next_char(input, index) {
-        if char.is_ascii_alphanumeric() || char == '_' || char == '-' {
-            index = next;
-        } else {
-            break;
-        }
-    }
-    index > 0
-        && is_directive_name(&input[..index])
-        && matches!(input.as_bytes().get(index), Some(b'[' | b'{'))
 }
 
 /// Quote states of the walk to a directive's closing `}`: outside quotes,
@@ -4583,7 +3438,10 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
         while cursor < input.len() {
             let (next, char) = next_char(input, cursor)?;
             if char as u8 == quote && !is_escaped_at(input, cursor) {
-                return Some((unescape_ascii_punctuation(&input[index + 1..cursor]), next));
+                return Some((
+                    decode_escapes_and_references(&input[index + 1..cursor]),
+                    next,
+                ));
             }
             cursor = next;
         }
@@ -4592,33 +3450,23 @@ fn parse_attribute_value(input: &str, index: usize) -> Option<(String, usize)> {
 
     let (value, next) = parse_attribute_token(input, index);
     Some((
-        unescape_selected(value, |char| matches!(char, '\\' | '&')),
+        decode_selected_escapes_and_references(value, |char| matches!(char, '\\' | '&')),
         next,
     ))
 }
 
-struct CodeSpanSource {
-    value: String,
-    raw: String,
-    fence_length: usize,
-}
-
+/// The end and the normalized value of the code span opening at `index`.
 fn parse_code_span_with(
     lookups: &mut impl Lookups,
     input: &str,
     index: usize,
-) -> Option<(usize, CodeSpanSource)> {
+) -> Option<(usize, String)> {
     let len = backtick_run_len(input, index);
     let search_start = index + len;
     let close = lookups.code_span_close(search_start, len)?;
-    let raw = &input[search_start..close];
     Some((
         close + len,
-        CodeSpanSource {
-            value: normalize_code_span(raw),
-            raw: raw.into(),
-            fence_length: len,
-        },
+        normalize_code_span(&input[search_start..close]),
     ))
 }
 
@@ -4691,56 +3539,11 @@ fn can_close_delimited(input: &str, index: usize, marker_len: usize) -> bool {
     delimiter_flanking(input, index, marker_len).right
 }
 
-fn is_single_tilde_delete_close(input: &str, index: usize) -> bool {
-    input.as_bytes()[index] == b'~'
-        && !is_escaped_at(input, index)
-        && single_tilde_can_close_delete(input, index)
-}
-
-fn single_tilde_can_open_delete(input: &str, index: usize) -> bool {
-    starts_exact_byte_run(input, index, b'~', 1)
-        && can_open_delimited(input, index, 1)
-        && !tilde_is_alphanumeric_interior(input, index)
-}
-
-fn single_tilde_can_close_delete(input: &str, index: usize) -> bool {
-    starts_exact_byte_run(input, index, b'~', 1)
-        && can_close_delimited(input, index, 1)
-        && !tilde_is_alphanumeric_interior(input, index)
-}
-
-fn single_tilde_delete_takes_precedence(
-    options: &SyntaxOptions,
-    input: &str,
-    index: usize,
-    scan: &mut InlineScan,
-) -> bool {
-    options.constructs.gfm_strikethrough
-        && options.parse.single_tilde_strikethrough
-        && single_tilde_can_open_delete(input, index)
-        && scan.single_tilde_delete_close(index + 1).is_some()
-}
-
-fn tilde_is_alphanumeric_interior(input: &str, index: usize) -> bool {
-    let previous = input[..index].chars().next_back();
-    let next = input[index + 1..].chars().next();
-    previous.is_some_and(|char| char.is_alphanumeric())
-        && next.is_some_and(|char| char.is_alphanumeric())
-}
-
-fn starts_exact_byte_run(input: &str, index: usize, marker: u8, len: usize) -> bool {
-    input.as_bytes().get(index) == Some(&marker)
-        && delimiter_byte_run_start(input, index, marker) == index
-        && delimiter_byte_run_len(input, index, marker) == len
-}
-
-fn delimiter_byte_run_start(input: &str, index: usize, marker: u8) -> usize {
-    let bytes = input.as_bytes();
-    let mut start = index;
-    while start > 0 && bytes[start - 1] == marker && !is_escaped_at(input, start - 1) {
-        start -= 1;
-    }
-    start
+/// Whether a run of `marker` bytes starts at `index`: the byte before it is
+/// not an unescaped `marker`. Only the one byte is looked at, so asking at
+/// every byte of a long run stays linear.
+fn starts_delimiter_run(input: &str, index: usize, marker: u8) -> bool {
+    index == 0 || input.as_bytes()[index - 1] != marker || is_escaped_at(input, index - 1)
 }
 
 fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
@@ -4750,25 +3553,6 @@ fn delimiter_byte_run_len(input: &str, index: usize, marker: u8) -> usize {
         cursor += 1;
     }
     cursor - index
-}
-
-/// Whether a run of `_` that the `marker_len` bytes of `input` from `index`
-/// are can open and can close emphasis, as the parser reads it.
-pub(crate) fn underscore_run_flanks(input: &str, index: usize, marker_len: usize) -> (bool, bool) {
-    (
-        can_open_underscore(input, index, marker_len),
-        can_close_underscore(input, index, marker_len),
-    )
-}
-
-fn can_open_underscore(input: &str, index: usize, marker_len: usize) -> bool {
-    let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.left && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation))
-}
-
-fn can_close_underscore(input: &str, index: usize, marker_len: usize) -> bool {
-    let flanking = delimiter_flanking(input, index, marker_len);
-    flanking.right && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation))
 }
 
 #[derive(Clone, Copy)]
@@ -4865,7 +3649,7 @@ fn parse_math_inline(
     }
 
     let content_start = index + open_dollars;
-    let close = scan_to_closing_dollar(input, content_start, open_dollars)?;
+    let close = scan_to_closing_dollar(lookups, input, content_start, open_dollars)?;
     let content_end = close - open_dollars;
     // The span requires `endpos - startpos >= fence_length * 2 + 1`, i.e. at
     // least one content byte between the open and close fences.
@@ -4883,50 +3667,42 @@ fn parse_math_inline(
     Some((close, value, MathInlineKind::Dollar { dollars }))
 }
 
+/// Whether `written`, read alone, is exactly one inline math holding `value`
+/// as `kind`: validation's check that dollar math reads back as written.
+pub(crate) fn reads_as_inline_math(written: &str, value: &str, kind: MathInlineKind) -> bool {
+    parse_math_inline(&mut DirectLookups { input: written }, written, 0).is_some_and(
+        |(end, read, read_kind)| end == written.len() && read == value && read_kind == kind,
+    )
+}
+
 /// Scans for the closing dollar run. `start` is the first content byte
 /// (just past the opening run); returns the byte offset just past a matching
 /// closing run of exactly `open_dollars` `$`.
-fn scan_to_closing_dollar(input: &str, start: usize, open_dollars: usize) -> Option<usize> {
+fn scan_to_closing_dollar(
+    lookups: &mut impl Lookups,
+    input: &str,
+    start: usize,
+    open_dollars: usize,
+) -> Option<usize> {
     let bytes = input.as_bytes();
-    // A space immediately after a single opening `$` forbids the open.
-    if open_dollars == 1 && bytes.get(start).is_some_and(|byte| is_math_space(*byte)) {
-        return None;
+    if open_dollars == 1 {
+        // A space immediately after a single opening `$` forbids the open.
+        if bytes.get(start).is_some_and(|byte| is_math_space(*byte)) {
+            return None;
+        }
+        // An escaped `\$` is content, not a delimiter (the backslash stays in
+        // the content verbatim); the first other `$` closes, unless a space
+        // comes before it or an ASCII digit after it. The lookup keeps a run
+        // of `\$` from being walked again from each `$` that opens before it.
+        let close = lookups.unescaped_dollar(start)?;
+        if is_math_space(bytes[close - 1]) || bytes.get(close + 1).is_some_and(u8::is_ascii_digit) {
+            return None;
+        }
+        return Some(close + 1);
     }
-
-    let mut cursor = start;
-    loop {
-        while cursor < bytes.len() && bytes[cursor] != b'$' {
-            cursor += 1;
-        }
-        if cursor >= bytes.len() {
-            return None;
-        }
-        // `cursor` now points at the first `$` of a potential closing run; the
-        // char just before it gates the single-`$` flanking and escape rules.
-        let prev = bytes[cursor - 1];
-        if open_dollars == 1 && is_math_space(prev) {
-            return None;
-        }
-        if open_dollars == 1 && prev == b'\\' {
-            // An escaped `\$` is content, not a delimiter: skip this one `$` and
-            // keep scanning (the backslash stays in the content verbatim).
-            cursor += 1;
-            continue;
-        }
-        let run = bytes[cursor..]
-            .iter()
-            .take(open_dollars)
-            .take_while(|byte| **byte == b'$')
-            .count();
-        // The single-`$` close cannot be followed by an ASCII digit.
-        if open_dollars == 1 && bytes.get(cursor + run).is_some_and(u8::is_ascii_digit) {
-            return None;
-        }
-        if run == open_dollars {
-            return Some(cursor + run);
-        }
-        cursor += run;
-    }
+    // The display form closes at the first `$$`, even the first two `$` of a
+    // longer run.
+    lookups.find("$$", start).map(|close| close + 2)
 }
 
 /// Math whitespace: ASCII tab, line feed, carriage return, and space.
@@ -5005,12 +3781,11 @@ fn parse_link_resource(
                 destination: String::new(),
                 destination_kind: LinkDestinationKind::Omitted,
                 title: None,
-                title_kind: None,
             },
         ));
     }
     if initial_space && matches!(bytes.get(cursor), Some(b'"' | b'\'' | b'(')) {
-        let (title, title_kind, next) = parse_link_title(input, cursor)?;
+        let (title, next) = parse_link_title(input, cursor)?;
         cursor = skip_link_resource_space(input, next)?;
         if bytes.get(cursor) == Some(&b')') {
             return Some((
@@ -5019,7 +3794,6 @@ fn parse_link_resource(
                     destination: String::new(),
                     destination_kind: LinkDestinationKind::Omitted,
                     title: Some(title),
-                    title_kind: Some(title_kind),
                 },
             ));
         }
@@ -5035,7 +3809,6 @@ fn parse_link_resource(
                 destination,
                 destination_kind,
                 title: None,
-                title_kind: None,
             },
         ));
     }
@@ -5043,7 +3816,7 @@ fn parse_link_resource(
         return None;
     }
 
-    let (title, title_kind, next) = parse_link_title(input, cursor)?;
+    let (title, next) = parse_link_title(input, cursor)?;
     cursor = skip_link_resource_space(input, next)?;
     if bytes.get(cursor) == Some(&b')') {
         Some((
@@ -5052,7 +3825,6 @@ fn parse_link_resource(
                 destination,
                 destination_kind,
                 title: Some(title),
-                title_kind: Some(title_kind),
             },
         ))
     } else {
@@ -5071,7 +3843,7 @@ fn parse_link_destination(
             return None;
         }
         return Some((
-            unescape_ascii_punctuation(&input[index + 1..stop]),
+            decode_escapes_and_references(&input[index + 1..stop]),
             LinkDestinationKind::Angle,
             stop + 1,
         ));
@@ -5107,14 +3879,14 @@ fn parse_link_destination(
         None
     } else {
         Some((
-            unescape_ascii_punctuation(&input[index..cursor]),
+            decode_escapes_and_references(&input[index..cursor]),
             LinkDestinationKind::Bare,
             cursor,
         ))
     }
 }
 
-fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind, usize)> {
+fn parse_link_title(input: &str, index: usize) -> Option<(Title, usize)> {
     let opener = input.as_bytes().get(index).copied()?;
     let (closer, title_kind) = match opener {
         b'"' => ('"', LinkTitleKind::DoubleQuote),
@@ -5129,11 +3901,8 @@ fn parse_link_title(input: &str, index: usize) -> Option<(String, LinkTitleKind,
             if contains_blank_line(&input[index + 1..cursor]) {
                 return None;
             }
-            return Some((
-                unescape_ascii_punctuation(&input[index + 1..cursor]),
-                title_kind,
-                next,
-            ));
+            let value = decode_escapes_and_references(&input[index + 1..cursor]);
+            return Some((Title::new(value, title_kind), next));
         }
         if opener == b'(' && char == '(' && !is_escaped_at(input, cursor) {
             return None;
@@ -5199,76 +3968,6 @@ fn skip_link_resource_space_with_info(input: &str, mut index: usize) -> Option<(
     Some((index, had_space))
 }
 
-pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
-    let rest = input.get(index..)?;
-    if let Some(rest) = rest
-        .strip_prefix("&#x")
-        .or_else(|| rest.strip_prefix("&#X"))
-    {
-        let digits = find_reference_terminator(rest, 6)?;
-        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return None;
-        }
-        let value = u32::from_str_radix(&rest[..digits], 16).ok()?;
-        return Some((
-            index + 3 + digits + 1,
-            character_reference_value(value).into(),
-        ));
-    }
-    if let Some(rest) = rest.strip_prefix("&#") {
-        let digits = find_reference_terminator(rest, 7)?;
-        if digits == 0 || !rest[..digits].bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        let value = rest[..digits].parse::<u32>().ok()?;
-        return Some((
-            index + 2 + digits + 1,
-            character_reference_value(value).into(),
-        ));
-    }
-
-    let name_end = find_reference_terminator(rest, 32)?;
-    if name_end == 0 {
-        return None;
-    }
-    let name = &rest[1..name_end];
-    named_character_reference(name).map(|value| (index + name_end + 1, value.into()))
-}
-
-/// Finds the `;` that ends a character reference body, looking no further than
-/// `max_len` bytes: a longer body is never a reference, so the scan stays
-/// bounded instead of running to the end of the input.
-fn find_reference_terminator(rest: &str, max_len: usize) -> Option<usize> {
-    rest.as_bytes()
-        .iter()
-        .take(max_len + 1)
-        .position(|byte| *byte == b';')
-}
-
-/// Decode a numeric character reference codepoint to its scalar value.
-///
-/// This follows the CommonMark reference behavior: `U+0000`, the UTF-16
-/// surrogate range, and codepoints beyond the Unicode scalar range decode to
-/// `U+FFFD`; every other codepoint decodes to itself.
-///
-/// Two deliberate non-behaviors:
-/// - We do NOT apply the HTML5 Windows-1252 remapping of C1 bytes; `&#128;`
-///   decodes to `U+0080`, not the Euro sign. The CommonMark reference does not
-///   perform that remapping.
-/// - We do NOT extend replacement to the C0/C1 controls, DEL, or the Unicode
-///   noncharacters the way some HTML-oriented decoders do. Keeping those as
-///   their literal scalar is what makes the serializer's `&#xNN;` escaping of
-///   control characters round-trip through a re-parse. The roundtrip corpus
-///   only pins `{0 -> FFFD, 9 -> tab, 10 -> line feed, surrogate -> FFFD,
-///   out-of-range -> FFFD}`, all of which this matches.
-pub(crate) fn character_reference_value(value: u32) -> char {
-    if value == 0 {
-        '\u{FFFD}'
-    } else {
-        char::from_u32(value).unwrap_or('\u{FFFD}')
-    }
-}
-
 pub(crate) fn is_escaped_at(input: &str, index: usize) -> bool {
     let bytes = input.as_bytes();
     let mut cursor = index;
@@ -5293,20 +3992,18 @@ fn parse_definition_destination_title(input: &str) -> Option<ParsedLinkResource>
             destination,
             destination_kind,
             title: None,
-            title_kind: None,
         });
     }
     if !had_space {
         return None;
     }
 
-    let (title, title_kind, next) = parse_link_title(input, cursor)?;
+    let (title, next) = parse_link_title(input, cursor)?;
     let after_title = skip_link_resource_space(input, next)?;
     (after_title == input.len()).then_some(ParsedLinkResource {
         destination,
         destination_kind,
         title: Some(title),
-        title_kind: Some(title_kind),
     })
 }
 
@@ -5341,48 +4038,6 @@ fn line_may_close_title(line: &str, closer: char) -> bool {
 fn line_can_start_definition_title(input: &str) -> bool {
     let trimmed = trim_ascii_start(input);
     matches!(trimmed.as_bytes().first(), Some(b'"' | b'\'' | b'('))
-}
-
-fn unescape_ascii_punctuation(input: &str) -> String {
-    // Only ASCII punctuation is escapable (`\ ` keeps its backslash).
-    unescape_selected(input, |char| char.is_ascii_punctuation())
-}
-
-fn unescape_string(input: &str) -> String {
-    unescape_selected(input, |char| char.is_ascii_punctuation() || char == '&')
-}
-
-fn unescape_selected(input: &str, should_unescape: impl Fn(char) -> bool) -> String {
-    let mut output = String::new();
-    let mut cursor = 0;
-    while cursor < input.len() {
-        if input.as_bytes().get(cursor) == Some(&b'&') {
-            if let Some((end, value)) = parse_character_reference(input, cursor) {
-                output.push_str(&value);
-                cursor = end;
-                continue;
-            }
-        }
-        let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
-        if char == '\\' {
-            if let Some((after_escape, escaped)) = next_char(input, next) {
-                if should_unescape(escaped) {
-                    output.push(escaped);
-                } else {
-                    output.push(char);
-                    output.push(escaped);
-                }
-                cursor = after_escape;
-            } else {
-                output.push(char);
-                cursor = next;
-            }
-        } else {
-            output.push(char);
-            cursor = next;
-        }
-    }
-    output
 }
 
 fn push_line(output: &mut String, line: &str) {
@@ -5465,12 +4120,10 @@ pub(crate) fn normalize_label(label: &str) -> String {
 }
 
 /// The identifiers a document's references can resolve to: those of its own
-/// definitions, and those a caller knows of, each sorted and deduplicated so
-/// that a lookup is a binary search.
+/// definitions, sorted and deduplicated so that a lookup is a binary search.
 #[derive(Clone, Copy)]
 pub(crate) struct Definitions<'a> {
     pub(crate) own: &'a [String],
-    pub(crate) known: &'a [String],
 }
 
 fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool {
@@ -5482,11 +4135,36 @@ fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool 
     };
     let identifier = normalize_label(label);
     definitions.own.binary_search(&identifier).is_ok()
-        || definitions.known.binary_search(&identifier).is_ok()
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
     label.chars().take(REFERENCE_LABEL_MAX_CHARS + 1).count() <= REFERENCE_LABEL_MAX_CHARS
+}
+
+/// Whether `[label]` reads back as a link reference label holding `label`:
+/// the walk to its `]` ends at its own `]`, so the label holds no unescaped
+/// bracket and does not escape its close; it is within the length limit, is
+/// not blank, and holds no blank line, which would end its paragraph.
+pub(crate) fn is_reference_label(label: &str) -> bool {
+    let written = alloc::format!("[{label}]");
+    path_walk(1, |cursor| reference_label_step(&written, cursor)) == Some(written.len() - 1)
+        && reference_label_is_within_limit(label)
+        && !normalize_label(label).is_empty()
+        && !holds_blank_line(label)
+}
+
+/// Whether `[^label]` reads back as a footnote label holding `label`: a
+/// footnote label whose `]` it does not escape.
+pub(crate) fn is_written_footnote_label(label: &str) -> bool {
+    is_footnote_label(label) && !is_escaped_at(&alloc::format!("{label}]"), label.len())
+}
+
+/// Whether a line of `text` other than its first and its last, which share
+/// their lines with what is written around `text`, is blank.
+fn holds_blank_line(text: &str) -> bool {
+    let text = text.replace("\r\n", "\n");
+    let lines: Vec<&str> = text.split(['\n', '\r']).collect();
+    lines.len() > 2 && lines[1..lines.len() - 1].iter().any(|line| is_blank(line))
 }
 
 fn trim_up_to_three_spaces(input: &str) -> Option<&str> {
@@ -5592,7 +4270,7 @@ fn task_marker_checked(input: &str) -> Option<bool> {
 }
 
 /// Whether `text` holds only spaces and tabs, as a blank line does.
-fn is_blank(text: &str) -> bool {
+pub(crate) fn is_blank(text: &str) -> bool {
     text.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
 }
 
@@ -5604,7 +4282,7 @@ fn leading_trim_bytes(input: &str) -> usize {
     input.len() - trim_ascii_start(input).len()
 }
 
-fn parse_table_delimiter(input: &str, spoiler: bool) -> Option<Vec<TableAlignment>> {
+fn parse_table_delimiter(input: &str) -> Option<Vec<TableAlignment>> {
     // Every cell trims to colons around dashes, so a row with any other char
     // is no delimiter row, whatever its cells.
     if !input.contains('-')
@@ -5614,7 +4292,7 @@ fn parse_table_delimiter(input: &str, spoiler: bool) -> Option<Vec<TableAlignmen
     {
         return None;
     }
-    let cells = table_row_cell_ranges(input, spoiler);
+    let cells = table_row_cell_ranges(input);
     if cells.is_empty() {
         return None;
     }
@@ -5659,247 +4337,38 @@ fn table_delimiter_alignment(cell: &str) -> Option<TableAlignment> {
 }
 
 /// The cell-delimiter pipes of a table row, in order: every `|` that is not
-/// escaped by an odd backslash run and not held inside a cell by a code span or
-/// a spoiler.
-///
-/// A single unescaped pipe always delimits, even inside a code span; a code
-/// span only keeps the bars of a `||` from delimiting. With spoilers enabled,
-/// bar runs outside code spans pair first-closer style, as the inline parser
-/// pairs them within one cell: a run opens with its last two bars, the next run
-/// closes with its first two (and opens again with what it has left), and every
-/// pipe between the two stays in the cell. The other bars of a run, and both
-/// bars of an opener with no closer, delimit. An escaped pipe is an escape in
-/// the cell's inline content: it never delimits and is no bar of a run. Code
-/// spans are matched as the inline parser matches them, and only when the span
-/// closes before any pipe that would delimit inside it, so it lies within one
-/// cell. The pairing does not consider other inline constructs.
-fn table_row_delimiters(row: &str, spoiler: bool) -> Vec<usize> {
-    scan_table_row(row, spoiler).0
-}
-
-/// The delimiters of a table row and the spans of the spoilers its cells will
-/// hold, from each opener's first bar to its closer's last.
-fn scan_table_row(row: &str, spoiler: bool) -> (Vec<usize>, Vec<(usize, usize)>) {
+/// escaped by an odd backslash run. An escaped pipe is an escape in the cell's
+/// inline content.
+fn table_row_delimiters(row: &str) -> Vec<usize> {
     let bytes = row.as_bytes();
-
-    // Every pipe, grouped into the bar runs of the cell text.
-    let mut bars: Vec<TableBar> = Vec::new();
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    let mut backticks = false;
+    let mut delimiters = Vec::new();
     let mut cursor = 0;
     while cursor < bytes.len() {
         match bytes[cursor] {
             b'\\' => {
                 let backslashes = delimiter_byte_run_len(row, cursor, b'\\');
                 let pipe = cursor + backslashes;
-                if bytes.get(pipe) == Some(&b'|') && backslashes % 2 == 1 {
-                    // The cell text drops one backslash, so with exactly one
-                    // the pipe follows whatever precedes the run.
-                    let text_start = if backslashes == 1 { cursor } else { pipe };
-                    push_table_bar(&mut bars, &mut runs, pipe, text_start, true);
-                    cursor = pipe + 1;
+                cursor = if bytes.get(pipe) == Some(&b'|') && backslashes % 2 == 1 {
+                    pipe + 1
                 } else {
-                    cursor = pipe;
-                }
+                    pipe
+                };
             }
             b'|' => {
-                push_table_bar(&mut bars, &mut runs, cursor, cursor, false);
+                delimiters.push(cursor);
                 cursor += 1;
-            }
-            byte => {
-                backticks |= byte == b'`';
-                cursor += 1;
-            }
-        }
-    }
-    if !spoiler || (!backticks && runs.iter().all(|&(_, length)| length == 1)) {
-        // With no bar runs and no code spans, every unescaped pipe delimits.
-        let delimiters = bars
-            .iter()
-            .filter(|bar| !bar.escaped)
-            .map(|bar| bar.position)
-            .collect();
-        return (delimiters, Vec::new());
-    }
-
-    // Inside a code span, two unescaped bars side by side stay in the cell and
-    // any other unescaped bar delimits.
-    let mut code_delimits = vec![false; bars.len()];
-    for &(first, length) in &runs {
-        let mut bar = first;
-        while bar < first + length {
-            if bar + 1 < first + length && !bars[bar].escaped && !bars[bar + 1].escaped {
-                bar += 2;
-            } else {
-                code_delimits[bar] = !bars[bar].escaped;
-                bar += 1;
-            }
-        }
-    }
-
-    // A code span forms only when no bar that would delimit inside it lies
-    // before its closer.
-    let mut breaker = 0;
-    let code_spans = if backticks {
-        inline_code_spans(row, |open, close| {
-            while breaker < bars.len() && (bars[breaker].position < open || !code_delimits[breaker])
-            {
-                breaker += 1;
-            }
-            bars.get(breaker).is_none_or(|bar| close < bar.position)
-        })
-    } else {
-        Vec::new()
-    };
-
-    // Decide which bars delimit; `held` collects the ranges a spoiler keeps in
-    // its cell.
-    let mut delimits = vec![false; bars.len()];
-    let mut held = Vec::new();
-    let mut opener: Option<usize> = None;
-    let mut code = code_spans.iter().peekable();
-    for (first, length) in runs {
-        let end = first + length;
-        let position = bars[first].position;
-        while code.peek().is_some_and(|&&(_, close)| close < position) {
-            code.next();
-        }
-        if code.peek().is_some_and(|&&(open, _)| open < position) {
-            delimits[first..end].copy_from_slice(&code_delimits[first..end]);
-            continue;
-        }
-        if length == 1 {
-            delimits[first] = true;
-            continue;
-        }
-        let mut rest = first;
-        if let Some(opened) = opener.take() {
-            held.push((bars[opened].position, bars[first + 1].position));
-            rest = first + 2;
-        }
-        let mut open_at = end;
-        if end - rest >= 2 {
-            open_at = end - 2;
-            opener = Some(open_at);
-        }
-        delimits[rest..open_at].fill(true);
-    }
-    if let Some(opened) = opener {
-        delimits[opened..opened + 2].fill(true);
-    }
-
-    let mut spoilers = held.iter().copied().peekable();
-    let mut delimiters = Vec::new();
-    for (bar, delimit) in bars.iter().zip(delimits) {
-        while spoilers.peek().is_some_and(|&(_, end)| end < bar.position) {
-            spoilers.next();
-        }
-        let in_spoiler = spoilers
-            .peek()
-            .is_some_and(|&(start, end)| start <= bar.position && bar.position <= end);
-        if delimit && !bar.escaped && !in_spoiler {
-            delimiters.push(bar.position);
-        }
-    }
-    (delimiters, held)
-}
-
-/// The code spans of `text` as the inline parser reads them, each as the
-/// offsets of its opening and closing backtick runs: a backtick run opens a
-/// span that the next run of the same length closes, except that outside a
-/// span an odd backslash run escapes the first backtick after it.
-/// `may_close(open, close)` can refuse a pair, leaving the opener literal; it
-/// is asked in increasing order of `open`.
-fn inline_code_spans(
-    text: &str,
-    mut may_close: impl FnMut(usize, usize) -> bool,
-) -> Vec<(usize, usize)> {
-    let bytes = text.as_bytes();
-    // Each backtick run's offset, length, and whether an odd backslash run
-    // precedes it.
-    let mut runs = Vec::new();
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'\\' => {
-                let backslashes = delimiter_byte_run_len(text, cursor, b'\\');
-                cursor += backslashes;
-                if bytes.get(cursor) == Some(&b'`') {
-                    let length = delimiter_byte_run_len(text, cursor, b'`');
-                    runs.push((cursor, length, backslashes % 2 == 1));
-                    cursor += length;
-                }
-            }
-            b'`' => {
-                let length = delimiter_byte_run_len(text, cursor, b'`');
-                runs.push((cursor, length, false));
-                cursor += length;
             }
             _ => cursor += 1,
         }
     }
-    let longest = runs.iter().map(|&(_, length, _)| length).max().unwrap_or(0);
-    let mut by_length = vec![Vec::new(); longest + 1];
-    for (index, &(_, length, _)) in runs.iter().enumerate() {
-        by_length[length].push(index);
-    }
-
-    let mut spans = Vec::new();
-    let mut index = 0;
-    while index < runs.len() {
-        let (position, length, escaped) = runs[index];
-        let (open, length) = if escaped {
-            (position + 1, length - 1)
-        } else {
-            (position, length)
-        };
-        let close = by_length[length]
-            .get(by_length[length].partition_point(|&later| later <= index))
-            .copied()
-            .filter(|_| length > 0);
-        match close {
-            Some(close) if may_close(open, runs[close].0) => {
-                spans.push((open, runs[close].0));
-                index = close + 1;
-            }
-            _ => index += 1,
-        }
-    }
-    spans
-}
-
-/// A pipe of a table row.
-struct TableBar {
-    position: usize,
-    escaped: bool,
-}
-
-/// Adds the pipe at `position` to the bar runs, joining the previous run when
-/// the cell text has the two side by side. An escaped pipe is an escape in the
-/// cell's inline content, so it joins no run and no run joins it.
-fn push_table_bar(
-    bars: &mut Vec<TableBar>,
-    runs: &mut Vec<(usize, usize)>,
-    position: usize,
-    text_start: usize,
-    escaped: bool,
-) {
-    let joins = !escaped
-        && bars
-            .last()
-            .is_some_and(|previous| !previous.escaped && previous.position + 1 == text_start);
-    match runs.last_mut() {
-        Some(run) if joins => run.1 += 1,
-        _ => runs.push((bars.len(), 1)),
-    }
-    bars.push(TableBar { position, escaped });
+    delimiters
 }
 
 /// The byte ranges of `input`'s cells, between the pipes that delimit them.
-fn table_row_cell_ranges(input: &str, spoiler: bool) -> Vec<(usize, usize)> {
+fn table_row_cell_ranges(input: &str) -> Vec<(usize, usize)> {
     let trimmed = input.trim_matches([' ', '\t']);
     let offset = leading_trim_bytes(input);
-    let delimiters = table_row_delimiters(trimmed, spoiler);
+    let delimiters = table_row_delimiters(trimmed);
     let mut cells = Vec::new();
     let mut start = 0;
     for &pipe in &delimiters {
@@ -5933,9 +4402,9 @@ struct TableCellSource {
 
 /// The cells of `row`, a slice of `line.text`, as `table_row_cell_ranges`
 /// splits it.
-fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSource> {
+fn table_row_cells(line: &Line<'_>, row: &str) -> Vec<TableCellSource> {
     let row_offset = slice_offset_in(line.text, row).unwrap_or(0);
-    table_row_cell_ranges(row, spoiler)
+    table_row_cell_ranges(row)
         .into_iter()
         .map(|(start, end)| {
             let raw = &row[start..end];
@@ -5983,7 +4452,7 @@ fn table_row_cells(line: &Line<'_>, row: &str, spoiler: bool) -> Vec<TableCellSo
         .collect()
 }
 
-fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
+fn table_has_separator(header: &str, delimiter: &str) -> bool {
     // GFM makes leading/trailing pipes optional, so `parse_table_delimiter` plus
     // the header/alignment column-count check usually suffice. The one exception
     // is a single resolved column with no disambiguating syntax: `a\n-\nb` has
@@ -5991,12 +4460,12 @@ fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
     // loose paragraph/setext, not a table. A single column still forms a table
     // when a pipe appears in the header/delimiter or the delimiter carries an
     // explicit alignment colon (`a\n-:`, `a\n:-:`, …).
-    let Some(alignments) = parse_table_delimiter(delimiter, spoiler) else {
+    let Some(alignments) = parse_table_delimiter(delimiter) else {
         return true;
     };
     if alignments.len() == 1 {
-        return contains_unescaped_pipe(header, spoiler)
-            || contains_unescaped_pipe(delimiter, spoiler)
+        return contains_unescaped_pipe(header)
+            || contains_unescaped_pipe(delimiter)
             || delimiter.contains(':');
     }
     true
@@ -6004,8 +4473,8 @@ fn table_has_separator(header: &str, delimiter: &str, spoiler: bool) -> bool {
 
 // Still used by `block_quote_table_body_row` to detect a table row appearing as
 // a block-quote continuation line (which DOES require a pipe).
-fn contains_unescaped_pipe(input: &str, spoiler: bool) -> bool {
-    !table_row_delimiters(input, spoiler).is_empty()
+fn contains_unescaped_pipe(input: &str) -> bool {
+    !table_row_delimiters(input).is_empty()
 }
 
 // A GFM footnote definition `[^label]:` is a block boundary: it interrupts a
@@ -6217,177 +4686,101 @@ fn is_email_autolink(input: &str) -> bool {
     is_email_local_part(&input[..at]) && is_email_domain(&input[at + 1..], 1)
 }
 
-// GFM literal-autolink dispatch. Tries, in order: `http(s)://` URLs, `www.`
-// URLs, extended-protocol (`mailto:`/`xmpp:`) emails, and bare emails. Each
-// branch enforces cmark-gfm's per-scheme preceding-character guard and its
-// domain/host rules; the trailing trim is shared (`autolink_delim`). The
-// returned destination is the synthesized href (a `http://`/`mailto:` prefix
-// may be prepended); the caller keeps `input[index..end]` as the visible
-// original.
-fn wikilinks_enabled(options: &SyntaxOptions) -> bool {
-    options.constructs.wikilink_title_after_pipe || options.constructs.wikilink_title_before_pipe
+/// The destination of a literal autolink written as `text`, when `text` is
+/// exactly one literal autolink the inline parser can read: the text after the
+/// prefix `parse_literal_autolink` gives it.
+///
+/// Whether a literal autolink forms depends in part on what follows it:
+/// cmark-gfm's domain check counts the `.` and `_` in the punctuation trimmed
+/// off its end, and `www.` at a line start links `www`. So `text` is read at a
+/// line start and followed by what lets the most through, `..` and a space:
+/// every literal autolink the parser reads has a destination, and a text the
+/// parser would trim never does.
+pub(crate) fn literal_autolink_destination(text: &str) -> Option<String> {
+    let mut input = String::from(text);
+    input.push_str(".. ");
+    let (end, prefix) =
+        parse_literal_autolink(&input, 0, &mut LiteralAutolinkScan::default(), true)?;
+    (end == text.len()).then(|| {
+        let mut destination = String::from(prefix);
+        destination.push_str(text);
+        destination
+    })
 }
 
+/// A literal autolink starting at `index`, by cmark-gfm's dispatch: it tries,
+/// in order, `http(s)://` URLs, `www.` URLs, extended-protocol
+/// (`mailto:`/`xmpp:`) emails, and bare emails. Each branch enforces
+/// cmark-gfm's per-scheme preceding-character guard and its domain/host
+/// rules; the trailing trim is shared (`autolink_delim`). Returns the end and
+/// the prefix the destination puts before `input[index..end]`, the visible
+/// original: `http://` for a `www.` URL, `mailto:` for a bare email, and
+/// nothing otherwise.
+///
+/// `urls` is false inside an open `[`: as in cmark-gfm, a `http://`,
+/// `https://`, or `www.` URL after a `[` no `]` has closed yet stays text, and
+/// only an email address links.
 fn parse_literal_autolink(
     input: &str,
     index: usize,
-    gfm: bool,
-    relaxed: bool,
-    wikilinks: bool,
     scan: &mut LiteralAutolinkScan,
-) -> Option<(usize, String)> {
+    urls: bool,
+) -> Option<(usize, &'static str)> {
     let rest = &input[index..];
-
-    if gfm {
-        // `http://` / `https://` URLs. cmark requires the char before the scheme
-        // to be non-alphanumeric (so `mmmhttp://…` does not link from `mmmh`).
-        if let Some(scheme_len) = rest
-            .starts_with("http://")
-            .then_some(7)
-            .or_else(|| rest.starts_with("https://").then_some(8))
-        {
-            if !literal_scheme_prefix_ok(input, index) {
-                return None;
-            }
-            let host = &input[index + scheme_len..];
-            // A non-empty domain or bracketed IPv6 host is additionally
-            // required, so `http://`, `http://#`, `http://$` are not links.
-            if !http_literal_host_ok(host) {
-                if relaxed {
-                    // Let cmark-gfm's relaxed `scheme://` pass decide cases
-                    // such as a bare `http://` followed by whitespace.
-                } else {
-                    return None;
-                }
-            } else {
-                // The URL extent is scanned from the very start (after `://`) and the
-                // trailing trim runs over the whole URL. Relaxed mode balances
-                // brackets/braces so `[abc]`/`{abc}`/IPv6 hosts stay in the URL.
-                let end = autolink_url_end(
-                    input,
-                    index + scheme_len,
-                    index + scheme_len,
-                    relaxed,
-                    wikilinks,
-                );
-                if end <= index + scheme_len {
-                    return None;
-                }
-                if literal_autolink_suppressed_by_link_label(
-                    input,
-                    index,
-                    end,
-                    relaxed,
-                    gfm,
-                    &mut scan.label_openers,
-                ) {
-                    return None;
-                }
-                return Some((end, input[index..end].into()));
-            }
+    let www = rest
+        .as_bytes()
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"www."));
+    if !urls {
+        // A literal starting `www.` is a URL, linked or not, as outside an
+        // open `[`: no email starts there.
+        if www {
+            return None;
         }
+        return parse_literal_email(input, index, scan);
+    }
 
-        // `www.` URLs (synthesize a `http://` href). cmark allows the preceding
-        // char to be one of `*_~(` or whitespace (or start of input).
-        if rest
-            .as_bytes()
-            .get(..4)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"www."))
-        {
-            if !literal_www_prefix_ok(input, index) {
-                return None;
-            }
-            check_domain(rest, false)?;
-            let end = autolink_url_end(input, index, index, relaxed, wikilinks);
-            if end <= index || (!relaxed && end <= index + 3 && !literal_starts_line(input, index))
-            {
-                return None;
-            }
-            if literal_autolink_suppressed_by_link_label(
-                input,
-                index,
-                end,
-                relaxed,
-                gfm,
-                &mut scan.label_openers,
-            ) {
-                return None;
-            }
-            let mut destination = String::from("http://");
-            destination.push_str(&input[index..end]);
-            return Some((end, destination));
+    // `http://` / `https://` URLs. cmark requires the char before the scheme
+    // to be non-alphanumeric (so `mmmhttp://…` does not link from `mmmh`).
+    if let Some(scheme_len) = rest
+        .starts_with("http://")
+        .then_some(7)
+        .or_else(|| rest.starts_with("https://").then_some(8))
+    {
+        if !literal_scheme_prefix_ok(input, index) {
+            return None;
         }
-
-        if let Some(email) = parse_literal_email(input, index, &mut scan.email_local) {
-            return Some(email);
+        // A non-empty domain is additionally required, so `http://`,
+        // `http://#`, `http://$`, and a bracketed IPv6 host are not links.
+        if !http_literal_host_ok(&input[index + scheme_len..]) {
+            return None;
         }
-    }
-
-    if relaxed {
-        // cmark-gfm "relaxed" URL autolinks: a bare `scheme://…` for any scheme
-        // (`smb://`, `irc://`, `rdar://`, `we://`, `nex://[…]`, …) or a
-        // scheme-less leading `://…` (`://-`). Requires the same non-alphanumeric
-        // preceding char as the http literal; a scheme-less `://` also needs a
-        // char other than whitespace after it, while a named scheme links on
-        // its own (`https:// x` links `https://`, as cmark-gfm does). No
-        // host/domain validation (cmark-gfm is permissive here — `smb:///path`
-        // and `://-` both linkify). The extent is balanced.
-        if literal_scheme_prefix_ok(input, index) {
-            if let Some(after_slashes) =
-                relaxed_scheme_after_slashes(input, index, &mut scan.scheme)
-            {
-                let body_start = index + after_slashes;
-                let next = input[body_start..].chars().next();
-                if next.is_none_or(|char| char.is_whitespace()) && after_slashes == 3 {
-                    return None;
-                }
-                let end = autolink_url_end(input, body_start, body_start, true, wikilinks);
-                if end > index {
-                    if literal_autolink_suppressed_by_link_label(
-                        input,
-                        index,
-                        end,
-                        relaxed,
-                        gfm,
-                        &mut scan.label_openers,
-                    ) {
-                        return None;
-                    }
-                    return Some((end, input[index..end].into()));
-                }
-            }
+        // The URL extent is scanned from the very start (after `://`) and the
+        // trailing trim runs over the whole URL.
+        let end = autolink_url_end(input, index + scheme_len);
+        if end <= index + scheme_len {
+            return None;
         }
+        return Some((end, ""));
     }
 
-    None
-}
+    // `www.` URLs (synthesize a `http://` href). cmark allows the preceding
+    // char to be one of `*_~(` or whitespace (or start of input).
+    if www {
+        if !literal_www_prefix_ok(input, index) {
+            return None;
+        }
+        if !check_domain(rest, false) {
+            return None;
+        }
+        let end = autolink_url_end(input, index);
+        if end <= index || (end <= index + 3 && !literal_starts_line(input, index)) {
+            return None;
+        }
+        return Some((end, "http://"));
+    }
 
-// Returns the byte offset (within `rest`) just past a relaxed `scheme://` (any
-// ASCII-alpha-then-`[alnum+. -]` scheme) or scheme-less `://` prefix, if `rest`
-// starts with one. No scheme length cap — cmark-gfm's relaxed autolink is
-// permissive. Returns `None` for a bare `scheme:` without `//` (that is the
-// email/angle-autolink path's job).
-fn relaxed_scheme_after_slashes(
-    input: &str,
-    index: usize,
-    scheme_run: &mut ByteRun,
-) -> Option<usize> {
-    let bytes = input[index..].as_bytes();
-    if bytes.starts_with(b"://") {
-        return Some(3);
-    }
-    let first = bytes.first()?;
-    if !first.is_ascii_alphabetic() {
-        return None;
-    }
-    // The scheme is the run of scheme bytes starting here, and `://` must
-    // follow it directly.
-    let i = scheme_run.end(input, index, is_relaxed_scheme_byte) - index;
-    if bytes.get(i..i + 3) == Some(b"://") {
-        Some(i + 3)
-    } else {
-        None
-    }
+    parse_literal_email(input, index, scan)
 }
 
 // The char immediately before a `http(s)://` literal must be non-alphabetic.
@@ -6427,108 +4820,14 @@ fn literal_starts_line(input: &str, index: usize) -> bool {
             .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
 }
 
-fn literal_autolink_suppressed_by_link_label(
-    input: &str,
-    index: usize,
-    end: usize,
-    relaxed: bool,
-    gfm_autolink_literal: bool,
-    label_openers: &mut LabelOpenerScan,
-) -> bool {
-    if !label_openers.has_unclosed_opener(input, index) {
-        return false;
-    }
-    if input[end..].starts_with("](") && !link_resource_tail_has_close(input, end + 2) {
-        return true;
-    }
-    !relaxed && !gfm_autolink_literal && input.as_bytes().get(end).is_some_and(|byte| *byte == b']')
-}
-
-/// Whether an unclosed `[` precedes a literal autolink on its line: the
-/// `[`/`]` depth from the line start (honouring `\` escapes) is positive. The
-/// walk is kept across calls because one inline scan asks about increasing
-/// positions; it drops back to depth 0 after each line break it consumes, which
-/// is exactly the state a walk from that line's start reaches.
-#[derive(Default)]
-struct LabelOpenerScan {
-    /// The last position asked about; the walk has stopped at the first step
-    /// at or after it.
-    queried: usize,
-    cursor: usize,
-    depth: usize,
-}
-
-impl LabelOpenerScan {
-    fn has_unclosed_opener(&mut self, input: &str, index: usize) -> bool {
-        if index < self.queried {
-            *self = Self::default();
-        }
-        while self.cursor < index {
-            let Some((next, char)) = next_char(input, self.cursor) else {
-                break;
-            };
-            match char {
-                '\\' => {
-                    // An escaped line break still ends the line, so it is left
-                    // for the next step to consume as a break.
-                    self.cursor = match next_char(input, next) {
-                        Some((_, '\n' | '\r')) | None => next,
-                        Some((after_escape, _)) => after_escape,
-                    };
-                    continue;
-                }
-                '\n' | '\r' => self.depth = 0,
-                '[' => self.depth += 1,
-                ']' => self.depth = self.depth.saturating_sub(1),
-                _ => {}
-            }
-            self.cursor = next;
-        }
-        self.queried = index;
-        self.depth > 0
-    }
-}
-
-fn link_resource_tail_has_close(input: &str, start: usize) -> bool {
-    let mut cursor = start;
-    while cursor < input.len() {
-        let Some((next, char)) = next_char(input, cursor) else {
-            break;
-        };
-        match char {
-            '\\' => {
-                cursor = next_char(input, next)
-                    .map(|(after_escape, _)| after_escape)
-                    .unwrap_or(next);
-                continue;
-            }
-            '\n' | '\r' => return false,
-            ')' => return true,
-            _ => {}
-        }
-        cursor = next;
-    }
-    false
-}
-
 fn http_literal_host_ok(host: &str) -> bool {
-    if host.starts_with('[') {
-        return bracketed_ipv6_host_end(host).is_some();
-    }
     match host.chars().next() {
-        Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => {
-            check_domain(host, true).is_some()
-        }
+        Some(char) if char.is_ascii() && char.is_ascii_alphanumeric() => check_domain(host, true),
         Some(char) if !char.is_ascii() && is_valid_hostchar(source_char(char)) => {
-            check_domain(host, true).is_some()
+            check_domain(host, true)
         }
         _ => false,
     }
-}
-
-fn bracketed_ipv6_host_end(host: &str) -> Option<usize> {
-    let close = host.find(']')?;
-    (close > 1).then_some(close + 1)
 }
 
 // Port of cmark-gfm `is_valid_hostchar`: a host char is valid when it is not a
@@ -6537,21 +4836,22 @@ fn is_valid_hostchar(char: char) -> bool {
     !char.is_whitespace() && !crate::unicode_punctuation::is_unicode_punctuation(char)
 }
 
-// Port of cmark-gfm `check_domain`. Scans the leading host of `data` (up to the
-// first non-host char) and returns its byte length, or `None` when invalid.
+// Port of cmark-gfm `check_domain`: whether `data` starts with a valid host.
 // Rejects a `_` in either of the last two `.`-separated host segments (unless
 // the host has >10 segments — a DoS guard). When `allow_short` is false a dot
 // is required (the `www.` rule). The URL extent past the host is determined by
-// `autolink_url_end`, so the precise length here only gates validity.
+// `autolink_url_end`, so only the verdict matters here.
 //
 // cmark walks bytes with `is_valid_hostchar` decoding each char; this walks
 // chars directly (UTF-8 safe) over the host prefix, which yields the same
-// dot/underscore-segment verdict. A `\` escapes the following char.
-fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
+// dot/underscore-segment verdict. A `\` escapes the following char, so a host
+// can run on over escaped spaces through later `www.` candidates; the walk
+// stops at the eleventh dot, which settles the verdict, so that the walks
+// from all the candidates of a pass stay linear in total.
+fn check_domain(data: &str, allow_short: bool) -> bool {
     let mut np = 0usize;
     let mut uscore1 = 0usize;
     let mut uscore2 = 0usize;
-    let mut host_len = 0usize;
 
     let mut chars = data.char_indices().peekable();
     while let Some((offset, char)) = chars.next() {
@@ -6563,69 +4863,44 @@ fn check_domain(data: &str, allow_short: bool) -> Option<usize> {
         match char {
             '\\' => {
                 // Escape: consume the next char as a literal host char.
-                host_len = offset + char.len_utf8();
-                if let Some((next_off, next)) = chars.next() {
-                    host_len = next_off + next.len_utf8();
-                }
+                chars.next();
             }
-            '_' if account => {
-                uscore2 += 1;
-                host_len = offset + char.len_utf8();
-            }
+            '_' if account => uscore2 += 1,
             '.' if account => {
                 uscore1 = uscore2;
                 uscore2 = 0;
                 np += 1;
-                host_len = offset + char.len_utf8();
+                if np > 10 {
+                    return true;
+                }
             }
-            '_' | '.' | '-' => {
-                host_len = offset + char.len_utf8();
-            }
+            '_' | '.' | '-' => {}
             _ => {
                 if !is_valid_hostchar(source_char(char)) {
                     break;
                 }
-                host_len = offset + char.len_utf8();
             }
         }
     }
 
     if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
-        return None;
+        return false;
     }
 
-    if allow_short || np > 0 {
-        Some(host_len)
-    } else {
-        None
-    }
+    allow_short || np > 0
 }
 
 // Forward scan from `start` for the URL extent: Unicode whitespace, `<`, a
 // non-ASCII char in CommonMark's Unicode punctuation set (full-width `，` or
-// `。`) other than the replacement char, `[[` with wikilinks enabled, or `]`
-// ends the URL. CommonMark allows
+// `。`) other than the replacement char, `[[`, or `]` ends the URL. CommonMark allows
 // `>` and `[` inside (the renderer percent-encodes them); a `]` is
 // additionally treated as a hard URL boundary (autolink-3), so a `]` ends the
-// scan and is never part of the link. `trim_from` is where the trailing trim
-// may reach (the URL start).
-fn autolink_url_end(
-    input: &str,
-    start: usize,
-    trim_from: usize,
-    balanced: bool,
-    wikilinks: bool,
-) -> usize {
+// scan and is never part of the link. The trailing trim may reach `start`.
+fn autolink_url_end(input: &str, start: usize) -> usize {
     let bytes = input.as_bytes();
     let mut end = start;
-    // Relaxed (cmark-gfm) URL extents balance `[`/`]` and `{`/`}` so an IPv6
-    // host `nex://[fe80…]/z` and a balanced `[abc]`/`{abc}` run stay inside the
-    // URL while an unbalanced trailing `]`/`}` ends it. Strict (GFM literal)
-    // extents stop at the first `]` (no balancing) — the two oracle shapes
-    // differ on purpose (`autolink_brackets_unbalanced` keeps both `]`;
-    // `autolink_relaxed_links_brackets_balanced` keeps one).
-    let mut bracket_depth = 0i32;
-    let mut curly_depth = 0i32;
+    // The extent stops at the first `]` outside backticks unless a `[` came
+    // before it in the URL (no balancing).
     let mut strict_has_open_bracket = false;
     let mut strict_inside_backticks = false;
     for (offset, char) in input[start..].char_indices() {
@@ -6635,37 +4910,15 @@ fn autolink_url_end(
             || (!char.is_ascii()
                 && char != '\u{FFFD}'
                 && crate::unicode_punctuation::is_unicode_punctuation(char))
-            || (wikilinks && input[start + offset..].starts_with("[["))
+            || input[start + offset..].starts_with("[[")
         {
             break;
         }
-        if balanced {
-            match char {
-                '[' => bracket_depth += 1,
-                ']' => {
-                    if bracket_depth > 0 {
-                        bracket_depth -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                '{' => curly_depth += 1,
-                '}' => {
-                    if curly_depth > 0 {
-                        curly_depth -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            match char {
-                '[' => strict_has_open_bracket = true,
-                '`' => strict_inside_backticks = !strict_inside_backticks,
-                ']' if !strict_has_open_bracket && !strict_inside_backticks => break,
-                _ => {}
-            }
+        match char {
+            '[' => strict_has_open_bracket = true,
+            '`' => strict_inside_backticks = !strict_inside_backticks,
+            ']' if !strict_has_open_bracket && !strict_inside_backticks => break,
+            _ => {}
         }
         // A `\` before ASCII punctuation other than `.` ends the URL. The
         // serializer writes text after a literal autolink with backslash
@@ -6682,7 +4935,7 @@ fn autolink_url_end(
         }
         end = start + offset + char.len_utf8();
     }
-    autolink_delim(input, trim_from, end)
+    autolink_delim(input, start, end)
 }
 
 fn is_autolink_terminating_control(char: char) -> bool {
@@ -6691,8 +4944,8 @@ fn is_autolink_terminating_control(char: char) -> bool {
 
 // Port of cmark-gfm `autolink_delim`: trim trailing delimiters from the end of
 // the URL. A trailing `) ? ! . , : * _ ~ ' "` is trimmed; `)` only when there
-// are more `)` than `(` in the link; a trailing `&…;` entity run is excluded
-// whole; a lone trailing `;` is trimmed.
+// are more `)` than `(` in the link; a trailing `&` and alphanumerics ending
+// in `;` is excluded whole; any other trailing `;` is trimmed alone.
 fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
     let bytes = input.as_bytes();
     let mut opening = 0usize;
@@ -6718,26 +4971,16 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
                 end -= 1;
             }
             b';' => {
-                // A trailing hex numeric character reference `&#x…;` is excluded
-                // whole. This is the round-trip dual of the serializer, which
-                // encodes a text char that would otherwise merge into the URL as
-                // a hex entity; no autolink-oracle URL ends in `&#x…;`, so this
-                // is conformance-safe (decimal `&#…;` is left intact to match
-                // the oracle, which keeps `www.a&#35` in the URL).
-                if let Some(amp) = trailing_hex_entity_run_start(bytes, start, end) {
-                    end = amp;
+                // Walk back over alphanumerics; if they reach a `&`, exclude
+                // the whole `&…;` entity run, otherwise trim just the `;`.
+                let mut new_end = end - 1;
+                while new_end > start && bytes[new_end - 1].is_ascii_alphanumeric() {
+                    new_end -= 1;
+                }
+                if new_end > start && new_end < end - 1 && bytes[new_end - 1] == b'&' {
+                    end = new_end - 1;
                 } else {
-                    // Walk back over alphanumerics; if they reach a `&`, exclude
-                    // the whole `&…;` entity run, otherwise trim just the `;`.
-                    let mut new_end = end - 1;
-                    while new_end > start && bytes[new_end - 1].is_ascii_alphanumeric() {
-                        new_end -= 1;
-                    }
-                    if new_end > start && new_end < end - 1 && bytes[new_end - 1] == b'&' {
-                        end = new_end - 1;
-                    } else {
-                        end -= 1;
-                    }
+                    end -= 1;
                 }
             }
             _ => break,
@@ -6746,36 +4989,6 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
     end
 }
 
-// When the URL ends with a hex numeric character reference `&#x[hex]+;`, returns
-// the offset of its leading `&`; otherwise `None`. Used only by `autolink_delim`
-// to trim the serializer's round-trip boundary marker (the serializer encodes a
-// would-merge text char as `&#xNN;`). Decimal `&#…;` is intentionally NOT
-// matched so the oracle's `www.a&#35` URLs stay intact.
-fn trailing_hex_entity_run_start(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
-    if end <= start || bytes[end - 1] != b';' {
-        return None;
-    }
-    let mut cursor = end - 1;
-    while cursor > start && bytes[cursor - 1].is_ascii_hexdigit() {
-        cursor -= 1;
-    }
-    // Require at least one hex digit, then `&#x` (case-insensitive `x`).
-    if cursor == end - 1 || cursor < start + 3 {
-        return None;
-    }
-    let x = bytes[cursor - 1];
-    if (x == b'x' || x == b'X') && bytes[cursor - 2] == b'#' && bytes[cursor - 3] == b'&' {
-        Some(cursor - 3)
-    } else {
-        None
-    }
-}
-
-// GFM bare-email literal (and the extended `mailto:`/`xmpp:` protocol forms).
-// `index` must be the link start: cmark anchors the email at the left edge
-// found by rewinding from `@` over `[A-Za-z0-9._+-]` (or a `mailto:`/`xmpp:`
-// scheme), so this only succeeds when the char before `index` is not part of
-// that left extent.
 /// Scan state shared by the `parse_literal_autolink` calls of one inline pass.
 /// The pass only moves forward, so each piece lets a later start position reuse
 /// the bytes already walked for an earlier one instead of rescanning them.
@@ -6783,9 +4996,129 @@ fn trailing_hex_entity_run_start(bytes: &[u8], start: usize, end: usize) -> Opti
 struct LiteralAutolinkScan {
     /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
     email_local: ByteRun,
-    /// Runs of relaxed-autolink scheme bytes.
-    scheme: ByteRun,
-    label_openers: LabelOpenerScan,
+    /// What every start before one `@` shares: its last `:` and its domain.
+    email_at: EmailAt,
+    /// The text before a start, for the `+` boundary check.
+    email_prefix: EmailPrefix,
+}
+
+/// The facts of one `@` that every email start before it reads: the last `:`
+/// in its local-part run at or after `from`, and the domain end for the plain
+/// and the `xmpp:` form. A query starting before `from` rescans the run.
+#[derive(Default)]
+struct EmailAt {
+    at: Option<usize>,
+    from: usize,
+    last_colon: Option<usize>,
+    domain_end: [Option<Option<usize>>; 2],
+}
+
+impl EmailAt {
+    fn update(&mut self, input: &str, index: usize, at: usize) {
+        if self.at != Some(at) {
+            *self = Self {
+                at: Some(at),
+                from: usize::MAX,
+                ..Self::default()
+            };
+        }
+        if index < self.from {
+            self.last_colon = input[index..at].rfind(':').map(|offset| index + offset);
+            self.from = index;
+        }
+    }
+
+    /// The end of the domain after the `@`, trimmed and validated, or `None`.
+    fn domain_end(&mut self, input: &str, is_xmpp: bool) -> Option<usize> {
+        let at = self.at.expect("updated before use");
+        *self.domain_end[usize::from(is_xmpp)].get_or_insert_with(|| {
+            let start = at + 1;
+            let end = literal_email_domain_end(input, start, is_xmpp)?;
+            let trimmed = autolink_delim(input, start, end);
+            (trimmed > start && is_gfm_email_domain(&input[start..trimmed], is_xmpp))
+                .then_some(trimmed)
+        })
+    }
+}
+
+/// Whether the text before a position ends in a bare email, kept as a pass
+/// walks forward: the start of the text after the last whitespace, the first
+/// byte there that no local part holds, the last `@`, and after it the first
+/// byte no domain holds, the first `.`, and the first `.` opening an empty
+/// label. A query before the walked position walks again from the start.
+#[derive(Default)]
+struct EmailPrefix {
+    cursor: usize,
+    segment: usize,
+    non_local: Option<usize>,
+    at: Option<usize>,
+    domain_bad: Option<usize>,
+    domain_dot: Option<usize>,
+    domain_empty_label: Option<usize>,
+}
+
+impl EmailPrefix {
+    fn advance(&mut self, input: &str, end: usize) {
+        if end < self.cursor {
+            *self = Self::default();
+        }
+        let bytes = input.as_bytes();
+        let from = self.cursor;
+        for (offset, char) in input[from..end].char_indices() {
+            let position = from + offset;
+            if char.is_whitespace() {
+                *self = Self {
+                    segment: position + char.len_utf8(),
+                    ..Self::default()
+                };
+                continue;
+            }
+            let byte = char.is_ascii().then_some(char as u8);
+            if self.non_local.is_none() && !byte.is_some_and(is_gfm_email_local_byte) {
+                self.non_local = Some(position);
+            }
+            if char == '@' {
+                self.at = Some(position);
+                self.domain_bad = None;
+                self.domain_dot = None;
+                self.domain_empty_label = None;
+                continue;
+            }
+            let Some(at) = self.at else {
+                continue;
+            };
+            match byte {
+                Some(b'.') => {
+                    self.domain_dot.get_or_insert(position);
+                    if position == at + 1 || bytes[position - 1] == b'.' {
+                        self.domain_empty_label.get_or_insert(position);
+                    }
+                }
+                Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') => {}
+                _ => {
+                    self.domain_bad.get_or_insert(position);
+                }
+            }
+        }
+        self.cursor = end;
+    }
+
+    /// Whether the text from the last whitespace before `end` to `end` ends
+    /// in a bare email: `prefix_ends_with_gfm_email`, walked once per pass.
+    fn ends_with_email(&mut self, input: &str, end: usize) -> bool {
+        self.advance(input, end);
+        let Some(at) = self.at else {
+            return false;
+        };
+        let before = |position: Option<usize>| position.is_some_and(|position| position < end);
+        at > self.segment
+            && !self.non_local.is_some_and(|position| position < at)
+            && end > at + 1
+            && !before(self.domain_bad)
+            && before(self.domain_dot)
+            && !before(self.domain_empty_label)
+            && !matches!(input.as_bytes()[end - 1], b'.' | b'-' | b'_')
+    }
 }
 
 /// The extent of one run of bytes accepted by a fixed predicate: every start
@@ -6820,63 +5153,62 @@ fn is_email_local_or_scheme_byte(byte: u8) -> bool {
     is_gfm_email_local_byte(byte) || byte == b':'
 }
 
-fn is_relaxed_scheme_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
-}
-
+/// A GFM bare-email literal (and the extended `mailto:`/`xmpp:` protocol
+/// forms) starting at `index`, which must be the link start: cmark anchors
+/// the email at the left edge found by rewinding from `@` over
+/// `[A-Za-z0-9._+-]` (or a `mailto:`/`xmpp:` scheme), so this only succeeds
+/// when the char before `index` is not part of that left extent.
 fn parse_literal_email(
     input: &str,
     index: usize,
-    local_run: &mut ByteRun,
-) -> Option<(usize, String)> {
-    let rest = &input[index..];
+    scan: &mut LiteralAutolinkScan,
+) -> Option<(usize, &'static str)> {
     // A valid local part holds only local-part bytes behind an optional
     // `mailto:`/`xmpp:` scheme, so the `@` must be the byte that ends that run.
-    let at_index = local_run.end(input, index, is_email_local_or_scheme_byte);
-    if input.as_bytes().get(at_index) != Some(&b'@') {
+    let at_index = scan
+        .email_local
+        .end(input, index, is_email_local_or_scheme_byte);
+    if input.as_bytes().get(at_index) != Some(&b'@') || at_index == index {
         return None;
     }
-    let at = at_index - index;
-    if at == 0 {
-        return None;
-    }
-    let local = &rest[..at];
 
     // Determine whether this `@` is preceded by an extended protocol scheme
     // (`mailto:` / `xmpp:`), which both relaxes the href synthesis and (xmpp)
     // allows `/` in the domain.
-    let (auto_mailto, is_xmpp) = classify_email_local(local);
+    let (auto_mailto, is_xmpp) = classify_email_local(&input[index..at_index]);
 
     // Left-boundary guard (autolink-1): the char before `index` must not be a
     // local-part continuation char, otherwise the true link starts earlier and
     // this position is interior. After a recognized scheme, the scheme's own
     // preceding-char rule is what matters.
-    if !email_left_boundary_ok(input, index, auto_mailto) {
+    if !email_left_boundary_ok(input, index, auto_mailto, |end| {
+        scan.email_prefix.ends_with_email(input, end)
+    }) {
         return None;
     }
 
-    if !email_local_is_valid(local, auto_mailto) {
+    // The run holds only local-part bytes and `:`, so the local part after
+    // its scheme is valid when it is not empty and holds no `:`. The facts of
+    // the `@` are shared by every start before it, so a run of starts reads
+    // them once.
+    let body_start = if auto_mailto {
+        index
+    } else if is_xmpp {
+        index + "xmpp:".len()
+    } else {
+        index + "mailto:".len()
+    };
+    scan.email_at.update(input, index, at_index);
+    if body_start >= at_index
+        || scan
+            .email_at
+            .last_colon
+            .is_some_and(|colon| colon >= body_start)
+    {
         return None;
     }
-
-    let domain_start = index + at + 1;
-    let domain_end = literal_email_domain_end(input, domain_start, is_xmpp)?;
-    let trimmed = autolink_delim(input, domain_start, domain_end);
-    if trimmed <= domain_start {
-        return None;
-    }
-
-    let domain = &input[domain_start..trimmed];
-    if !is_gfm_email_domain(domain, is_xmpp) {
-        return None;
-    }
-
-    let mut destination = String::new();
-    if auto_mailto {
-        destination.push_str("mailto:");
-    }
-    destination.push_str(&input[index..trimmed]);
-    Some((trimmed, destination))
+    let end = scan.email_at.domain_end(input, is_xmpp)?;
+    Some((end, if auto_mailto { "mailto:" } else { "" }))
 }
 
 // Classify the local part for the extended-protocol forms. Returns
@@ -6913,7 +5245,12 @@ fn strip_ci_prefix<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
 // also rejected (`/a@b.c` is not linked), while the extended
 // `mailto:`/`xmpp:` form permits `/` before the scheme (so
 // `…/mailto:beedrill@…` links).
-fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool {
+fn email_left_boundary_ok(
+    input: &str,
+    index: usize,
+    auto_mailto: bool,
+    prefix_ends_with_email: impl FnOnce(usize) -> bool,
+) -> bool {
     if index == 0 {
         return true;
     }
@@ -6921,10 +5258,7 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
         return true;
     };
     if previous.is_ascii_alphanumeric() {
-        if auto_mailto
-            && input[index..].starts_with('+')
-            && prefix_ends_with_gfm_email(input, index)
-        {
+        if auto_mailto && input[index..].starts_with('+') && prefix_ends_with_email(index) {
             return true;
         }
         return false;
@@ -6935,6 +5269,7 @@ fn email_left_boundary_ok(input: &str, index: usize, auto_mailto: bool) -> bool 
     true
 }
 
+#[cfg(test)]
 fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
     let start = input[..end]
         .char_indices()
@@ -6951,6 +5286,7 @@ fn prefix_ends_with_gfm_email(input: &str, end: usize) -> bool {
 // Validate the email local part. For the bare form, every char must be a GFM
 // email atext byte (`[A-Za-z0-9.+_-]` plus the dot-separated structure). For
 // the extended-protocol forms, the part after the scheme is validated.
+#[cfg(test)]
 fn email_local_is_valid(local: &str, auto_mailto: bool) -> bool {
     let body = if auto_mailto {
         local
@@ -7096,7 +5432,7 @@ fn is_email_domain(input: &str, min_labels: usize) -> bool {
 
 /// A footnote label: no space, tab, or line ending and, as in a link label,
 /// no unescaped bracket.
-fn is_footnote_label(label: &str) -> bool {
+pub(crate) fn is_footnote_label(label: &str) -> bool {
     !label.is_empty()
         && reference_label_is_within_limit(label)
         && !label.contains([' ', '\t', '\n', '\r'])

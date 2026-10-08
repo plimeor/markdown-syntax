@@ -24,6 +24,12 @@ fn optional(value: &mut Option<String>) {
     }
 }
 
+fn title(title: &mut Option<Title>) {
+    if let Some(title) = title {
+        string(&mut title.value);
+    }
+}
+
 fn attributes(attributes: &mut [DirectiveAttribute]) {
     for attribute in attributes {
         string(&mut attribute.name);
@@ -52,14 +58,6 @@ fn blocks(blocks: &mut [Block]) {
                     self::blocks(&mut item.children);
                 }
             }
-            Block::DescriptionList(node) => {
-                for item in &mut node.children {
-                    inlines(&mut item.term);
-                    for details in &mut item.details {
-                        self::blocks(&mut details.children);
-                    }
-                }
-            }
             Block::CodeBlock(node) => {
                 optional(&mut node.info);
                 string(&mut node.value);
@@ -77,7 +75,7 @@ fn blocks(blocks: &mut [Block]) {
                 string(&mut node.label);
                 string(&mut node.identifier);
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
             }
             Block::FootnoteDefinition(node) => {
                 string(&mut node.label);
@@ -93,9 +91,6 @@ fn blocks(blocks: &mut [Block]) {
             }
             Block::MathBlock(node) => string(&mut node.value),
             Block::Frontmatter(node) => string(&mut node.value),
-            Block::MdxEsm(node) => string(&mut node.value),
-            Block::MdxExpression(node) => string(&mut node.value),
-            Block::MdxJsx(node) => string(&mut node.value),
             Block::LeafDirective(node) => {
                 string(&mut node.name);
                 inlines(&mut node.label);
@@ -116,33 +111,23 @@ fn inlines(inlines: &mut [Inline]) {
         match inline {
             Inline::Text(node) => string(&mut node.value),
             Inline::Escape(_) | Inline::SoftBreak(_) | Inline::LineBreak(_) => {}
-            Inline::CharacterReference(node) => {
-                string(&mut node.reference);
-                string(&mut node.value);
-            }
+            Inline::CharacterReference(node) => string(&mut node.reference),
             Inline::Emphasis(node) => self::inlines(&mut node.children),
             Inline::Strong(node) => self::inlines(&mut node.children),
-            Inline::Underline(node) => self::inlines(&mut node.children),
             Inline::Delete(node) => self::inlines(&mut node.children),
-            Inline::Insert(node) => self::inlines(&mut node.children),
             Inline::Mark(node) => self::inlines(&mut node.children),
-            Inline::Subscript(node) => self::inlines(&mut node.children),
-            Inline::Superscript(node) => self::inlines(&mut node.children),
-            Inline::Spoiler(node) => self::inlines(&mut node.children),
             Inline::InlineFootnote(node) => self::inlines(&mut node.children),
             Inline::Shortcode(node) => string(&mut node.name),
-            Inline::Code(node) => {
-                string(&mut node.value);
-                string(&mut node.raw);
-            }
+            Inline::Code(node) => string(&mut node.value),
             Inline::Link(node) => {
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
                 self::inlines(&mut node.children);
             }
+            Inline::Autolink(node) => string(&mut node.text),
             Inline::Image(node) => {
                 string(&mut node.destination);
-                optional(&mut node.title);
+                title(&mut node.title);
                 self::inlines(&mut node.alt);
             }
             Inline::LinkReference(node) => {
@@ -165,8 +150,6 @@ fn inlines(inlines: &mut [Inline]) {
                 string(&mut node.target);
                 string(&mut node.label);
             }
-            Inline::MdxExpression(node) => string(&mut node.value),
-            Inline::MdxJsx(node) => string(&mut node.value),
             Inline::TextDirective(node) => {
                 string(&mut node.name);
                 self::inlines(&mut node.label);

@@ -11,8 +11,7 @@ Document
     HtmlInline "<bar attr=\"](baz)\">"
   Paragraph
     Text "[foo"
-    Code value="](/uri)" raw="](/uri)" fence=1
+    Code value="](/uri)"
   Paragraph
     Text "[foo"
-    Link destination=http://example.com/?search=](uri) title=none
-      Text "http://example.com/?search=](uri)"
+    Autolink form=angle text="http://example.com/?search=](uri)" destination=http://example.com/?search=](uri)

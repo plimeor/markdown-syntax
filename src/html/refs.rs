@@ -43,13 +43,6 @@ fn collect_defs(blocks: &[Block], out: &mut BTreeMap<String, Definition>) {
                     collect_defs(&item.children, out);
                 }
             }
-            Block::DescriptionList(dl) => {
-                for item in &dl.children {
-                    for details in &item.details {
-                        collect_defs(&details.children, out);
-                    }
-                }
-            }
             Block::FootnoteDefinition(fd) => collect_defs(&fd.children, out),
             Block::HtmlContainer(container) => {
                 if let HtmlContainerContent::Blocks(children) = &container.content {
@@ -98,19 +91,15 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
         match inline {
             Inline::Text(t) => out.push_str(&t.value),
             Inline::Escape(e) => out.push(e.value),
-            Inline::CharacterReference(c) => out.push_str(&c.value),
+            Inline::CharacterReference(c) => out.push_str(&c.value().unwrap_or_default()),
             Inline::Code(c) => out.push_str(&c.value),
             Inline::Math(m) => out.push_str(&m.value),
             Inline::Emphasis(n) => flatten_into(&n.children, out),
             Inline::Strong(n) => flatten_into(&n.children, out),
-            Inline::Underline(n) => flatten_into(&n.children, out),
             Inline::Delete(n) => flatten_into(&n.children, out),
-            Inline::Insert(n) => flatten_into(&n.children, out),
             Inline::Mark(n) => flatten_into(&n.children, out),
-            Inline::Subscript(n) => flatten_into(&n.children, out),
-            Inline::Superscript(n) => flatten_into(&n.children, out),
-            Inline::Spoiler(n) => flatten_into(&n.children, out),
             Inline::Link(n) => flatten_into(&n.children, out),
+            Inline::Autolink(n) => out.push_str(&n.text),
             Inline::LinkReference(n) => flatten_into(&n.children, out),
             Inline::Image(n) => flatten_into(&n.alt, out),
             Inline::ImageReference(n) => flatten_into(&n.alt, out),
@@ -118,7 +107,7 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             Inline::SoftBreak(_) => out.push('\n'),
             Inline::LineBreak(_) => out.push('\n'),
             Inline::Html(h) => out.push_str(&h.value),
-            Inline::WikiLink(w) => out.push_str(&w.label),
+            Inline::WikiLink(w) => out.push_str(&w.decoded_label()),
             Inline::Shortcode(s) => match s.glyph() {
                 Some(glyph) => out.push_str(glyph),
                 None => {
@@ -129,8 +118,6 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
             },
             Inline::FootnoteReference(_) => {}
             Inline::TextDirective(d) => flatten_into(&d.label, out),
-            Inline::MdxExpression(_) => {}
-            Inline::MdxJsx(_) => {}
         }
     }
 }

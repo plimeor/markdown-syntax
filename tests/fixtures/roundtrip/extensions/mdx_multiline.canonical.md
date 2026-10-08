@@ -5,5 +5,5 @@ import X from './x'
 </Callout>
 
 {
-  1 + 1
+1 + 1
 }

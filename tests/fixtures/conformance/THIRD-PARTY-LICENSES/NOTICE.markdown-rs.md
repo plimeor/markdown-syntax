@@ -1,9 +1,9 @@
 # markdown-rs Test Corpus
 
-Fixtures under `../commonmark/`, `../gfm/`, `../../roundtrip/cases/`, and
-`../../roundtrip/examples/` include Markdown inputs and expected-HTML oracle
-snapshots derived from `wooorm/markdown-rs` at local comparison commit
-`1506572`.
+Fixtures under `../commonmark/`, `../gfm/`, `../../roundtrip/cases/`,
+`../../roundtrip/examples/`, and `../../syntax_decisions/` include Markdown
+inputs and expected-HTML oracle snapshots derived from `wooorm/markdown-rs` at
+local comparison commit `1506572`.
 
 The upstream Rust test sources are not present in this tree. This crate stores
 only the byte-counted fixture snapshots it executes or audits locally; upstream

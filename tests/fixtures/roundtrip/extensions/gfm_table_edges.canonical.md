@@ -9,8 +9,8 @@
 | --- |
 | two |
 
-\| Literal \|
-\| - \|
+| Literal |
+| - |
 
 | Code |
 | --- |

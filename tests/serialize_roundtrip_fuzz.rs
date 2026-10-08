@@ -1,12 +1,12 @@
 //! Seeded round-trip generators: documents built from pieces of inline,
-//! block, and emphasis syntax are parsed, serialized under the same dialect,
-//! and parsed again. Each generated document reads back as the parsed one,
-//! or is listed as unrepresentable with its reason.
+//! block, and emphasis syntax are parsed, serialized, and parsed again. Each
+//! generated document reads back as the parsed one, or is listed with the
+//! reason it does not.
 
 #[path = "support/normalize.rs"]
 mod normalize;
 
-use markdown_syntax::{SerializeError, SerializeOptions, SyntaxOptions};
+use markdown_syntax::parse;
 
 /// A small deterministic xorshift generator, so failures reproduce.
 struct Rng(u64);
@@ -147,18 +147,28 @@ const GENERATORS: &[(&str, &[&str], usize, u64)] = &[
 
 const INPUTS_PER_GENERATOR: usize = 2_000;
 
-/// Generated inputs whose parse no Markdown the serializer writes reads
-/// back as, with the reason.
-const UNREPRESENTABLE: &[(&str, &str)] = &[];
-
-fn dialects() -> [(&'static str, SyntaxOptions); 4] {
-    [
-        ("commonmark", SyntaxOptions::commonmark()),
-        ("gfm", SyntaxOptions::gfm()),
-        ("default", SyntaxOptions::default()),
-        ("mdx", SyntaxOptions::mdx()),
-    ]
-}
+/// Generated inputs whose Markdown reads back as a different tree, with the
+/// reason.
+///
+/// Each difference is whitespace or a blank line that the AST does not
+/// record, as decision 0008 (Consequences) accepts.
+const NOT_READING_BACK: &[(&str, &str)] = &[
+    (
+        "__$$++\t\\\t\n}$==",
+        "the tab between a final backslash and the line ending, which keeps the \
+         backslash from making a hard break, is not recorded",
+    ),
+    (
+        ">\n>[!NOTE]: }",
+        "the empty first line of the quote, which keeps `[!NOTE]` from opening an \
+         alert, is not recorded",
+    ),
+    (
+        "-->\n\t$$[^1]: -->```:::- ",
+        "the tab indenting the paragraph's continuation line, which keeps `$$` \
+         from opening a math block, is not recorded",
+    ),
+];
 
 fn generated(pieces: &[&str], max_pieces: usize, seed: u64) -> Vec<String> {
     let mut rng = Rng(seed);
@@ -172,43 +182,43 @@ fn generated(pieces: &[&str], max_pieces: usize, seed: u64) -> Vec<String> {
         .collect()
 }
 
+/// Whether `input` reads back: its Markdown parses as the same tree, and
+/// serializes to the same Markdown again. Panics if it does not serialize.
+fn reads_back(input: &str) -> Result<(), String> {
+    let document = parse(input).document;
+    let markdown = document
+        .to_markdown()
+        .unwrap_or_else(|error| panic!("{input:?}: {error:?}"));
+    let reparsed = parse(&markdown).document;
+    if normalize::normalized(&reparsed.children) != normalize::normalized(&document.children) {
+        return Err(format!("{input:?} -> {markdown:?}"));
+    }
+    match reparsed.to_markdown() {
+        Ok(again) if again == markdown => Ok(()),
+        other => Err(format!("{input:?} -> {markdown:?} -> {other:?}")),
+    }
+}
+
 #[test]
-fn generated_documents_round_trip_in_each_dialect() {
+fn generated_documents_round_trip() {
     let mut failures = Vec::new();
-    for (dialect, options) in dialects() {
-        let mut serialize = SerializeOptions::default();
-        serialize.syntax = options.clone();
-        for &(generator, pieces, max_pieces, seed) in GENERATORS {
-            for input in generated(pieces, max_pieces, seed) {
-                let document = options.parse(&input).document;
-                let markdown = match document.to_markdown_with(&serialize) {
-                    Ok(markdown) => markdown,
-                    // A parsed document has its source as one spelling, so
-                    // it is unrepresentable only where listed with a reason.
-                    Err(SerializeError::Unrepresentable(_))
-                        if UNREPRESENTABLE.iter().any(|(listed, _)| *listed == input) =>
-                    {
-                        continue
-                    }
-                    Err(error) => {
-                        failures.push(format!("{dialect} {generator} {input:?}: {error:?}"));
-                        continue;
-                    }
-                };
-                let reparsed = options.parse(&markdown).document;
-                if normalize::normalized(&reparsed.children)
-                    != normalize::normalized(&document.children)
-                {
-                    failures.push(format!("{dialect} {generator} {input:?} -> {markdown:?}"));
-                    continue;
-                }
-                match reparsed.to_markdown_with(&serialize) {
-                    Ok(again) if again == markdown => {}
-                    other => failures.push(format!(
-                        "{dialect} {generator} {input:?} -> {markdown:?} -> {other:?}"
-                    )),
+    let mut listed_seen = Vec::new();
+    for &(generator, pieces, max_pieces, seed) in GENERATORS {
+        for input in generated(pieces, max_pieces, seed) {
+            let listed = NOT_READING_BACK.iter().any(|(listed, _)| *listed == input);
+            match (reads_back(&input), listed) {
+                (Ok(()), false) => {}
+                (Err(_), true) => listed_seen.push(input),
+                (Err(failure), false) => failures.push(format!("{generator} {failure}")),
+                (Ok(()), true) => {
+                    failures.push(format!("{generator} {input:?}: listed, but reads back"))
                 }
             }
+        }
+    }
+    for (listed, _) in NOT_READING_BACK {
+        if !listed_seen.iter().any(|seen| seen == listed) {
+            failures.push(format!("{listed:?}: listed, but not generated"));
         }
     }
     assert!(

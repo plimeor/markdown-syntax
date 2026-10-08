@@ -1,0 +1,49 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: gfm_extensions
+decision: Tables, task list items, and inline footnotes are part of the syntax.
+count: 3
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 66 input-bytes 17 expected-bytes 94
+from commonmark/gfm_table.cases #1; verified: cmark-gfm, micromark
+--- input
+| a |
+| - |
+| b |
+--- expected
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b</td>
+</tr>
+</tbody>
+</table>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 117 input-bytes 8 expected-bytes 71
+from commonmark/gfm_task_list_item.cases #1; verified: micromark (cmark-gfm writes `checked=""` before `disabled=""`)
+--- input
+* [x] y.
+--- expected
+<ul>
+<li><input type="checkbox" disabled="" checked="" /> y.</li>
+</ul>
+--- end
+--- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 91 input-bytes 30 expected-bytes 384
+from gfm/inline_footnotes.cases #10; decision 0007: inline footnotes are part of the syntax
+--- input
+Text^[note] should not parse.
+
+--- expected
+<p>Text<sup class="footnote-ref"><a href="#fn-__inline_1" id="fnref-__inline_1" data-footnote-ref>1</a></sup> should not parse.</p>
+<section class="footnotes" data-footnotes>
+<ol>
+<li id="fn-__inline_1">
+<p>note <a href="#fnref-__inline_1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+</li>
+</ol>
+</section>
+--- end

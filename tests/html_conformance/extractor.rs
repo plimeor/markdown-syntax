@@ -146,6 +146,7 @@ fn parse_file(path: &Path, category: Category) -> Vec<OracleTuple> {
 
         tuples.push(OracleTuple {
             source_file,
+            index: parsed.index,
             category,
             label,
             input: input.to_string(),
@@ -169,6 +170,7 @@ fn parse_file(path: &Path, category: Category) -> Vec<OracleTuple> {
 }
 
 struct CaseHeader {
+    index: usize,
     option_tokens: Vec<String>,
     has_label: bool,
     label_bytes: usize,
@@ -201,6 +203,7 @@ fn parse_case_header(rel: &str, header: &str) -> CaseHeader {
     let expected_bytes = parse_usize(rel, header, parts[10]);
 
     CaseHeader {
+        index: parse_usize(rel, header, parts[2]),
         option_tokens,
         // A zero-length label is recorded as "no label" (the source had none);
         // genuine empty-string labels never occur in the snapshot.

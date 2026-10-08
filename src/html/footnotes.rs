@@ -131,13 +131,6 @@ fn collect_defs(
                     collect_defs(&item.children, defs, display_labels);
                 }
             }
-            Block::DescriptionList(dl) => {
-                for item in &dl.children {
-                    for details in &item.details {
-                        collect_defs(&details.children, defs, display_labels);
-                    }
-                }
-            }
             Block::ContainerDirective(dir) => collect_defs(&dir.children, defs, display_labels),
             Block::HtmlContainer(container) => {
                 if let HtmlContainerContent::Blocks(children) = &container.content {
@@ -169,14 +162,6 @@ impl RefBuilder {
                 Block::List(list) => {
                     for item in &list.children {
                         self.walk_blocks(&item.children);
-                    }
-                }
-                Block::DescriptionList(dl) => {
-                    for item in &dl.children {
-                        self.walk_inlines(&item.term);
-                        for details in &item.details {
-                            self.walk_blocks(&details.children);
-                        }
                     }
                 }
                 Block::Table(table) => {
@@ -222,13 +207,8 @@ impl RefBuilder {
                 }
                 Inline::Emphasis(n) => self.walk_inlines(&n.children),
                 Inline::Strong(n) => self.walk_inlines(&n.children),
-                Inline::Underline(n) => self.walk_inlines(&n.children),
                 Inline::Delete(n) => self.walk_inlines(&n.children),
-                Inline::Insert(n) => self.walk_inlines(&n.children),
                 Inline::Mark(n) => self.walk_inlines(&n.children),
-                Inline::Subscript(n) => self.walk_inlines(&n.children),
-                Inline::Superscript(n) => self.walk_inlines(&n.children),
-                Inline::Spoiler(n) => self.walk_inlines(&n.children),
                 Inline::Link(n) => self.walk_inlines(&n.children),
                 Inline::LinkReference(n) => self.walk_inlines(&n.children),
                 Inline::TextDirective(d) => self.walk_inlines(&d.label),

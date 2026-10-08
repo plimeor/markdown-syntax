@@ -1,4 +1,10 @@
 Document
-  MdxEsm "import X from './x'"
-  MdxJsx "<Callout kind=\"info\">\n  <X value={1} />\n</Callout>"
-  MdxExpression "\n  1 + 1"
+  Paragraph
+    Text "import X from './x'"
+  HtmlBlock "<Callout kind=\"info\">\n  <X value={1} />\n</Callout>"
+  Paragraph
+    Text "{"
+    SoftBreak
+    Text "1 + 1"
+    SoftBreak
+    Text "}"

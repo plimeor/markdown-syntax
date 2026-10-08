@@ -16,6 +16,6 @@
 <div *???-&&&-<---
 *raw*
 
-Text <a b=ok>ok</a> and <a b=a\`b>bad.
+Text <a b=ok>ok</a> and <a b=a`b>bad.
 
 <script/>

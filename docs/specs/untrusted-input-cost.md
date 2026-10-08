@@ -11,11 +11,23 @@ the tree walkers that depend on its nesting limits.
 
 ### Requirement: Linear time
 Parsing, `to_markdown`, `to_html`, and `validate` SHALL take time linear in the
-input size, except MDX JSX tag matching, which SHALL take at most `n log n`.
+input size.
 
 #### Scenario: Unclosed openers
-- **WHEN** an input of tens of thousands of unclosed openers of one construct (for example `[`, `++`, `<Tag`, or `{`) is parsed in any dialect
+- **WHEN** an input of tens of thousands of unclosed openers of one construct (for example `[`, `==`, `^[`, or `<!X`) is parsed
 - **THEN** doubling the input at most roughly doubles the time
+
+#### Scenario: Repeated fragment combinations
+- **WHEN** any pair or triple of syntax fragments — link, image, footnote, wiki link, and directive openers and closers, literal autolinks, code, math, emphasis, strikethrough, and highlight delimiters, a backslash, a character reference, a pipe, a space, a line ending, and block quote and list markers — is repeated `n` and `2n` times, alone or after a paragraph's first word, and parsed and serialized
+- **THEN** doubling the repetitions at most roughly doubles the time of each
+
+#### Scenario: Email candidates before one `@`
+- **WHEN** a long run of local-part bytes that each could start an email, such as `"-a"` or `"a+"` repeated, is followed by one `@` and a domain, and parsed
+- **THEN** quadrupling the run at most roughly quadruples the time
+
+#### Scenario: Literal autolinks in open labels
+- **WHEN** thousands of link labels left open, each holding a literal autolink and followed by `(`, such as `"[ www.a]("` repeated, are parsed
+- **THEN** quadrupling them at most roughly quadruples the time
 
 #### Scenario: Diagnostics running to the end of a paragraph
 - **WHEN** thousands of lines each holding a malformed text directive opener, such as `" x :a{"`, are parsed, at the top level or in a block quote
@@ -23,14 +35,14 @@ input size, except MDX JSX tag matching, which SHALL take at most `n log n`.
 
 #### Scenario: Long run of tildes
 - **WHEN** a paragraph holding tens of thousands of `~` between two words is parsed and serialized
-- **THEN** quadrupling the run at most roughly quadruples the serialization time
+- **THEN** quadrupling the run at most roughly quadruples the parse and the serialization time
 
 #### Scenario: Deeply nested emphasis
-- **WHEN** a paragraph holding 16 levels of nested emphasis, a mark around further nested emphasis, and a tail that abuts the runs is serialized
+- **WHEN** a paragraph holding 16 levels of nested emphasis and a mark around further nested emphasis is serialized
 - **THEN** it finishes within 1 s in a debug build, and doubling the nesting depth from 4 to 8 to 16 at most roughly doubles the time
 
-#### Scenario: Long description details
-- **WHEN** a description list whose details hold thousands of continuation lines, `"a\n: b\n"` followed by `"c\n"` repeated, is parsed
+#### Scenario: Long footnote definition
+- **WHEN** a footnote definition whose paragraph takes thousands of lazy lines, `"[^1]: b\n"` followed by `"c\n"` repeated, is parsed
 - **THEN** quadrupling the lines at most roughly quadruples the time
 
 #### Scenario: Long nested containers
@@ -47,13 +59,13 @@ nests; the deepest input SHALL fit a 2 MiB thread stack, in unoptimized builds
 too.
 
 #### Scenario: Deep nesting on a small stack
-- **WHEN** inputs nested thousands of levels deep (block quotes, lists, links, emphasis) are parsed, serialized, rendered, and validated on a 2 MiB thread in a debug build
+- **WHEN** inputs nested tens of thousands of levels deep (block quotes, lists, links, emphasis) are parsed, serialized, rendered, and validated on a 2 MiB thread, in a debug or an optimized build
 - **THEN** none overflows the stack
 
 ### Requirement: Block nesting limit
 Block containers (block quotes, list items, container directives, footnote
-definitions, HTML containers, description details) SHALL nest at most 32 levels;
-markers past the limit SHALL stay leaf-block text, usually paragraph text.
+definitions, HTML containers) SHALL nest at most 32 levels; markers past the
+limit SHALL stay leaf-block text, usually paragraph text.
 
 #### Scenario: 40 nested block quotes
 - **WHEN** a line starting with 40 `>` markers is parsed
@@ -61,9 +73,8 @@ markers past the limit SHALL stay leaf-block text, usually paragraph text.
 
 ### Requirement: Inline nesting limit
 Inline containers — link and image labels, inline footnotes, directive labels,
-emphasis and strong, strikethrough, and `++`, `==`, `~`, `^`, `||`, and
-underline spans — SHALL nest at most 32 levels together; an opener past the
-limit SHALL stay literal text.
+emphasis and strong, strikethrough, and `==` spans — SHALL nest at most 32
+levels together; an opener past the limit SHALL stay literal text.
 
 #### Scenario: Deeply nested highlights
 - **WHEN** 40 nested `==` spans are parsed

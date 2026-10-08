@@ -2,10 +2,10 @@
 
 ## Purpose
 
-The Rust surface through which callers parse Markdown, choose a dialect, read
-diagnostics and source positions, build ASTs by hand, and ask a `Document` for
-Markdown, HTML, or validation results. Owned by `src/lib.rs`, `src/options.rs`,
-`src/diagnostic.rs`, `src/span.rs`, and `src/ast.rs`.
+The Rust surface through which callers parse Markdown, read diagnostics and
+source positions, build ASTs by hand, and ask a `Document` for Markdown, HTML,
+or validation results. Owned by `src/lib.rs`, `src/diagnostic.rs`,
+`src/span.rs`, and `src/ast.rs`.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ keep the same constraints.
 
 #### Scenario: Default build
 - **WHEN** the crate is built with default features
-- **THEN** it compiles for `wasm32-unknown-unknown` and with Rust 1.82, pulls in no runtime dependency, and exports no HTML renderer
+- **THEN** it compiles for `wasm32-unknown-unknown` and with Rust 1.82, pulls in no runtime dependency, and exports no HTML renderer; `scripts/pre-release-check.sh` checks the two builds before a release
 
 #### Scenario: HTML feature
 - **WHEN** the crate is built with `--features html`
@@ -36,80 +36,12 @@ reported as diagnostics.
 - **THEN** a document is returned and `diagnostics` contains an error-severity `UnclosedDirectiveContainer`
 
 #### Scenario: Multi-byte whitespace before an email-like run
-- **WHEN** `"\u{a0}e+@"` is parsed with `parse` and with the GFM preset
-- **THEN** each call returns a document
+- **WHEN** `"\u{a0}e+@"` is parsed
+- **THEN** the call returns a document
 
 #### Scenario: Generated whitespace and autolink pieces
-- **WHEN** every seeded generated input built from Unicode whitespace chars and literal-autolink pieces (`www.`, `://`, `@`, `.`, `+`, `_`, letters, CJK punctuation, `[[`) is parsed in each dialect
+- **WHEN** every seeded generated input built from Unicode whitespace chars and literal-autolink pieces (`www.`, `://`, `@`, `.`, `+`, `_`, letters, CJK punctuation, `[[`) is parsed
 - **THEN** no call panics
-
-### Requirement: Default dialect
-`parse(input)` SHALL behave exactly as `SyntaxOptions::default().parse(input)`,
-the maximal non-MDX dialect: every construct except MDX and `underline`.
-
-#### Scenario: Underline stays off
-- **WHEN** `parse("a __b__ c")` runs
-- **THEN** `__b__` is `Strong`
-
-#### Scenario: Extensions are on
-- **WHEN** `parse("H~2~O and x^2^")` runs
-- **THEN** the paragraph contains a `Subscript` and a `Superscript`
-
-### Requirement: Named presets
-`SyntaxOptions::commonmark()`, `SyntaxOptions::gfm()`, and `SyntaxOptions::mdx()`
-SHALL select, respectively, CommonMark core only; CommonMark plus tables, task
-lists, strikethrough, autolinks, and footnotes; and MDX JSX, expressions, and
-ESM with raw HTML off.
-
-#### Scenario: CommonMark keeps extensions literal
-- **WHEN** `SyntaxOptions::commonmark().parse("~~kept literal~~")` runs
-- **THEN** the paragraph is text only
-
-#### Scenario: GFM strikethrough
-- **WHEN** `SyntaxOptions::gfm().parse("~~done~~")` runs
-- **THEN** the paragraph contains a `Delete`
-
-#### Scenario: MDX mode
-- **WHEN** `SyntaxOptions::mdx().parse("<Component/>\n\ntext")` runs
-- **THEN** the first block is an MDX JSX node, not raw HTML
-
-### Requirement: Construct builder
-`SyntaxOptions::enable` and `SyntaxOptions::disable` SHALL toggle one
-`Construct`; grouped constructs (`Math`, `Footnotes`, `Directives`) SHALL toggle
-every flag in their group, and `Wikilinks` SHALL take the title order as a
-parameter.
-
-#### Scenario: Opt into underline
-- **WHEN** `SyntaxOptions::default().enable(Construct::Underline).parse("a __b__ c")` runs
-- **THEN** `__b__` is `Underline`
-
-#### Scenario: Enable wikilinks on CommonMark
-- **WHEN** `SyntaxOptions::commonmark().enable(Construct::Wikilinks(WikiLinkOrder::TitleAfterPipe)).parse("see [[target|label]]")` runs
-- **THEN** the paragraph contains a `WikiLink` with target `target` and label `label`
-
-### Requirement: Configuration conflicts
-`SyntaxOptions::validate` SHALL return `SyntaxConfigError::MdxHtmlConflict` when
-MDX JSX and raw HTML are both enabled and
-`SyntaxConfigError::WikilinkTitleOrderConflict` when both wikilink title orders
-are enabled; `parse` SHALL still return a document for such options and report
-the conflict as a diagnostic.
-
-#### Scenario: Conflicting fields
-- **WHEN** a `SyntaxOptions` with both `mdx_jsx_inline` and `html_inline` enabled is validated
-- **THEN** `validate()` returns `Err(SyntaxConfigError::MdxHtmlConflict)`
-
-### Requirement: Strict parse
-`SyntaxOptions::parse_strict` SHALL return `Err(ParseStrictError::Config)` for a
-configuration conflict, `Err(ParseStrictError::Diagnostic)` when parsing produces
-an error-severity diagnostic, and `Ok(ParseOutput)` otherwise.
-
-#### Scenario: Clean strict parse
-- **WHEN** `SyntaxOptions::default().parse_strict("# clean input")` runs
-- **THEN** it returns `Ok` with no error-severity diagnostics
-
-#### Scenario: Error diagnostic promoted
-- **WHEN** `SyntaxOptions::default().parse_strict(":::note\nunclosed container")` runs
-- **THEN** it returns `Err(ParseStrictError::Diagnostic(_))`
 
 ### Requirement: Output verbs on Document
 A `Document` SHALL offer `to_markdown()`, `to_markdown_with(&SerializeOptions)`,
@@ -119,6 +51,19 @@ and `validate()`, and with the `html` feature `to_html()` and
 #### Scenario: Round trip through the document
 - **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
 - **THEN** it returns `Ok("# Title\n\nHello *world*.\n")`
+
+### Requirement: Serialize option types
+`SerializeOptions` SHALL be `#[non_exhaustive]` and hold `line_ending:
+LineEnding`, `final_newline: bool`, `bullet: Option<BulletMarker>`,
+`ordered_delimiter: Option<OrderedDelimiter>`, and `fence_marker:
+Option<FenceMarker>`, each marker option `None` by default. `BulletMarker`
+SHALL hold only `Dash`, `Asterisk`, and `Plus`, and `OrderedDelimiter` only
+`Period` and `Paren`. Both SHALL be exported from the crate root and the
+prelude.
+
+#### Scenario: Bullet that is not a bullet
+- **WHEN** code assigns `ListDelimiter::Period` to `SerializeOptions::bullet`
+- **THEN** it does not compile
 
 ### Requirement: One diagnostic type
 Parser diagnostics, AST validation, and serializer and HTML pre-validation SHALL
@@ -173,8 +118,8 @@ only by whitespace, apart from one leading U+FEFF before the first block.
 ### Requirement: Hand construction
 The AST SHALL provide `From` conversions into `Block` and `Inline` for every node
 type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
-`Text`, `Paragraph`, `Heading`, `Link`, `Code`, and `List`, all defaulting `meta`
-to no span; `markdown_syntax::prelude::*` SHALL import this surface.
+`Text`, `Paragraph`, `Heading`, `Link`, `Autolink`, `CodeInline`,
+`CharacterReference`, and `List`, all defaulting `meta` to no span; `markdown_syntax::prelude::*` SHALL import this surface.
 
 #### Scenario: Build and serialize
 - **WHEN** a `Document` is built from `Heading::new(1, [Text::from("Title")]).into()` and `Paragraph::new([Text::from("hello")]).into()`
@@ -206,10 +151,9 @@ stay in the coordinates of the original input.
 - **THEN** the paragraph holds an `Image` whose destination is `#\u{FFFD}`
 
 ### Requirement: Emphasis-like spans cover their delimiters
-The span of a parsed emphasis-like container (`Emphasis`, `Strong`,
-`Underline`, `Delete`, `Insert`, `Mark`, `Spoiler`, `Subscript`, or
-`Superscript`) SHALL run from the first character of the delimiters that open
-it to the last character of the delimiters that close it, and SHALL lie within
+The span of a parsed emphasis-like container (`Emphasis`, `Strong`, `Delete`,
+or `Mark`) SHALL run from the first character of the delimiters that open it
+to the last character of the delimiters that close it, and SHALL lie within
 the span of the node that contains it.
 
 #### Scenario: Strong inside emphasis
@@ -332,8 +276,44 @@ input and within the span of the node that contains it, and the spans of a
 node's children SHALL be in source order and SHALL NOT overlap.
 
 #### Scenario: Fixture corpus and generated inputs
-- **WHEN** every fixture input and every seeded generated input is parsed in each dialect
+- **WHEN** every fixture input and every seeded generated input is parsed
 - **THEN** every node, at every depth, satisfies these conditions
+
+### Requirement: Each written fact is stored once
+A node SHALL hold what its source writes once and derive the rest from it.
+`CharacterReference` SHALL hold only the reference as written, and
+`CharacterReference::value()` SHALL return the character it decodes to, or
+`None` when the reference is not exactly one character reference.
+`CodeInline` SHALL hold only its value, as the parser normalizes it.
+`Autolink` SHALL hold its form and its text as written, and
+`Autolink::destination()` SHALL return the link target that text writes: an
+angle-bracket URI itself and an angle-bracket email after `mailto:`; a literal
+`www.` domain after `http://`, a literal email without a scheme after
+`mailto:`, and any other literal autolink itself; or `None` when the text is
+not exactly one autolink of its form.
+A `Link`, an `Image`, and a `Definition` SHALL hold a title, when they have
+one, as one `Title` holding its value and the quotes it is written in, so a
+title without quotes or quotes without a title cannot be built.
+
+#### Scenario: Character reference value
+- **WHEN** `value()` is called on the `CharacterReference` parsed from `"&amp;"`
+- **THEN** it returns `Some("&")`
+
+#### Scenario: Hand-built reference that does not decode
+- **WHEN** `value()` is called on a hand-built `CharacterReference` holding `"&amp"`
+- **THEN** it returns `None`
+
+#### Scenario: Literal autolink destination
+- **WHEN** `destination()` is called on the `Autolink` parsed from `"www.a.b"`
+- **THEN** it returns `Some("http://www.a.b")`
+
+#### Scenario: Text the parser would trim
+- **WHEN** `destination()` is called on a hand-built literal `Autolink` holding `"http://a.b."`
+- **THEN** it returns `None`
+
+#### Scenario: Link title
+- **WHEN** `parse("[a](/u 'b')")` runs
+- **THEN** the paragraph holds a `Link` whose `title` is `Some(Title::new("b", LinkTitleKind::SingleQuote))`
 
 ### Requirement: Shortcode glyph
 `Shortcode::glyph()` SHALL return the emoji that the crate's pinned gemoji
@@ -347,3 +327,56 @@ hold.
 #### Scenario: Hand-built unknown name
 - **WHEN** `glyph()` is called on a hand-built `Shortcode` named `not_an_emoji_name`
 - **THEN** it returns `None`
+
+### Requirement: Wiki link decoding
+`WikiLink::decoded_target()` and `WikiLink::decoded_label()` SHALL return the
+target and the label with each backslash escape of an ASCII punctuation
+character replaced by that character and each valid character reference
+replaced by the text it names, the decoding CommonMark applies to a link
+destination. A backslash before any other character SHALL stay as written.
+
+#### Scenario: Escapes and references
+- **WHEN** `decoded_target()` and `decoded_label()` are called on the `WikiLink` parsed from `"[[a\\|b &amp; c|x &#65; \\y]]"`
+- **THEN** they return `a|b & c` and `x A \y`
+
+#### Scenario: Compared with a link destination
+- **WHEN** `"[[a&amp;b]] [x](a&amp;b)"` is parsed with `parse`
+- **THEN** the `WikiLink`'s target is `a&amp;b`, and its `decoded_target()` equals the `Link`'s destination, `a&b`
+
+### Requirement: One syntax
+`parse(input)` SHALL be the only way to parse, and SHALL recognize one fixed
+syntax with no configuration: CommonMark with raw HTML and indented code,
+`<details>` HTML containers, GFM tables, task list items, literal autolinks,
+and `~~` strikethrough, footnotes and inline footnotes, GitHub alerts,
+frontmatter, shortcodes, `==` highlight, wiki links, math, and directives.
+Subscript, superscript, insert, spoiler, underline, description lists,
+literal autolinks with a scheme other than `http`, `https`, `mailto`, and
+`xmpp`, and MDX SHALL NOT be recognized.
+
+#### Scenario: Double underscore is strong
+- **WHEN** `parse("a __b__ c")` runs
+- **THEN** `__b__` is `Strong`
+
+#### Scenario: Removed marks stay text
+- **WHEN** `parse("H~2~O and x^2^ ++a++ ||b||")` runs
+- **THEN** the paragraph holds only text
+
+#### Scenario: GFM strikethrough
+- **WHEN** `parse("~~done~~")` runs
+- **THEN** the paragraph holds a `Delete`
+
+### Requirement: Recorded syntax forms
+Where one node kind has more than one Markdown spelling, a parsed node SHALL
+record the spelling its source used: `Emphasis` and `Strong` record whether
+their delimiter is `*` or `_`, and `Autolink` records whether it was written
+in angle brackets `<destination>` or as a literal autolink. A `Link` is an
+inline link `[text](destination)`. A node built with a constructor SHALL take
+the default spelling: `*`.
+
+#### Scenario: Underscore delimiters
+- **WHEN** `parse("_a_ __b__")` runs
+- **THEN** the `Emphasis` and the `Strong` both record the `_` delimiter
+
+#### Scenario: Link forms
+- **WHEN** `parse("www.a.b <http://c.d> [e](f)")` runs
+- **THEN** the paragraph holds a literal `Autolink`, an angle-bracket `Autolink`, and a `Link`, in that order

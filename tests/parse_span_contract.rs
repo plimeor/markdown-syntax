@@ -1,6 +1,5 @@
 use markdown_syntax::{
-    parse, Block, DescriptionDetails, DescriptionItem, HtmlContainerContent, Inline, ListItem,
-    Span, SyntaxOptions, TableCell, TableRow,
+    parse, Block, HtmlContainerContent, Inline, ListItem, Span, TableCell, TableRow,
 };
 use std::path::{Path, PathBuf};
 
@@ -142,11 +141,8 @@ fn assert_inline_spans(source: &str, parent: Span, inlines: &[Inline]) {
         );
         let marker = match inline {
             Inline::Emphasis(_) | Inline::Strong(_) => Some(['*', '_']),
-            Inline::Delete(_) | Inline::Subscript(_) => Some(['~', '~']),
+            Inline::Delete(_) => Some(['~', '~']),
             Inline::Mark(_) => Some(['=', '=']),
-            Inline::Insert(_) => Some(['+', '+']),
-            Inline::Spoiler(_) => Some(['|', '|']),
-            Inline::Superscript(_) => Some(['^', '^']),
             _ => None,
         };
         if let Some(marker) = marker {
@@ -435,8 +431,6 @@ enum Node<'a> {
     Block(&'a Block),
     Inline(&'a Inline),
     ListItem(&'a ListItem),
-    DescriptionItem(&'a DescriptionItem),
-    DescriptionDetails(&'a DescriptionDetails),
     TableRow(&'a TableRow),
     TableCell(&'a TableCell),
 }
@@ -447,8 +441,6 @@ impl<'a> Node<'a> {
             Node::Block(node) => node.span(),
             Node::Inline(node) => node.span(),
             Node::ListItem(node) => node.meta.span,
-            Node::DescriptionItem(node) => node.meta.span,
-            Node::DescriptionDetails(node) => node.meta.span,
             Node::TableRow(node) => node.meta.span,
             Node::TableCell(node) => node.meta.span,
         }
@@ -464,9 +456,6 @@ impl<'a> Node<'a> {
                 Block::BlockQuote(node) => blocks(&node.children),
                 Block::Alert(node) => blocks(&node.children),
                 Block::List(node) => node.children.iter().map(Node::ListItem).collect(),
-                Block::DescriptionList(node) => {
-                    node.children.iter().map(Node::DescriptionItem).collect()
-                }
                 Block::HtmlContainer(node) => match &node.content {
                     HtmlContainerContent::Blocks(children) => blocks(children),
                     HtmlContainerContent::Inlines(children) => inlines(children),
@@ -483,12 +472,6 @@ impl<'a> Node<'a> {
             },
             Node::Inline(inline) => inlines(inline.children()),
             Node::ListItem(item) => blocks(&item.children),
-            Node::DescriptionItem(item) => {
-                let mut children = inlines(&item.term);
-                children.extend(item.details.iter().map(Node::DescriptionDetails));
-                children
-            }
-            Node::DescriptionDetails(details) => blocks(&details.children),
             Node::TableRow(row) => row.cells.iter().map(Node::TableCell).collect(),
             Node::TableCell(cell) => inlines(&cell.children),
         }
@@ -519,8 +502,8 @@ fn assert_spans_nest(label: &str, source: &str, parent: Span, children: Vec<Node
     }
 }
 
-fn assert_document_spans_nest(label: &str, source: &str, options: &SyntaxOptions) {
-    let document = options.parse(source).document;
+fn assert_document_spans_nest(label: &str, source: &str) {
+    let document = parse(source).document;
     let whole = Span {
         start: 0,
         end: source.len(),
@@ -642,16 +625,13 @@ fn generated_inputs(count: usize) -> Vec<String> {
 #[test]
 fn spans_nest_in_the_fixture_corpus() {
     for (name, source) in corpus_inputs() {
-        assert_document_spans_nest(&name, &source, &SyntaxOptions::commonmark());
-        assert_document_spans_nest(&name, &source, &SyntaxOptions::default());
+        assert_document_spans_nest(&name, &source);
     }
-    // Round-trip cases parse under the profile each names.
     let mut cases = 0;
     for path in derived_case_files() {
         for case in fixtures::read_derived_cases(&path) {
             let label = format!("{} case {}", path.display(), case.index);
-            let options = fixtures::profile_options(&case.profile);
-            assert_document_spans_nest(&label, &case.input, &options);
+            assert_document_spans_nest(&label, &case.input);
             cases += 1;
         }
     }
@@ -659,7 +639,7 @@ fn spans_nest_in_the_fixture_corpus() {
 }
 
 /// The `.cases` files of the fixture corpus that hold round-trip cases,
-/// `--- case N [profile P] bytes B` headers each, rather than the AST->HTML
+/// `--- case N bytes B` headers each, rather than the AST->HTML
 /// conformance suites.
 fn derived_case_files() -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -690,8 +670,7 @@ fn derived_case_files() -> Vec<PathBuf> {
 fn spans_nest_in_generated_inputs() {
     for (index, source) in generated_inputs(20_000).iter().enumerate() {
         let label = format!("generated input {index}");
-        assert_document_spans_nest(&label, source, &SyntaxOptions::commonmark());
-        assert_document_spans_nest(&label, source, &SyntaxOptions::default());
+        assert_document_spans_nest(&label, source);
     }
 }
 
@@ -701,8 +680,6 @@ impl Node<'_> {
             Node::Block(node) => format!("{node:?}"),
             Node::Inline(node) => format!("{node:?}"),
             Node::ListItem(_) => return "ListItem".into(),
-            Node::DescriptionItem(_) => return "DescriptionItem".into(),
-            Node::DescriptionDetails(_) => return "DescriptionDetails".into(),
             Node::TableRow(_) => return "TableRow".into(),
             Node::TableCell(_) => return "TableCell".into(),
         };

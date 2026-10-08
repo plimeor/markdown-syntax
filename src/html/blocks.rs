@@ -1,13 +1,12 @@
-//! All 20 `Block` arms plus the nested `ListItem` / `DescriptionItem` /
-//! `DescriptionDetails` helpers they dispatch to.
+//! All 16 `Block` arms plus the nested `ListItem` helpers they dispatch to.
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
-    Alert, AlertKind, Block, BlockQuote, CodeBlock, ContainerDirective, DescriptionList, Heading,
-    HtmlContainer, HtmlContainerContent, LeafDirective, List, ListItem, MathBlock, Paragraph,
+    Alert, AlertKind, Block, BlockQuote, CodeBlock, ContainerDirective, Heading, HtmlContainer,
+    HtmlContainerContent, LeafDirective, List, ListItem, MathBlock, Paragraph,
 };
 
 use super::escape::{attr_escape, escape_text};
@@ -17,7 +16,7 @@ use super::tables::render_table;
 use super::{Ctx, TasklistAttrOrder};
 
 /// Render a block list, dropping empty-string results (Definition, Frontmatter,
-/// MDX*, source-position FootnoteDefinitions, output-less directives) and
+/// source-position FootnoteDefinitions, output-less directives) and
 /// joining survivors with a single `\n`. No leading/trailing newline.
 pub fn render_blocks_joined(blocks: &[Block], ctx: &Ctx) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -30,12 +29,12 @@ pub fn render_blocks_joined(blocks: &[Block], ctx: &Ctx) -> String {
     parts.join("\n")
 }
 
-/// Top-level `Block` dispatch — every one of the 19 arms is handled; there is
+/// Top-level `Block` dispatch — every one of the 16 arms is handled; there is
 /// no catch-all.
 pub fn render_block(block: &Block, ctx: &Ctx) -> String {
     match block {
         // 1. Paragraph (loose context; tight suppression is applied by the
-        //    list/description helpers that call render_paragraph directly).
+        //    list helpers that call render_paragraph directly).
         Block::Paragraph(p) => render_paragraph(p, ctx),
 
         // 2. Heading — Atx and Setext render identically.
@@ -53,46 +52,34 @@ pub fn render_block(block: &Block, ctx: &Ctx) -> String {
         // 6. List.
         Block::List(list) => render_list(list, ctx),
 
-        // 7. DescriptionList (GFM extension).
-        Block::DescriptionList(dl) => render_description_list(dl, ctx),
-
-        // 8. CodeBlock.
+        // 7. CodeBlock.
         Block::CodeBlock(cb) => render_code_block(cb),
 
-        // 9. HtmlBlock.
+        // 8. HtmlBlock.
         Block::HtmlBlock(hb) => render_raw_html(&hb.value, ctx),
 
-        // 10. HtmlContainer.
+        // 9. HtmlContainer.
         Block::HtmlContainer(container) => render_html_container(container, ctx),
 
-        // 11. Definition — emits nothing (feeds reference resolution).
+        // 10. Definition — emits nothing (feeds reference resolution).
         Block::Definition(_) => String::new(),
 
-        // 12. FootnoteDefinition — hoisted to the doc-end section; nothing here.
+        // 11. FootnoteDefinition — hoisted to the doc-end section; nothing here.
         Block::FootnoteDefinition(_) => String::new(),
 
-        // 13. Table (GFM).
+        // 12. Table (GFM).
         Block::Table(t) => render_table(t, ctx),
 
-        // 14. MathBlock — GFM display wrapper.
+        // 13. MathBlock — GFM display wrapper.
         Block::MathBlock(mb) => render_math_block(mb, ctx),
 
-        // 15. Frontmatter — no HTML.
+        // 14. Frontmatter — no HTML.
         Block::Frontmatter(_) => String::new(),
 
-        // 16. MdxEsm — no HTML.
-        Block::MdxEsm(_) => String::new(),
-
-        // 17. MdxExpression (flow) — no HTML.
-        Block::MdxExpression(_) => String::new(),
-
-        // 18. MdxJsx (flow) — no HTML (node carries no children).
-        Block::MdxJsx(_) => String::new(),
-
-        // 19. LeafDirective [CONV].
+        // 15. LeafDirective [CONV].
         Block::LeafDirective(d) => render_leaf_directive(d, ctx),
 
-        // 20. ContainerDirective.
+        // 16. ContainerDirective.
         Block::ContainerDirective(d) => render_container_directive(d, ctx),
     }
 }
@@ -310,42 +297,6 @@ fn task_checkbox(checked: bool, checkable: bool, attr_order: TasklistAttrOrder) 
         }
         TasklistAttrOrder::DisabledFirst => {
             format!("<input type=\"checkbox\" disabled=\"\"{checked_attr} />")
-        }
-    }
-}
-
-fn render_description_list(dl: &DescriptionList, ctx: &Ctx) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for item in &dl.children {
-        parts.push(format!("<dt>{}</dt>", render_inlines(&item.term, ctx)));
-        for details in &item.details {
-            parts.push(render_description_details(&details.children, dl.tight, ctx));
-        }
-    }
-    format!("<dl>\n{}\n</dl>", parts.join("\n"))
-}
-
-/// `<dd>`: tight unwraps a sole paragraph child to bare inline; loose keeps
-/// full block rendering. Mirrors the list tightness rule.
-fn render_description_details(children: &[Block], tight: bool, ctx: &Ctx) -> String {
-    if tight {
-        let mut parts: Vec<String> = Vec::new();
-        for child in children {
-            let rendered = match child {
-                Block::Paragraph(p) => render_inlines(&p.children, ctx),
-                other => render_block(other, ctx),
-            };
-            if !rendered.is_empty() {
-                parts.push(rendered);
-            }
-        }
-        format!("<dd>{}</dd>", parts.join("\n"))
-    } else {
-        let inner = render_blocks_joined(children, ctx);
-        if inner.is_empty() {
-            String::from("<dd>\n</dd>")
-        } else {
-            format!("<dd>\n{inner}\n</dd>")
         }
     }
 }

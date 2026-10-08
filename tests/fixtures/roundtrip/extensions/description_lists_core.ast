@@ -1,36 +1,25 @@
 Document
-  DescriptionList tight=false
-    Item
-      Term
-        Text "apple"
-      Details
-        Paragraph
-          Text "red fruit"
-      Details
-        Paragraph
-          Text "computer company"
-    Item
-      Term
-        Text "orange"
-      Details
-        Paragraph
-          Text "orange fruit"
-    Item
-      Term
-        Text "Term 1"
-      Details
-        Paragraph
-          Text "Definition 1"
+  Paragraph
+    Text "apple"
+    SoftBreak
+    Text ": red fruit"
+    SoftBreak
+    Text ": computer company"
+    SoftBreak
+    Text "orange"
+    SoftBreak
+    Text ": orange fruit"
+  Paragraph
+    Text "Term 1"
+  Paragraph
+    Text ": Definition 1"
   List ordered=false tight=false
     ListItem checked=none
       Paragraph
         Text "Nested"
-      DescriptionList tight=true
-        Item
-          Term
-            Text "Term 2 with "
-            Emphasis
-              Text "inline markup"
-          Details
-            Paragraph
-              Text "Definition 2"
+      Paragraph
+        Text "Term 2 with "
+        Emphasis delimiter=*
+          Text "inline markup"
+        SoftBreak
+        Text ": Definition 2"

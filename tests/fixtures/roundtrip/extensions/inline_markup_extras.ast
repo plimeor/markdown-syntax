@@ -1,29 +1,17 @@
 Document
   Paragraph
-    Underline
+    Strong delimiter=_
       Text "underlined text"
   Paragraph
-    Emphasis
-      Underline
+    Emphasis delimiter=_
+      Strong delimiter=_
         Text "this"
   Paragraph
-    Text "H"
-    Subscript
-      Text "2"
-    Text "O and e = mc"
-    Superscript
-      Text "2"
-    Text "."
+    Text "H~2~O and e = mc^2^."
   Paragraph
-    Text "The "
-    Spoiler
-      Text "dog dies"
-    Text "."
+    Text "The ||dog dies||."
   Paragraph
-    Text "|"
-    Spoiler
-      Text "pipe wrapped"
-    Text "|"
+    Text "|||pipe wrapped|||"
   Table
     Alignments none,none
     Row
@@ -33,7 +21,5 @@ Document
         Text "Result"
     Row
       Cell
-        Code value="||literal||" raw="||literal||" fence=1
+        Text "`"
       Cell
-        Spoiler
-          Text "visible"

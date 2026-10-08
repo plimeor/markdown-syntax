@@ -4,110 +4,109 @@ commit: 1506572
 source: upstream-tests/mdx_expression_text.rs
 role: upstream-input
 count: 31
-profiles: mdx
 
---- case 1 profile mdx bytes 6
+--- case 1 bytes 6
 a {} b
 --- end
---- case 2 profile mdx bytes 10
+--- case 2 bytes 10
 a { 	
 } b
 --- end
---- case 3 profile mdx bytes 10
+--- case 3 bytes 10
 a {/**/} b
 --- end
---- case 4 profile mdx bytes 14
+--- case 4 bytes 14
 a {  /*
 */	} b
 --- end
---- case 5 profile mdx bytes 16
+--- case 5 bytes 16
 a {/*b*//*c*/} d
 --- end
---- case 6 profile mdx bytes 12
+--- case 6 bytes 12
 a {b/*c*/} d
 --- end
---- case 7 profile mdx bytes 12
+--- case 7 bytes 12
 a {/*b*/c} d
 --- end
---- case 8 profile mdx bytes 8
+--- case 8 bytes 8
 a {//} b
 --- end
---- case 9 profile mdx bytes 12
+--- case 9 bytes 12
 a { // b } c
 --- end
---- case 10 profile mdx bytes 9
+--- case 10 bytes 9
 a {//
 } b
 --- end
---- case 11 profile mdx bytes 12
+--- case 11 bytes 12
 a {// b
 c} d
 --- end
---- case 12 profile mdx bytes 12
+--- case 12 bytes 12
 a {b// c
 } d
 --- end
---- case 13 profile mdx bytes 17
+--- case 13 bytes 17
 a {/*b*/ // c
 } d
 --- end
---- case 14 profile mdx bytes 9
+--- case 14 bytes 9
 a {b.c} d
 --- end
---- case 15 profile mdx bytes 11
+--- case 15 bytes 11
 a {1 + 1} b
 --- end
---- case 16 profile mdx bytes 20
+--- case 16 bytes 20
 a {function () {}} b
 --- end
---- case 17 profile mdx bytes 17
+--- case 17 bytes 17
 a {var b = "c"} d
 --- end
---- case 18 profile mdx bytes 12
+--- case 18 bytes 12
 > a {
 > b} c
 --- end
---- case 19 profile mdx bytes 13
+--- case 19 bytes 13
 > a {
 > b<} c
 --- end
---- case 20 profile mdx bytes 16
+--- case 20 bytes 16
 > a {
 > b
 > c} d
 --- end
---- case 21 profile mdx bytes 7
+--- case 21 bytes 7
 a {b} c
 --- end
---- case 22 profile mdx bytes 6
+--- case 22 bytes 6
 a {b c
 --- end
---- case 23 profile mdx bytes 12
+--- case 23 bytes 12
 a {b { c } d
 --- end
---- case 24 profile mdx bytes 7
+--- case 24 bytes 7
 a {
 } b
 --- end
---- case 25 profile mdx bytes 5
+--- case 25 bytes 5
 a } b
 --- end
---- case 26 profile mdx bytes 7
+--- case 26 bytes 7
 { a } b
 --- end
---- case 27 profile mdx bytes 12
+--- case 27 bytes 12
 a {alpha} b.
 --- end
---- case 28 profile mdx bytes 8
+--- case 28 bytes 8
 a {??} b
 --- end
---- case 29 profile mdx bytes 15
+--- case 29 bytes 15
 a { /* { */ } b
 --- end
---- case 30 profile mdx bytes 15
+--- case 30 bytes 15
 a { /* } */ } b
 --- end
---- case 31 profile mdx bytes 63
+--- case 31 bytes 63
 > alpha {`
 > bravo
 >  charlie

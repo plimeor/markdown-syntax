@@ -4,9 +4,8 @@ commit: d2da7a0
 source: upstream-tests/block_directive.rs
 role: upstream-input
 count: 6
-profiles: extras
 
---- case 1 profile extras bytes 40
+--- case 1 bytes 40
 :::foo bar
 Paragraph 1
 
@@ -14,7 +13,7 @@ Paragraph 2
 :::
 
 --- end
---- case 2 profile extras bytes 71
+--- case 2 bytes 71
 - item one
 
   :::foo bar
@@ -25,7 +24,7 @@ Paragraph 2
 - item two
 
 --- end
---- case 3 profile extras bytes 56
+--- case 3 bytes 56
 - item one
 
   :::foo bar
@@ -34,19 +33,19 @@ Paragraph 2
 - item two
 
 --- end
---- case 4 profile extras bytes 19
+--- case 4 bytes 19
 :::foo bar
 > a
 :::
 
 --- end
---- case 5 profile extras bytes 19
+--- case 5 bytes 19
 :::foo bar
 * a
 :::
 
 --- end
---- case 6 profile extras bytes 23
+--- case 6 bytes 23
 > :::foo bar
 > a
 > :::

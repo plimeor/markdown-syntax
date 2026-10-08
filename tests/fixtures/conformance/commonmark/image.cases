@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: image
-count: 34
+count: 33
 
 --- case 1 options - label-bytes 20 input-bytes 20 expected-bytes 44
 should support links
@@ -159,17 +159,7 @@ should support shortcut references (2)
 --- expected
 <p><img src="/url" alt="foo bar" title="title" /></p>
 --- end
---- case 20 options - label-bytes 52 input-bytes 31 expected-bytes 54
-should not support link labels w/ unescaped brackets
---- input
-[[foo]]: /url "title"
-
-![[foo]]
---- expected
-<p>[[foo]]: /url &quot;title&quot;</p>
-<p>![[foo]]</p>
---- end
---- case 21 options - label-bytes 46 input-bytes 27 expected-bytes 49
+--- case 20 options - label-bytes 46 input-bytes 27 expected-bytes 49
 should support case-insensitive label matching
 --- input
 [foo]: /url "title"
@@ -178,7 +168,7 @@ should support case-insensitive label matching
 --- expected
 <p><img src="/url" alt="Foo" title="title" /></p>
 --- end
---- case 22 options - label-bytes 59 input-bytes 28 expected-bytes 13
+--- case 21 options - label-bytes 59 input-bytes 28 expected-bytes 13
 should “support” an escaped bracket instead of an image
 --- input
 [foo]: /url "title"
@@ -187,7 +177,7 @@ should “support” an escaped bracket instead of an image
 --- expected
 <p>![foo]</p>
 --- end
---- case 23 options - label-bytes 73 input-bytes 28 expected-bytes 44
+--- case 22 options - label-bytes 73 input-bytes 28 expected-bytes 44
 should support an escaped bang instead of an image, but still have a link
 --- input
 [foo]: /url "title"
@@ -196,77 +186,77 @@ should support an escaped bang instead of an image, but still have a link
 --- expected
 <p>!<a href="/url" title="title">foo</a></p>
 --- end
---- case 24 options - label-bytes 37 input-bytes 8 expected-bytes 31
+--- case 23 options - label-bytes 37 input-bytes 8 expected-bytes 31
 should support images w/o destination
 --- input
 ![foo]()
 --- expected
 <p><img src="" alt="foo" /></p>
 --- end
---- case 25 options - label-bytes 51 input-bytes 10 expected-bytes 31
+--- case 24 options - label-bytes 51 input-bytes 10 expected-bytes 31
 should support images w/ explicit empty destination
 --- input
 ![foo](<>)
 --- expected
 <p><img src="" alt="foo" /></p>
 --- end
---- case 26 options - label-bytes 29 input-bytes 16 expected-bytes 39
+--- case 25 options - label-bytes 29 input-bytes 16 expected-bytes 39
 should support images w/o alt
 --- input
 ![](example.png)
 --- expected
 <p><img src="example.png" alt="" /></p>
 --- end
---- case 27 options - label-bytes 40 input-bytes 22 expected-bytes 42
+--- case 26 options - label-bytes 40 input-bytes 22 expected-bytes 42
 should support images w/ empty title (1)
 --- input
 ![alpha](bravo.png "")
 --- expected
 <p><img src="bravo.png" alt="alpha" /></p>
 --- end
---- case 28 options - label-bytes 40 input-bytes 22 expected-bytes 42
+--- case 27 options - label-bytes 40 input-bytes 22 expected-bytes 42
 should support images w/ empty title (2)
 --- input
 ![alpha](bravo.png '')
 --- expected
 <p><img src="bravo.png" alt="alpha" /></p>
 --- end
---- case 29 options - label-bytes 40 input-bytes 22 expected-bytes 42
+--- case 28 options - label-bytes 40 input-bytes 22 expected-bytes 42
 should support images w/ empty title (3)
 --- input
 ![alpha](bravo.png ())
 --- expected
 <p><img src="bravo.png" alt="alpha" /></p>
 --- end
---- case 30 options - label-bytes 45 input-bytes 56 expected-bytes 89
+--- case 29 options - label-bytes 45 input-bytes 56 expected-bytes 89
 should support character references in images
 --- input
 ![&amp;&copy;&](example.com/&amp;&copy;& "&amp;&copy;&")
 --- expected
 <p><img src="example.com/&amp;%C2%A9&amp;" alt="&amp;©&amp;" title="&amp;©&amp;" /></p>
 --- end
---- case 31 options - label-bytes 28 input-bytes 10 expected-bytes 28
+--- case 30 options - label-bytes 28 input-bytes 10 expected-bytes 28
 should ignore an empty title
 --- input
 ![](<> "")
 --- expected
 <p><img src="" alt="" /></p>
 --- end
---- case 32 options - label-bytes 43 input-bytes 24 expected-bytes 28
+--- case 31 options - label-bytes 43 input-bytes 24 expected-bytes 28
 should ignore non-http protocols by default
 --- input
 ![](javascript:alert(1))
 --- expected
 <p><img src="" alt="" /></p>
 --- end
---- case 33 options allow_dangerous_protocol label-bytes 59 input-bytes 24 expected-bytes 47
+--- case 32 options allow_dangerous_protocol label-bytes 59 input-bytes 24 expected-bytes 47
 should allow non-http protocols w/ `allowDangerousProtocol`
 --- input
 ![](javascript:alert(1))
 --- expected
 <p><img src="javascript:alert(1)" alt="" /></p>
 --- end
---- case 34 options allow_dangerous_protocol,allow_any_img_src label-bytes 67 input-bytes 24 expected-bytes 47
+--- case 33 options allow_dangerous_protocol,allow_any_img_src label-bytes 67 input-bytes 24 expected-bytes 47
 should allow non-http protocols with the `allow_any_img_src` option
 --- input
 ![](javascript:alert(1))

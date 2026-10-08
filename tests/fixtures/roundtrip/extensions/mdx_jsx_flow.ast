@@ -1,4 +1,24 @@
 Document
-  MdxJsx "<>\n  * a\n</>"
-  MdxJsx "<x\n  y\n>\nb\n</x>"
-  MdxJsx "<Box value={'} > '} other={\"}\"}>\ninside\n</Box>"
+  Paragraph
+    Text "<>"
+  List ordered=false tight=true
+    ListItem checked=none
+      Paragraph
+        Text "a"
+        SoftBreak
+        Text "</>"
+  Paragraph
+    Text "<x"
+    SoftBreak
+    Text "y"
+  BlockQuote
+  Paragraph
+    Text "b"
+    SoftBreak
+    HtmlInline "</x>"
+  Paragraph
+    Text "<Box value={'} > '} other={\"}\"}>"
+    SoftBreak
+    Text "inside"
+    SoftBreak
+    HtmlInline "</Box>"

@@ -4,7 +4,7 @@
 //!
 //! This harness uses the crate's opt-in public HTML renderer purely to MEASURE
 //! how faithfully the parser's AST reflects CommonMark/GFM semantics, by
-//! comparing `parse(input) → to_html_with_options(AST) → HTML` against this
+//! comparing `parse(input) → to_html_with(AST) → HTML` against this
 //! bench's own conformance suite under
 //! `tests/fixtures/conformance/<category>/<source>.cases`.
 //!
@@ -13,13 +13,16 @@
 //!
 //! Layout (each declared with an explicit `#[path]` from this crate root so the
 //! submodules live under `tests/html_conformance/`):
-//!   - `types`      — frozen shared types (OracleTuple, Category, …)
+//!   - `types`      — the types the modules share (OracleTuple, Category, …)
 //!   - `normalizer` — faithful port of CommonMark `normalize.py`
 //!   - `extractor`  — reads (input, expected_html, options) cases from our suite fixtures
-//!   - `runner`     — maps each case's options → parse+public render+compare
-//!   - `report`     — pass/fail/skip tallies, headline %, failure dump
+//!   - `runner`     — parses each case and maps its render options → public render+compare
+//!   - `report`     — pass/fail tallies, headline %, deviation report, failure dump
+//!   - `deviations` — the cases that differ from their oracle, named by content, with reasons
 
 #![allow(dead_code)]
+
+use std::sync::OnceLock;
 
 #[path = "html_conformance/types.rs"]
 mod types;
@@ -36,8 +39,13 @@ mod runner;
 #[path = "html_conformance/report.rs"]
 mod report;
 
+#[path = "html_conformance/deviations.rs"]
+mod deviations;
+
 /// Snapshot-integrity check: our CommonMark-spec source fixture must carry
-/// exactly 652 cases (the snapshot of the upstream CommonMark spec corpus).
+/// exactly 643 cases: the 652 of the upstream CommonMark spec corpus, less the
+/// 9 whose input reads as a construct the CommonMark oracle lacks (literal
+/// autolinks, wiki links, frontmatter), which cannot be compared.
 #[test]
 fn corpus_counts_match() {
     let tuples = extractor::load_all();
@@ -46,9 +54,15 @@ fn corpus_counts_match() {
         .filter(|t| t.source_file.ends_with("commonmark/commonmark.cases"))
         .count();
     assert_eq!(
-        commonmark, 652,
-        "commonmark/commonmark.cases must carry exactly 652 cases, got {commonmark}"
+        commonmark, 643,
+        "commonmark/commonmark.cases must carry exactly 643 cases, got {commonmark}"
     );
+}
+
+/// Every case run once, shared by the tests below.
+fn report() -> &'static report::Report {
+    static REPORT: OnceLock<report::Report> = OnceLock::new();
+    REPORT.get_or_init(runner::run_all)
 }
 
 /// The measurement: parse → render → compare every runnable oracle tuple and
@@ -56,7 +70,20 @@ fn corpus_counts_match() {
 /// threshold — it reports a number and dumps failures for triage.
 #[test]
 fn html_conformance_report() {
-    let report = runner::run_all();
+    let report = report();
     report.print_summary();
     report.write_failures("target/html_conformance_failures.txt");
+}
+
+/// The exception lists in `deviations` stay current: every entry names a case
+/// that exists and still fails. A failing case no entry names does not fail
+/// this test, and neither does the pass rate; the report prints both.
+#[test]
+fn exception_lists_are_current() {
+    let problems = report().list_problems();
+    assert!(
+        problems.is_empty(),
+        "the exception lists in tests/html_conformance/deviations.rs are out of date:\n  {}",
+        problems.join("\n  ")
+    );
 }

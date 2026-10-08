@@ -1,12 +1,12 @@
 # Project overview
-Updated 2026-10-06
+Updated 2026-10-07
 
 ## What this is
 
-`markdown-syntax` is a `no_std + alloc` Rust crate that parses Markdown into an
-owned AST and serializes the AST back to canonical Markdown. Raw HTML and MDX are
-represented only as Markdown syntax nodes; safe-by-default HTML rendering is
-available behind the opt-in `html` feature.
+`markdown-syntax` is a `no_std + alloc` Rust crate that parses one fixed
+Markdown syntax into an owned AST and serializes the AST back to canonical
+Markdown. Raw HTML is represented only as Markdown syntax nodes;
+safe-by-default HTML rendering is available behind the opt-in `html` feature.
 
 ## Principles
 
@@ -28,13 +28,15 @@ Shipped features are described in `docs/specs/`.
 
 Releasing, as one SemVer-breaking version, the delimiter-stack inline parser,
 CommonMark input handling (leading BOM, NUL), source-mapped spans, block
-parsing on one stack of open blocks, serializer escapes and delimiter choices
-taken from the parser, and autolinks folded into `Link`.
+parsing on one stack of open blocks, one normative syntax in place of the
+dialect presets, a render-only serializer with validation as its only gate,
+and AST nodes that store each written fact once (plimeor/markdown-syntax#14).
+The one-normative-syntax plan has shipped on its branch and is archived; the
+release follows its merge.
 
 ## Next
 
-- One normative syntax in place of the dialect presets and their
-  configuration surface (plimeor/markdown-syntax#14).
+- Nothing is queued after plimeor/markdown-syntax#14.
 
 ## Non-goals
 

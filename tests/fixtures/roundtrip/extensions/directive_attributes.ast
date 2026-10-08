@@ -3,7 +3,7 @@ Document
     TextDirective name=badge attrs=id:main,class:green,key:two words,single:a "quote",escaped:a "quote" and \ slash,flag,data-x:raw
       Label
         Text "Hello "
-        Emphasis
+        Emphasis delimiter=*
           Text "you"
   LeafDirective name=note attrs=title:hello world,enabled
     Label

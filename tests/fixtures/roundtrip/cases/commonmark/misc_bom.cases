@@ -4,11 +4,10 @@ commit: 1506572
 source: upstream-tests/misc_bom.rs
 role: upstream-input
 count: 2
-profiles: commonmark
 
---- case 1 profile commonmark bytes 3
+--- case 1 bytes 3
 ﻿
 --- end
---- case 2 profile commonmark bytes 15
+--- case 2 bytes 15
 ﻿# hea﻿ding
 --- end

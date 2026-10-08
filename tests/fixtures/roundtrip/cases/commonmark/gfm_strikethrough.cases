@@ -4,33 +4,32 @@ commit: 1506572
 source: upstream-tests/gfm_strikethrough.rs
 role: upstream-input
 count: 15
-profiles: commonmark,gfm
 
---- case 1 profile gfm bytes 5
+--- case 1 bytes 5
 a ~b~
 --- end
---- case 2 profile gfm bytes 7
+--- case 2 bytes 7
 a ~~b~~
 --- end
---- case 3 profile gfm bytes 9
+--- case 3 bytes 9
 a ~~~b~~~
 --- end
---- case 4 profile gfm bytes 11
+--- case 4 bytes 11
 a \~~~b~~ c
 --- end
---- case 5 profile gfm bytes 17
+--- case 5 bytes 17
 a ~~b ~~c~~ d~~ e
 --- end
---- case 6 profile gfm bytes 8
+--- case 6 bytes 8
 a ~-1~ b
 --- end
---- case 7 profile gfm bytes 8
+--- case 7 bytes 8
 a ~b.~ c
 --- end
---- case 8 profile gfm bytes 5
+--- case 8 bytes 5
 ~b.~.
 --- end
---- case 9 profile gfm bytes 500
+--- case 9 bytes 500
 
 # Balanced
 
@@ -89,7 +88,7 @@ a ~~two b one~ c two~~ d
 a ~~two b two~~ c one~ d
 
 --- end
---- case 10 profile gfm bytes 561
+--- case 10 bytes 561
 
 # Flank
 
@@ -124,22 +123,22 @@ a ~~twoLeft b ~~twoLeft c twoRight~~ d
 a ~~twoLeft b ~~twoLeft c ~~twoLeft d
 
 --- end
---- case 11 profile gfm bytes 16
+--- case 11 bytes 16
 a*~b~*c
 
 a*.b.*c
 --- end
---- case 12 profile gfm bytes 13
+--- case 12 bytes 13
 a ~b~ ~~c~~ d
 --- end
---- case 13 profile commonmark bytes 7
+--- case 13 bytes 7
 a ~b~ c
 --- end
---- case 14 profile commonmark bytes 16
+--- case 14 bytes 16
 a*~b~*c
 
 a*.b.*c
 --- end
---- case 15 profile gfm bytes 14
+--- case 15 bytes 14
 a ~~alpha~~ b.
 --- end

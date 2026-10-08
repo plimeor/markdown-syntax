@@ -1,0 +1,39 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: superscript
+decision: Superscript is not part of the syntax.
+count: 2
+
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 59 input-bytes 61 expected-bytes 152
+from gfm/autolink.cases #41; verified: cmark-gfm, micromark
+--- input
+https://www.wolframalpha.com/input/?i=x^2+(y-(x^2)^(1/3))^2=1
+--- expected
+<p><a href="https://www.wolframalpha.com/input/?i=x%5E2+(y-(x%5E2)%5E(1/3))%5E2=1">https://www.wolframalpha.com/input/?i=x^2+(y-(x^2)^(1/3))^2=1</a></p>
+--- end
+--- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 104 input-bytes 153 expected-bytes 717
+from gfm/footnotes.cases #4; comrak oracle, except that `^2^` stays text (decision 0007: no superscript)
+--- input
+Here is a footnote reference.[^1]
+
+Here is a longer footnote reference.[^ref]
+
+e = mc^2^.
+
+[^1]: Here is the footnote.
+[^ref]: Here is another footnote.
+
+--- expected
+<p>Here is a footnote reference.<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup></p>
+<p>Here is a longer footnote reference.<sup class="footnote-ref"><a href="#fn-ref" id="fnref-ref" data-footnote-ref>2</a></sup></p>
+<p>e = mc^2^.</p>
+<section class="footnotes" data-footnotes>
+<ol>
+<li id="fn-1">
+<p>Here is the footnote. <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+</li>
+<li id="fn-ref">
+<p>Here is another footnote. <a href="#fnref-ref" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="2" aria-label="Back to reference 2">↩</a></p>
+</li>
+</ol>
+</section>
+--- end

@@ -22,6 +22,6 @@ Document
       Text "Tip"
     Paragraph
       Text "Inside "
-      Strong
+      Strong delimiter=*
         Text "now"
       Text "."

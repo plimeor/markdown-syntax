@@ -4,9 +4,8 @@ commit: d2da7a0
 source: upstream-tests/header_id_prefix.rs
 role: upstream-input
 count: 2
-profiles: commonmark
 
---- case 1 profile commonmark bytes 76
+--- case 1 bytes 76
 # Hi.
 ## Hi 1.
 ### Hi.
@@ -15,7 +14,7 @@ profiles: commonmark
 ###### Hello.
 # Isn't it grand?
 --- end
---- case 2 profile commonmark bytes 6
+--- case 2 bytes 6
 # Hi.
 
 --- end

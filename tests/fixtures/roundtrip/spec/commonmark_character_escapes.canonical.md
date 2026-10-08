@@ -5,7 +5,7 @@
 \*not emphasized*
 \<br/> not a tag
 \[not a link](/foo)
-\`not code\`
+\`not code`
 1\. not a list
 \* not a list
 \# not a heading

@@ -1,21 +1,10 @@
 # Semantic Input Corpus
 
 This manifest covers executable round-trip input cases under `commonmark/` and
-`gfm/`. The fixture runner checks the total case count and executable profiles
-against the files on disk.
+`gfm/`. The fixture runner checks the total case count against the files on
+disk.
 
 Total executable input cases: 2300
-
-## Profile Counts
-
-- `commonmark`: 1486
-- `extras`: 45
-- `frontmatter`: 25
-- `gfm`: 331
-- `math`: 106
-- `mdx`: 287
-- `wikilink-after`: 9
-- `wikilink-before`: 11
 
 ## Source Metadata
 

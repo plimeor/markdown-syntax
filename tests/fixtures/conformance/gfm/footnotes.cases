@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: footnotes
-count: 10
+count: 9
 
 --- case 1 options extension.footnotes label-bytes 9 input-bytes 344 expected-bytes 1422
 footnotes
@@ -100,35 +100,7 @@ A footnote in a paragraph[^1]
 </section>
 
 --- end
---- case 4 options extension.superscript,extension.footnotes label-bytes 25 input-bytes 153 expected-bytes 727
-footnote_with_superscript
---- input
-Here is a footnote reference.[^1]
-
-Here is a longer footnote reference.[^ref]
-
-e = mc^2^.
-
-[^1]: Here is the footnote.
-[^ref]: Here is another footnote.
-
---- expected
-<p>Here is a footnote reference.<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup></p>
-<p>Here is a longer footnote reference.<sup class="footnote-ref"><a href="#fn-ref" id="fnref-ref" data-footnote-ref>2</a></sup></p>
-<p>e = mc<sup>2</sup>.</p>
-<section class="footnotes" data-footnotes>
-<ol>
-<li id="fn-1">
-<p>Here is the footnote. <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
-</li>
-<li id="fn-ref">
-<p>Here is another footnote. <a href="#fnref-ref" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="2" aria-label="Back to reference 2">↩</a></p>
-</li>
-</ol>
-</section>
-
---- end
---- case 5 options extension.footnotes label-bytes 21 input-bytes 75 expected-bytes 429
+--- case 4 options extension.footnotes label-bytes 21 input-bytes 75 expected-bytes 429
 footnote_escapes_name
 --- input
 Here is a footnote reference.[^😄ref]
@@ -146,7 +118,7 @@ Here is a footnote reference.[^😄ref]
 </section>
 
 --- end
---- case 6 options extension.footnotes label-bytes 45 input-bytes 75 expected-bytes 647
+--- case 5 options extension.footnotes label-bytes 45 input-bytes 75 expected-bytes 647
 footnote_case_insensitive_and_case_preserving
 --- input
 Here is a footnote reference.[^AB] and [^ab]
@@ -164,7 +136,7 @@ Here is a footnote reference.[^AB] and [^ab]
 </section>
 
 --- end
---- case 7 options extension.footnotes label-bytes 40 input-bytes 42 expected-bytes 356
+--- case 6 options extension.footnotes label-bytes 40 input-bytes 42 expected-bytes 356
 footnote_name_parsed_into_multiple_nodes
 --- input
 Foo.[^_ab]
@@ -182,7 +154,7 @@ Foo.[^_ab]
 </section>
 
 --- end
---- case 8 options extension.footnotes label-bytes 34 input-bytes 36 expected-bytes 49
+--- case 7 options extension.footnotes label-bytes 34 input-bytes 36 expected-bytes 49
 footnote_invalid_with_missing_name
 --- input
 Foo.[^]
@@ -194,7 +166,7 @@ Foo.[^]
 <p>[^]: Here is the footnote.</p>
 
 --- end
---- case 9 options extension.footnotes label-bytes 38 input-bytes 50 expected-bytes 63
+--- case 8 options extension.footnotes label-bytes 38 input-bytes 50 expected-bytes 63
 footnote_does_not_allow_spaces_in_name
 --- input
 Foo.[^one two]
@@ -206,7 +178,7 @@ Foo.[^one two]
 <p>[^one two]: Here is the footnote.</p>
 
 --- end
---- case 10 options extension.footnotes label-bytes 41 input-bytes 30 expected-bytes 353
+--- case 9 options extension.footnotes label-bytes 41 input-bytes 30 expected-bytes 353
 footnote_does_not_expand_emphasis_in_name
 --- input
 Foo[^**one**]

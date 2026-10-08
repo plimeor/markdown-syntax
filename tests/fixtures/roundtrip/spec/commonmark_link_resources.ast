@@ -11,7 +11,7 @@ Document
     SoftBreak
     Image destination=img(1).png title="image title"
       Text "image "
-      Emphasis
+      Emphasis delimiter=*
         Text "alt"
     SoftBreak
     Link destination= title="empty title"

@@ -4,24 +4,23 @@ commit: 1506572
 source: upstream-tests/gfm_tagfilter.rs
 role: upstream-input
 count: 5
-profiles: gfm
 
---- case 1 profile gfm bytes 8
+--- case 1 bytes 8
 <iframe>
 --- end
---- case 2 profile gfm bytes 14
+--- case 2 bytes 14
 a <i>
 <script>
 --- end
---- case 3 profile gfm bytes 9
+--- case 3 bytes 9
 <iframe
 >
 --- end
---- case 4 profile gfm bytes 6
+--- case 4 bytes 6
 <div
 >
 --- end
---- case 5 profile gfm bytes 897
+--- case 5 bytes 897
 
 <title>
 

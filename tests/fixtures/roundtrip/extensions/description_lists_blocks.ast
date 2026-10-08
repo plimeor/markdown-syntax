@@ -1,25 +1,15 @@
 Document
-  DescriptionList tight=false
-    Item
-      Term
-        Emphasis
-          Text "apple"
-      Details
-        Paragraph
-          Text "red fruit"
-        Paragraph
-          Text "contains seeds,"
-          SoftBreak
-          Text "crisp, pleasant to taste"
-    Item
-      Term
-        Emphasis
-          Text "orange"
-      Details
-        Paragraph
-          Text "orange fruit"
-        CodeBlock kind=indented info=none
-          Value "{ orange code block }"
-        BlockQuote
-          Paragraph
-            Text "orange block quote"
+  Paragraph
+    Emphasis delimiter=*
+      Text "apple"
+  Paragraph
+    Text ": red fruit"
+  CodeBlock kind=indented info=none
+    Value "contains seeds,\ncrisp, pleasant to taste"
+  Paragraph
+    Emphasis delimiter=*
+      Text "orange"
+  Paragraph
+    Text ": orange fruit"
+  CodeBlock kind=indented info=none
+    Value "    { orange code block }\n\n> orange block quote"

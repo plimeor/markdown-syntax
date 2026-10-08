@@ -46,8 +46,6 @@ pub enum Block {
     Alert(Alert),
     /// A bullet or ordered list.
     List(List),
-    /// A description / definition list (term + details).
-    DescriptionList(DescriptionList),
     /// A fenced (```` ``` ````) or indented code block.
     CodeBlock(CodeBlock),
     /// A raw HTML block.
@@ -64,15 +62,9 @@ pub enum Block {
     MathBlock(MathBlock),
     /// A leading frontmatter block (`---` YAML or `+++` TOML).
     Frontmatter(Frontmatter),
-    /// An MDX ESM block (`import`/`export` statements).
-    MdxEsm(MdxEsm),
-    /// A block-level MDX expression: `{ … }`.
-    MdxExpression(MdxExpression),
-    /// A block-level MDX JSX element.
-    MdxJsx(MdxJsx),
-    /// A leaf directive: `::name[label]{attrs}` (distinct from MDX).
+    /// A leaf directive: `::name[label]{attrs}`.
     LeafDirective(LeafDirective),
-    /// A container directive: `:::name … :::` (distinct from MDX).
+    /// A container directive: `:::name … :::`.
     ContainerDirective(ContainerDirective),
 }
 
@@ -207,38 +199,6 @@ pub struct ListItem {
     pub children: Vec<Block>,
 }
 
-/// A description / definition list of term + details pairs.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionList {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// `true` if the list is tight (no blank lines between items).
-    pub tight: bool,
-    /// The list's term/details items.
-    pub children: Vec<DescriptionItem>,
-}
-
-/// One entry of a [`DescriptionList`]: a term and its detail blocks. Source: a
-/// term line followed by `: details` lines.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionItem {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The term's inline content.
-    pub term: Vec<Inline>,
-    /// The detail group(s) attached to this term.
-    pub details: Vec<DescriptionDetails>,
-}
-
-/// The details (`: …`) attached to a [`DescriptionItem`]'s term.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DescriptionDetails {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The details' block content.
-    pub children: Vec<Block>,
-}
-
 /// A code block. Source: ```` ```lang … ``` ```` (fenced) or 4-space-indented lines.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodeBlock {
@@ -330,10 +290,8 @@ pub struct Definition {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional link title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional link title, with the quotes it is written in.
+    pub title: Option<Title>,
 }
 
 /// A footnote definition. Source: `[^id]: footnote text`.
@@ -422,35 +380,7 @@ pub enum FrontmatterKind {
     Toml,
 }
 
-/// An MDX ESM block: top-level `import`/`export` statements (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxEsm {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal ESM source.
-    pub value: String,
-}
-
-/// A block-level MDX expression: `{ … }` (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxExpression {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal expression source (between the braces).
-    pub value: String,
-}
-
-/// A block-level MDX JSX element (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxJsx {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal JSX source.
-    pub value: String,
-}
-
-/// A leaf directive. Source: `::name[label]{attrs}` (a directive feature,
-/// not MDX).
+/// A leaf directive. Source: `::name[label]{attrs}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeafDirective {
     /// Node metadata (source span).
@@ -463,8 +393,7 @@ pub struct LeafDirective {
     pub attributes: Vec<DirectiveAttribute>,
 }
 
-/// A container directive. Source: `:::name[label]{attrs}` … `:::` (a directive
-/// feature, not MDX).
+/// A container directive. Source: `:::name[label]{attrs}` … `:::`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContainerDirective {
     /// Node metadata (source span).
@@ -492,26 +421,18 @@ pub enum Inline {
     Emphasis(Emphasis),
     /// Strong emphasis: `**text**` or `__text__`.
     Strong(Strong),
-    /// Underline: `__text__`/`___text___` (underscore extension).
-    Underline(Underline),
     /// Strikethrough: `~~text~~`.
     Delete(Delete),
-    /// A CriticMarkup-style insertion: `++text++`.
-    Insert(Insert),
     /// A highlight / "mark" span: `==text==`.
     Mark(Mark),
-    /// Subscript: `~x~`.
-    Subscript(Subscript),
-    /// Superscript: `^x^`.
-    Superscript(Superscript),
-    /// A spoiler span: `||text||`.
-    Spoiler(Spoiler),
     /// An emoji-style shortcode: `:name:`.
     Shortcode(Shortcode),
     /// An inline code span: `` `code` ``.
     Code(CodeInline),
     /// An inline link: `[text](url)`.
     Link(Link),
+    /// An autolink: `<https://example.com>` or a bare literal URL or email.
+    Autolink(Autolink),
     /// An inline image: `![alt](url)`.
     Image(Image),
     /// A reference link: `[text][label]`.
@@ -532,11 +453,7 @@ pub enum Inline {
     InlineFootnote(InlineFootnote),
     /// A wiki link: `[[target|label]]`.
     WikiLink(WikiLink),
-    /// An inline MDX expression: `{ … }` (distinct from directives).
-    MdxExpression(MdxExpressionInline),
-    /// An inline MDX JSX element (distinct from directives).
-    MdxJsx(MdxJsxInline),
-    /// A text directive: `:name[label]{attrs}` (distinct from MDX).
+    /// A text directive: `:name[label]{attrs}`.
     TextDirective(TextDirective),
 }
 
@@ -558,15 +475,14 @@ pub struct Escape {
     pub value: char,
 }
 
-/// A character reference such as `&amp;` or `&#247;`.
+/// A character reference such as `&amp;` or `&#247;`. The reference as
+/// written is the node's one fact; [`CharacterReference::value`] decodes it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CharacterReference {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// The reference as written, including `&` and `;` (e.g. `amp` for `&amp;`).
+    /// The reference as written, including `&` and `;` (e.g. `&amp;`).
     pub reference: String,
-    /// The resolved character value (e.g. `&` for `&amp;`).
-    pub value: String,
 }
 
 /// Emphasis (typically italic): `*text*` or `_text_`.
@@ -574,6 +490,8 @@ pub struct CharacterReference {
 pub struct Emphasis {
     /// Node metadata (source span).
     pub meta: NodeMeta,
+    /// The delimiter the span was written with.
+    pub delimiter: EmphasisDelimiter,
     /// The emphasized inline content.
     pub children: Vec<Inline>,
 }
@@ -583,45 +501,28 @@ pub struct Emphasis {
 pub struct Strong {
     /// Node metadata (source span).
     pub meta: NodeMeta,
+    /// The delimiter the span was written with.
+    pub delimiter: EmphasisDelimiter,
     /// The strongly-emphasized inline content.
     pub children: Vec<Inline>,
 }
 
-/// Underline (underscore extension): `__text__` or `___text___`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Underline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The underlined inline content.
-    pub children: Vec<Inline>,
+/// The delimiter character of an [`Emphasis`] or [`Strong`] span.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EmphasisDelimiter {
+    /// `*text*` / `**text**`.
+    #[default]
+    Asterisk,
+    /// `_text_` / `__text__`.
+    Underscore,
 }
 
-/// Strikethrough: `~~text~~` (or single `~text~` when single-tilde is enabled).
+/// Strikethrough: `~~text~~`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Delete {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// Whether the span used one or two tildes.
-    pub marker: DeleteMarker,
     /// The struck-through inline content.
-    pub children: Vec<Inline>,
-}
-
-/// Which tilde run delimited a [`Delete`] span.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeleteMarker {
-    /// Single-tilde strikethrough: `~text~`.
-    SingleTilde,
-    /// Double-tilde strikethrough: `~~text~~`.
-    DoubleTilde,
-}
-
-/// A CriticMarkup-style insertion: `++text++`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Insert {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The inserted inline content.
     pub children: Vec<Inline>,
 }
 
@@ -634,33 +535,6 @@ pub struct Mark {
     pub children: Vec<Inline>,
 }
 
-/// Subscript: `~x~`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Subscript {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The subscripted inline content.
-    pub children: Vec<Inline>,
-}
-
-/// Superscript: `^x^`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Superscript {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The superscripted inline content.
-    pub children: Vec<Inline>,
-}
-
-/// A spoiler span: `||text||`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Spoiler {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The hidden inline content.
-    pub children: Vec<Inline>,
-}
-
 /// An emoji shortcode: `:name:`, where `name` is a gemoji name or alias.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Shortcode {
@@ -670,22 +544,19 @@ pub struct Shortcode {
     pub name: String,
 }
 
-/// An inline code span: `` `code` ``.
+/// An inline code span: `` `code` ``. The fence and the padding spaces are
+/// not recorded: the serializer chooses them from the value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodeInline {
     /// Node metadata (source span).
     pub meta: NodeMeta,
-    /// The normalized code text (trimmed/collapsed per CommonMark).
+    /// The code text, normalized as CommonMark reads it: line endings as
+    /// spaces, and one space stripped from each end when both ends hold one
+    /// and the text is not all spaces.
     pub value: String,
-    /// The raw text between the backtick fences, before normalization.
-    pub raw: String,
-    /// The number of backticks in the fence.
-    pub fence_length: usize,
 }
 
-/// An inline link: `[text](destination "title")`. An autolink, `<url>` or a
-/// bare literal URL or email, is a `Link` whose one child is a `Text` holding
-/// the URL as written, with no title.
+/// An inline link: `[text](destination "title")`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     /// Node metadata (source span).
@@ -694,12 +565,35 @@ pub struct Link {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional link title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional link title, with the quotes it is written in.
+    pub title: Option<Title>,
     /// The link's inline content (the visible text).
     pub children: Vec<Inline>,
+}
+
+/// An autolink: `<https://example.com>`, `<a@b.c>`, or a GFM literal
+/// autolink, a bare `https://…`, `www.…`, or email address. The text as
+/// written is the node's one fact; [`Autolink::destination`] derives the link
+/// target from it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Autolink {
+    /// Node metadata (source span). An angle-bracket autolink's span covers
+    /// its brackets.
+    pub meta: NodeMeta,
+    /// Which autolink syntax the text is written in.
+    pub form: AutolinkForm,
+    /// The URL or address as written, without an angle-bracket autolink's
+    /// brackets.
+    pub text: String,
+}
+
+/// How an [`Autolink`] is written.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutolinkForm {
+    /// An angle-bracket autolink: `<https://example.com>` or `<a@b.c>`.
+    Angle,
+    /// A GFM literal autolink: a bare `https://…`, `www.…`, or email address.
+    Literal,
 }
 
 /// An inline image: `![alt](destination "title")`.
@@ -711,10 +605,8 @@ pub struct Image {
     pub destination: String,
     /// How the destination was delimited (bare or `<…>`).
     pub destination_kind: LinkDestinationKind,
-    /// The optional image title.
-    pub title: Option<String>,
-    /// How the title was quoted, if present.
-    pub title_kind: Option<LinkTitleKind>,
+    /// The optional image title, with the quotes it is written in.
+    pub title: Option<Title>,
     /// The image's alt-text inline content.
     pub alt: Vec<Inline>,
 }
@@ -739,6 +631,16 @@ pub enum LinkTitleKind {
     SingleQuote,
     /// Parenthesized: `(title)`.
     Paren,
+}
+
+/// The title of a [`Link`], [`Image`], or [`Definition`]: its text and the
+/// quotes it is written in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Title {
+    /// The title text, with its escapes and character references decoded.
+    pub value: String,
+    /// How the title is quoted.
+    pub kind: LinkTitleKind,
 }
 
 /// A reference link: `[text][label]`, `[text][]`, or `[text]`.
@@ -866,45 +768,20 @@ pub struct InlineFootnote {
 pub struct WikiLink {
     /// Node metadata (source span). An embed's span starts at its `!`.
     pub meta: NodeMeta,
-    /// The link target (page name).
+    /// The link target (page name) as written in the source, its backslash
+    /// escapes and character references kept; [`WikiLink::decoded_target`]
+    /// gives the text they stand for.
     pub target: String,
-    /// The visible label.
+    /// The visible label as written in the source, its backslash escapes and
+    /// character references kept; [`WikiLink::decoded_label`] gives the text
+    /// they stand for. A label equal to `target` means the link is written
+    /// without a `|label` part.
     pub label: String,
-    /// Whether the label appeared before or after the `|` in the source.
-    pub label_order: WikiLinkLabelOrder,
     /// Whether a `!` directly before the `[[` marks the link as an embed.
     pub embed: bool,
 }
 
-/// Whether a [`WikiLink`]'s label preceded or followed the `|` separator.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WikiLinkLabelOrder {
-    /// Target then label: `[[target|label]]`.
-    AfterPipe,
-    /// Label then target: `[[label|target]]`.
-    BeforePipe,
-}
-
-/// An inline MDX expression: `{ … }` (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxExpressionInline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal expression source (between the braces).
-    pub value: String,
-}
-
-/// An inline MDX JSX element (distinct from directives).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MdxJsxInline {
-    /// Node metadata (source span).
-    pub meta: NodeMeta,
-    /// The literal JSX source.
-    pub value: String,
-}
-
-/// A text directive. Source: `:name[label]{attrs}` (a directive feature,
-/// not MDX).
+/// A text directive. Source: `:name[label]{attrs}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextDirective {
     /// Node metadata (source span).
@@ -970,7 +847,6 @@ impl_meta_accessors!(Block {
     BlockQuote,
     Alert,
     List,
-    DescriptionList,
     CodeBlock,
     HtmlBlock,
     HtmlContainer,
@@ -979,21 +855,17 @@ impl_meta_accessors!(Block {
     Table,
     MathBlock,
     Frontmatter,
-    MdxEsm,
-    MdxExpression,
-    MdxJsx,
     LeafDirective,
     ContainerDirective,
 });
 
 impl_from_variants!(Block {
     Paragraph(Paragraph), Heading(Heading), ThematicBreak(ThematicBreak),
-    BlockQuote(BlockQuote), Alert(Alert), List(List), DescriptionList(DescriptionList),
+    BlockQuote(BlockQuote), Alert(Alert), List(List),
     CodeBlock(CodeBlock), HtmlBlock(HtmlBlock), Definition(Definition),
     HtmlContainer(HtmlContainer),
     FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
-    Frontmatter(Frontmatter), MdxEsm(MdxEsm), MdxExpression(MdxExpression),
-    MdxJsx(MdxJsx), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
+    Frontmatter(Frontmatter), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
 });
 
 impl_meta_accessors!(Inline {
@@ -1002,16 +874,12 @@ impl_meta_accessors!(Inline {
     CharacterReference,
     Emphasis,
     Strong,
-    Underline,
     Delete,
-    Insert,
     Mark,
-    Subscript,
-    Superscript,
-    Spoiler,
     Shortcode,
     Code,
     Link,
+    Autolink,
     Image,
     LinkReference,
     ImageReference,
@@ -1022,20 +890,17 @@ impl_meta_accessors!(Inline {
     FootnoteReference,
     InlineFootnote,
     WikiLink,
-    MdxExpression,
-    MdxJsx,
     TextDirective,
 });
 
 impl_from_variants!(Inline {
     Text(Text), Escape(Escape), CharacterReference(CharacterReference),
-    Emphasis(Emphasis), Strong(Strong), Underline(Underline), Delete(Delete),
-    Insert(Insert), Mark(Mark), Subscript(Subscript), Superscript(Superscript),
-    Spoiler(Spoiler), Shortcode(Shortcode), Code(CodeInline), Link(Link), Image(Image),
+    Emphasis(Emphasis), Strong(Strong), Delete(Delete), Mark(Mark),
+    Shortcode(Shortcode), Code(CodeInline), Link(Link), Autolink(Autolink), Image(Image),
     LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
     SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
-    MdxExpression(MdxExpressionInline), MdxJsx(MdxJsxInline), TextDirective(TextDirective),
+    TextDirective(TextDirective),
 });
 
 impl Inline {
@@ -1046,13 +911,8 @@ impl Inline {
         match self {
             Inline::Emphasis(n) => &n.children,
             Inline::Strong(n) => &n.children,
-            Inline::Underline(n) => &n.children,
             Inline::Delete(n) => &n.children,
-            Inline::Insert(n) => &n.children,
             Inline::Mark(n) => &n.children,
-            Inline::Subscript(n) => &n.children,
-            Inline::Superscript(n) => &n.children,
-            Inline::Spoiler(n) => &n.children,
             Inline::Link(n) => &n.children,
             Inline::Image(n) => &n.alt,
             Inline::LinkReference(n) => &n.children,
@@ -1064,11 +924,78 @@ impl Inline {
     }
 }
 
+impl CharacterReference {
+    /// A character reference node for `reference`, written with its `&` and
+    /// `;` (e.g. `&amp;`).
+    pub fn new(reference: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            reference: reference.into(),
+        }
+    }
+
+    /// The character the reference decodes to, or `None` when
+    /// [`reference`](Self::reference) is not exactly one character reference.
+    /// A valid document holds only references that decode.
+    pub fn value(&self) -> Option<String> {
+        crate::decode::decode_character_reference(&self.reference)
+    }
+}
+
+impl Autolink {
+    /// An autolink of `form` whose text is `text`.
+    pub fn new(form: AutolinkForm, text: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            form,
+            text: text.into(),
+        }
+    }
+
+    /// The link target the text writes, or `None` when the text is not
+    /// exactly one autolink of its form. An angle-bracket URI links to itself
+    /// and an email address to it after `mailto:`; a literal `www.` domain
+    /// links to it after `http://`, a literal email address to it after
+    /// `mailto:`, and any other literal autolink to itself. A valid document
+    /// holds only autolinks with a destination.
+    pub fn destination(&self) -> Option<String> {
+        match self.form {
+            AutolinkForm::Angle => crate::parse::angle_autolink_destination(&self.text),
+            AutolinkForm::Literal => crate::parse::literal_autolink_destination(&self.text),
+        }
+    }
+}
+
+impl Title {
+    /// A title holding `value`, quoted as `kind`.
+    pub fn new(value: impl Into<String>, kind: LinkTitleKind) -> Self {
+        Self {
+            value: value.into(),
+            kind,
+        }
+    }
+}
+
 impl Shortcode {
     /// The emoji the crate's pinned gemoji table gives this shortcode's
     /// name, or `None` for a name the table does not hold.
     pub fn glyph(&self) -> Option<&'static str> {
         crate::gemoji::glyph(&self.name)
+    }
+}
+
+impl WikiLink {
+    /// The target with its backslash escapes and character references
+    /// decoded, as CommonMark decodes a link destination: `a \| b &amp; c`
+    /// decodes to `a | b & c`.
+    pub fn decoded_target(&self) -> String {
+        crate::decode::decode_escapes_and_references(&self.target)
+    }
+
+    /// The label with its backslash escapes and character references
+    /// decoded, as [`WikiLink::decoded_target`] decodes the target.
+    pub fn decoded_label(&self) -> String {
+        crate::decode::decode_escapes_and_references(&self.label)
     }
 }
 
@@ -1125,7 +1052,7 @@ impl Heading {
 }
 
 impl Link {
-    /// A bare-destination link with no title.
+    /// An inline, bare-destination link with no title.
     pub fn new<I, T>(destination: impl Into<String>, children: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -1136,21 +1063,17 @@ impl Link {
             destination: destination.into(),
             destination_kind: LinkDestinationKind::Bare,
             title: None,
-            title_kind: None,
             children: children.into_iter().map(Into::into).collect(),
         }
     }
 }
 
 impl CodeInline {
-    /// An inline code span with a single-backtick fence.
+    /// An inline code span holding `value`.
     pub fn new(value: impl Into<String>) -> Self {
-        let value = value.into();
         Self {
             meta: NodeMeta::default(),
-            raw: value.clone(),
-            value,
-            fence_length: 1,
+            value: value.into(),
         }
     }
 }

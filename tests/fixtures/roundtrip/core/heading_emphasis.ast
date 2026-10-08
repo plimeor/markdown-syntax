@@ -3,10 +3,9 @@ Document
     Text "Title"
   Paragraph
     Text "Hello "
-    Emphasis
+    Emphasis delimiter=*
       Text "world"
     Text " and "
-    Strong
+    Strong delimiter=*
       Text "friends"
     Text "."
-
