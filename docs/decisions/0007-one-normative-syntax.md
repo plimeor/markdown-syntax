@@ -52,28 +52,6 @@ single-tilde strikethrough, relaxed literal autolinks, and MDX are not part of
 the syntax, and their AST nodes do not exist. The syntax is hard-coded: no
 public or private configuration value selects constructs.
 
-The public surface around the one syntax:
-
-- **Output on `Document`.** After `parse`, the caller asks the document:
-  `to_markdown()`, `to_markdown_with(&SerializeOptions)`, `to_html()` and
-  `to_html_with(&HtmlOptions)` behind the `html` feature, and
-  `validate() -> Vec<Diagnostic>`. There are no free output functions and no
-  `*_with_options` names.
-- **One diagnostic type.** `Diagnostic` serves parse, validate, serialize, and
-  render; its `span` is an `Option<Span>`, and `DiagnosticCode::InvalidDocument`
-  marks a tree that has no spelling. `SerializeError` and `HtmlError` carry
-  diagnostics.
-- **AST ergonomics.** `Block` and `Inline` give `meta()` and `span()`, and
-  `Inline::children()` reads the inline content of any inline node, image alt
-  included; block children stay match-based. Nodes are built with
-  `From<&str>` and `From<String>` for `Text`, `From<node>` for `Block` and
-  `Inline`, and `new(..)` on the common nodes, each defaulting `meta`.
-  `NodeMeta` and the one-struct-per-variant enums stay, so every node is a
-  nameable type.
-- **Exports.** Render internals are crate-private; the crate root re-exports an
-  explicit list beside the `ast::*` glob, and `prelude` is the recommended
-  one-line import. `ParseOutput` is not generic.
-
 ## Considered options
 
 - Keep the presets and add a normative one as the default: the configuration
@@ -90,11 +68,6 @@ The public surface around the one syntax:
 - Nest an autolink's link inside link text, as cmark-gfm, commonmark.js, and
   micromark do for `[this <http://and.com> that](url)`: link text would hold
   a link, which the AST, validation, and the serializer otherwise rule out.
-- Output functions beside the document, or `*_with_options` names: the
-  document is the value in hand on output, and the suffix regrows the
-  surface.
-- A builder module for every node, or a typed `Block::children()`: too much
-  surface for a secondary use, and block children differ in kind.
 
 ## Consequences
 

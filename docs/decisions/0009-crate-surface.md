@@ -1,8 +1,8 @@
-# 0009: Crate and renderer boundary
+# 0009: Crate surface
 
 Status: Accepted
 Date: 2026-10-08
-Supersedes: 0001, 0002
+Supersedes: 0001, 0002, 0005
 
 ## Context
 
@@ -15,6 +15,10 @@ promise to downstream users.
 HTML output is observable behavior with a security edge (raw HTML and
 dangerous protocols). Keeping one public renderer, the one the conformance
 bench exercises, avoids drift between a test renderer and a shipped one.
+
+Callers meet the crate through a small surface: the common path should cost
+one concept, the configured path should read as intent, and no redundant or
+internal item should greet them.
 
 The test fixture corpus vendors third-party CommonMark, GFM, comrak, and
 markdown-rs cases; redistributing it would need a license and provenance
@@ -37,6 +41,28 @@ otherwise. It does not build a DOM, highlight syntax, or offer pluggable
 sanitization. Parser, AST, and serializer behavior do not change merely to
 support HTML output.
 
+The public API around `parse`:
+
+- **Output on `Document`.** After `parse`, the caller asks the document:
+  `to_markdown()`, `to_markdown_with(&SerializeOptions)`, `to_html()` and
+  `to_html_with(&HtmlOptions)` behind the `html` feature, and
+  `validate() -> Vec<Diagnostic>`. There are no free output functions and no
+  `*_with_options` names.
+- **One diagnostic type.** `Diagnostic` serves parse, validate, serialize, and
+  render; its `span` is an `Option<Span>`, and `DiagnosticCode::InvalidDocument`
+  marks a tree that has no spelling. `SerializeError` and `HtmlError` carry
+  diagnostics.
+- **AST ergonomics.** `Block` and `Inline` give `meta()` and `span()`, and
+  `Inline::children()` reads the inline content of any inline node, image alt
+  included; block children stay match-based. Nodes are built with
+  `From<&str>` and `From<String>` for `Text`, `From<node>` for `Block` and
+  `Inline`, and `new(..)` on the common nodes, each defaulting `meta`.
+  `NodeMeta` and the one-struct-per-variant enums stay, so every node is a
+  nameable type.
+- **Exports.** Render internals are crate-private; the crate root re-exports an
+  explicit list beside the `ast::*` glob, and `prelude` is the recommended
+  one-line import. `ParseOutput` is not generic.
+
 The published package ships only the library source, `Cargo.toml`, the
 README, the changelog, and the licenses (the `include` list in `Cargo.toml`).
 The vendored fixture corpus stays in the repository as dev-only material.
@@ -56,6 +82,11 @@ The public contract for this surface lives in `docs/specs/public-api.md`,
   the two drift.
 - Publishing the fixture corpus: it would redistribute third-party cases
   without a per-case license and provenance review.
+- Output functions beside the document, or `*_with_options` names: the
+  document is the value in hand on output, and the suffix regrows the
+  surface.
+- A builder module for every node, or a typed `Block::children()`: too much
+  surface for a secondary use, and block children differ in kind.
 
 ## Consequences
 
