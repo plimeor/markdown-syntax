@@ -31,7 +31,8 @@ performs.
   `https://` literal does not form after a link or image `[` that no `]` has
   closed yet, while an email address still links there), and `~~`
   strikethrough;
-- footnote definitions, references, and inline footnotes `^[…]`;
+- footnote definitions, references, and inline footnotes `^[…]`, whose `^[`
+  opens no link text, so a URL inside one links;
 - GFM alerts, frontmatter, shortcodes, `==` highlight;
 - wiki links with the title after the pipe, whose content holds no unescaped
   `[` or `]`, and which win over a defined reference label;
