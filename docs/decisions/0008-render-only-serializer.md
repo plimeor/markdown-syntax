@@ -29,23 +29,26 @@ Each spelling decision is made once, where the information to make it exists:
   written.
 - **Validation is the only gate.** `Document::validate` rejects, with
   `InvalidDocument`, the shapes that the node and its siblings show to have no
-  spelling: a link in link text, emphasis-like content with whitespace at an
-  edge, an autolink text that is not one autolink of its form, a character
+  spelling: a link in link text, an empty paragraph, emphasis-like content
+  with whitespace at an edge, an autolink text that is not one autolink of its form, a character
   reference that is not one reference, an empty code span or one holding a
-  line ending, empty inline math or code-form math holding its close,
-  adjacent lists written with one marker, a table cell value no cell source
+  line ending, empty inline math, code-form math holding its close, dollar
+  math that does not read back with its value and fence, adjacent lists
+  written with one marker, a loose list of one item holding at most one
+  block, a table cell value no cell source
   spells, and a directive name outside the name rule; a span holding only a
   span whose delimiters join its own, adjacent strikethroughs, a line ending
   in text, a break after a break or on a one-line label or cell, a label or
   identifier the parser would not read back, a task item without its
   paragraph, a tight item's block that cannot interrupt the paragraph before
-  it, an empty list or inline footnote, misplaced frontmatter or frontmatter
+  it, a list among them whose first item is written below its bullet, an empty list or inline footnote, misplaced frontmatter or frontmatter
   holding its fence, an alert title or info string the parser would trim
   away, an empty bare destination, and indented code with a blank edge line.
   Each rule is decided by the code that owns it: the parser's own functions
-  say whether a text is an autolink, a label is a label, or a block
-  interrupts a paragraph, and the serializer's say which marker a list is
-  written with and whether a heading is written as setext.
+  say whether a text is an autolink, a label is a label, inline math reads
+  back, or a block interrupts a paragraph, and the serializer's say which
+  marker a list is written with, whether a list's first item starts below its
+  bullet, and whether a heading is written as setext.
   The serializer refuses nothing that validates. A shape that depends on
   neighbouring characters is not rejected; it renders and may read back
   differently.
