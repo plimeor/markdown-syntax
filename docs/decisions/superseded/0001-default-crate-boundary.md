@@ -1,6 +1,6 @@
 # 0001: Default crate boundary
 
-Status: Accepted
+Status: Superseded by 0009
 Date: 2026-06-20
 
 ## Context

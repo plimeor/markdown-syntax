@@ -1,6 +1,6 @@
 # 0006: Bounded cost on untrusted input
 
-Status: Accepted
+Status: Superseded by 0011
 Date: 2026-10-04
 
 ## Context

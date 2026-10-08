@@ -1,6 +1,6 @@
 # 0004: Correctness workflow
 
-Status: Accepted
+Status: Superseded by 0010
 Date: 2026-06-20
 
 ## Context
