@@ -6,9 +6,10 @@ Read `docs/overview.md` before starting work.
 
 - A `no_std + alloc` Rust crate at the repo root. Parses one fixed Markdown
   syntax → AST and writes AST → Markdown: a parsed document keeps its source,
-  unchanged top-level blocks are written as their source, a leaf built from
-  text (`with_source`) as that text, and the rest as canonical Markdown
-  (decision 0016). Raw HTML is represented only as Markdown syntax nodes;
+  each unchanged node is written as its source, an edited one with its own
+  syntax copied from the source around what changed, a leaf built from text
+  (`with_source`) as that text, and the rest as canonical Markdown (decision
+  0017). Raw HTML is represented only as Markdown syntax nodes;
   HTML rendering and sanitization stay out of the default build.
 - The repository is a Cargo workspace whose default member is the root
   crate; `wasm/` holds `markdown-syntax-wasm`, the unpublished WebAssembly

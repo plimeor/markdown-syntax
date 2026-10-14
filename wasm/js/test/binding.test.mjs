@@ -258,6 +258,19 @@ describe("Write from JavaScript", () => {
     assert.equal(document.toMarkdown(tree), source.replace("[c]( /d )", "[c](  /d )"));
   });
 
+  test("a save that ticks one task item keeps every other byte", () => {
+    const source = "Todo:\n\n*   [ ] a  *b*\n*   [ ] c\n\n    > d\n*   [x] e\n";
+    const document = binding.parse(source);
+    const tree = structuredClone(document.tree);
+    for (const { path, source: leaf } of document.leafSources) {
+      const node = nodeAt(tree, path);
+      delete node.children;
+      node.source = leaf.text;
+    }
+    nodeAt(tree, [1, 1]).checked = true;
+    assert.equal(document.toMarkdown(tree), source.replace("[ ] c", "[x] c"));
+  });
+
   test("the file's byte order mark is kept", () => {
     const source = "\ufeff# a\n\nb\n";
     const document = binding.parse(source);

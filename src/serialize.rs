@@ -1,12 +1,16 @@
-//! AST to canonical Markdown. The verbs live on [`Document`]
+//! AST to Markdown. The verbs live on [`Document`]
 //! ([`to_markdown`](Document::to_markdown) /
 //! [`to_markdown_with`](Document::to_markdown_with)); [`SerializeOptions`] tunes
 //! the output style. The document is validated first, so serialization can fail
 //! with a [`SerializeError`].
 //!
-//! The serializer only renders: each node is written in the spelling the AST
-//! records for it, or else by one fixed rule. Text, escapes, and character
-//! references are written as recorded, and the output is never parsed back.
+//! A document with its source is written partly from it (`reuse`, decision
+//! 0017): each node that corresponds to the node its source parses to is
+//! written as its source, an edited one with its own syntax copied around
+//! what changed, and the rest is rendered. Rendering only renders: each node
+//! is written in the spelling the AST records for it, or else by one fixed
+//! rule, with text, escapes, and character references as recorded. The output
+//! is parsed back only to check the blocks written partly from the source.
 
 use alloc::{
     format,
