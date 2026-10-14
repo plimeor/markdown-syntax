@@ -104,15 +104,27 @@ pub enum SerializeError {
 
 impl Document {
     /// Write this document as Markdown with default options: the source of
-    /// every unchanged top-level block, and canonical Markdown for the rest.
+    /// every unchanged node, the source of its own syntax around a node whose
+    /// children changed, and canonical Markdown for the rest.
     pub fn to_markdown(&self) -> Result<String, SerializeError> {
         self.to_markdown_with(&SerializeOptions::default())
     }
 
     /// Write this document as Markdown with explicit options. A document
-    /// with a source reuses it for each top-level block equal to the block
-    /// the source parses to at the same span; the options apply to the rest.
+    /// with a source reuses it for each node that corresponds to the node
+    /// the source parses to at the same span, and for the own syntax of one
+    /// whose children changed; the options apply to the rest.
     pub fn to_markdown_with(&self, options: &SerializeOptions) -> Result<String, SerializeError> {
+        Ok(self.write(options)?.0)
+    }
+
+    /// The text `to_markdown_with` writes, and how many top-level blocks it
+    /// wrote canonically because, written partly from the source, they read
+    /// back as something else.
+    pub(crate) fn write(
+        &self,
+        options: &SerializeOptions,
+    ) -> Result<(String, usize), SerializeError> {
         let diagnostics = validate_document(self);
         if !diagnostics.is_empty() {
             return Err(SerializeError::InvalidDocument(diagnostics));
@@ -136,14 +148,14 @@ impl Document {
             &self.children
         };
         let Some(source) = self.source() else {
-            return write_canonical(blocks, options);
+            return Ok((write_canonical(blocks, options)?, 0));
         };
         // A block written partly from the source stays so only where the
         // output reads back as it at its place.
         let mut whole = alloc::vec![false; blocks.len()];
         let (output, partly) = write_reusing(blocks, source, options, &definitions, &whole)?;
         if partly.is_empty() {
-            return Ok(output);
+            return Ok((output, 0));
         }
         let read = crate::parse(&output).document.children;
         if read.len() == blocks.len() {
@@ -155,10 +167,14 @@ impl Document {
                 whole[index] = true;
             }
         }
-        if whole.iter().any(|whole| *whole) {
-            return Ok(write_reusing(blocks, source, options, &definitions, &whole)?.0);
+        let rewritten = whole.iter().filter(|whole| **whole).count();
+        if rewritten > 0 {
+            return Ok((
+                write_reusing(blocks, source, options, &definitions, &whole)?.0,
+                rewritten,
+            ));
         }
-        Ok(output)
+        Ok((output, 0))
     }
 }
 
@@ -305,10 +321,28 @@ fn write_reusing(
                 partly[index] = None;
             }
         }
-        let follows_predecessor = matches!(
-            (previous_at, placed(&reused, &partly, index)),
-            (Some(previous), Some(at)) if previous + 1 == at && separated[index] == base_separated[at]
-        );
+        let follows_predecessor = match (previous_at, placed(&reused, &partly, index)) {
+            (Some(previous), Some(at))
+                if previous + 1 == at && separated[index] == base_separated[at] =>
+            {
+                // A gap without a blank line stays only where the lines
+                // around it are the source's.
+                let left = base[previous].span().expect("a parsed block has a span");
+                let right = base[at].span().expect("a parsed block has a span");
+                let left_end = left.start + strip_line_ending(&source[left.start..left.end]).len();
+                reuse::holds_blank_line(&source[left_end..right.start])
+                    || (index == 0
+                        || !reuse::holds_blocks(&blocks[index - 1])
+                        || partly[index - 1].as_ref().is_none_or(|(_, lines)| {
+                            reuse::last_line_holds(source, lines, left, left_end, true)
+                        }))
+                        && (!reuse::holds_blocks(block)
+                            || partly[index].as_ref().is_none_or(|(_, lines)| {
+                                reuse::first_line_holds(source, lines, right)
+                            }))
+            }
+            _ => false,
+        };
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;

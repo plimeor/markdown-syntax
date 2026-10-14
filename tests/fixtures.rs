@@ -29,9 +29,9 @@ mod leaves;
 use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
-    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker, Inline,
-    LineEnding, LineIndex, NodeMeta, OrderedDelimiter, SerializeOptions, Span, ThematicBreak,
-    ThematicBreakMarker,
+    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker,
+    HtmlContainerContent, Inline, LineEnding, LineIndex, NodeMeta, OrderedDelimiter, Paragraph,
+    SerializeOptions, Span, Text, ThematicBreak, ThematicBreakMarker,
 };
 
 use deviations::{excerpt, input_hash};
@@ -748,6 +748,206 @@ fn edited_blocks_keep_the_rest_of_the_source() {
         }
     }
     assert!(edits > 3_000, "only {edits} edits");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// One step of a path to a sequence of sibling blocks: a block's children,
+/// or the children of an item of the list at that index.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    Child(usize),
+    Item(usize, usize),
+}
+
+/// The path of every sequence of sibling blocks in `blocks`, at every depth,
+/// with the index of each block in it other than a blank line.
+fn sibling_paths(blocks: &[Block], path: &mut Vec<Step>, found: &mut Vec<(Vec<Step>, usize)>) {
+    for (index, block) in blocks.iter().enumerate() {
+        if !matches!(block, Block::BlankLine(_)) {
+            found.push((path.clone(), index));
+        }
+        let mut inside = |children: &[Block], step: Step, found: &mut Vec<(Vec<Step>, usize)>| {
+            path.push(step);
+            sibling_paths(children, path, found);
+            path.pop();
+        };
+        match block {
+            Block::BlockQuote(node) => inside(&node.children, Step::Child(index), found),
+            Block::Alert(node) => inside(&node.children, Step::Child(index), found),
+            Block::FootnoteDefinition(node) => inside(&node.children, Step::Child(index), found),
+            Block::ContainerDirective(node) => inside(&node.children, Step::Child(index), found),
+            Block::HtmlContainer(node) => {
+                if let HtmlContainerContent::Blocks(children) = &node.content {
+                    inside(children, Step::Child(index), found);
+                }
+            }
+            Block::List(node) => {
+                for (item, list_item) in node.children.iter().enumerate() {
+                    inside(&list_item.children, Step::Item(index, item), found);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The sibling blocks at `path` in `blocks`.
+fn siblings_at<'a>(blocks: &'a mut Vec<Block>, path: &[Step]) -> &'a mut Vec<Block> {
+    let Some((step, rest)) = path.split_first() else {
+        return blocks;
+    };
+    let children = match (*step, blocks) {
+        (Step::Child(index), blocks) => match &mut blocks[index] {
+            Block::BlockQuote(node) => &mut node.children,
+            Block::Alert(node) => &mut node.children,
+            Block::FootnoteDefinition(node) => &mut node.children,
+            Block::ContainerDirective(node) => &mut node.children,
+            Block::HtmlContainer(node) => match &mut node.content {
+                HtmlContainerContent::Blocks(children) => children,
+                HtmlContainerContent::Inlines(_) => unreachable!(),
+            },
+            _ => unreachable!(),
+        },
+        (Step::Item(index, item), blocks) => match &mut blocks[index] {
+            Block::List(node) => &mut node.children[item].children,
+            _ => unreachable!(),
+        },
+    };
+    siblings_at(children, rest)
+}
+
+/// Changes one own field of `block`: a list's first item's checkbox or
+/// number, a heading's depth, a code block's value; false for other blocks.
+fn edit_own_field(block: &mut Block) -> bool {
+    match block {
+        Block::List(node) => {
+            let item = &mut node.children[0];
+            if let Some(checked) = item.checked {
+                item.checked = Some(!checked);
+                true
+            } else if let Some(number) = item.number {
+                item.number = Some(number + 1);
+                true
+            } else {
+                false
+            }
+        }
+        Block::Heading(node) if node.depth < 2 => {
+            node.depth += 1;
+            true
+        }
+        Block::CodeBlock(node) => {
+            node.value.push_str("edited\n");
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Each block at every depth of each corpus input, with its first leaf or
+/// one own field edited, deleted, or followed by a new paragraph, written
+/// with the source, reads back as the edited tree wherever the edited tree's
+/// canonical output does, without a block the read-back check has to write
+/// canonically, and keeps the source of the top-level blocks around the one
+/// it edits inside; the same with every leaf given as its text: the
+/// simulated edits of `per-node-reuse`, task 2.5.
+// serialization: Unchanged source is kept
+#[test]
+fn edited_nodes_at_every_depth_read_back() {
+    let mut failures = Vec::new();
+    let mut edits = 0;
+    for source in read_back_corpus() {
+        let parsed = parse(source.input.as_str()).document;
+        let rebuilt = leaves::rebuilt_from_leaf_sources(&parsed);
+        let mut paths = Vec::new();
+        sibling_paths(&parsed.children, &mut Vec::new(), &mut paths);
+        for (document, path, index) in [&parsed, &rebuilt].into_iter().flat_map(|document| {
+            paths
+                .iter()
+                .map(move |(path, index)| (document, path, *index))
+        }) {
+            for edit in ["leaf", "own", "delete", "insert"] {
+                let mut edited = document.clone();
+                let siblings = siblings_at(&mut edited.children, path);
+                let applied = match edit {
+                    "leaf" => {
+                        matches!(
+                            siblings[index],
+                            Block::Paragraph(_) | Block::Heading(_) | Block::Table(_)
+                        ) && edit_block(&mut siblings[index])
+                    }
+                    "own" => edit_own_field(&mut siblings[index]),
+                    "delete" => {
+                        siblings.remove(index);
+                        true
+                    }
+                    _ => {
+                        siblings.insert(index + 1, Paragraph::new([Text::from("new")]).into());
+                        true
+                    }
+                };
+                if !applied {
+                    continue;
+                }
+                let Ok(canonical) = edited.clone().without_source().to_markdown() else {
+                    continue;
+                };
+                if !reads_as(&canonical, &edited) {
+                    continue;
+                }
+                edits += 1;
+                let leaves = if std::ptr::eq(document, &rebuilt) {
+                    " (leaves as text)"
+                } else {
+                    ""
+                };
+                let at = format!("{}{leaves} {path:?} {index} {edit}", source.at());
+                match edited.to_markdown() {
+                    Err(_) => failures.push(format!("{at}: refused with its source only")),
+                    Ok(markdown) if !reads_as(&markdown, &edited) => {
+                        failures.push(format!("{at}: {markdown:?} does not read back"))
+                    }
+                    Ok(markdown) if markdown_syntax::__private::rewritten_blocks(&edited) > 0 => {
+                        failures.push(format!("{at}: {markdown:?} rewritten by the check"))
+                    }
+                    Ok(markdown) => {
+                        // An edit inside a top-level block keeps the source
+                        // of the blocks before and after it.
+                        let Some(Step::Child(top) | Step::Item(top, _)) = path.first() else {
+                            continue;
+                        };
+                        let input = source.input.as_str();
+                        let span = |index: usize| parsed.children[index].span().expect("parsed");
+                        let before = match top.checked_sub(1) {
+                            Some(previous) => &input[..span(previous).end],
+                            None => "",
+                        };
+                        let before = before
+                            .strip_suffix("\r\n")
+                            .or_else(|| before.strip_suffix(['\n', '\r']))
+                            .unwrap_or(before);
+                        let mut kept_from = top + 1;
+                        while rewritten_after_an_edit(input, &edited.children, kept_from) {
+                            kept_from += 1;
+                        }
+                        let after = parsed
+                            .children
+                            .get(kept_from)
+                            .map_or("", |_| &input[span(kept_from).start..]);
+                        if !markdown.starts_with(before) || !markdown.ends_with(after) {
+                            failures.push(format!("{at}: {markdown:?} moves the source around it"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(edits > 20_000, "only {edits} edits");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",
