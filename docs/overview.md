@@ -31,9 +31,11 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-The second batch for the editor, after `#tag` joined the syntax: source
-reused per node and per node's own syntax down to inlines, blank lines as
-nodes, ordered item numbers, and every leaf's inline source in one pass.
+The second batch for the editor. Blank lines are nodes, ordered items keep
+their numbers, every leaf's inline source comes in one pass, and a leaf built
+from its text is written as that text. Next: source reused per node and per
+node's own syntax down to inlines (`docs/plans/per-node-reuse/`), then inline
+syntax tokens, the ranges of each inline's own syntax the editor marks.
 Lists stay nested; the editor flattens them.
 
 ## Non-goals

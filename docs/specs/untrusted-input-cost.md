@@ -12,8 +12,10 @@ on its nesting limits.
 
 ### Requirement: Linear time
 Parsing with `parse` and `parse_inline`, `to_markdown`, `to_html`, `validate`,
-and `Document::inline_source` SHALL take time linear in the input size: the
-input, the inline text, or the document and its kept source together.
+`Document::inline_source`, `Document::leaf_sources`, and the `with_source`
+constructors SHALL take time linear in the input size: the input, the inline
+text, or the document, its kept source, and the sources its leaves keep
+together.
 
 ### Requirement: Bounded stack
 The native stack these operations use SHALL NOT grow with how deeply the input
