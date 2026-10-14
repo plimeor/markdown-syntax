@@ -1529,3 +1529,115 @@ mod emphasis_edges {
         ));
     }
 }
+
+mod blank_lines_and_numbers {
+    use markdown_syntax::prelude::*;
+
+    fn paragraph(value: &str) -> Block {
+        Paragraph::new([Text::from(value)]).into()
+    }
+
+    fn blank() -> Block {
+        BlankLine::new().into()
+    }
+
+    fn list(tight: bool, items: Vec<Vec<Block>>) -> Document {
+        let mut list = List::new(items.into_iter().map(ListItem::new));
+        list.tight = tight;
+        Document::new(vec![list.into()])
+    }
+
+    fn footnote(children: Vec<Block>) -> Document {
+        Document::new(vec![Block::FootnoteDefinition(FootnoteDefinition {
+            meta: NodeMeta::default(),
+            label: "n".into(),
+            identifier: "n".into(),
+            children,
+        })])
+    }
+
+    // validation: Shapes that cannot be written
+    #[test]
+    fn a_blank_line_is_invalid_where_none_can_be_written() {
+        for (name, document) in [
+            (
+                "first in an item",
+                list(
+                    false,
+                    vec![vec![blank(), paragraph("a")], vec![paragraph("b")]],
+                ),
+            ),
+            (
+                "in a tight list",
+                list(
+                    true,
+                    vec![vec![paragraph("a"), blank()], vec![paragraph("b")]],
+                ),
+            ),
+            (
+                "last in the last item",
+                list(
+                    false,
+                    vec![vec![paragraph("a")], vec![paragraph("b"), blank()]],
+                ),
+            ),
+            (
+                "first in a footnote",
+                footnote(vec![blank(), paragraph("a")]),
+            ),
+            (
+                "last in a footnote",
+                footnote(vec![paragraph("a"), blank()]),
+            ),
+        ] {
+            assert!(!document.validate().is_empty(), "{name}");
+        }
+        for (name, document) in [
+            (
+                "between items",
+                list(
+                    false,
+                    vec![vec![paragraph("a"), blank()], vec![paragraph("b")]],
+                ),
+            ),
+            (
+                "inside an item",
+                list(
+                    false,
+                    vec![
+                        vec![paragraph("a"), blank(), paragraph("c")],
+                        vec![paragraph("b")],
+                    ],
+                ),
+            ),
+            (
+                "inside a footnote",
+                footnote(vec![paragraph("a"), blank(), paragraph("b")]),
+            ),
+            ("alone", Document::new(vec![blank()])),
+        ] {
+            assert_eq!(document.validate(), [], "{name}");
+            let markdown = document.to_markdown().expect(name);
+            assert_eq!(
+                parse(&markdown)
+                    .document
+                    .without_source()
+                    .to_markdown()
+                    .expect(name),
+                markdown,
+                "{name}"
+            );
+        }
+    }
+
+    // validation: Shapes that cannot be written
+    #[test]
+    fn a_bullet_item_has_no_number() {
+        let mut document = list(true, vec![vec![paragraph("a")]]);
+        let Block::List(list) = &mut document.children[0] else {
+            unreachable!()
+        };
+        list.children[0].number = Some(1);
+        assert!(!document.validate().is_empty());
+    }
+}

@@ -106,8 +106,9 @@ canonical round trips unstable.
 - A blank line inside an open leaf (fenced code, HTML block, math) is part of
   that leaf's value, as today.
 - Validation: an empty `Paragraph` stays invalid. A `BlankLine` is invalid
-  where no blank line can be written: first in a list item, first in a
-  footnote definition, and in a tight list.
+  where no blank line can be written: first in a list item, last in a list's
+  last item, first or last in a footnote definition (the parser gives those
+  lines to the parent), and in a tight list.
 - A blank line inside a list item is written without trailing whitespace
   (`- a\n\n  b` is written as itself, not `- a\n  \n  b`).
 

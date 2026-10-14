@@ -139,8 +139,25 @@ const BLOCK_PIECES: &[&str] = &[
 /// Containers and blank-line runs, so that blank lines meet every edge the
 /// blank-line rule names.
 const BLANK_LINE_PIECES: &[&str] = &[
-    "a", "\n", "\n\n", "\n\n\n", "\n\n\n\n", "- ", "1. ", "> ", ">", "  ", "```", ":::e",
-    ":::", "<details>", "</details>", "[^1]: ", "# ", "---", ">[!NOTE]",
+    "a",
+    "\n",
+    "\n\n",
+    "\n\n\n",
+    "\n\n\n\n",
+    "- ",
+    "1. ",
+    "> ",
+    ">",
+    "  ",
+    "```",
+    ":::e",
+    ":::",
+    "<details>",
+    "</details>",
+    "[^1]: ",
+    "# ",
+    "---",
+    ">[!NOTE]",
 ];
 
 const EMPHASIS_PIECES: &[&str] = &[

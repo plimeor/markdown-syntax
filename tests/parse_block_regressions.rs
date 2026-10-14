@@ -2452,3 +2452,53 @@ mod serialized_spellings {
         assert_eq!(html.value, "<!--\n");
     }
 }
+
+mod blank_lines_and_numbers {
+    use markdown_syntax::*;
+
+    // block-syntax: Blank lines are nodes
+    #[test]
+    fn extra_blank_lines_between_paragraphs() {
+        let document = parse("a\n\n\n\nb").document;
+        let [Block::Paragraph(_), Block::BlankLine(first), Block::BlankLine(second), Block::Paragraph(_)] =
+            document.children.as_slice()
+        else {
+            panic!("{:?}", document.children);
+        };
+        assert_eq!(
+            [first.meta.span, second.meta.span],
+            [Some(Span::new(3, 4)), Some(Span::new(4, 5))]
+        );
+    }
+
+    // block-syntax: Blank lines are nodes
+    #[test]
+    fn two_blank_lines_between_items() {
+        let document = parse("- a\n\n\n- b").document;
+        let [Block::List(list)] = document.children.as_slice() else {
+            panic!("{:?}", document.children);
+        };
+        assert!(!list.tight);
+        assert!(matches!(
+            list.children[0].children.as_slice(),
+            [Block::Paragraph(_), Block::BlankLine(_)]
+        ));
+        assert_eq!(list.children[0].meta.span, Some(Span::new(0, 6)));
+    }
+
+    // public-api: Recorded syntax forms
+    #[test]
+    fn repeated_numbers() {
+        let document = parse("1. a\n1. b").document;
+        let [Block::List(list)] = document.children.as_slice() else {
+            panic!("{:?}", document.children);
+        };
+        let numbers: Vec<_> = list.children.iter().map(|item| item.number).collect();
+        assert_eq!(numbers, [Some(1), Some(1)]);
+        let bullets = parse("- a").document;
+        let [Block::List(list)] = bullets.children.as_slice() else {
+            panic!();
+        };
+        assert_eq!(list.children[0].number, None);
+    }
+}

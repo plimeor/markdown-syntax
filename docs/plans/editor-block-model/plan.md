@@ -100,18 +100,18 @@ loop: `cargo test --profile ci --features html --test <name>`.
   superseded, archived, or updated references.
 
 ### 2. Blank lines
-- [ ] 2.1 Add `BlankLine` and produce it by the blank-line table, rendering
+- [x] 2.1 Add `BlankLine` and produce it by the blank-line table, rendering
   nothing for it in HTML; verified by new `.ast` goldens under
   `tests/fixtures/roundtrip/` for each row of design › Blank lines, and the
   conformance bench passing every case it passes today.
-- [ ] 2.2 Write and validate `BlankLine`; verified by
+- [x] 2.2 Write and validate `BlankLine`; verified by
   `tests/serialize_regressions.rs` and `tests/validate_regressions.rs`, and
   the seeded round trip generating blank-line runs.
-- [ ] 2.3 Write a blank line in a list item without trailing whitespace;
+- [x] 2.3 Write a blank line in a list item without trailing whitespace;
   verified by a `serialize_regressions.rs` case for `- a\n\n  b`.
 
 ### 3. Ordered item numbers
-- [ ] 3.1 Replace `List::start` with `ListItem::number`, parse, write, and
+- [x] 3.1 Replace `List::start` with `ListItem::number`, parse, write, and
   validate it, and take the HTML `start` from the first item; verified by
   goldens, `serialize_regressions.rs` cases for `1. 1. 1.`, `3. 7.`, and an
   item without a number, and the conformance bench.

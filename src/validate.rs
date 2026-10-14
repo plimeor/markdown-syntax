@@ -107,7 +107,11 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
             // Its first line holds its label, and a blank line after its last
             // block belongs to the container around it.
             let edges = [definition.children.first(), definition.children.last()];
-            if let Some(Block::BlankLine(blank)) = edges.into_iter().flatten().find(|block| matches!(block, Block::BlankLine(_))) {
+            if let Some(Block::BlankLine(blank)) = edges
+                .into_iter()
+                .flatten()
+                .find(|block| matches!(block, Block::BlankLine(_)))
+            {
                 diagnostics.push(Diagnostic::invalid(
                     blank.meta.span,
                     "a footnote definition cannot open or end with a blank line",
@@ -124,7 +128,10 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
         Block::HtmlContainer(container) => validate_html_container(container, depth, diagnostics),
         Block::CodeBlock(code) => validate_code_block(code, diagnostics),
         Block::Frontmatter(frontmatter) => validate_frontmatter(frontmatter, depth, diagnostics),
-        Block::ThematicBreak(_) | Block::HtmlBlock(_) | Block::MathBlock(_) | Block::BlankLine(_) => {}
+        Block::ThematicBreak(_)
+        | Block::HtmlBlock(_)
+        | Block::MathBlock(_)
+        | Block::BlankLine(_) => {}
     }
 }
 

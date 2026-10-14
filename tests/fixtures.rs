@@ -36,8 +36,8 @@ use markdown_syntax::{
 
 use deviations::{excerpt, input_hash};
 use support::fixtures::{
-    derived_corpus_stats, files_with_extension, read_derived_cases,
-    read_derived_metadata, read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
+    derived_corpus_stats, files_with_extension, read_derived_cases, read_derived_metadata,
+    read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
 };
 
 /// Each golden under the corpus root whose name ends in `suffix`, with the

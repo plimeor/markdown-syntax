@@ -473,9 +473,8 @@ fn write_blocks(
         }
         output.extend(core::iter::repeat_n('\n', blank_lines));
         blank_lines = 0;
-        let after_paragraph_line = join == Join::Line
-            && index > 0
-            && matches!(blocks[index - 1], Block::Paragraph(_));
+        let after_paragraph_line =
+            join == Join::Line && index > 0 && matches!(blocks[index - 1], Block::Paragraph(_));
         let written = match block {
             Block::List(list) => {
                 let marker = list_marker(list, options, previous_list);
@@ -535,7 +534,11 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             // starts on the line after the label, as in a list item, where
             // the label's line would take that whitespace as its separator.
             Ok(if inner.starts_with([' ', '\t']) {
-                format!("[^{}]:\n{}", node.label, prefix_container_lines(&inner, "    "))
+                format!(
+                    "[^{}]:\n{}",
+                    node.label,
+                    prefix_container_lines(&inner, "    ")
+                )
             } else {
                 format!("[^{}]: {}", node.label, indent_continuation(&inner))
             })
@@ -801,10 +804,7 @@ fn write_list(
         if break_after_bullet || opens_with_whitespace {
             output.push_str(marker.trim_end());
             output.push('\n');
-            output.push_str(&prefix_container_lines(
-                &inner,
-                &" ".repeat(marker.len()),
-            ));
+            output.push_str(&prefix_container_lines(&inner, &" ".repeat(marker.len())));
         } else {
             output.push_str(&marker);
             output.push_str(&indent_after_first_line(&inner, marker.len()));

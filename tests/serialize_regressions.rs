@@ -917,3 +917,75 @@ mod tags {
         assert_eq!(normalized(&parse("\\#a").document), normalized(&escaped));
     }
 }
+
+mod blank_lines_and_numbers {
+    use super::*;
+
+    fn blank() -> Block {
+        BlankLine::new().into()
+    }
+
+    fn item(value: &str) -> ListItem {
+        ListItem::new([paragraph(vec![text(value)])])
+    }
+
+    fn ordered(numbers: &[Option<u64>]) -> Document {
+        let mut list =
+            List::new(
+                numbers
+                    .iter()
+                    .zip(["a", "b", "c"])
+                    .map(|(&number, value)| ListItem {
+                        number,
+                        ..item(value)
+                    }),
+            );
+        list.ordered = true;
+        list.delimiter = ListDelimiter::Period;
+        document(vec![list.into()])
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn each_blank_line_is_one_line_beyond_the_separator() {
+        let between = document(vec![
+            paragraph(vec![text("a")]),
+            blank(),
+            blank(),
+            paragraph(vec![text("b")]),
+        ]);
+        assert_eq!(rendered(&between), "a\n\n\n\nb\n");
+        let trailing = document(vec![paragraph(vec![text("a")]), blank()]);
+        assert_eq!(rendered(&trailing), "a\n\n");
+        let leading = document(vec![blank(), paragraph(vec![text("a")])]);
+        assert_eq!(rendered(&leading), "\na\n");
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn a_blank_line_in_a_container_has_no_trailing_whitespace() {
+        let quote = document(vec![Block::BlockQuote(BlockQuote {
+            meta: NodeMeta::default(),
+            children: vec![
+                paragraph(vec![text("a")]),
+                blank(),
+                paragraph(vec![text("b")]),
+            ],
+        })]);
+        assert_eq!(rendered(&quote), "> a\n>\n>\n> b\n");
+        assert_eq!(written("- a\n\n  b"), "- a\n\n  b\n");
+        assert_eq!(written("- a\n\n\n  b"), "- a\n\n\n  b\n");
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn item_numbers_are_written_as_recorded() {
+        assert_eq!(
+            rendered(&ordered(&[Some(1), Some(1), Some(1)])),
+            "1. a\n1. b\n1. c\n"
+        );
+        assert_eq!(rendered(&ordered(&[Some(3), Some(7)])), "3. a\n7. b\n");
+        assert_eq!(rendered(&ordered(&[Some(3), None])), "3. a\n4. b\n");
+        assert_eq!(rendered(&ordered(&[None, None])), "1. a\n2. b\n");
+    }
+}

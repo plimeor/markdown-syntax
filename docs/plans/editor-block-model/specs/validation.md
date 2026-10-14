@@ -26,8 +26,8 @@ sits in a table cell or a directive label:
 - `List`: no items; a loose list of one item holding at most one block.
 - `ListItem`: a number beyond the parser's 9-digit marker limit; a number in
   a bullet list.
-- `BlankLine`: first in a list item or a footnote definition; in a tight
-  list.
+- `BlankLine`: first or last in a footnote definition; first in a list item,
+  or last in a list's last item; in a tight list.
 - `ListItem`: a task item (`checked` set) whose first block after its leading
   `Definition`s is not a `Paragraph` with children.
 - `Alert`: a title that is empty or starts or ends with a space or a tab.
