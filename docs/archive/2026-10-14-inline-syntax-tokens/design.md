@@ -21,14 +21,21 @@ A token names only its innermost node. The editor takes a container's mark
 (strong, link) from the container's span, which `nodes()` gives it, and the
 tokens refine the parts within each node; it maps (node kind, role) to a
 mark and restates no rule of the syntax. The binding returns `nodes` too,
-as the decoded objects in the same order, so JavaScript does not repeat the
-walk.
+the decoded objects in the same order. The JavaScript wrapper lists them by
+walking each kind's inline-list fields in its wire schema, which hold what
+`Inline::children()` returns, so the order costs no wire bytes; a Node test
+checks that every token lies in its node across every container kind.
 
 ## Roles by node
 
 | Node | `Text` | `Syntax` | Fields |
 |---|---|---|---|
 | `Text`, `Html`, `SoftBreak` | all | | |
+
+The spaces and tabs removed before a soft break are in the span of the text
+before them; when no text holds them, as after another inline or a tag, the
+soft break's span starts at them. So the inlines tile the text, and the
+bytes have one owner wherever the text before them ends.
 | `LineBreak` | its line ending | the spaces or `\` | |
 | `Escape` | the escaped character | `\` | |
 | `CharacterReference` | between `&` and `;` | `&`, `;` | |
@@ -51,7 +58,7 @@ all spaces. `$$` and `` $`…`$ `` math drop none.
 
 The pass runs inside `parse_inline`, after the inline parse and before the
 `\r\n` mapping and the NUL rewrite, over the content the parse read. It
-walks the tree in pre-order with an explicit stack (Bounded stack),
+walks the tree in pre-order with an explicit stack (`untrusted-input-cost` › Bounded stack),
 numbering nodes as it goes.
 
 It rests on one invariant of the parse, which the plan makes a promise: a
@@ -82,7 +89,13 @@ skips the pass, so tokens cost only `parse_inline`'s callers.
 
 The pass matches every `Inline` kind without a wildcard, as the NUL rewrite
 does, and `Inline::children()` does too: a new kind does not compile until
-both say what it holds.
+both say what it holds. It reads a directive's name as the stored name's
+length, since a name is ASCII, and math padding through the predicate the
+parse uses for math of each kind. Where the parse would have broken the
+invariant it rests on (a gap before a node, a run that goes backwards, a
+link tail that does not scan again, a node left unnumbered), the pass
+asserts in debug builds, which CI's profile keeps, so a disagreement fails
+where it starts instead of showing as a wrong role.
 
 ## Read-back of parts
 
@@ -91,13 +104,17 @@ compares it with the field the parse stored:
 
 - code and math: the `Text` bytes with the padding, normalized by the
   kind's rule, equal the value;
-- a destination or title equals the stored value after decoding escapes and
-  references; an angle autolink's or literal autolink's destination equals
-  its `text`;
+- a destination and title, written again as a link tail of the same
+  destination and title kinds, parse to the stored values, which decodes
+  their escapes and references; an angle autolink's or literal autolink's
+  destination equals its `text`;
 - a wiki link's target and label are its fields as written; a wiki link
-  without a pipe has no `Label`;
-- a directive's attribute run, parsed by `parse_attributes`, gives its
+  without a pipe, or with an empty label, has no `Label`;
+- a directive's attribute run, parsed again as `:d{…}`, gives its
   attributes; a name equals the stored name.
+
+The check matches every kind without a wildcard, so a new kind says which
+of its parts read back.
 
 ## Decisions
 

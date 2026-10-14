@@ -59,3 +59,12 @@ Document
         Tag "cell"
       Cell
         Text "text"
+  Paragraph
+    Text "Spaces after a "
+    Tag "tag"
+    SoftBreak
+    Text "and "
+    Emphasis delimiter=*
+      Tag "tab"
+    SoftBreak
+    Text "end"

@@ -177,6 +177,32 @@ describe("Inline parse and inline source from JavaScript", () => {
     assert.equal(tokens.at(-1).span[1], text.length);
   });
 
+  test("each token lies in the node it names, through every container", () => {
+    const text =
+      "*a **b** ~~c~~ ==d==* [e *f*](u) ![g [h](v)](w) [i *j*][r] ![k][r] ^[l *m*] :n[o *p*]{q} 😀 #t \nx";
+    const { tokens, nodes } = binding.parseInline(text, ["r"]);
+    const types = new Set(nodes.map((node) => node.type));
+    for (const type of ["emphasis", "strong", "delete", "mark", "link", "image", "linkReference",
+      "imageReference", "inlineFootnote", "textDirective", "tag", "softBreak"]) {
+      assert.ok(types.has(type), type);
+    }
+    let at = 0;
+    for (const { span, node } of tokens) {
+      assert.equal(span[0], at);
+      at = span[1];
+      const [from, to] = nodes[node].span;
+      assert.ok(from <= span[0] && span[1] <= to, `${JSON.stringify(span)} in ${nodes[node].type}`);
+    }
+    assert.equal(at, text.length);
+  });
+
+  test("a container with very many children keeps its tokens", () => {
+    const text = `[${"\\*".repeat(200000)}](u)`;
+    const { tokens, nodes } = binding.parseInline(text);
+    assert.equal(nodes.length, 200001);
+    assert.equal(tokens.at(-2).role, "destination");
+  });
+
   test("the inline source reproduces the leaf beyond the BMP", () => {
     const source = "> 😀 *a*\n> b";
     const document = binding.parse(source);

@@ -287,8 +287,8 @@ pub struct InlineToken {
 pub enum TokenRole {
     /// The inline's content: a text node, raw HTML, a soft break, a hard
     /// break's line ending, an escaped character, a character reference
-    /// between `&` and `;`, and code or math inside its delimiters and the
-    /// padding its value drops.
+    /// between `&` and `;`, and code or math inside its delimiters apart
+    /// from the padding its value drops, which is syntax.
     Text,
     /// A character of the inline's own syntax.
     Syntax,
@@ -4014,13 +4014,21 @@ fn parse_math_inline(
     }
 
     let raw = &input[content_start..content_end];
-    let value = if open_dollars == 1 {
+    let dollars = u8::try_from(open_dollars).unwrap_or(u8::MAX);
+    let kind = MathInlineKind::Dollar { dollars };
+    let value = if math_is_padded(kind) {
         normalize_math_text(raw)
     } else {
         raw.into()
     };
-    let dollars = u8::try_from(open_dollars).unwrap_or(u8::MAX);
-    Some((close, value, MathInlineKind::Dollar { dollars }))
+    Some((close, value, kind))
+}
+
+/// Whether math of `kind` follows the code-span content rules: line endings
+/// read as spaces, and padding `code_padding` finds is dropped. Only
+/// single-dollar math does.
+pub(crate) fn math_is_padded(kind: MathInlineKind) -> bool {
+    matches!(kind, MathInlineKind::Dollar { dollars: 1 })
 }
 
 /// Whether `written`, read alone, is exactly one inline math holding `value`

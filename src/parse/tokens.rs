@@ -12,7 +12,9 @@ use alloc::vec::Vec;
 use crate::ast::{AutolinkForm, Inline, MathInlineKind, ReferenceKind};
 use crate::span::Span;
 
-use super::{code_padding, find_wikilink_separator, parse_link_resource, DirectLookups};
+use super::{
+    code_padding, find_wikilink_separator, math_is_padded, parse_link_resource, DirectLookups,
+};
 use super::{InlineToken, TokenRole};
 
 /// The tokens of `inlines`, read from `input`, tiling `input`.
@@ -34,10 +36,12 @@ pub(super) fn tokens(input: &str, inlines: &[Inline]) -> Vec<InlineToken> {
                 next += 1;
                 last = Some(node);
                 let Some(span) = inline.span() else {
+                    debug_assert!(false, "a parsed inline has a span");
                     continue;
                 };
-                // Bytes before a node that no node holds are syntax of the
-                // node after them.
+                // A parse tiles its text, so no bytes lie before a node; any
+                // that did would read as syntax of the node after them.
+                debug_assert_eq!(tokens.at, span.start, "the inlines tile the text");
                 tokens.push(span.start, node, TokenRole::Syntax);
                 let start = work.len();
                 pieces(input, inline, span, node, &mut work);
@@ -45,10 +49,24 @@ pub(super) fn tokens(input: &str, inlines: &[Inline]) -> Vec<InlineToken> {
             }
         }
     }
+    debug_assert_eq!(next, count(inlines), "every inline is numbered");
     if let Some(node) = last {
+        debug_assert_eq!(tokens.at, input.len(), "the inlines tile the text");
         tokens.push(input.len(), node, TokenRole::Syntax);
     }
     tokens.tokens
+}
+
+/// How many inlines `inlines` holds, nested ones included: what
+/// `InlineOutput::nodes()` numbers.
+fn count(inlines: &[Inline]) -> usize {
+    let mut count = 0;
+    let mut work: Vec<&[Inline]> = alloc::vec![inlines];
+    while let Some(list) = work.pop() {
+        count += list.len();
+        work.extend(list.iter().map(Inline::children));
+    }
+    count
 }
 
 /// One step of the walk: the run up to an offset, as a node's part, or a node
@@ -68,6 +86,7 @@ impl Tokens {
     /// Adds the run from where the last one ended to `end`, merged into the
     /// last one when it has the same node and role; nothing when empty.
     fn push(&mut self, end: usize, node: usize, role: TokenRole) {
+        debug_assert!(end >= self.at, "a run ends after the last one");
         if end <= self.at {
             return;
         }
@@ -134,13 +153,12 @@ fn pieces<'a>(input: &str, inline: &'a Inline, span: Span, node: usize, work: &m
             run(work, end, TokenRole::Syntax);
         }
         Inline::Math(math) => {
-            let (open, close, padded) = match math.kind {
-                MathInlineKind::Code => (2, 2, false),
-                MathInlineKind::Dollar { dollars } => {
-                    (usize::from(dollars), usize::from(dollars), dollars == 1)
-                }
+            let fence = match math.kind {
+                MathInlineKind::Code => 2,
+                MathInlineKind::Dollar { dollars } => usize::from(dollars),
             };
-            delimited(input, start + open, end - close, padded, node, work);
+            let padded = math_is_padded(math.kind);
+            delimited(input, start + fence, end - fence, padded, node, work);
             run(work, end, TokenRole::Syntax);
         }
         Inline::Link(_) | Inline::Image(_) => {
@@ -158,6 +176,8 @@ fn pieces<'a>(input: &str, inline: &'a Inline, span: Span, node: usize, work: &m
                     run(work, title_start, TokenRole::Syntax);
                     run(work, title_end, TokenRole::Title);
                 }
+            } else {
+                debug_assert!(false, "a parsed link's tail scans again");
             }
             run(work, end, TokenRole::Syntax);
         }
@@ -202,13 +222,9 @@ fn pieces<'a>(input: &str, inline: &'a Inline, span: Span, node: usize, work: &m
             }
             run(work, end, TokenRole::Syntax);
         }
-        Inline::TextDirective(_) => {
-            let name_end = start
-                + 1
-                + input[start + 1..end]
-                    .bytes()
-                    .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                    .count();
+        Inline::TextDirective(directive) => {
+            // A name is ASCII, so it is the bytes it was read from.
+            let name_end = start + 1 + directive.name.len();
             run(work, start + 1, TokenRole::Syntax);
             run(work, name_end, TokenRole::Name);
             let mut at = name_end;

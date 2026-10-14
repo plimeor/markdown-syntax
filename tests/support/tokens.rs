@@ -97,17 +97,67 @@ fn part(text: &str, tokens: &[InlineToken], node: usize, role: TokenRole) -> Opt
     found.map(|part| part.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
-/// Whether a part holds what decoding could change.
-fn encoded(part: &str) -> bool {
-    part.contains(['\\', '&'])
+/// The first inline of `text` parsed alone.
+fn first(text: &str) -> Option<Inline> {
+    parse_inline(text, &Definitions::default())
+        .inlines
+        .into_iter()
+        .next()
 }
 
-/// A part of `node` that does not read back as the field it names.
+/// The destination and title a link tail written with the read parts
+/// decodes to, read by the parser itself.
+fn decoded_tail(
+    destination: &str,
+    kind: LinkDestinationKind,
+    title: Option<(&str, LinkTitleKind)>,
+) -> Option<(String, Option<String>)> {
+    let destination = match kind {
+        LinkDestinationKind::Angle => format!("<{destination}>"),
+        _ => destination.to_string(),
+    };
+    let title = match title {
+        None => String::new(),
+        Some((title, LinkTitleKind::DoubleQuote)) => format!(" \"{title}\""),
+        Some((title, LinkTitleKind::SingleQuote)) => format!(" '{title}'"),
+        Some((title, LinkTitleKind::Paren)) => format!(" ({title})"),
+    };
+    match first(&format!("[x]({destination}{title})"))? {
+        Inline::Link(link) => Some((link.destination, link.title.map(|title| title.value))),
+        _ => None,
+    }
+}
+
+/// A part of `node` that does not read back as the field it names: encoded
+/// parts are decoded by parsing them again in their syntax.
 fn part_problem(text: &str, node: &Inline, index: usize, tokens: &[InlineToken]) -> Option<String> {
     let get = |role| part(text, tokens, index, role);
     let differs = |role: TokenRole, read: Option<String>, field: &str| {
         let read = read.unwrap_or_default();
-        (read != field && !encoded(&read)).then(|| format!("{role:?} {read:?} is not {field:?}"))
+        (read != field).then(|| format!("{role:?} {read:?} is not {field:?}"))
+    };
+    let tail = |destination: &str, kind, title: &Option<Title>| {
+        let read_destination = get(TokenRole::Destination).unwrap_or_default();
+        let read_title = get(TokenRole::Title);
+        let read = (
+            read_destination.clone(),
+            title
+                .as_ref()
+                .map(|_| read_title.clone().unwrap_or_default()),
+        );
+        let decoded = decoded_tail(
+            &read_destination,
+            kind,
+            title
+                .as_ref()
+                .map(|title| (read_title.as_deref().unwrap_or_default(), title.kind)),
+        );
+        let expected = (
+            destination.to_string(),
+            title.as_ref().map(|title| title.value.clone()),
+        );
+        (decoded.as_ref() != Some(&expected))
+            .then(|| format!("tail {read:?} reads as {decoded:?}, not {expected:?}"))
     };
     match node {
         Inline::Code(code) => {
@@ -122,38 +172,19 @@ fn part_problem(text: &str, node: &Inline, index: usize, tokens: &[InlineToken])
             };
             (read != math.value).then(|| format!("math {read:?} is not {:?}", math.value))
         }
-        Inline::Link(link) => differs(
-            TokenRole::Destination,
-            get(TokenRole::Destination),
-            &link.destination,
-        )
-        .or_else(|| {
-            let title = link.title.as_ref().map_or("", |title| title.value.as_str());
-            differs(TokenRole::Title, get(TokenRole::Title), title)
-        }),
-        Inline::Image(image) => differs(
-            TokenRole::Destination,
-            get(TokenRole::Destination),
-            &image.destination,
-        )
-        .or_else(|| {
-            let title = image
-                .title
-                .as_ref()
-                .map_or("", |title| title.value.as_str());
-            differs(TokenRole::Title, get(TokenRole::Title), title)
-        }),
+        Inline::Link(link) => tail(&link.destination, link.destination_kind, &link.title),
+        Inline::Image(image) => tail(&image.destination, image.destination_kind, &image.title),
         Inline::Autolink(autolink) => differs(
             TokenRole::Destination,
             get(TokenRole::Destination),
             &autolink.text,
         ),
-        Inline::LinkReference(reference) if reference.kind == ReferenceKind::Full => {
-            differs(TokenRole::Label, get(TokenRole::Label), &reference.label)
-        }
-        Inline::ImageReference(reference) if reference.kind == ReferenceKind::Full => {
-            differs(TokenRole::Label, get(TokenRole::Label), &reference.label)
-        }
+        Inline::LinkReference(reference) => (reference.kind == ReferenceKind::Full)
+            .then(|| differs(TokenRole::Label, get(TokenRole::Label), &reference.label))
+            .flatten(),
+        Inline::ImageReference(reference) => (reference.kind == ReferenceKind::Full)
+            .then(|| differs(TokenRole::Label, get(TokenRole::Label), &reference.label))
+            .flatten(),
         Inline::FootnoteReference(reference) => {
             differs(TokenRole::Label, get(TokenRole::Label), &reference.label)
         }
@@ -161,18 +192,43 @@ fn part_problem(text: &str, node: &Inline, index: usize, tokens: &[InlineToken])
             differs(TokenRole::Target, get(TokenRole::Target), &wikilink.target).or_else(|| {
                 match get(TokenRole::Label) {
                     Some(label) => differs(TokenRole::Label, Some(label), &wikilink.label),
-                    None => (wikilink.label != wikilink.target)
+                    // A label equal to the target is the target's; an empty
+                    // one after a pipe has no token.
+                    None => (wikilink.label != wikilink.target && !wikilink.label.is_empty())
                         .then(|| format!("no label for {:?}", wikilink.label)),
                 }
             })
         }
         Inline::TextDirective(directive) => {
-            differs(TokenRole::Name, get(TokenRole::Name), &directive.name)
+            differs(TokenRole::Name, get(TokenRole::Name), &directive.name).or_else(|| {
+                let attributes = get(TokenRole::Attributes)?;
+                let read = match first(&format!(":d{{{attributes}}}")) {
+                    Some(Inline::TextDirective(read)) => read.attributes,
+                    _ => Vec::new(),
+                };
+                (read != directive.attributes).then(|| {
+                    format!(
+                        "attributes {attributes:?} read as {read:?}, not {:?}",
+                        directive.attributes
+                    )
+                })
+            })
         }
         Inline::Shortcode(shortcode) => {
             differs(TokenRole::Name, get(TokenRole::Name), &shortcode.name)
         }
         Inline::Tag(tag) => differs(TokenRole::Name, get(TokenRole::Name), &tag.name),
-        _ => None,
+        // Their parts are their source text or their syntax.
+        Inline::Text(_)
+        | Inline::Escape(_)
+        | Inline::CharacterReference(_)
+        | Inline::Emphasis(_)
+        | Inline::Strong(_)
+        | Inline::Delete(_)
+        | Inline::Mark(_)
+        | Inline::Html(_)
+        | Inline::SoftBreak(_)
+        | Inline::LineBreak(_)
+        | Inline::InlineFootnote(_) => None,
     }
 }

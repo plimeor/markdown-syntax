@@ -18,7 +18,9 @@ and the two readings would drift.
   `#[non_exhaustive]`. The analysis behind this plan
   (`editor-marking-gap.md` in the project files, §4) expected an additive
   change; a field is the shape that keeps tokens bound to the text they
-  describe (Decisions), and the break is taken once.
+  describe (Decisions), and the break is taken once. The spaces and tabs
+  removed before a soft break that no text holds move into the soft break's
+  span, in `parse` too, so the inlines tile the text.
 
 ## What changes
 
@@ -27,6 +29,9 @@ and the two readings would drift.
   `#[non_exhaustive]`; the spans clause cites "Source spans", the
   requirement that states nesting
 - `public-api` › Inline syntax tokens: added
+- `inline-syntax` › Hard line breaks from spaces: modified — the removed
+  spaces and tabs lie in the span of the text before them, or of the soft
+  break when no text holds them
 
 ### WebAssembly binding
 - `wasm-binding` › Inline parse and inline source from JavaScript: modified
@@ -38,6 +43,7 @@ and the two readings would drift.
 - `Inline::children()` lists every kind, so a new kind cannot fall through.
 
 Specs:
+- `inline-syntax` (modified)
 - `public-api` (modified)
 - `wasm-binding` (modified)
 
@@ -71,11 +77,17 @@ See `design.md`.
   destination, and nested containers through an image's alt and a
   directive's label
   - Design › Token pass
+- [x] 1.5 Give the spaces and tabs removed before a soft break that no text
+  holds, after another inline or a tag, to the soft break's span; verified
+  by `tests/inline_tokens.rs` and the tags corpus
+  - Design › Roles by node
 - [x] 1.3 Check the tokens of every corpus leaf and of seeded inline text:
   they tile the text in order; each lies within its node's span and
   outside that node's children; a container's children tile its content;
   and each part reads back as its field (Design › Read-back of parts);
-  verified by `tests/inline_tokens.rs`
+  verified by `corpus_inline_tokens_tile_their_text` in `tests/fixtures.rs`
+  and `generated_inline_tokens_tile_their_text` in
+  `tests/serialize_roundtrip_fuzz.rs`
 - [x] 1.4 Keep the pass linear and stack-bounded: `parse_inline` in
   `tests/linear_growth.rs` and the deep inline cases of
   `tests/pathological_inputs.rs` include it; verified by those suites

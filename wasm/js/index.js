@@ -153,7 +153,9 @@ function preorder(inlines) {
     const node = work.pop();
     nodes.push(node);
     for (const [field, type] of BY_NAME.get(node.type).fields) {
-      if (type === "inlines") work.push(...[...node[field]].reverse());
+      if (type !== "inlines") continue;
+      const children = node[field];
+      for (let index = children.length - 1; index >= 0; index--) work.push(children[index]);
     }
   }
   return nodes;

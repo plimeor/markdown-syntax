@@ -33,10 +33,10 @@ Shipped features are described in `docs/specs/`.
 
 The second batch for the editor. Blank lines are nodes, ordered items keep
 their numbers, every leaf's inline source comes in one pass, a leaf built
-from its text is written as that text, and the source is reused per node and
-per node's own syntax down to inlines. Next: inline syntax tokens, the
-ranges of each inline's own syntax the editor marks.
-Lists stay nested; the editor flattens them.
+from its text is written as that text, the source is reused per node and
+per node's own syntax down to inlines, and an inline parse marks each run
+of its text with the node holding it and the part of that node it is, for
+the editor's marks. Lists stay nested; the editor flattens them.
 
 ## Non-goals
 

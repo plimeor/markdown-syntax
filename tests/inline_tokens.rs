@@ -261,6 +261,91 @@ fn line_endings_and_nul_keep_the_text_tiled() {
     );
 }
 
+// public-api: Inline syntax tokens
+// inline-syntax: Hard line breaks from spaces
+#[test]
+fn stripped_spaces_no_text_holds_are_the_soft_break() {
+    for (input, span) in [("*a* \nb", Span::new(3, 5)), ("#t\t\nx", Span::new(2, 4))] {
+        let document = parse(input).document;
+        let Block::Paragraph(paragraph) = &document.children[0] else {
+            panic!("{input:?} is a paragraph");
+        };
+        assert_eq!(paragraph.children[1].span(), Some(span), "{input:?}");
+    }
+    expect(
+        "*a* \nb",
+        &[
+            ("*", 0, Syntax),
+            ("a", 1, Text),
+            ("*", 0, Syntax),
+            (" \n", 2, Text),
+            ("b", 3, Text),
+        ],
+    );
+    expect(
+        "#t \nx",
+        &[
+            ("#", 0, Syntax),
+            ("t", 0, Name),
+            (" \n", 1, Text),
+            ("x", 2, Text),
+        ],
+    );
+    expect(
+        "a #t\t\r\nx",
+        &[
+            ("a ", 0, Text),
+            ("#", 1, Syntax),
+            ("t", 1, Name),
+            ("\t\r\n", 2, Text),
+            ("x", 3, Text),
+        ],
+    );
+    expect(
+        "*#t \nx*",
+        &[
+            ("*", 0, Syntax),
+            ("#", 1, Syntax),
+            ("t", 1, Name),
+            (" \n", 2, Text),
+            ("x", 3, Text),
+            ("*", 0, Syntax),
+        ],
+    );
+    // Text before them holds them.
+    expect("a \nb", &[("a ", 0, Text), ("\n", 1, Text), ("b", 2, Text)]);
+}
+
+#[test]
+fn encoded_parts_read_back_decoded() {
+    expect(
+        "[a](u\\(v '&amp;')",
+        &[
+            ("[", 0, Syntax),
+            ("a", 1, Text),
+            ("](", 0, Syntax),
+            ("u\\(v", 0, Destination),
+            (" '", 0, Syntax),
+            ("&amp;", 0, Title),
+            ("')", 0, Syntax),
+        ],
+    );
+    expect(
+        ":d{#i .c k=\"v\"}",
+        &[
+            (":", 0, Syntax),
+            ("d", 0, Name),
+            ("{", 0, Syntax),
+            ("#i .c k=\"v\"", 0, Attributes),
+            ("}", 0, Syntax),
+        ],
+    );
+    expect(
+        "[[a|]]",
+        &[("[[", 0, Syntax), ("a", 0, Target), ("|]]", 0, Syntax)],
+    );
+}
+
 #[test]
 fn nodes_are_numbered_in_pre_order_through_alt_and_labels() {
     let output = parse_inline("x ![a *b*](u) :d[c]", &Definitions::new::<_, &str>([]));
