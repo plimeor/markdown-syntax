@@ -614,7 +614,14 @@ pub struct Reader<'m> {
     units: &'m [u8],
     /// The byte offset of each UTF-16 offset spans count in.
     offsets: &'m [u32],
+    /// How many lists of nodes enclose the one being read.
+    depth: usize,
 }
+
+/// The deepest nesting of node lists a message may hold: far above what a
+/// parse produces, and shallow enough that decoding and writing the tree stay
+/// within the WebAssembly stack.
+pub const MAX_DEPTH: usize = 128;
 
 fn le_word(bytes: &[u8], at: usize) -> Read<u32> {
     match bytes.get(at..at + 4) {
@@ -647,6 +654,7 @@ impl<'m> Reader<'m> {
             strings,
             units: &message[strings_end..],
             offsets,
+            depth: 0,
         })
     }
 
@@ -763,13 +771,28 @@ impl<'m> Reader<'m> {
     }
 
     pub fn blocks(&mut self) -> Read<Vec<Block>> {
-        let count = self.count()?;
-        (0..count).map(|_| self.block()).collect()
+        self.nested(|reader| {
+            let count = reader.count()?;
+            (0..count).map(|_| reader.block()).collect()
+        })
     }
 
     pub fn inlines(&mut self) -> Read<Vec<Inline>> {
-        let count = self.count()?;
-        (0..count).map(|_| self.inline()).collect()
+        self.nested(|reader| {
+            let count = reader.count()?;
+            (0..count).map(|_| reader.inline()).collect()
+        })
+    }
+
+    /// Reads one more level of nodes, refusing one past `MAX_DEPTH`.
+    fn nested<T>(&mut self, read: impl FnOnce(&mut Self) -> Read<T>) -> Read<T> {
+        if self.depth == MAX_DEPTH {
+            return malformed(format!("the tree nests deeper than {MAX_DEPTH} levels"));
+        }
+        self.depth += 1;
+        let value = read(self);
+        self.depth -= 1;
+        value
     }
 
     fn title(&mut self) -> Read<Option<Title>> {
@@ -1257,6 +1280,33 @@ mod tests {
             .and_then(|mut reader| reader.document())
             .unwrap_err();
         assert_eq!(error, Malformed("kind 40 where a block belongs".into()));
+    }
+
+    #[test]
+    fn a_tree_deeper_than_the_limit_is_refused() {
+        let nested = |depth: usize| {
+            let mut inline = Inline::from(Text::from("x"));
+            // The document's blocks and the paragraph's inlines take two
+            // levels, each emphasis one more.
+            for _ in 2..depth {
+                inline = Emphasis {
+                    meta: NodeMeta::default(),
+                    delimiter: EmphasisDelimiter::Asterisk,
+                    children: vec![inline],
+                }
+                .into();
+            }
+            let document = Document::new(vec![Paragraph::new([inline]).into()]);
+            let mut writer = Writer::new(&[0]);
+            writer.document(&document);
+            let message = writer.finish();
+            Reader::new(&message, &[0]).and_then(|mut reader| reader.document())
+        };
+        assert!(nested(MAX_DEPTH).is_ok());
+        assert_eq!(
+            nested(MAX_DEPTH + 1).unwrap_err(),
+            Malformed(format!("the tree nests deeper than {MAX_DEPTH} levels"))
+        );
     }
 
     #[test]

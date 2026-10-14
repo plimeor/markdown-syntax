@@ -3,6 +3,9 @@
 // objects shaped like the Rust AST. No dependencies; Node 22 and WKWebView.
 
 const NO_SPAN = 0xffffffff;
+// A leading U+FEFF is content, in the string table and in the written text.
+const UTF16 = new TextDecoder("utf-16le", { ignoreBOM: true });
+const UTF8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 const ENUMS = {
   headingKind: ["atx", "setext"],
@@ -146,7 +149,7 @@ class Reader {
     this.at = 0;
     const table = new Uint32Array(copy.buffer, 8 + 4 * wordCount, 2 * stringCount);
     const unitsStart = 8 + 4 * wordCount + 8 * stringCount;
-    const units = new TextDecoder("utf-16le").decode(copy.subarray(unitsStart));
+    const units = UTF16.decode(copy.subarray(unitsStart));
     this.strings = new Array(stringCount);
     for (let index = 0; index < stringCount; index++) {
       const start = table[2 * index];
@@ -455,6 +458,7 @@ export class ParsedDocument {
   constructor(binding, handle, source, tree, diagnostics) {
     this.#binding = binding;
     this.#handle = handle;
+    binding.track(this, handle);
     /** The source the document was parsed from. */
     this.source = source;
     /** The document's tree. */
@@ -549,14 +553,15 @@ export class ParsedDocument {
       ),
     );
     const result = this.#binding.result();
-    if (status === 0) return new TextDecoder().decode(result);
+    if (status === 0) return UTF8.decode(result);
     if (status === 1) return { diagnostics: new Reader(result).diagnostics() };
-    throw new TypeError(`markdown-syntax: malformed tree: ${new TextDecoder().decode(result)}`);
+    throw new TypeError(`markdown-syntax: malformed tree: ${UTF8.decode(result)}`);
   }
 
   /** Releases the document in WebAssembly; later calls on it throw. */
   free() {
     const handle = this.#live();
+    this.#binding.untrack(this);
     this.#binding.call((exports) => exports.document_free(handle));
     this.#handle = 0;
   }
@@ -565,6 +570,8 @@ export class ParsedDocument {
 /** markdown-syntax compiled to WebAssembly. */
 export class MarkdownSyntax {
   #exports;
+  // Releases the document of a ParsedDocument collected without `free()`.
+  #documents = new FinalizationRegistry((handle) => this.#exports.document_free(handle));
 
   constructor(instance) {
     this.#exports = instance.exports;
@@ -615,10 +622,20 @@ export class MarkdownSyntax {
         ),
       ),
     );
-    if (status !== 0) throw new TypeError(`markdown-syntax: ${new TextDecoder().decode(this.result())}`);
+    if (status !== 0) throw new TypeError(`markdown-syntax: ${UTF8.decode(this.result())}`);
     const reader = new Reader(this.result());
     const inlines = reader.list(() => reader.node());
     return { inlines, diagnostics: reader.diagnostics() };
+  }
+
+  /** @internal Frees `handle` once `document` is collected. */
+  track(document, handle) {
+    this.#documents.register(document, handle, document);
+  }
+
+  /** @internal */
+  untrack(document) {
+    this.#documents.unregister(document);
   }
 
   /** @internal */

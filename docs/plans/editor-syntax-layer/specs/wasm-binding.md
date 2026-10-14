@@ -66,8 +66,9 @@ SHALL return the validation diagnostics when it refuses the tree.
 ### Requirement: Malformed trees
 A tree passed to `toMarkdown` that names an unknown `type`, lacks a field
 its type needs, or holds a child of the wrong kind SHALL make the call throw a
-`TypeError` naming the first such node's path, and SHALL leave the
-`ParsedDocument` usable.
+`TypeError` naming the first such node's path, and so SHALL a tree nested
+deeper than the binding's limit, which lies above the nesting of any tree
+`parse` returns; the call SHALL leave the `ParsedDocument` usable.
 
 ### Requirement: Released memory
 `parsedDocument.free()` SHALL release the memory the document holds in

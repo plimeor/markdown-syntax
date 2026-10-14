@@ -130,6 +130,17 @@ describe("Inline parse and inline source from JavaScript", () => {
     assert.equal(binding.parseInline("# a").inlines[0].value, "# a");
   });
 
+  test("a leading U+FEFF is content in every string", () => {
+    const { inlines } = binding.parseInline("\ufeffa [x](/u)");
+    assert.deepEqual(
+      inlines.map((inline) => [inline.type, inline.value ?? inline.destination]),
+      [["text", "\ufeffa "], ["link", "/u"]],
+    );
+    const [paragraph] = binding.parse("\ufeff\ufeffx *y*").tree.children;
+    assert.equal(paragraph.children[0].value, "\ufeffx ");
+    assert.equal(paragraph.children[1].children[0].value, "y");
+  });
+
   test("the inline source reproduces the leaf beyond the BMP", () => {
     const source = "> 😀 *a*\n> b";
     const document = binding.parse(source);
@@ -166,6 +177,16 @@ describe("Write from JavaScript", () => {
     );
   });
 
+  test("the file's byte order mark is kept", () => {
+    const source = "\ufeff# a\n\nb\n";
+    const document = binding.parse(source);
+    assert.equal(document.toMarkdown(), source);
+    const tree = structuredClone(document.tree);
+    tree.children[1].children[0] = { type: "text", span: null, value: "c" };
+    tree.children[1].span = null;
+    assert.equal(document.toMarkdown(tree), "\ufeff# a\n\nc\n");
+  });
+
   test("a refused tree returns the diagnostics", () => {
     const document = binding.parse("- a\n\np\n\n- b");
     const tree = structuredClone(document.tree);
@@ -200,6 +221,24 @@ describe("Malformed trees", () => {
       assert.throws(() => document.toMarkdown(tree), (error) => error instanceof TypeError && message.test(error.message));
     }
     assert.equal(document.toMarkdown(), "> a\n\n- b");
+  });
+
+  test("a tree nested too deeply throws and leaves the module usable", () => {
+    const document = binding.parse("a");
+    const nested = (depth) => {
+      let inline = { type: "text", span: null, value: "x" };
+      for (let level = 2; level < depth; level++) {
+        inline = { type: "emphasis", span: null, delimiter: "asterisk", children: [inline] };
+      }
+      return { type: "document", span: null, children: [{ type: "paragraph", span: null, children: [inline] }] };
+    };
+    assert.doesNotThrow(() => document.toMarkdown(nested(128)));
+    assert.throws(
+      () => document.toMarkdown(nested(129)),
+      (error) => error instanceof TypeError && /deeper than 128 levels/.test(error.message),
+    );
+    assert.equal(document.toMarkdown(), "a");
+    assert.equal(binding.parse("b").toMarkdown(), "b");
   });
 });
 

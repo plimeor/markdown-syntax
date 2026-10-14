@@ -162,10 +162,12 @@ they do for a document with a source.
   it would change (an unclosed fence, directive, or math block, or a fence in
   a list item that the next line closed), before a block other than its
   successor; one whose source opens with indentation after a list or a
-  footnote definition, whose content could take it in, or a list after a list
-  written with its marker, after a block other than its predecessor; and a
-  thematic break that comes to open the document, where `---` would open
-  frontmatter. The first check parses the block's own text with a blank line
+  footnote definition, whose content could take it in, one other than
+  indented code whose source opens with four columns of indentation, which a
+  paragraph opened by definitions took as a continuation, or a list after a
+  list written with its marker, after a block other than its predecessor; and
+  a thematic break that comes to open the document, or opens it written as
+  `---`, where a later `---` line would close frontmatter. The first check parses the block's own text with a blank line
   and `x` after it, so its cost is linear in the block and runs once per
   block at most.
 - Validation runs on the document first, as for every write; the
@@ -213,8 +215,10 @@ One encoding, private to the crate and the JS wrapper; it is not a promise.
 - **JS → wasm.** The wrapper checks each node against the same field table
   as it encodes it and throws a `TypeError` naming the first malformed
   node's path; wasm decodes into a `Document` and refuses, as a status code,
-  a message that is still malformed. A span that falls between the halves of
-  a surrogate pair reads as none.
+  a message that is still malformed or nests node lists more than 128 deep,
+  which keeps decoding and writing within the wasm stack. Every string
+  decodes with `ignoreBOM`, so a leading U+FEFF stays content. A span that
+  falls between the halves of a surrogate pair reads as none.
 - The spike's span tree for the 124 KB input was 60 KB against 159 KB of
   JSON, and parse plus encode plus read took 3.4–4.1 ms against 7.0 ms.
 
