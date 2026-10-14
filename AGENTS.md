@@ -6,9 +6,10 @@ Read `docs/overview.md` before starting work.
 
 - A `no_std + alloc` Rust crate at the repo root. Parses one fixed Markdown
   syntax → AST and writes AST → Markdown: a parsed document keeps its source,
-  unchanged top-level blocks are written as their source, a leaf built from
-  text (`with_source`) as that text, and the rest as canonical Markdown
-  (decision 0016). Raw HTML is represented only as Markdown syntax nodes;
+  each unchanged node is written as its source, an edited one with its own
+  syntax copied from the source around what changed, a leaf built from text
+  (`with_source`) as that text, and the rest as canonical Markdown (decision
+  0017). Raw HTML is represented only as Markdown syntax nodes;
   HTML rendering and sanitization stay out of the default build.
 - The repository is a Cargo workspace whose default member is the root
   crate; `wasm/` holds `markdown-syntax-wasm`, the unpublished WebAssembly
@@ -39,11 +40,12 @@ CI (`.github/workflows/ci.yml`) runs these in this order:
   wasm32-unknown-unknown --profile wasm`, then
   `node --test 'wasm/js/test/*.test.mjs'` (Node 22).
 
-Observed on 4 cores from an empty `target/`: about 1 min for the sequence,
-of which ~20 s compiles the ci profile and ~22 s runs the tests;
-`tests/pathological_inputs.rs` takes ~13 s and `tests/linear_growth.rs` ~7 s
-of that. Plain `cargo test` (debug) takes ~2.5 min, nearly all in those two
-files.
+Observed on 4 cores: about 1.5 min for the ci-profile tests, plus ~20 s to
+compile the ci profile from an empty `target/`; `tests/linear_growth.rs`
+takes ~40 s of that, `tests/pathological_inputs.rs` ~15 s, and
+`tests/fixtures.rs` ~8 s. Plain `cargo test` (debug) takes over 5 min,
+nearly all in `linear_growth.rs` (~4.5 min) and `pathological_inputs.rs`
+(~1 min).
 
 Inner loop: `cargo test --profile ci --features html --test <name>`; a fast
 file also runs quickly as plain `cargo test --test <name>`.

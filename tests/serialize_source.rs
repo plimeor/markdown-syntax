@@ -8,6 +8,7 @@
 #[path = "support/leaves.rs"]
 mod leaves;
 
+use markdown_syntax::__private::normalized_blocks;
 use markdown_syntax::prelude::*;
 use markdown_syntax::{BulletMarker, LineEnding, SerializeOptions};
 
@@ -199,14 +200,14 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
-    fn an_indented_block_after_an_edited_list_is_rewritten() {
+    fn an_indented_block_after_a_list_written_partly_from_the_source_is_kept() {
         let mut document = parse("-   a\n\n  b").document;
         let Block::List(list) = &mut document.children[0] else {
             panic!("{:?}", document.children);
         };
         list.children[0].children[0] = paragraph("c");
         let markdown = document.to_markdown().unwrap();
-        assert_eq!(markdown, "- c\n\nb\n");
+        assert_eq!(markdown, "-   c\n\n  b");
         assert_eq!(parse(&markdown).document.children.len(), 2);
         // After a paragraph, the indentation is kept.
         let mut document = parse("a\n\n   b").document;
@@ -355,5 +356,392 @@ mod leaves_given_as_text {
             document.to_markdown().unwrap(),
             "| h  *i* |\n| --- |\n| a\\|b |\n\n## T  *u*\n\n::x[l  *m*]\n"
         );
+    }
+}
+
+mod source_reused_per_node {
+    use super::*;
+
+    fn item_mut(document: &mut Document, list: usize, item: usize) -> &mut ListItem {
+        let Block::List(node) = &mut document.children[list] else {
+            panic!("not a list");
+        };
+        &mut node.children[item]
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn one_edited_item() {
+        let mut document = parse("-   a\n-   b\n\n    c\n-   d\n").document;
+        item_mut(&mut document, 0, 1).children[0] = paragraph("x");
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "-   a\n-   x\n\n    c\n-   d\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn one_edited_link() {
+        let mut document = parse("see  [[A]] and `` b ``").document;
+        let Block::Paragraph(paragraph) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        let Inline::WikiLink(link) = &mut paragraph.children[1] else {
+            panic!("{:?}", paragraph.children);
+        };
+        link.target = "B".into();
+        link.label = "B".into();
+        assert_eq!(document.to_markdown().unwrap(), "see  [[B]] and `` b ``");
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_emphasis_inside_a_link_keeps_the_link() {
+        let mut document = parse("> a [_b_ c]( /u  'T' ) d\n").document;
+        let Block::BlockQuote(quote) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        let Block::Paragraph(paragraph) = &mut quote.children[0] else {
+            panic!("{:?}", quote.children);
+        };
+        let Inline::Link(link) = &mut paragraph.children[1] else {
+            panic!("{:?}", paragraph.children);
+        };
+        let Inline::Emphasis(emphasis) = &mut link.children[0] else {
+            panic!("{:?}", link.children);
+        };
+        emphasis.children = vec![Text::from("e").into()];
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "> a [_e_ c]( /u  'T' ) d\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_renumbered_or_ticked_item_keeps_its_column() {
+        let source = "1.  a\n\n    > q\n2.  [ ] b\n\n        code\n";
+        let mut document = parse(source).document;
+        item_mut(&mut document, 0, 0).number = Some(7);
+        item_mut(&mut document, 0, 1).checked = Some(true);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "7.  a\n\n    > q\n2.  [x] b\n\n        code\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_split_paragraph_and_a_moved_item() {
+        let mut document = parse("- a\n- b\n\nc d\n").document;
+        // Both halves of a split paragraph carry its span.
+        let half = document.children[1].clone();
+        document.children.push(half);
+        let moved;
+        // The second item moves into a new list.
+        {
+            let Block::List(list) = &mut document.children[0] else {
+                panic!();
+            };
+            moved = list.children.pop().unwrap();
+        }
+        document.children.push(List::new([moved]).into());
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- a\n\nc d\n\nc d\n\n- b\n");
+        assert_eq!(
+            normalized_blocks(&parse(&markdown).document.children),
+            normalized_blocks(&document.children)
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_new_item_takes_the_lists_recorded_marker() {
+        let mut document = parse("* a\n*   b\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.push(ListItem::new(vec![paragraph("c")]));
+        let mut options = SerializeOptions::default();
+        options.bullet = Some(BulletMarker::Dash);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "* a\n*   b\n* c\n"
+        );
+    }
+
+    fn quote_mut(document: &mut Document, index: usize) -> &mut Vec<Block> {
+        let Block::BlockQuote(quote) = &mut document.children[index] else {
+            panic!("not a quote");
+        };
+        &mut quote.children
+    }
+
+    /// The edited tree reads back from `markdown`.
+    fn reads_back(markdown: &str, document: &Document) {
+        assert_eq!(
+            normalized_blocks(&parse(markdown).document.children),
+            normalized_blocks(&document.children),
+            "{markdown:?}"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_paragraph_after_an_unclosed_fence_closes_it() {
+        // The fence ends with the quote; a new paragraph after it in the
+        // quote would continue it.
+        let mut document = parse("> ```\n> a\n\nb\n").document;
+        quote_mut(&mut document, 0).push(paragraph("new"));
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "> ```\n> a\n> ```\n>\n> new\n\nb\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_gap_without_a_blank_line_stays_only_beside_unchanged_lines() {
+        // `b` follows the quote's code without a blank line; after a new
+        // last paragraph in the quote it would continue that paragraph.
+        let mut document = parse(">     code\n    b\n").document;
+        quote_mut(&mut document, 0).push(paragraph("new"));
+        let markdown = document.to_markdown().unwrap();
+        reads_back(&markdown, &document);
+        assert!(
+            markdown.starts_with(">     code\n>\n> new\n\n"),
+            "{markdown:?}"
+        );
+        // An edited paragraph before a list keeps the gap: the list's first
+        // line still interrupts it.
+        let mut document = parse("Intro:\n- a\n- b\n").document;
+        let Block::Paragraph(intro) = &mut document.children[0] else {
+            panic!();
+        };
+        let Inline::Text(text) = &mut intro.children[0] else {
+            panic!();
+        };
+        text.value = "Intro, edited:".into();
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "Intro, edited:\n- a\n- b\n"
+        );
+        // A renumbered list no longer interrupts the paragraph before it.
+        let mut document = parse("a\n1. b\n").document;
+        item_mut(&mut document, 1, 0).number = Some(2);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "a\n\n2. b\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_loose_list_keeps_a_blank_line() {
+        // The blank line inside the second item made the list loose; with
+        // it gone, the list is written whole.
+        let mut document = parse("- a\n- b\n\n  c\n- d\n").document;
+        item_mut(&mut document, 0, 1).children.remove(0);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- a\n\n- c\n\n- d\n");
+        reads_back(&markdown, &document);
+        // Blank lines at an item's end keep the separator before them.
+        let mut document = parse("- a\n\n- b\n\n\n- c\n").document;
+        item_mut(&mut document, 0, 1).children[0] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), "- a\n\n- x\n\n\n- c\n");
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_emptied_item_keeps_its_marker_and_column() {
+        // `  - c` is a sibling of ` - b` only against b's own column.
+        let mut document = parse("- a\n - b\n  - c\n").document;
+        item_mut(&mut document, 0, 1).children.clear();
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- a\n -\n  - c\n");
+        reads_back(&markdown, &document);
+        // An item whose first block becomes indented code is written whole.
+        let mut document = parse("1.  a\n\n        c\n\n    d\n").document;
+        item_mut(&mut document, 0, 0).children.remove(0);
+        let markdown = document.to_markdown().unwrap();
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_task_items_rendered_blocks_take_its_content_column() {
+        // The checkbox is part of the item's content, which starts at two
+        // columns.
+        let mut document = parse("* [ ] a\n  * [x] b\n").document;
+        let Block::List(nested) = &mut item_mut(&mut document, 0, 0).children[1] else {
+            panic!();
+        };
+        nested.children[0].checked = Some(false);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "* [ ] a\n  * [ ] b\n");
+        let mut document = parse("* [ ] a\n\n  b\n").document;
+        item_mut(&mut document, 0, 0).children[1] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), "* [ ] a\n\n  x\n");
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_nested_block_that_a_list_would_take_in_is_rendered() {
+        // Without `b`, the indented `c` would continue the item.
+        let mut document = parse("> # T #\n>\n> - a\n>\n> b\n>\n>   c\n").document;
+        quote_mut(&mut document, 0).remove(2);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "> # T #\n>\n> - a\n>\n> c\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn containers_keep_their_own_opening_lines() {
+        let mut document = parse(">b\n>\n>c\n").document;
+        quote_mut(&mut document, 0)[1] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), ">b\n>\n> x\n");
+        let mut document = parse("[^1]:\n\n    a\n\nb [^1]\n").document;
+        let Block::FootnoteDefinition(note) = &mut document.children[0] else {
+            panic!();
+        };
+        note.children[0] = paragraph("x");
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "[^1]:\n\n    x\n\nb [^1]\n");
+        reads_back(&markdown, &document);
+        let mut document = parse("<details><summary>S</summary>\n\nbody\n\n</details>\n").document;
+        let Block::HtmlContainer(container) = &mut document.children[0] else {
+            panic!();
+        };
+        let HtmlContainerContent::Blocks(children) = &mut container.content else {
+            panic!();
+        };
+        children[1] = paragraph("x");
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(
+            markdown,
+            "<details><summary>S</summary>\n\nx\n\n</details>\n"
+        );
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_block_that_reads_differently_is_written_canonically() {
+        // A copied underline under content that opens a list.
+        let mut document = parse("a\n===\n\nb\n").document;
+        let Block::Heading(heading) = &mut document.children[0] else {
+            panic!();
+        };
+        heading.children = vec![Text::from("- x").into()];
+        let canonical = document.clone().without_source().to_markdown().unwrap();
+        assert_eq!(document.to_markdown().unwrap(), canonical);
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 1);
+    }
+
+    fn first_text(blocks: &mut [Block]) -> &mut Text {
+        fn in_inlines(inlines: &mut [Inline]) -> Option<&mut Text> {
+            inlines.iter_mut().find_map(|inline| match inline {
+                Inline::Text(text) => Some(text),
+                _ => None,
+            })
+        }
+        blocks
+            .iter_mut()
+            .find_map(|block| match block {
+                Block::Paragraph(node) => in_inlines(&mut node.children),
+                Block::Heading(node) => in_inlines(&mut node.children),
+                _ => None,
+            })
+            .expect("a leaf with text")
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn the_line_ending_option_leaves_copied_endings() {
+        let mut document = parse("x\n\n- a\n- b\n- c\n\ny\n").document;
+        first_text(&mut item_mut(&mut document, 1, 1).children).value = "bZ".into();
+        assert_eq!(
+            document.to_markdown_with(&crate::crlf()).unwrap(),
+            "x\n\n- a\n- bZ\n- c\n\ny\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_leaf_keeps_its_indentation_and_trailing_spaces() {
+        for (input, written) in [
+            ("x\n\n   b\n", "x\n\n   bZ\n"),
+            ("> x\n>\n>   b  \n", "> x\n>\n>   bZ  \n"),
+            ("x\n\n  b\n  ===\n", "x\n\n  bZ\n===\n"),
+        ] {
+            let mut document = parse(input).document;
+            let last = document.children.len() - 1;
+            let blocks = match &mut document.children[last] {
+                Block::BlockQuote(node) => &mut node.children[1..],
+                _ => &mut document.children[last..],
+            };
+            first_text(blocks).value.push('Z');
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written);
+            reads_back(&markdown, &document);
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_label_or_cell_keeps_the_rest_of_its_line() {
+        let mut document = parse(":::box[label]\n\n-   a\n:::\n").document;
+        let Block::ContainerDirective(directive) = &mut document.children[0] else {
+            panic!();
+        };
+        directive.label = vec![Text::from("labelZ").into()];
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, ":::box[labelZ]\n\n-   a\n:::\n");
+        reads_back(&markdown, &document);
+        let mut document = parse("|a|`` b ``|\n|-|-|\n").document;
+        let Block::Table(table) = &mut document.children[0] else {
+            panic!();
+        };
+        table.rows[0].cells[0].children = vec![Text::from("aZ").into()];
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "|aZ|`` b ``|\n|-|-|\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn items_written_around_an_edit_keep_reading_as_they_did() {
+        // A rendered item keeps its trailing blank line.
+        let mut document = parse("- foo\n\n- bar\n\n\n- baz").document;
+        item_mut(&mut document, 0, 1).checked = Some(false);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "- foo\n\n- [ ] bar\n\n\n- baz"
+        );
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // An indented item no longer after its predecessor is rendered.
+        let mut document = parse("1. a\n\n  2. b\n\n   3. c").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.remove(1);
+        assert_eq!(document.to_markdown().unwrap(), "1. a\n\n3. c");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // A break after a new paragraph in a tight item is spaced.
+        let mut document = parse("a\n* ---").document;
+        item_mut(&mut document, 1, 0)
+            .children
+            .insert(0, paragraph("new"));
+        assert_eq!(document.to_markdown().unwrap(), "a\n\n* new\n  - - -");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // A new last item takes in no indented paragraph after the list.
+        let mut document = parse("-    foo\n\n  bar\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.push(ListItem::new([paragraph("new")]));
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "-    foo\n- new\n\nbar\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
     }
 }

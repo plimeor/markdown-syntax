@@ -38,6 +38,15 @@ pub use span::{LineIndex, LinePosition, Span};
 pub mod __private {
     pub use crate::compare::normalized_blocks;
     pub use crate::parse::inline_spans_to_source;
+
+    /// How many top-level blocks `to_markdown` writes canonically because,
+    /// written partly from the source, they would read back as something
+    /// else.
+    pub fn rewritten_blocks(document: &crate::Document) -> usize {
+        document
+            .write(&crate::SerializeOptions::default())
+            .map_or(0, |(_, rewritten)| rewritten)
+    }
 }
 
 /// Common imports for working with `markdown-syntax`: `use

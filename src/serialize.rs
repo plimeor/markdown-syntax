@@ -1,12 +1,16 @@
-//! AST to canonical Markdown. The verbs live on [`Document`]
+//! AST to Markdown. The verbs live on [`Document`]
 //! ([`to_markdown`](Document::to_markdown) /
 //! [`to_markdown_with`](Document::to_markdown_with)); [`SerializeOptions`] tunes
 //! the output style. The document is validated first, so serialization can fail
 //! with a [`SerializeError`].
 //!
-//! The serializer only renders: each node is written in the spelling the AST
-//! records for it, or else by one fixed rule. Text, escapes, and character
-//! references are written as recorded, and the output is never parsed back.
+//! A document with its source is written partly from it (`reuse`, decision
+//! 0017): each node that corresponds to the node its source parses to is
+//! written as its source, an edited one with its own syntax copied around
+//! what changed, and the rest is rendered. Rendering only renders: each node
+//! is written in the spelling the AST records for it, or else by one fixed
+//! rule, with text, escapes, and character references as recorded. The output
+//! is parsed back only to check the blocks written partly from the source.
 
 use alloc::{
     format,
@@ -17,9 +21,11 @@ use alloc::{
 use alloc::collections::BTreeMap;
 
 use crate::{
-    ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource,
+    ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource, span::Span,
     validate::validate_document,
 };
+
+mod reuse;
 
 /// The newline style emitted by the serializer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,15 +108,27 @@ pub enum SerializeError {
 
 impl Document {
     /// Write this document as Markdown with default options: the source of
-    /// every unchanged top-level block, and canonical Markdown for the rest.
+    /// every unchanged node, the source of its own syntax around a node whose
+    /// children changed, and canonical Markdown for the rest.
     pub fn to_markdown(&self) -> Result<String, SerializeError> {
         self.to_markdown_with(&SerializeOptions::default())
     }
 
     /// Write this document as Markdown with explicit options. A document
-    /// with a source reuses it for each top-level block equal to the block
-    /// the source parses to at the same span; the options apply to the rest.
+    /// with a source reuses it for each node that corresponds to the node
+    /// the source parses to at the same span, and for the own syntax of one
+    /// whose children changed; the options apply to the rest.
     pub fn to_markdown_with(&self, options: &SerializeOptions) -> Result<String, SerializeError> {
+        Ok(self.write(options)?.0)
+    }
+
+    /// The text `to_markdown_with` writes, and how many top-level blocks it
+    /// wrote canonically because, written partly from the source, they read
+    /// back as something else.
+    pub(crate) fn write(
+        &self,
+        options: &SerializeOptions,
+    ) -> Result<(String, usize), SerializeError> {
         let diagnostics = validate_document(self);
         if !diagnostics.is_empty() {
             return Err(SerializeError::InvalidDocument(diagnostics));
@@ -118,8 +136,8 @@ impl Document {
         // A leaf keeps its text only while its inlines are the ones the text
         // reads as.
         let current;
+        let definitions = Definitions::of(self);
         let blocks = if leaves::any_kept(&self.children) {
-            let definitions = Definitions::of(self);
             let mut blocks = self.children.clone();
             leaves::visit_mut(&mut blocks, &mut |leaf| {
                 if let Some(text) = leaf.source.as_deref() {
@@ -133,10 +151,28 @@ impl Document {
         } else {
             &self.children
         };
-        match self.source() {
-            Some(source) => write_reusing(blocks, source, options),
-            None => write_canonical(blocks, options),
+        let Some(source) = self.source() else {
+            return Ok((write_canonical(blocks, options)?, 0));
+        };
+        // A block written partly from the source stays so only where the
+        // output reads back as it at its place.
+        let base = crate::parse(source).document;
+        let mut whole = alloc::vec![false; blocks.len()];
+        let (output, partly) = write_reusing(blocks, &base, source, options, &definitions, &whole)?;
+        if partly.is_empty() {
+            return Ok((output, 0));
         }
+        for index in misread(blocks, &output, &partly) {
+            whole[index] = true;
+        }
+        let rewritten = whole.iter().filter(|whole| **whole).count();
+        if rewritten > 0 {
+            return Ok((
+                write_reusing(blocks, &base, source, options, &definitions, &whole)?.0,
+                rewritten,
+            ));
+        }
+        Ok((output, 0))
     }
 }
 
@@ -160,118 +196,202 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
     Ok(output)
 }
 
-/// Writes `blocks`, taking from `source` each one equal to the block the
-/// source parses to at the same span. Between two reused blocks adjacent in
-/// the source the source's own bytes are kept, as are the bytes before the
-/// source's first block and after its last when those blocks are reused
-/// there; every other boundary is a blank line.
+/// Writes `blocks` against `base_document`, the parse of `source`: each
+/// block matched to the base block at its span as its source when it
+/// corresponds to it, partly from the source when only what it holds
+/// changed (`reuse`), and canonically otherwise; returns the output and the
+/// indices of the blocks written partly from the source, which `whole`
+/// writes canonically instead. Between two blocks written from the source
+/// and adjacent there the source's own bytes are kept where they read the
+/// same (`reuse::keeps_gap`), as are the bytes before the source's first
+/// block and after its last when those blocks are written from it there;
+/// every other boundary is a blank line.
 ///
 /// A block is written canonically instead where its source would read
 /// differently in its new place: one a blank line and a paragraph after it
 /// would change, as they extend an unclosed fence, when it comes before a
-/// block other than its successor in the source; one whose source opens with
-/// indentation after a list or a footnote definition, or a list after a list
-/// with the same marker, when it comes after a block other than its
-/// predecessor; and a thematic break that comes to open the document, where
-/// it would open frontmatter.
+/// block other than its successor in the source; one the block before it
+/// would take in (`moves_into_previous`); and a thematic break that comes to
+/// open the document, where it would open frontmatter.
 fn write_reusing(
     blocks: &[Block],
+    base_document: &Document,
     source: &str,
     options: &SerializeOptions,
-) -> Result<String, SerializeError> {
-    let base_document = crate::parse(source).document;
+    definitions: &Definitions,
+    whole: &[bool],
+) -> Result<(String, Vec<usize>), SerializeError> {
     let base = &base_document.children;
     let mut correspondence = Correspondence {
-        base: &base_document,
+        base: base_document,
         sources: None,
     };
+    let base_definitions = Definitions::of(base_document);
+    let mut reuse = reuse::Reuse {
+        source,
+        options,
+        correspondence: &mut correspondence,
+        definitions,
+        base_definitions: &base_definitions,
+    };
     let span_of = |block: &Block| block.span().expect("a reused block has a span");
-    let mut reused: Vec<Option<usize>> = blocks
-        .iter()
-        .map(|block| {
-            let span = block.span()?;
-            let index = base
+    let mut outs = Vec::with_capacity(blocks.len());
+    // Whether each block written partly from the source is an open list.
+    let mut open_lists = alloc::vec![false; blocks.len()];
+    for (index, block) in blocks.iter().enumerate() {
+        let found = block.span().and_then(|span| {
+            let at = base
                 .binary_search_by_key(&span.start, |base| {
                     base.span().map_or(usize::MAX, |span| span.start)
                 })
                 .ok()?;
-            correspondence.holds(block, &base[index]).then_some(index)
-        })
-        .collect();
+            (base[at].span() == Some(span)
+                && core::mem::discriminant(&base[at]) == core::mem::discriminant(block))
+            .then_some(at)
+        });
+        outs.push(match found {
+            Some(at) => match reuse.block(block, &base[at])? {
+                reuse::Out::Kept(_) => (Some(at), None),
+                reuse::Out::Lines(_) | reuse::Out::OpenList(_) if whole[index] => (None, None),
+                reuse::Out::Lines(lines) => (None, Some((at, lines))),
+                reuse::Out::OpenList(lines) => {
+                    open_lists[index] = true;
+                    (None, Some((at, lines)))
+                }
+                reuse::Out::Render => (None, None),
+            },
+            None => (None, None),
+        });
+    }
+    let mut reused: Vec<Option<usize>> = outs.iter().map(|(at, _)| *at).collect();
+    // The blocks written partly from the source, with their place in it.
+    let mut partly: Vec<Option<(usize, Vec<reuse::Line>)>> =
+        outs.into_iter().map(|(_, lines)| lines).collect();
+    // Where each block written from the source, whole or partly, stands in
+    // the source.
+    let placed =
+        |reused: &[Option<usize>], partly: &[Option<(usize, Vec<reuse::Line>)>], index: usize| {
+            reused[index].or(partly[index].as_ref().map(|(at, _)| *at))
+        };
     if blocks.len() == base.len()
         && reused
             .iter()
             .enumerate()
             .all(|(index, at)| *at == Some(index))
     {
-        return Ok(source.into());
+        return Ok((source.into(), Vec::new()));
     }
-    // Backward, so that each block knows whether its successor stays reused.
-    for index in (0..blocks.len().saturating_sub(1)).rev() {
-        let Some(at) = reused[index] else { continue };
-        if reused[index + 1] != Some(at + 1) {
-            let span = span_of(&blocks[index]);
-            if !closed_by_a_blank_line(&source[span.start..span.end]) {
-                reused[index] = None;
-            }
-        }
-    }
-
     // Whether the boundary before each block holds the blank line that
     // separates two blocks; the source between two blocks adjacent in the
     // source is kept only where it still does or does not.
     let separated = separated_boundaries(blocks);
-    let base_separated = separated_boundaries(&base);
+    let base_separated = separated_boundaries(base);
+    // Whether the source between the block at `index`, placed at `at`, and
+    // the one before it, placed at `at - 1`, is kept: the boundary holds a
+    // separating blank line exactly when it did, and the source reads the
+    // same between them (`reuse::keeps_gap`).
+    let keeps_gap = |partly: &[Option<(usize, Vec<reuse::Line>)>], index: usize, at: usize| {
+        if index == 0 || at == 0 || separated[index] != base_separated[at] {
+            return false;
+        }
+        let left = base[at - 1].span().expect("a parsed block has a span");
+        let right = base[at].span().expect("a parsed block has a span");
+        let left_end = left.start + strip_line_ending(&source[left.start..left.end]).len();
+        reuse::keeps_gap(
+            source,
+            &source[left_end..right.start],
+            (
+                &blocks[index - 1],
+                left,
+                partly[index - 1]
+                    .as_ref()
+                    .map(|(_, lines)| lines.as_slice()),
+            ),
+            (
+                &blocks[index],
+                right,
+                partly[index].as_ref().map(|(_, lines)| lines.as_slice()),
+            ),
+            true,
+        )
+    };
+    // Backward, so that each block knows whether its successor stays reused,
+    // with the source between them.
+    for index in (0..blocks.len().saturating_sub(1)).rev() {
+        let Some(at) = placed(&reused, &partly, index) else {
+            continue;
+        };
+        if placed(&reused, &partly, index + 1) == Some(at + 1)
+            && keeps_gap(&partly, index + 1, at + 1)
+        {
+            continue;
+        }
+        match &partly[index] {
+            Some((_, lines)) => {
+                let mut text = reuse::join(lines, "\n");
+                text.push('\n');
+                if !closed_by_a_blank_line(&text) {
+                    partly[index] = None;
+                }
+            }
+            None => {
+                let span = span_of(&blocks[index]);
+                if !closed_by_a_blank_line(&source[span.start..span.end]) {
+                    reused[index] = None;
+                }
+            }
+        }
+    }
 
     let mut output = String::with_capacity(source.len());
     // The block written before the current one: its index in the source's
     // parse, where its text ends there, and its line ending there when it was
     // reused, and its marker when it is a list.
     let mut previous_at: Option<usize> = None;
-    // The last block before the current one other than a blank line.
-    let mut last_block: Option<&Block> = None;
+    let mut placement = reuse::Placement::default();
     let mut previous_ending = "";
     let mut previous_body_end = 0;
-    let mut previous_list: Option<char> = None;
     // Whether the output ends with the source's own trailing bytes, which
     // take the place of the final newline.
     let mut ends_with_source_tail = false;
+    // Whether every block since the last one other than a blank line follows
+    // its predecessor in the source.
+    let mut run_follows = true;
     for (index, block) in blocks.iter().enumerate() {
-        // Blank lines between them do not end a list or a footnote
-        // definition before an indented line.
-        let previous_takes_indented_lines = matches!(
-            last_block,
-            Some(Block::List(_) | Block::FootnoteDefinition(_))
-        );
-        if !matches!(block, Block::BlankLine(_)) {
-            last_block = Some(block);
+        // A list written partly from the source keeps its recorded marker,
+        // which a list before it may already use.
+        if let (Block::List(list), Some(_)) = (block, &partly[index]) {
+            if placement.previous_list() == Some(written_marker(list)) {
+                partly[index] = None;
+            }
         }
         let follows_predecessor = matches!(
-            (previous_at, reused[index]),
-            (Some(previous), Some(at)) if previous + 1 == at && separated[index] == base_separated[at]
+            (previous_at, placed(&reused, &partly, index)),
+            (Some(previous), Some(at)) if previous + 1 == at && keeps_gap(&partly, index, at)
         );
+        // Blank lines between them do not end a list or a footnote
+        // definition before an indented line, so a block follows its
+        // predecessor only where every block since the last other than a
+        // blank line did.
+        let follows_run = follows_predecessor && run_follows;
+        run_follows = index == 0 || !matches!(block, Block::BlankLine(_)) || follows_run;
+        // A block whose source the block before it could take in stays only
+        // after its predecessor in the source, written as it was there.
+        let taken_in = |text: &str| placement.takes_in(block, text, follows_run);
+        if let Some((_, lines)) = &partly[index] {
+            if taken_in(&lines[0].body) {
+                partly[index] = None;
+            }
+        }
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;
-            let moved_after = index > 0 && !follows_predecessor;
-            let rewritten = match block {
-                // `---` opening the document stays a break only while no
-                // later line closes it as frontmatter.
-                Block::ThematicBreak(_) => {
-                    index == 0 && (position != 0 || source[start..].starts_with("---"))
-                }
-                Block::List(list) => moved_after && previous_list == Some(written_marker(list)),
-                _ => false,
-            } || (moved_after
-                && if previous_takes_indented_lines {
-                    source[start..].starts_with([' ', '\t'])
-                } else {
-                    // Indentation that a paragraph opened by definitions
-                    // took as a continuation reads as indented code after
-                    // another block.
-                    !matches!(block, Block::CodeBlock(_))
-                        && opens_with_code_indent(&source[start..])
-                });
+            // `---` opening the document stays a break only while no later
+            // line closes it as frontmatter.
+            let rewritten = matches!(block, Block::ThematicBreak(_))
+                && index == 0
+                && (position != 0 || source[start..].starts_with("---"))
+                || taken_in(&source[start..]);
             if rewritten {
                 at = None;
             }
@@ -313,11 +433,31 @@ fn write_reusing(
                 }
                 previous_ending = &source[body_end..span.end];
                 previous_body_end = body_end;
-                previous_list = match block {
+                let marker = match block {
                     Block::List(list) => Some(written_marker(list)),
-                    Block::BlankLine(_) => previous_list,
                     _ => None,
                 };
+                placement.wrote(block, marker, false);
+            }
+            None if partly[index].is_some() => {
+                let (position, lines) = partly[index].as_ref().expect("written partly");
+                let span = base[*position].span().expect("a parsed block has a span");
+                let body_end = span.start + strip_line_ending(&source[span.start..span.end]).len();
+                if index == 0 && *position == 0 {
+                    output.push_str(&source[..span.start]);
+                }
+                output.push_str(&reuse::join(lines, options.line_ending.as_str()));
+                if index + 1 == blocks.len() && *position + 1 == base.len() {
+                    output.push_str(&source[body_end..]);
+                    ends_with_source_tail = true;
+                }
+                previous_body_end = body_end;
+                let marker = match block {
+                    Block::List(list) => Some(written_marker(list)),
+                    _ => None,
+                };
+                placement.wrote(block, marker, open_lists[index]);
+                at = Some(*position);
             }
             None => {
                 let mut text = write_blocks(
@@ -325,17 +465,19 @@ fn write_reusing(
                     options,
                     Join::Gap,
                     index == 0,
-                    previous_list,
+                    placement.previous_list(),
                 )?;
                 if options.line_ending == LineEnding::CrLf {
                     text = lf_to_crlf(&text);
                 }
                 output.push_str(&text);
-                previous_list = match block {
-                    Block::List(list) => Some(list_marker(list, options, previous_list)),
-                    Block::BlankLine(_) => previous_list,
+                let marker = match block {
+                    Block::List(list) => {
+                        Some(list_marker(list, options, placement.previous_list()))
+                    }
                     _ => None,
                 };
+                placement.wrote(block, marker, false);
             }
         }
         previous_at = at;
@@ -353,7 +495,76 @@ fn write_reusing(
             own => own,
         });
     }
-    Ok(output)
+    let partly = partly
+        .iter()
+        .enumerate()
+        .filter_map(|(index, lines)| lines.as_ref().map(|_| index))
+        .collect();
+    Ok((output, partly))
+}
+
+/// The blocks among `partly`, indices of `blocks` written partly from the
+/// source, that `output` reads back as something else in their place: each
+/// one that differs, or every one when the output holds a different number
+/// of top-level blocks.
+fn misread(blocks: &[Block], output: &str, partly: &[usize]) -> Vec<usize> {
+    let read = crate::parse(output).document.children;
+    if read.len() != blocks.len() {
+        return partly.to_vec();
+    }
+    partly
+        .iter()
+        .copied()
+        .filter(|index| !reads_as(&read[*index], &blocks[*index]))
+        .collect()
+}
+
+/// Whether `read`, a block of the parsed output, reads as `block` as
+/// "Round-trip stability" compares them, an ordered item without a number
+/// reading as the number it is written with.
+fn reads_as(read: &Block, block: &Block) -> bool {
+    let mut read = crate::compare::normalized_blocks(core::slice::from_ref(read));
+    let mut block = crate::compare::normalized_blocks(core::slice::from_ref(block));
+    number_items(&mut read);
+    number_items(&mut block);
+    read == block
+}
+
+/// Gives each ordered item without a number the one it is written with.
+fn number_items(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::List(list) => {
+                let mut previous = None;
+                for item in &mut list.children {
+                    if list.ordered {
+                        item.number = Some(item_number(item, &mut previous));
+                    }
+                    number_items(&mut item.children);
+                }
+            }
+            Block::BlockQuote(node) => number_items(&mut node.children),
+            Block::Alert(node) => number_items(&mut node.children),
+            Block::FootnoteDefinition(node) => number_items(&mut node.children),
+            Block::ContainerDirective(node) => number_items(&mut node.children),
+            Block::HtmlContainer(node) => {
+                if let HtmlContainerContent::Blocks(children) = &mut node.content {
+                    number_items(children);
+                }
+            }
+            Block::Paragraph(_)
+            | Block::Heading(_)
+            | Block::ThematicBreak(_)
+            | Block::CodeBlock(_)
+            | Block::HtmlBlock(_)
+            | Block::Definition(_)
+            | Block::Table(_)
+            | Block::MathBlock(_)
+            | Block::Frontmatter(_)
+            | Block::LeafDirective(_)
+            | Block::BlankLine(_) => {}
+        }
+    }
 }
 
 /// Whether a block corresponds to a block of the document its source parses
@@ -368,18 +579,28 @@ struct Correspondence<'a> {
 }
 
 impl Correspondence<'_> {
-    fn holds(&mut self, block: &Block, base: &Block) -> bool {
-        if !leaves::any_kept(core::slice::from_ref(block)) {
-            return block == base;
-        }
+    /// The inline source of each leaf of the base, by span.
+    fn sources(&mut self) -> &BTreeMap<(usize, usize), InlineSource> {
         let base_document = self.base;
-        let sources = self.sources.get_or_insert_with(|| {
+        self.sources.get_or_insert_with(|| {
             let mut sources = BTreeMap::new();
             base_document.each_leaf_source(|_, span, source| {
                 sources.insert((span.start, span.end), source);
             });
             sources
-        });
+        })
+    }
+
+    /// The inline source of the base leaf at `span`.
+    fn source_of(&mut self, span: Span) -> Option<&InlineSource> {
+        self.sources().get(&(span.start, span.end))
+    }
+
+    fn holds(&mut self, block: &Block, base: &Block) -> bool {
+        if !leaves::any_kept(core::slice::from_ref(block)) {
+            return block == base;
+        }
+        let sources = self.sources();
         // Each leaf whose text is its base leaf's inline source takes the
         // inlines that text reads as there.
         let mut block = block.clone();
@@ -412,6 +633,34 @@ fn separated_boundaries(blocks: &[Block]) -> Vec<bool> {
     separated
 }
 
+/// Whether a block written from the source, whose text opens with `text`,
+/// reads differently where it does not follow its predecessor in the
+/// source, after `last`, the last block written before it other than a blank
+/// line, and `previous_list`, the marker of a list written just before it:
+/// indentation after a list or a footnote definition, which blank lines do
+/// not end, continues them; four columns of it on a block other than
+/// indented code read as indented code, as a paragraph opened by definitions
+/// took them as a continuation; and a list after a list written with its
+/// marker continues that list. A blank line reads as one wherever it stands.
+/// `rewritten_after_an_edit` in `tests/support/edits.rs` states the same rule
+/// for the simulated edits.
+fn moves_into_previous(
+    block: &Block,
+    text: &str,
+    last: Option<&Block>,
+    previous_list: Option<char>,
+) -> bool {
+    match block {
+        Block::BlankLine(_) => false,
+        Block::List(list) if previous_list == Some(written_marker(list)) => true,
+        _ if matches!(last, Some(Block::List(_) | Block::FootnoteDefinition(_))) => {
+            text.starts_with([' ', '\t'])
+        }
+        Block::CodeBlock(_) => false,
+        _ => opens_with_code_indent(text),
+    }
+}
+
 /// Whether `text` opens with four columns of indentation, which starts
 /// indented code where no paragraph continues.
 fn opens_with_code_indent(text: &str) -> bool {
@@ -431,7 +680,8 @@ fn opens_with_code_indent(text: &str) -> bool {
 
 /// Whether the block parsed from `text`, its source with its line ending,
 /// keeps that text when a blank line and a paragraph follow it, as a closed
-/// fence does and an unclosed one does not.
+/// fence does and an unclosed one does not. `tests/support/edits.rs` holds a
+/// copy.
 fn closed_by_a_blank_line(text: &str) -> bool {
     let gap = if text.ends_with('\n') {
         "\n"
@@ -869,34 +1119,59 @@ fn write_list(
         if index > 0 {
             output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
-        let marker = if node.ordered {
-            // An item without a number counts on from the previous one, and
-            // stops at the largest number a marker can hold.
-            let number = item.number.unwrap_or_else(|| {
-                previous.map_or(1, |previous| {
-                    previous
-                        .saturating_add(1)
-                        .min(crate::parse::MAX_ORDERED_NUMBER)
-                })
-            });
-            previous = Some(number);
-            format!("{number}{marker_char} ")
-        } else {
-            format!("{marker_char} ")
-        };
-        let inner = write_item_blocks(&item.children, options, node.tight, item.checked)?;
-        let break_after_bullet = breaks_after_bullet(node, item, marker_char);
-        let opens_with_whitespace = opens_with_padding(&inner);
-        if break_after_bullet || opens_with_whitespace {
-            output.push_str(marker.trim_end());
-            output.push('\n');
-            output.push_str(&prefix_container_lines(&inner, &" ".repeat(marker.len())));
-        } else {
-            output.push_str(&marker);
-            output.push_str(&indent_after_first_line(&inner, marker.len()));
-        }
+        output.push_str(&write_item(
+            node,
+            item,
+            options,
+            marker_char,
+            &mut previous,
+        )?);
     }
     Ok(output)
+}
+
+/// The number an ordered item is written with: its own, or else one more than
+/// the previous item's, `previous`, which it then becomes.
+fn item_number(item: &ListItem, previous: &mut Option<u64>) -> u64 {
+    // An item without a number counts on from the previous one, and stops at
+    // the largest number a marker can hold.
+    let number = item.number.unwrap_or_else(|| {
+        previous.map_or(1, |previous| {
+            previous
+                .saturating_add(1)
+                .min(crate::parse::MAX_ORDERED_NUMBER)
+        })
+    });
+    *previous = Some(number);
+    number
+}
+
+/// One item of `list`, written with `marker_char`; `previous` is the number
+/// the item before it was written with.
+fn write_item(
+    list: &List,
+    item: &ListItem,
+    options: &SerializeOptions,
+    marker_char: char,
+    previous: &mut Option<u64>,
+) -> Result<String, SerializeError> {
+    let marker = if list.ordered {
+        format!("{}{marker_char} ", item_number(item, previous))
+    } else {
+        format!("{marker_char} ")
+    };
+    let inner = write_item_blocks(&item.children, options, list.tight, item.checked)?;
+    let break_after_bullet = breaks_after_bullet(list, item, marker_char);
+    let opens_with_whitespace = opens_with_padding(&inner);
+    Ok(if break_after_bullet || opens_with_whitespace {
+        format!(
+            "{}\n{}",
+            marker.trim_end(),
+            prefix_container_lines(&inner, &" ".repeat(marker.len()))
+        )
+    } else {
+        format!("{marker}{}", indent_after_first_line(&inner, marker.len()))
+    })
 }
 
 fn thematic_break_char(marker: ThematicBreakMarker) -> char {
@@ -1083,8 +1358,22 @@ fn char_reference(char: char) -> String {
 }
 
 fn write_table(node: &Table) -> Result<String, SerializeError> {
-    let delimiter_row = node
-        .alignments
+    let mut output = String::new();
+    for (row_index, row) in node.rows.iter().enumerate() {
+        if row_index > 0 {
+            output.push('\n');
+        }
+        output.push_str(&write_row(row)?);
+        if row_index == 0 {
+            output.push('\n');
+            output.push_str(&write_delimiter_row(&node.alignments));
+        }
+    }
+    Ok(output)
+}
+
+fn write_delimiter_row(alignments: &[TableAlignment]) -> String {
+    let cells = alignments
         .iter()
         .map(|alignment| match alignment {
             TableAlignment::None => "---",
@@ -1092,29 +1381,22 @@ fn write_table(node: &Table) -> Result<String, SerializeError> {
             TableAlignment::Center => ":---:",
             TableAlignment::Right => "---:",
         })
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let mut output = String::new();
-    for (row_index, row) in node.rows.iter().enumerate() {
-        if row_index > 0 {
-            output.push('\n');
-        }
-        let cells = row
-            .cells
-            .iter()
-            .map(|cell| {
-                Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
-                    Some(text) => text.into(),
-                    None => write_inlines(&cell.children, Context::BLOCK)?,
-                }))
-            })
-            .collect::<Result<Vec<_>, SerializeError>>()?;
-        output.push_str(&format!("| {} |", cells.join(" | ")));
-        if row_index == 0 {
-            output.push_str(&format!("\n| {delimiter_row} |"));
-        }
-    }
-    Ok(output)
+        .collect::<Vec<_>>();
+    format!("| {} |", cells.join(" | "))
+}
+
+fn write_row(row: &TableRow) -> Result<String, SerializeError> {
+    let cells = row
+        .cells
+        .iter()
+        .map(|cell| {
+            Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
+                Some(text) => text.into(),
+                None => write_inlines(&cell.children, Context::BLOCK)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, SerializeError>>()?;
+    Ok(format!("| {} |", cells.join(" | ")))
 }
 
 /// A cell's inline content, written as anywhere else, encoded as cell
@@ -1814,4 +2096,21 @@ fn trim_up_to_three_indent_columns(input: &str) -> Option<&str> {
         bytes += 1;
     }
     (columns <= 3).then_some(&input[bytes..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn the_read_back_check_names_each_block_that_reads_differently() {
+        let blocks = crate::parse("> x\n\n# y\n\nz").document.children;
+        assert_eq!(misread(&blocks, "> x\n\n# y\n\nz", &[0, 2]), [0usize; 0]);
+        // A block read differently in its place.
+        assert_eq!(misread(&blocks, "> w\n\n# y\n\nz", &[0, 2]), [0]);
+        assert_eq!(misread(&blocks, "> w\n\n# y\n\nz", &[2]), [0usize; 0]);
+        // `z` read into the quote: the block count differs.
+        assert_eq!(misread(&blocks, "> x\nz\n\n# y", &[0, 2]), [0, 2]);
+    }
 }

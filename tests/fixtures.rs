@@ -26,15 +26,19 @@ mod normalize;
 #[path = "support/leaves.rs"]
 mod leaves;
 
+#[path = "support/edits.rs"]
+mod edits;
+
 use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
-    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker, Inline,
+    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker,
     LineEnding, LineIndex, NodeMeta, OrderedDelimiter, SerializeOptions, Span, ThematicBreak,
     ThematicBreakMarker,
 };
 
 use deviations::{excerpt, input_hash};
+use edits::{edit_block, reads_as, rewritten_after_an_edit};
 use support::fixtures::{
     derived_corpus_stats, files_with_extension, read_derived_cases, read_derived_metadata,
     read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
@@ -618,73 +622,6 @@ fn documents_with_leaves_given_as_text_are_written_as_their_source() {
     );
 }
 
-/// Appends " edited" to the first `Text` of the block's first leaf, or a line
-/// to a code block's value; false for a block holding neither.
-fn edit_block(block: &mut Block) -> bool {
-    fn edit_inlines(inlines: &mut [Inline]) -> bool {
-        inlines.iter_mut().any(|inline| match inline {
-            Inline::Text(text) => {
-                text.value.push_str(" edited");
-                true
-            }
-            _ => false,
-        })
-    }
-    fn edit_blocks(blocks: &mut [Block]) -> bool {
-        blocks.iter_mut().any(edit_block)
-    }
-    match block {
-        Block::Paragraph(node) => edit_inlines(&mut node.children),
-        Block::Heading(node) => edit_inlines(&mut node.children),
-        Block::BlockQuote(node) => edit_blocks(&mut node.children),
-        Block::Alert(node) => edit_blocks(&mut node.children),
-        Block::List(node) => node
-            .children
-            .iter_mut()
-            .any(|item| edit_blocks(&mut item.children)),
-        Block::Table(node) => node.rows.iter_mut().any(|row| {
-            row.cells
-                .iter_mut()
-                .any(|cell| edit_inlines(&mut cell.children))
-        }),
-        Block::CodeBlock(node) => {
-            node.value.push_str("edited\n");
-            true
-        }
-        Block::Definition(node) => {
-            node.destination.push_str("/edited");
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Whether the reused block at `index` of `blocks` is written again after a
-/// block written canonically, as its indentation could carry it into that
-/// block: any indentation after a list or footnote definition, and code
-/// indentation on a block other than indented code.
-fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usize) -> bool {
-    let Some(block) = blocks.get(index) else {
-        return false;
-    };
-    let rest = &input[block.span().expect("a parsed block has a span").start..];
-    let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-    let columns = rest[..indent].chars().fold(0, |column, char| match char {
-        '\t' => column + 4 - column % 4,
-        _ => column + 1,
-    });
-    match blocks[index - 1] {
-        Block::List(_) | Block::FootnoteDefinition(_) => indent > 0,
-        _ => columns >= 4 && !matches!(block, Block::CodeBlock(_)),
-    }
-}
-
-/// Whether `markdown` parses as `document` does, as tree comparison reads it.
-fn reads_as(markdown: &str, document: &Document) -> bool {
-    normalize::normalized(&parse(markdown).document.children)
-        == normalize::normalized(&document.children)
-}
-
 /// Each top-level block of each corpus input, edited alone and written with
 /// the source, leaves the source before the block that precedes it and after
 /// the block that follows it as it is, and the output reads back as the
@@ -748,6 +685,81 @@ fn edited_blocks_keep_the_rest_of_the_source() {
         }
     }
     assert!(edits > 3_000, "only {edits} edits");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The leaf edits of the corpus that rewrite a line other than the leaf's
+/// own, each named as the simulated edits name it (input, path, index, edit
+/// kind), with what the writer renders around it.
+#[rustfmt::skip]
+const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
+    ("core/blank_lines.md [Child(6)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
+    ("extensions/gfm_task_list.md [Item(3, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/block_quote.cases#19 [Child(0)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
+    ("cases/commonmark/frontmatter.cases#7 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#8 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#15 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#19 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/fuzz.cases#18 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/gfm_table.cases#31 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_table.cases#53 [Child(8)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_table.cases#53 [Child(9)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_task_list_item.cases#7 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/list.cases#29 [Item(0, 0)] 0 leaf", "a marker line's trailing spaces are not copied"),
+    ("cases/commonmark/list.cases#49 [Item(0, 0)] 0 leaf", "the gap without a blank line after a list whose last line changed is canonical"),
+    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 0 leaf", "a marker followed by a tab renders its item"),
+    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 1 leaf", "a marker followed by a tab renders its item"),
+    ("cases/gfm/alerts.cases#2 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/alerts.cases#4 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/multiline_block_quotes.cases#8 [Child(0), Item(1, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/multiline_block_quotes.cases#10 [Child(0), Child(0), Item(2, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/sourcepos_chars.cases#5 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/table.cases#5 [Item(0, 0)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#9 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#11 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#16 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
+];
+
+/// Each block at every depth of each corpus input, with its first leaf or
+/// one own field edited, deleted, or followed by a new paragraph, written
+/// with the source, reads back as the edited tree wherever the edited tree's
+/// canonical output does, without a block the read-back check has to write
+/// canonically, and keeps the source of the top-level blocks around the one
+/// it edits inside; an edited leaf changes only its own lines, unless the
+/// edit is listed in `NOT_KEPT_AROUND_A_LEAF_EDIT`; the same with every
+/// leaf given as its text: the simulated edits of `per-node-reuse`, task
+/// 2.5.
+// serialization: Unchanged source is kept
+#[test]
+fn edited_nodes_at_every_depth_read_back() {
+    let mut failures = Vec::new();
+    let mut edits = 0;
+    let mut leaf_lines = Vec::new();
+    for source in read_back_corpus() {
+        let at = source.at();
+        edits += edits::simulated_edits(&at, &source.input, Some(&mut leaf_lines), &mut failures);
+    }
+    for at in &leaf_lines {
+        if !NOT_KEPT_AROUND_A_LEAF_EDIT
+            .iter()
+            .any(|(listed, _)| listed == at)
+        {
+            failures.push(format!("{at}: rewrites more than the edited leaf"));
+        }
+    }
+    for (listed, _) in NOT_KEPT_AROUND_A_LEAF_EDIT {
+        if !leaf_lines.iter().any(|at| at == listed) {
+            failures.push(format!(
+                "{listed}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but names no edit that rewrites more than its leaf"
+            ));
+        }
+    }
+    assert!(edits > 20_000, "only {edits} edits");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",

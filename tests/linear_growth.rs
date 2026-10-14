@@ -1,7 +1,8 @@
 //! Parse, `parse_inline`, `inline_source`, `leaf_sources`, and
 //! `Paragraph::with_source`, and `to_markdown` time over
 //! inputs built from syntax fragments, written without their source and,
-//! with their top-level blocks reversed, with it, so that a cost growing
+//! with their top-level blocks reversed or an edit at their deepest level,
+//! with it, so that a cost growing
 //! faster than the input is found without anyone having foreseen its shape.
 //! Every pair and triple of fragments, as one unit, is repeated `n` and `2n`
 //! times, and every pair also after a paragraph's first word; doubling the
@@ -18,6 +19,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use markdown_syntax::{parse, parse_inline, Block, Definitions, NodePath, Paragraph};
+
+#[path = "support/deepest_edit.rs"]
+mod deepest_edit;
 
 /// Openers, closers, and prefixes of the constructs the parser reads. The
 /// literal autolinks start with a space, after which they may begin.
@@ -118,6 +122,7 @@ struct Times {
     inline: Duration,
     serialize: Duration,
     rewrite: Duration,
+    edited: Duration,
 }
 
 fn time(input: &str) -> Times {
@@ -133,6 +138,8 @@ fn time(input: &str) -> Times {
     let inline = started.elapsed();
     let mut reversed = document.clone();
     reversed.children.reverse();
+    let mut edited = document.clone();
+    deepest_edit::edit_deepest(&mut edited.children);
     let document = document.without_source();
     let started = Instant::now();
     let _ = document.to_markdown();
@@ -140,11 +147,16 @@ fn time(input: &str) -> Times {
     // Every block comes after one other than its predecessor in the source.
     let started = Instant::now();
     let _ = reversed.to_markdown();
+    let rewrite = started.elapsed();
+    // Every container above the edit is written partly from the source.
+    let started = Instant::now();
+    let _ = edited.to_markdown();
     Times {
         parse,
         inline,
         serialize,
-        rewrite: started.elapsed(),
+        rewrite,
+        edited: started.elapsed(),
     }
 }
 
@@ -169,6 +181,7 @@ impl Growth {
             inline: Duration::MAX,
             serialize: Duration::MAX,
             rewrite: Duration::MAX,
+            edited: Duration::MAX,
         };
         let (mut small, mut large) = (slowest, slowest);
         for _ in 0..runs {
@@ -178,6 +191,7 @@ impl Growth {
                 best.inline = best.inline.min(times.inline);
                 best.serialize = best.serialize.min(times.serialize);
                 best.rewrite = best.rewrite.min(times.rewrite);
+                best.edited = best.edited.min(times.edited);
             }
         }
         Growth {
@@ -195,12 +209,13 @@ impl Growth {
             && linear(self.small.inline, self.large.inline)
             && linear(self.small.serialize, self.large.serialize)
             && linear(self.small.rewrite, self.large.rewrite)
+            && linear(self.small.edited, self.large.edited)
     }
 
     fn report(&self) -> String {
         let ratio = |small: Duration, large: Duration| large.as_secs_f64() / small.as_secs_f64();
         format!(
-            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), parse_inline and inline_source {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
+            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), parse_inline and inline_source {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x), edited at depth {:?} -> {:?} ({:.1}x)",
             self.unit.0,
             self.unit.1,
             self.n,
@@ -217,6 +232,9 @@ impl Growth {
             self.small.rewrite,
             self.large.rewrite,
             ratio(self.small.rewrite, self.large.rewrite),
+            self.small.edited,
+            self.large.edited,
+            ratio(self.small.edited, self.large.edited),
         )
     }
 }

@@ -11,11 +11,11 @@ use alloc::vec::Vec;
 use crate::ast::*;
 
 /// `inlines` normalized for comparison: spans cleared, escapes and character
-/// references read as text, and adjacent text merged.
-#[cfg(test)]
-pub(crate) fn normalized_inlines(inlines: &[Inline]) -> Vec<Inline> {
+/// references read as text, and adjacent text merged; in a heading, a soft
+/// break reads as a space.
+pub(crate) fn normalized_inlines(inlines: &[Inline], heading: bool) -> Vec<Inline> {
     let mut inlines = inlines.to_vec();
-    normalize_inlines(&mut inlines, false);
+    normalize_inlines(&mut inlines, heading);
     inlines
 }
 
@@ -192,7 +192,7 @@ mod tests {
             text("a"),
             Inline::CharacterReference(CharacterReference::new("&#42;")),
         ];
-        assert_eq!(normalized_inlines(&escaped), vec![text("*a*")]);
+        assert_eq!(normalized_inlines(&escaped, false), vec![text("*a*")]);
     }
 
     #[test]
@@ -207,7 +207,7 @@ mod tests {
             delimiter: EmphasisDelimiter::Asterisk,
             children: vec![text("ab")],
         })];
-        assert_eq!(normalized_inlines(&split), whole);
+        assert_eq!(normalized_inlines(&split, false), whole);
     }
 
     #[test]
