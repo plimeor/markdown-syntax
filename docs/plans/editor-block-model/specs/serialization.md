@@ -38,38 +38,29 @@ written with `\|`.
 - **THEN** `to_markdown()` returns `"| h |\n| --- |\n| a\\|b |\n"`, which reads back with the cell holding `Text("a|b")`
 
 ### Requirement: Unchanged source is kept
-For a document with a source, `to_markdown` and `to_markdown_with` SHALL treat
-a node that carries a span as the successor of the node of the same kind at
-that span in the document `parse` returns for the source, when one exists and
-no node earlier in document order has claimed it, and SHALL write:
+For a document with a source, `to_markdown` and `to_markdown_with` SHALL write
+each top-level block that carries a span equal to that of a top-level block
+of the document `parse` returns for the source, and corresponds to that block,
+as that span's source text; SHALL keep the source between two such blocks
+that are adjacent in the source, and the source before the first block and
+after the last when that block is one of them; and SHALL write every other
+block as canonical output, with a blank line on each side. A node corresponds
+to a base node of its kind when their spans and their own fields are equal
+and their children correspond pairwise; a leaf with its own source
+(`with_source`) whose inlines are the ones it was built from corresponds when
+that source equals the base leaf's inline source, and is written as that
+source wherever it is written. A block SHALL be written as canonical output
+even so where its source would read differently in its place; which
+placements make a block's source read differently is unspecified. Options
+SHALL apply only to the text written as canonical output. Parsing the output
+SHALL yield a document equal to the written one as "Round-trip stability"
+compares them wherever parsing the canonical output of the same document
+does.
 
-- a successor equal to its base node, spans at every depth included, whose
-  ancestors all keep their own syntax and which follows the sibling it
-  followed in the base, as that span's source text;
-- any other successor equal to its base node as its source lines without the
-  base's container prefixes, under the prefixes it is written with;
-- a successor whose own fields equal its base node's, with the source text of
-  its own syntax (markers, fences, delimiters, underlines, table pipes and
-  padding, and everything else that is not a child or a gap between
-  children), and its children by these rules;
-- every other node as canonical output, with its children by these rules.
+#### Scenario: One edited block
+- **WHEN** the second block of the document parsed from `"|a|b|\n|-|-|\n\n*  x\n\n\n# T #"` is replaced by a hand-built paragraph `Text("y")` and the document is written
+- **THEN** it returns `"|a|b|\n|-|-|\n\ny\n\n\n# T #"`: the table, the blank line, the heading, and the missing final newline are kept, and the gap before the new paragraph is canonical
 
-A leaf with a source of its own (`with_source`) SHALL be written likewise
-against that source, its inlines being the children. The writer SHALL keep
-the source between two siblings written from the source that are adjacent in
-the base, and the source before the document's first block and after its last
-when that block is written from the source there; every other boundary SHALL
-be canonical. A node SHALL be written as canonical output even so where its
-source would read differently in its place; which placements make a node's
-source read differently is unspecified. Options SHALL apply only to the text
-written as canonical output. Parsing the output SHALL yield a document equal
-to the written one as "Round-trip stability" compares them wherever parsing
-the canonical output of the same document does.
-
-#### Scenario: One edited item
-- **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n-   c\n"` is replaced by a hand-built paragraph `Text("x")` and the document is written
-- **THEN** it returns `"-   a\n-   x\n-   c\n"`: the item keeps its marker and gap, and the other items are kept
-
-#### Scenario: One edited link
-- **WHEN** the target of the `WikiLink` in the document parsed from `"see  [[A]] and `` b ``"` is changed to `B` and the document is written
-- **THEN** it returns `"see  [[B]] and `` b ``"`
+#### Scenario: Leaves given as text
+- **WHEN** every leaf of the document parsed from `"- a  *b*\n\n  c\n"` is replaced by the leaf `with_source` builds from its `leaf_sources` text, with its span, and the document is written
+- **THEN** it returns the source

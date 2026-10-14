@@ -68,6 +68,7 @@ describe("Parse from JavaScript", () => {
       "[^f]: note",
       "| a |\n|:-:|\n| c |",
       "$$\nx\n$$",
+      "",
       "::leaf[l]{a=b c}",
       ":::box\nx\n:::",
       "[l](/u) <http://a> ![i](/j) [d][] ![d] a\\\nb $x$ [^f] ^[n] [[w]] :t[l]{k} #tag",
@@ -79,14 +80,14 @@ describe("Parse from JavaScript", () => {
       "htmlContainer", "definition", "footnoteDefinition", "table", "tableRow", "tableCell",
       "mathBlock", "leafDirective", "containerDirective", "link", "autolink", "image",
       "linkReference", "imageReference", "lineBreak", "math", "footnoteReference",
-      "inlineFootnote", "wikiLink", "textDirective", "tag",
+      "inlineFootnote", "wikiLink", "textDirective", "tag", "blankLine",
     ]) {
       assert.ok(types.has(type), type);
     }
     const list = binding.parse("2) a\n3) [x] b").tree.children[0];
     assert.deepEqual(
-      [list.ordered, list.start, list.delimiter, list.children[1].checked],
-      [true, 2, "paren", true],
+      [list.ordered, list.delimiter, list.children.map((item) => [item.number, item.checked])],
+      [true, "paren", [[2, null], [3, true]]],
     );
     const fence = binding.parse("~~~~ js\nx\n~~~~").tree.children[0];
     assert.deepEqual(fence.kind, { type: "fenced", marker: "tilde", length: 4 });
@@ -194,12 +195,13 @@ describe("Write from JavaScript", () => {
     const document = binding.parse(source);
     const tree = structuredClone(document.tree);
     tree.children[1] = { type: "paragraph", span: null, children: [{ type: "text", span: null, value: "y" }] };
-    assert.equal(document.toMarkdown(tree), "|a|b|\n|-|-|\n\ny\n\n# T #");
+    // The kept blank line stays between the edit and the heading.
+    assert.equal(document.toMarkdown(tree), "|a|b|\n|-|-|\n\ny\n\n\n# T #");
     tree.children[1].children[0].value = "z";
-    // The kept table keeps its own line ending.
+    // The kept table and blank line keep their own line endings.
     assert.equal(
       document.toMarkdown(tree, { lineEnding: "crlf", finalNewline: false }),
-      "|a|b|\n|-|-|\n\r\nz\r\n\r\n# T #",
+      "|a|b|\n|-|-|\n\r\nz\r\n\r\n\n# T #",
     );
   });
 

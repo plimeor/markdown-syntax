@@ -9,6 +9,6 @@ Term 1
 : Definition 1
 
 * Nested
-  
+
   Term 2 with *inline markup*
   : Definition 2

@@ -82,7 +82,7 @@ mod unchanged_source_is_kept {
         document.children[1] = paragraph("y");
         assert_eq!(
             document.to_markdown().unwrap(),
-            "|a|b|\n|-|-|\n\ny\n\n# T #"
+            "|a|b|\n|-|-|\n\ny\n\n\n# T #"
         );
     }
 
@@ -99,8 +99,9 @@ mod unchanged_source_is_kept {
     #[test]
     fn removed_blocks_leave_canonical_gaps() {
         let mut document = parse("a\n\n\nb\n\n\nc").document;
-        document.children.remove(1);
-        assert_eq!(document.to_markdown().unwrap(), "a\n\nc");
+        // `b` and the blank line after it.
+        document.children.drain(2..4);
+        assert_eq!(document.to_markdown().unwrap(), "a\n\n\nc");
     }
 
     #[test]
@@ -113,10 +114,12 @@ mod unchanged_source_is_kept {
     #[test]
     fn leading_bytes_are_kept_with_the_first_block() {
         let mut document = parse("\u{feff}\n\n# T\n\na").document;
-        document.children[1] = paragraph("b");
+        // Two blank lines open the document.
+        document.children[3] = paragraph("b");
         assert_eq!(document.to_markdown().unwrap(), "\u{feff}\n\n# T\n\nb\n");
 
         let mut document = parse("\u{feff}\n\n# T\n\na").document;
+        document.children.drain(..2);
         document.children[0] = paragraph("b");
         assert_eq!(document.to_markdown().unwrap(), "b\n\na");
     }

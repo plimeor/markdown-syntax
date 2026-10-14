@@ -1,6 +1,6 @@
 # 0013: The source is the only truth
 
-Status: Accepted
+Status: Superseded by 0016
 Date: 2026-10-14
 Supersedes: 0008
 

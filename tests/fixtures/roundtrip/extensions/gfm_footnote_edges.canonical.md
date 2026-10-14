@@ -8,7 +8,7 @@ Call[^1] and [^^] and [^a\]b].
 [^a\]b]: escaped close
 
 [^multi]: first
-    
+
     second paragraph
-    
+
     - nested

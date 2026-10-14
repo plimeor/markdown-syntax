@@ -88,6 +88,7 @@ fn normalize_blocks(blocks: &mut [Block]) {
             }
             Block::MathBlock(node) => clear(&mut node.meta),
             Block::Frontmatter(node) => clear(&mut node.meta),
+            Block::BlankLine(node) => clear(&mut node.meta),
             Block::LeafDirective(node) => {
                 clear(&mut node.meta);
                 inlines(&mut node.label);

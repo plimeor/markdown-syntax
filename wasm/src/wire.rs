@@ -37,6 +37,7 @@ pub mod kind {
     pub const FRONTMATTER: u32 = 14;
     pub const LEAF_DIRECTIVE: u32 = 15;
     pub const CONTAINER_DIRECTIVE: u32 = 16;
+    pub const BLANK_LINE: u32 = 17;
     pub const LIST_ITEM: u32 = 30;
     pub const TABLE_ROW: u32 = 31;
     pub const TABLE_CELL: u32 = 32;
@@ -246,27 +247,19 @@ impl<'t> Writer<'t> {
             Block::List(List {
                 meta,
                 ordered,
-                start,
                 delimiter,
                 tight,
                 children,
             }) => {
                 self.head(kind::LIST, meta);
                 self.bool(*ordered);
-                match start {
-                    None => self.word(0),
-                    Some(start) => {
-                        self.word(1);
-                        self.word(*start as u32);
-                        self.word((*start >> 32) as u32);
-                    }
-                }
                 self.word(*delimiter as u32);
                 self.bool(*tight);
                 self.word(children.len() as u32);
                 for ListItem {
                     meta,
                     checked,
+                    number,
                     children,
                 } in children
                 {
@@ -276,6 +269,14 @@ impl<'t> Writer<'t> {
                         Some(false) => 1,
                         Some(true) => 2,
                     });
+                    match number {
+                        None => self.word(0),
+                        Some(number) => {
+                            self.word(1);
+                            self.word(*number as u32);
+                            self.word((*number >> 32) as u32);
+                        }
+                    }
                     self.blocks(children);
                 }
             }
@@ -400,6 +401,7 @@ impl<'t> Writer<'t> {
                 self.attributes(attributes);
                 self.blocks(children);
             }
+            Block::BlankLine(BlankLine { meta }) => self.head(kind::BLANK_LINE, meta),
         }
     }
 
@@ -916,15 +918,6 @@ impl<'m> Reader<'m> {
             }),
             kind::LIST => {
                 let ordered = self.bool()?;
-                let start = match self.word()? {
-                    0 => None,
-                    1 => {
-                        let low = u64::from(self.word()?);
-                        let high = u64::from(self.word()?);
-                        Some(high << 32 | low)
-                    }
-                    other => return malformed(format!("{other} is not a list start")),
-                };
                 let delimiter = self.enumerated(
                     &[
                         ListDelimiter::Dash,
@@ -948,6 +941,17 @@ impl<'m> Reader<'m> {
                                 2 => Some(true),
                                 other => return malformed(format!("{other} is not a task state")),
                             },
+                            number: match self.word()? {
+                                0 => None,
+                                1 => {
+                                    let low = u64::from(self.word()?);
+                                    let high = u64::from(self.word()?);
+                                    Some(high << 32 | low)
+                                }
+                                other => {
+                                    return malformed(format!("{other} is not an item number"))
+                                }
+                            },
                             children: self.blocks()?,
                         })
                     })
@@ -955,7 +959,6 @@ impl<'m> Reader<'m> {
                 Block::List(List {
                     meta,
                     ordered,
-                    start,
                     delimiter,
                     tight,
                     children,
@@ -1069,6 +1072,7 @@ impl<'m> Reader<'m> {
                 attributes: self.attributes()?,
                 children: self.blocks()?,
             }),
+            kind::BLANK_LINE => Block::BlankLine(BlankLine { meta }),
             other => return malformed(format!("kind {other} where a block belongs")),
         })
     }

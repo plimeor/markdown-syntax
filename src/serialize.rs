@@ -126,7 +126,12 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
     // Blocks end without a line ending, except an HTML block whose last
     // line is empty (the final newline ends that line too) and an indented
     // code block that keeps its value's `\r` or `\r\n` ending.
-    if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output) {
+    // A last blank line always takes its line ending.
+    let ends_with_blank_line = matches!(blocks.last(), Some(Block::BlankLine(_)));
+    if options.final_newline
+        && !blocks.is_empty()
+        && (ends_with_blank_line || !ends_with_carriage_return_ending(&output))
+    {
         output.push_str(options.line_ending.as_str());
     }
     Ok(output)
@@ -179,11 +184,19 @@ fn write_reusing(
         }
     }
 
+    // Whether the boundary before each block holds the blank line that
+    // separates two blocks; the source between two blocks adjacent in the
+    // source is kept only where it still does or does not.
+    let separated = separated_boundaries(blocks);
+    let base_separated = separated_boundaries(&base);
+
     let mut output = String::with_capacity(source.len());
     // The block written before the current one: its index in the source's
     // parse, where its text ends there, and its line ending there when it was
     // reused, and its marker when it is a list.
     let mut previous_at: Option<usize> = None;
+    // The last block before the current one other than a blank line.
+    let mut last_block: Option<&Block> = None;
     let mut previous_ending = "";
     let mut previous_body_end = 0;
     let mut previous_list: Option<char> = None;
@@ -191,14 +204,18 @@ fn write_reusing(
     // take the place of the final newline.
     let mut ends_with_source_tail = false;
     for (index, block) in blocks.iter().enumerate() {
-        let previous_takes_indented_lines = index > 0
-            && matches!(
-                blocks[index - 1],
-                Block::List(_) | Block::FootnoteDefinition(_)
-            );
+        // Blank lines between them do not end a list or a footnote
+        // definition before an indented line.
+        let previous_takes_indented_lines = matches!(
+            last_block,
+            Some(Block::List(_) | Block::FootnoteDefinition(_))
+        );
+        if !matches!(block, Block::BlankLine(_)) {
+            last_block = Some(block);
+        }
         let follows_predecessor = matches!(
             (previous_at, reused[index]),
-            (Some(previous), Some(at)) if previous + 1 == at
+            (Some(previous), Some(at)) if previous + 1 == at && separated[index] == base_separated[at]
         );
         let mut at = reused[index];
         if let Some(position) = at {
@@ -230,7 +247,7 @@ fn write_reusing(
             if follows_predecessor {
                 let start = span_of(block).start;
                 output.push_str(&source[previous_body_end..start]);
-            } else {
+            } else if separated[index] {
                 // A reused block keeps its own line ending; one more makes
                 // the blank line.
                 output.push_str(previous_ending);
@@ -239,6 +256,12 @@ fn write_reusing(
                     "\r" => output.push('\r'),
                     _ => output.push_str(options.line_ending.as_str()),
                 }
+            } else {
+                // A blank line is a line of its own, without a separator.
+                output.push_str(match previous_ending {
+                    "" => options.line_ending.as_str(),
+                    own => own,
+                });
             }
         }
         previous_ending = "";
@@ -259,6 +282,7 @@ fn write_reusing(
                 previous_body_end = body_end;
                 previous_list = match block {
                     Block::List(list) => Some(written_marker(list)),
+                    Block::BlankLine(_) => previous_list,
                     _ => None,
                 };
             }
@@ -276,16 +300,18 @@ fn write_reusing(
                 output.push_str(&text);
                 previous_list = match block {
                     Block::List(list) => Some(list_marker(list, options, previous_list)),
+                    Block::BlankLine(_) => previous_list,
                     _ => None,
                 };
             }
         }
         previous_at = at;
     }
+    let ends_with_blank_line = matches!(blocks.last(), Some(Block::BlankLine(_)));
     if !ends_with_source_tail
         && options.final_newline
-        && !output.is_empty()
-        && !ends_with_carriage_return_ending(&output)
+        && !blocks.is_empty()
+        && (ends_with_blank_line || !ends_with_carriage_return_ending(&output))
     {
         // A reused last block keeps its own line ending, which can be part
         // of its value, as in indented code.
@@ -295,6 +321,19 @@ fn write_reusing(
         });
     }
     Ok(output)
+}
+
+/// For each block, whether the boundary before it holds the blank line that
+/// separates two blocks: one written after a block other than a blank line,
+/// before a block or before the blank lines that precede one.
+fn separated_boundaries(blocks: &[Block]) -> Vec<bool> {
+    let mut separated = alloc::vec![false; blocks.len()];
+    let mut block_follows = false;
+    for index in (1..blocks.len()).rev() {
+        block_follows |= !matches!(blocks[index], Block::BlankLine(_));
+        separated[index] = block_follows && !matches!(blocks[index - 1], Block::BlankLine(_));
+    }
+    separated
 }
 
 /// Whether `text` opens with four columns of indentation, which starts
@@ -333,9 +372,10 @@ fn closed_by_a_blank_line(text: &str) -> bool {
     last.meta
         .span
         .is_some_and(|span| span.start + 1 == probe.len())
-        && rest
-            .iter()
-            .all(|block| block.span().is_some_and(|span| span.end <= text.len()))
+        && rest.iter().all(|block| {
+            matches!(block, Block::BlankLine(_))
+                || block.span().is_some_and(|span| span.end <= text.len())
+        })
 }
 
 /// Pushes the gap between two top-level blocks in the options' line ending.
@@ -401,6 +441,10 @@ enum Join {
 /// Writes a sequence of sibling blocks. `document_start` is true only for the
 /// top-level document body, where the first block sits at byte 0 and a
 /// contiguous `---` would open frontmatter.
+///
+/// Two blocks are separated by `join`, and each `BlankLine` is one more empty
+/// line: between two blocks after their separator, and before the first
+/// block or after the last on its own.
 fn write_blocks(
     blocks: &[Block],
     options: &SerializeOptions,
@@ -412,15 +456,26 @@ fn write_blocks(
     // The marker of the list written right before the current block; ordered
     // and unordered markers never share a char.
     let mut previous_list = previous_list;
+    // Whether a block other than a blank line was written, and the blank
+    // lines since the last one.
+    let mut wrote_block = false;
+    let mut blank_lines = 0;
     for (index, block) in blocks.iter().enumerate() {
-        if index > 0 {
+        if let Block::BlankLine(_) = block {
+            blank_lines += 1;
+            continue;
+        }
+        if wrote_block {
             match join {
                 Join::Gap => push_block_gap(&mut output),
                 Join::Line => output.push('\n'),
             }
         }
-        let after_paragraph_line =
-            join == Join::Line && index > 0 && matches!(blocks[index - 1], Block::Paragraph(_));
+        output.extend(core::iter::repeat_n('\n', blank_lines));
+        blank_lines = 0;
+        let after_paragraph_line = join == Join::Line
+            && index > 0
+            && matches!(blocks[index - 1], Block::Paragraph(_));
         let written = match block {
             Block::List(list) => {
                 let marker = list_marker(list, options, previous_list);
@@ -437,17 +492,28 @@ fn write_blocks(
             }
         };
         output.push_str(&written);
+        wrote_block = true;
     }
+    // Trailing blank lines each end the line before them; with no block,
+    // the first of them starts the output.
+    let trailing = if wrote_block {
+        blank_lines
+    } else {
+        blank_lines.saturating_sub(1)
+    };
+    output.extend(core::iter::repeat_n('\n', trailing));
     Ok(output)
 }
 
 fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
     match block {
+        Block::BlankLine(_) => Ok(String::new()),
         Block::Paragraph(node) => write_inlines(&node.children, Context::BLOCK),
         Block::Heading(node) => write_heading(node),
         Block::ThematicBreak(node) => Ok(write_thematic_break(node, false, false)),
         Block::BlockQuote(node) => {
             let inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
+            // No content, or one blank line, is one `>` line.
             Ok(if inner.is_empty() {
                 ">".into()
             } else {
@@ -469,7 +535,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             // starts on the line after the label, as in a list item, where
             // the label's line would take that whitespace as its separator.
             Ok(if inner.starts_with([' ', '\t']) {
-                format!("[^{}]:\n{}", node.label, prefix_lines(&inner, "    "))
+                format!("[^{}]:\n{}", node.label, prefix_container_lines(&inner, "    "))
             } else {
                 format!("[^{}]: {}", node.label, indent_continuation(&inner))
             })
@@ -500,7 +566,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             // Content ends with a line ending before the closing fence; an
             // empty directive takes no blank line, which would loosen a list
             // holding it.
-            if !inner.is_empty() {
+            if !node.children.is_empty() {
                 inner.push('\n');
             }
             Ok(format!(
@@ -580,8 +646,18 @@ fn write_html_container(
     match &node.content {
         HtmlContainerContent::Blocks(children) => {
             let inner = write_blocks(children, options, Join::Gap, false, None)?;
-            Ok(if inner.is_empty() {
-                format!("{}\n{}", node.opening.raw, node.closing.raw)
+            // Content takes a blank line before the closing tag; blank lines
+            // alone stand between the tags.
+            let blank_lines = children
+                .iter()
+                .all(|block| matches!(block, Block::BlankLine(_)));
+            Ok(if blank_lines {
+                format!(
+                    "{}\n{}{}",
+                    node.opening.raw,
+                    "\n".repeat(children.len()),
+                    node.closing.raw
+                )
             } else {
                 format!("{}\n{}\n\n{}", node.opening.raw, inner, node.closing.raw)
             })
@@ -610,6 +686,9 @@ fn write_alert(node: &Alert, options: &SerializeOptions) -> Result<String, Seria
     if !inner.is_empty() {
         output.push('\n');
         output.push_str(&quote_lines(&inner));
+    } else if !node.children.is_empty() {
+        // One blank line.
+        output.push_str("\n>");
     }
     Ok(output)
 }
@@ -617,7 +696,7 @@ fn write_alert(node: &Alert, options: &SerializeOptions) -> Result<String, Seria
 /// `inner` with every line in the quote: an empty last line, which a value
 /// ending in a line ending holds, takes `>` too.
 fn quote_lines(inner: &str) -> String {
-    let mut output = prefix_lines(inner, "> ");
+    let mut output = prefix_container_lines(inner, "> ");
     if inner.ends_with(['\n', '\r']) {
         output.push('>');
     }
@@ -695,18 +774,23 @@ fn write_list(
     marker_char: char,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
+    // The number the previous item was written with.
+    let mut previous: Option<u64> = None;
     for (index, item) in node.children.iter().enumerate() {
         if index > 0 {
             output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
         let marker = if node.ordered {
-            // Only the first number sets the start, so later items stop
-            // counting at the largest number a marker can hold.
-            let number = node
-                .start
-                .unwrap_or(1)
-                .saturating_add(index as u64)
-                .min(crate::parse::MAX_ORDERED_NUMBER);
+            // An item without a number counts on from the previous one, and
+            // stops at the largest number a marker can hold.
+            let number = item.number.unwrap_or_else(|| {
+                previous.map_or(1, |previous| {
+                    previous
+                        .saturating_add(1)
+                        .min(crate::parse::MAX_ORDERED_NUMBER)
+                })
+            });
+            previous = Some(number);
             format!("{number}{marker_char} ")
         } else {
             format!("{marker_char} ")
@@ -717,7 +801,10 @@ fn write_list(
         if break_after_bullet || opens_with_whitespace {
             output.push_str(marker.trim_end());
             output.push('\n');
-            output.push_str(&prefix_lines(&inner, &" ".repeat(marker.len())));
+            output.push_str(&prefix_container_lines(
+                &inner,
+                &" ".repeat(marker.len()),
+            ));
         } else {
             output.push_str(&marker);
             output.push_str(&indent_after_first_line(&inner, marker.len()));
@@ -1433,8 +1520,21 @@ fn escape_title(input: &str, kind: LinkTitleKind) -> String {
     output
 }
 
+/// Prefixes every line of `input` with a container's `prefix`, keeping each
+/// line's ending; an empty line takes the prefix without its trailing
+/// whitespace, so that no blank line the writer writes ends in whitespace.
+fn prefix_container_lines(input: &str, prefix: &str) -> String {
+    prefix_lines_with(input, prefix, prefix.trim_end_matches([' ', '\t']))
+}
+
 /// Prefixes every line of `input` with `prefix`, keeping each line's ending.
 fn prefix_lines(input: &str, prefix: &str) -> String {
+    prefix_lines_with(input, prefix, prefix)
+}
+
+/// Prefixes every line of `input` with `prefix`, or an empty one with
+/// `empty_prefix`, keeping each line's ending.
+fn prefix_lines_with(input: &str, prefix: &str, empty_prefix: &str) -> String {
     if input.is_empty() {
         return String::new();
     }
@@ -1450,7 +1550,11 @@ fn prefix_lines(input: &str, prefix: &str) -> String {
             _ => None,
         };
         if let Some(end) = eol_end {
-            output.push_str(prefix);
+            output.push_str(if cursor == line_start {
+                empty_prefix
+            } else {
+                prefix
+            });
             output.push_str(&input[line_start..end]);
             cursor = end;
             line_start = cursor;
@@ -1473,15 +1577,16 @@ fn indent_continuation(input: &str) -> String {
     indent_lines_of(input, 4)
 }
 
-/// Indents every line of `input` after its first by `width` spaces. Each
-/// line keeps its line ending, a final one included.
+/// Indents every line of `input` after its first by `width` spaces, as a
+/// container's continuation; an empty line stays empty. Each line keeps its
+/// line ending, a final one included.
 fn indent_lines_of(input: &str, width: usize) -> String {
     let mut output = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut line_start = 0;
     let mut index = 0;
     let push = |output: &mut String, line: &str, number: usize| {
-        if number > 0 {
+        if number > 0 && !line.starts_with(['\n', '\r']) {
             output.extend(core::iter::repeat_n(' ', width));
         }
         output.push_str(line);

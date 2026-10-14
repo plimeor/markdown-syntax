@@ -19,6 +19,7 @@ use crate::{
     validate::is_directive_name,
 };
 
+mod blank_lines;
 mod blocks;
 mod nul_replacement;
 #[cfg(test)]
@@ -142,7 +143,8 @@ pub fn parse(input: &str) -> ParseOutput {
     let source = &input[start..];
     let map = SourceMap::verbatim(source.len(), start);
     let lines = collect_lines(source, &map);
-    let children = blocks::parse_document(&lines, &mut diagnostics);
+    let mut children = blocks::parse_document(&lines, &mut diagnostics);
+    blank_lines::add_blank_lines(input, &mut children);
     let mut document = Document::parsed(
         NodeMeta::new(Some(Span::new(0, input.len()))),
         children,

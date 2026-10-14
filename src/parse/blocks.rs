@@ -328,7 +328,6 @@ enum Kind<'a> {
     },
     List {
         ordered: bool,
-        start: Option<u64>,
         delimiter: ListDelimiter,
     },
     Item {
@@ -336,6 +335,7 @@ enum Kind<'a> {
         /// a line continuing the item is indented.
         indent: usize,
         checked: Option<bool>,
+        number: Option<u64>,
     },
     ContainerDirective(Box<OpenDirective>),
     FootnoteDefinition {
@@ -449,7 +449,6 @@ enum Pending<'a> {
     List {
         span: Span,
         ordered: bool,
-        start: Option<u64>,
         delimiter: ListDelimiter,
         tight: bool,
         items: Vec<Child<'a>>,
@@ -457,6 +456,7 @@ enum Pending<'a> {
     Item {
         span: Span,
         checked: Option<bool>,
+        number: Option<u64>,
         children: Vec<Child<'a>>,
     },
     FootnoteDefinition {
@@ -1338,7 +1338,6 @@ impl<'a> BlockParser<'a> {
                     self.add_frame(
                         Kind::List {
                             ordered: marker.ordered,
-                            start: marker.start,
                             delimiter: marker.delimiter,
                         },
                         start,
@@ -1350,6 +1349,7 @@ impl<'a> BlockParser<'a> {
                     Kind::Item {
                         indent: marker.indent,
                         checked: None,
+                        number: marker.start,
                     },
                     start,
                     index,
@@ -1891,11 +1891,7 @@ impl<'a> BlockParser<'a> {
                     end: children_end,
                 }];
             }
-            Kind::List {
-                ordered,
-                start: number,
-                delimiter,
-            } => {
+            Kind::List { ordered, delimiter } => {
                 let tight = list_is_tight(&children);
                 let (first_line, last_line) = (
                     children.first().map_or(first_line, |item| item.first_line),
@@ -1912,7 +1908,6 @@ impl<'a> BlockParser<'a> {
                     block: Pending::List {
                         span: Span::new(span_start, children_end),
                         ordered,
-                        start: number,
                         delimiter,
                         tight,
                         items: children,
@@ -1922,11 +1917,14 @@ impl<'a> BlockParser<'a> {
                     end: children_end,
                 }];
             }
-            Kind::Item { checked, .. } => {
+            Kind::Item {
+                checked, number, ..
+            } => {
                 return alloc::vec![Child {
                     block: Pending::Item {
                         span: Span::new(start, children_end),
                         checked,
+                        number,
                         children,
                     },
                     first_line,
@@ -2157,7 +2155,12 @@ pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
         Block::Paragraph(_) | Block::Definition(_) | Block::Frontmatter(_) => false,
         Block::CodeBlock(node) => node.kind != CodeBlockKind::Indented,
         Block::List(list) => {
-            let number = list.ordered.then(|| list.start.unwrap_or(1));
+            let number = list.ordered.then(|| {
+                list.children
+                    .first()
+                    .and_then(|item| item.number)
+                    .unwrap_or(1)
+            });
             let blank = list
                 .children
                 .first()
@@ -2539,14 +2542,12 @@ impl Finish<'_> {
             Pending::List {
                 span,
                 ordered,
-                start,
                 delimiter,
                 tight,
                 items,
             } => Block::List(List {
                 meta: meta(span),
                 ordered,
-                start,
                 delimiter,
                 tight,
                 children: items
@@ -2555,10 +2556,12 @@ impl Finish<'_> {
                         Pending::Item {
                             span,
                             checked,
+                            number,
                             children,
                         } => Some(ListItem {
                             meta: meta(span),
                             checked,
+                            number,
                             children: self.blocks(children, diagnostics),
                         }),
                         _ => None,

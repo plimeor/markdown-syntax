@@ -116,9 +116,10 @@ let mut document = parse(source).document;
 assert_eq!(document.to_markdown()?, source);
 
 // An edited or new block, one without the spans of the block the source
-// parses to there, is written as canonical Markdown.
+// parses to there, is written as canonical Markdown. The second blank line
+// before the heading is a `BlankLine` node, and is kept.
 document.children[1] = Paragraph::new([Text::from("y")]).into();
-assert_eq!(document.to_markdown()?, "|a|b|\n|-|-|\n\ny\n\n# T #");
+assert_eq!(document.to_markdown()?, "|a|b|\n|-|-|\n\ny\n\n\n# T #");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 

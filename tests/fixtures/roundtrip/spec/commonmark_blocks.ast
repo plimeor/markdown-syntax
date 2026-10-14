@@ -16,10 +16,10 @@ Document
         Paragraph
           Text "two"
   List ordered=true tight=true
-    ListItem checked=none
+    ListItem checked=none number=1
       Paragraph
         Text "first"
-    ListItem checked=none
+    ListItem checked=none number=2
       Paragraph
         Text "second"
   CodeBlock kind=fenced info="rust"

@@ -36,7 +36,6 @@ const KINDS = [
     "list",
     [
       ["ordered", "boolean"],
-      ["start", "start"],
       ["delimiter", "listDelimiter"],
       ["tight", "boolean"],
       ["children", "items"],
@@ -66,7 +65,8 @@ const KINDS = [
     "containerDirective",
     [["name", "string"], ["label", "inlines"], ["attributes", "attributes"], ["children", "blocks"]],
   ],
-  [30, "listItem", [["checked", "checked"], ["children", "blocks"]]],
+  [17, "blankLine", []],
+  [30, "listItem", [["checked", "checked"], ["number", "number"], ["children", "blocks"]]],
   [31, "tableRow", [["cells", "cells"]]],
   [32, "tableCell", [["children", "inlines"]]],
   [40, "text", [["value", "string"]]],
@@ -217,7 +217,7 @@ class Reader {
         const state = this.word();
         return state === 0 ? null : state === 2;
       }
-      case "start": {
+      case "number": {
         if (this.word() === 0) return null;
         const low = this.word();
         return this.word() * 2 ** 32 + low;
@@ -372,7 +372,7 @@ function encodeField(writer, node, field, type, path) {
       if (value === null || value === undefined) return writer.words.push(0);
       if (typeof value !== "boolean") missing("a boolean or null");
       return writer.words.push(value ? 2 : 1);
-    case "start":
+    case "number":
       if (value === null || value === undefined) return writer.words.push(0);
       if (!Number.isSafeInteger(value) || value < 0) missing("a non-negative integer or null");
       return writer.words.push(1, value % 2 ** 32, Math.floor(value / 2 ** 32));

@@ -414,12 +414,12 @@ mod review_validate {
         let bad = Document::new(vec![Block::List(List {
             meta: NodeMeta::default(),
             ordered: true,
-            start: Some(1_000_000_000),
             delimiter: ListDelimiter::Period,
             tight: true,
             children: vec![ListItem {
                 meta: NodeMeta::default(),
                 checked: None,
+                number: Some(1_000_000_000),
                 children: vec![Block::Paragraph(Paragraph {
                     meta: NodeMeta::default(),
                     children: vec![text("foo")],
@@ -436,12 +436,12 @@ mod review_validate {
         let good = Document::new(vec![Block::List(List {
             meta: NodeMeta::default(),
             ordered: true,
-            start: Some(999_999_999),
             delimiter: ListDelimiter::Period,
             tight: true,
             children: vec![ListItem {
                 meta: NodeMeta::default(),
                 checked: None,
+                number: Some(999_999_999),
                 children: vec![Block::Paragraph(Paragraph {
                     meta: NodeMeta::default(),
                     children: vec![text("foo")],
@@ -706,13 +706,13 @@ mod review_validate {
         let item = || ListItem {
             meta: NodeMeta::default(),
             checked: None,
+            number: None,
             children: vec![Paragraph::new([Text::from("a")]).into()],
         };
         let list = |ordered: bool, delimiter| {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered,
-                start: ordered.then_some(1),
                 delimiter,
                 tight: true,
                 children: vec![item()],
@@ -758,13 +758,13 @@ mod review_validate {
         let item = || ListItem {
             meta: NodeMeta::default(),
             checked: None,
+            number: None,
             children: vec![Paragraph::new([Text::from("a")]).into()],
         };
         let list = |ordered: bool, delimiter| {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered,
-                start: ordered.then_some(1),
                 delimiter,
                 tight: true,
                 children: vec![item()],
@@ -927,6 +927,7 @@ mod written_shapes {
         ListItem {
             meta: NodeMeta::default(),
             checked,
+            number: None,
             children,
         }
     }
@@ -938,10 +939,12 @@ mod written_shapes {
         })
     }
 
-    fn ordered(start: u64, items: Vec<ListItem>) -> Block {
+    fn ordered(start: u64, mut items: Vec<ListItem>) -> Block {
+        if let Some(first) = items.first_mut() {
+            first.number = Some(start);
+        }
         Block::List(List {
             ordered: true,
-            start: Some(start),
             delimiter: ListDelimiter::Period,
             ..List::new(items)
         })

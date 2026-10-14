@@ -25,3 +25,4 @@ Document
       Strong delimiter=*
         Text "now"
       Text "."
+  BlankLine

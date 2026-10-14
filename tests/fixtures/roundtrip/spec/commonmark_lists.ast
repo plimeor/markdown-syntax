@@ -25,13 +25,13 @@ Document
       Paragraph
         Text "loose two"
   List ordered=true tight=true
-    ListItem checked=none
+    ListItem checked=none number=1
       Paragraph
         Text "ordered"
       List ordered=true tight=true
-        ListItem checked=none
+        ListItem checked=none number=1
           Paragraph
             Text "nested"
-    ListItem checked=none
+    ListItem checked=none number=2
       Paragraph
         Text "next"

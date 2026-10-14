@@ -51,7 +51,7 @@ fn blocks(blocks: &mut [Block]) {
         match block {
             Block::Paragraph(node) => inlines(&mut node.children),
             Block::Heading(node) => inlines(&mut node.children),
-            Block::ThematicBreak(_) => {}
+            Block::ThematicBreak(_) | Block::BlankLine(_) => {}
             Block::BlockQuote(node) => self::blocks(&mut node.children),
             Block::Alert(node) => {
                 optional(&mut node.title);

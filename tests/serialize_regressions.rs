@@ -326,13 +326,13 @@ mod value_encodings {
         let item = |value: &str| ListItem {
             meta: NodeMeta::default(),
             checked: None,
+            number: None,
             children: vec![paragraph(vec![text(value)])],
         };
         let document = document(vec![
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: false,
-                start: None,
                 delimiter: ListDelimiter::Dash,
                 tight: true,
                 children: vec![item("bullet")],
@@ -340,10 +340,15 @@ mod value_encodings {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: true,
-                start: Some(999_999_998),
                 delimiter: ListDelimiter::Period,
                 tight: true,
-                children: vec![item("one"), item("two")],
+                children: vec![
+                    ListItem {
+                        number: Some(999_999_998),
+                        ..item("one")
+                    },
+                    item("two"),
+                ],
             }),
             Block::CodeBlock(CodeBlock {
                 meta: NodeMeta::default(),
@@ -687,12 +692,12 @@ mod recorded_spellings {
         let list = Block::List(List {
             meta: NodeMeta::default(),
             ordered: false,
-            start: None,
             delimiter: ListDelimiter::Asterisk,
             tight: true,
             children: vec![ListItem {
                 meta: NodeMeta::default(),
                 checked: None,
+                number: None,
                 children: vec![rule(ThematicBreakMarker::Asterisk)],
             }],
         });
@@ -705,12 +710,12 @@ mod recorded_spellings {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: false,
-                start: None,
                 delimiter: ListDelimiter::Asterisk,
                 tight: true,
                 children: vec![ListItem {
                     meta: NodeMeta::default(),
                     checked: None,
+                    number: None,
                     children,
                 }],
             })

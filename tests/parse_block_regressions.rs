@@ -209,12 +209,14 @@ mod review_block {
         assert_eq!(code.value, "aaa\n aaa\naaa\n");
     }
 
-    /// B5: leading/trailing blank lines are not part of an indented code block;
-    /// interior blanks and the final content line ending stay.
+    /// B5: leading/trailing blank lines are not part of an indented code block
+    /// but blank lines after it; interior blanks and the final content line
+    /// ending stay.
     #[test]
     fn indented_code_trims_trailing_blank_lines() {
         let output = parse("    foo\n    \n");
-        let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
+        let [Block::CodeBlock(code), Block::BlankLine(_)] = output.document.children.as_slice()
+        else {
             panic!(
                 "expected one indented code block: {:?}",
                 output.document.children
@@ -863,7 +865,7 @@ mod lazy_lines_and_final_whitespace {
             panic!("expected a block quote and a list, got {blocks:?}");
         };
         assert!(list.ordered);
-        assert_eq!(list.start, Some(2));
+        assert_eq!(list.children[0].number, Some(2));
     }
 
     #[test]
@@ -2117,7 +2119,12 @@ mod one_pass_over_open_blocks {
     #[test]
     fn blank_lines_inside_open_leaf_blocks_loosen_no_list() {
         for source in ["- a\n  - ```\n\n    x\n\n- b", "\n\n- <!--\n\n- text"] {
-            assert!(list(&blocks_of(source)[0]).tight, "{source:?}");
+            let blocks = blocks_of(source);
+            let first = blocks
+                .iter()
+                .find(|block| !matches!(block, Block::BlankLine(_)))
+                .unwrap();
+            assert!(list(first).tight, "{source:?}");
         }
         assert!(list(&parse("- $$\n\n- b").document.children[0]).tight);
     }

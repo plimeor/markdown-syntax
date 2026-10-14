@@ -24,7 +24,7 @@ spans, reading each `Escape` as a `Text` holding its char, each
 inside a heading, which the serializer writes as one space, as a `Text`
 holding a space, and merging adjacent `Text` nodes; and serializing that
 reparsed document SHALL yield the same text byte for byte, unless the source
-holds a detail the AST does not record (decision 0013), such as a lazy
+holds a detail the AST does not record (decision 0016), such as a lazy
 continuation line or a count of blank lines.
 
 ### Requirement: Serialize options

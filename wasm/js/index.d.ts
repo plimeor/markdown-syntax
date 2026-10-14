@@ -29,7 +29,8 @@ export type Block =
   | MathBlock
   | Frontmatter
   | LeafDirective
-  | ContainerDirective;
+  | ContainerDirective
+  | BlankLine;
 
 export type Inline =
   | Text
@@ -94,13 +95,14 @@ export interface Alert extends Node<"alert"> {
 }
 export interface List extends Node<"list"> {
   ordered: boolean;
-  start: number | null;
   delimiter: "dash" | "asterisk" | "plus" | "period" | "paren";
   tight: boolean;
   children: ListItem[];
 }
 export interface ListItem extends Node<"listItem"> {
   checked: boolean | null;
+  /** The item's number in an ordered list; null follows the previous item (1 for the first). */
+  number: number | null;
   children: Block[];
 }
 export interface CodeBlock extends Node<"codeBlock"> {
@@ -156,6 +158,8 @@ export interface ContainerDirective extends Node<"containerDirective"> {
   attributes: DirectiveAttribute[];
   children: Block[];
 }
+/** A blank line beyond the one that separates two blocks. */
+export interface BlankLine extends Node<"blankLine"> {}
 
 export interface Text extends Node<"text"> {
   value: string;

@@ -139,6 +139,8 @@ pub enum Block {
     LeafDirective(LeafDirective),
     /// A container directive: `:::name … :::`.
     ContainerDirective(ContainerDirective),
+    /// A blank line beyond the one that separates two blocks.
+    BlankLine(BlankLine),
 }
 
 /// A paragraph: a run of inline content. Source: any plain text line(s).
@@ -170,6 +172,18 @@ pub enum HeadingKind {
     Atx,
     /// Setext heading: `Title` underlined with `===` (level 1) or `---` (level 2).
     Setext,
+}
+
+/// A blank line the source holds beyond the one that separates two blocks:
+/// K blank lines between two blocks are one separator and K − 1 of these.
+/// Before a document's first block, at the start or end of a block quote,
+/// alert, HTML container, or container directive, and after a document's
+/// last line, each blank line is one. Source: a line holding only
+/// whitespace and its containers' `>` markers.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BlankLine {
+    /// Node metadata (source span): the line with its line ending.
+    pub meta: NodeMeta,
 }
 
 /// A thematic break / horizontal rule. Source: `---`, `***`, or `___`.
@@ -236,8 +250,6 @@ pub struct List {
     pub meta: NodeMeta,
     /// `true` for an ordered list, `false` for a bullet list.
     pub ordered: bool,
-    /// The starting number of an ordered list (e.g. `3.` => `Some(3)`).
-    pub start: Option<u64>,
     /// The marker delimiter used by the list items.
     pub delimiter: ListDelimiter,
     /// `true` if the list is tight (no blank lines between items / no `<p>`).
@@ -268,6 +280,11 @@ pub struct ListItem {
     pub meta: NodeMeta,
     /// Task-list state: `Some(true)` for `[x]`, `Some(false)` for `[ ]`, `None` otherwise.
     pub checked: Option<bool>,
+    /// The number an ordered item is written with (`3.` => `Some(3)`), which
+    /// for the first item is the list's start. `None` is written as the
+    /// previous item's number plus one, or 1 for the first item; a bullet
+    /// item holds `None`.
+    pub number: Option<u64>,
     /// The item's block content.
     pub children: Vec<Block>,
 }
@@ -942,6 +959,7 @@ impl_meta_accessors!(Block {
     Frontmatter,
     LeafDirective,
     ContainerDirective,
+    BlankLine,
 });
 
 impl_from_variants!(Block {
@@ -951,6 +969,7 @@ impl_from_variants!(Block {
     HtmlContainer(HtmlContainer),
     FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
     Frontmatter(Frontmatter), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
+    BlankLine(BlankLine),
 });
 
 impl_meta_accessors!(Inline {
@@ -1183,10 +1202,32 @@ impl List {
         Self {
             meta: NodeMeta::default(),
             ordered: false,
-            start: None,
             delimiter: ListDelimiter::Dash,
             tight: true,
             children: children.into_iter().collect(),
         }
+    }
+}
+
+impl ListItem {
+    /// An item holding `children`, with no task marker and no number.
+    pub fn new<I, T>(children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Block>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            checked: None,
+            number: None,
+            children: children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl BlankLine {
+    /// A blank line.
+    pub fn new() -> Self {
+        Self::default()
     }
 }
