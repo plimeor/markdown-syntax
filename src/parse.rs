@@ -142,10 +142,11 @@ pub fn parse(input: &str) -> ParseOutput {
     let map = SourceMap::verbatim(source.len(), start);
     let lines = collect_lines(source, &map);
     let children = blocks::parse_document(&lines, &mut diagnostics);
-    let mut document = Document {
-        meta: NodeMeta::new(Some(Span::new(0, input.len()))),
+    let mut document = Document::parsed(
+        NodeMeta::new(Some(Span::new(0, input.len()))),
         children,
-    };
+        input,
+    );
     if source.contains('\0') {
         nul_replacement::replace_in_document(&mut document);
     }

@@ -43,7 +43,7 @@ let output = parse("# Title\n\nHello *world*.");
 assert!(output.diagnostics.is_empty());
 
 // Serialize the AST back to canonical Markdown (this is the fallible step).
-let markdown = output.document.to_markdown()?;
+let markdown = output.document.without_source().to_markdown()?;
 assert_eq!(markdown, "# Title\n\nHello *world*.\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
@@ -109,18 +109,18 @@ let mut options = SerializeOptions::default();
 options.line_ending = LineEnding::CrLf;
 options.final_newline = false;
 
-let markdown = parse("# Title").document.to_markdown_with(&options)?;
+let markdown = parse("# Title").document.without_source().to_markdown_with(&options)?;
 assert_eq!(markdown, "# Title");
 
 // List-marker and fence options are `None` by default, keeping the marker
 // each node records; `Some` writes every list or fence with the one given.
 let mut options = SerializeOptions::default();
 options.bullet = Some(BulletMarker::Dash);
-assert_eq!(parse("* a").document.to_markdown_with(&options)?, "- a\n");
+assert_eq!(parse("* a").document.without_source().to_markdown_with(&options)?, "- a\n");
 
 // Each node is written in the spelling it records: `_` emphasis stays `_`,
 // an escape stays an escape, and a literal autolink stays bare.
-let document = parse("_a_ \\*b\\* https://example.com").document;
+let document = parse("_a_ \\*b\\* https://example.com").document.without_source();
 assert_eq!(document.to_markdown()?, "_a_ \\*b\\* https://example.com\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
@@ -159,23 +159,17 @@ The [`prelude`](https://docs.rs/markdown-syntax/latest/markdown_syntax/prelude/i
 ```rust
 use markdown_syntax::prelude::*;
 
-let document = Document {
-    meta: NodeMeta::default(),
-    children: vec![
-        Heading::new(1, [Text::from("Title")]).into(),
-        Paragraph::new([Text::from("hello")]).into(),
-    ],
-};
+let document = Document::new(vec![
+    Heading::new(1, [Text::from("Title")]).into(),
+    Paragraph::new([Text::from("hello")]).into(),
+]);
 // Hand-built nodes carry no span.
 assert_eq!(document.children[0].span(), None);
 assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
 
 // Text is written as it is; `Escape` writes a literal punctuation char.
 let escape = |value| Inline::from(Escape { meta: NodeMeta::default(), value });
-let literal = Document {
-    meta: NodeMeta::default(),
-    children: vec![Paragraph::new([escape('*'), Text::from("a").into(), escape('*')]).into()],
-};
+let literal = Document::new(vec![Paragraph::new([escape('*'), Text::from("a").into(), escape('*')]).into()]);
 assert_eq!(literal.to_markdown().unwrap(), "\\*a\\*\n");
 ```
 

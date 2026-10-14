@@ -29,10 +29,7 @@ fn paragraph(children: Vec<Inline>) -> Block {
 }
 
 fn document(children: Vec<Block>) -> Document {
-    Document {
-        meta: NodeMeta::default(),
-        children,
-    }
+    Document::new(children)
 }
 
 fn paragraph_document(children: Vec<Inline>) -> Document {
@@ -54,6 +51,7 @@ fn normalized(document: &Document) -> String {
 fn written(source: &str) -> String {
     parse(source)
         .document
+        .without_source()
         .to_markdown()
         .unwrap_or_else(|error| panic!("{source:?}: {error:?}"))
 }

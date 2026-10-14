@@ -108,23 +108,24 @@ ci --features html --test <name>`.
   README.md` showing only superseded, archived, or updated references.
 
 ### 2. The kept source and writing with it
-- [ ] 2.1 Give `Document` its private source, `Document::new`, `source()`,
+- [x] 2.1 Give `Document` its private source, `Document::new`, `source()`,
   and `without_source()`, and move every hand construction in `src/` and
   `tests/` to `Document::new`; verified by `cargo test --no-run` and
-  `tests/document_source.rs` naming `Parsed documents keep their source`.
-- [ ] 2.2 Rewrite every `parse(..).document.to_markdown*` in `tests/` and the
+  `tests/serialize_source.rs` naming `Parsed documents keep their source`.
+- [x] 2.2 Rewrite every `parse(..).document.to_markdown*` in `tests/` and the
   README as `.without_source().to_markdown*`; verified by the full test run
   passing with no golden changed.
-- [ ] 2.3 Reuse unchanged top-level blocks in the serializer's top-level
+- [x] 2.3 Reuse unchanged top-level blocks in the serializer's top-level
   writer; verified by `tests/serialize_source.rs` naming `Unchanged source is
   kept`.
   - Follows design › Writing.
-- [ ] 2.4 Port the spike's simulated edits as a test: over the read-back
+- [x] 2.4 Port the spike's simulated edits as a test: over the read-back
   corpus, edit each top-level block, write, and check the bytes outside the
-  block and the read-back; verified by the same test file.
-- [ ] 2.5 Check that every unedited parse in the read-back corpus writes its
-  source byte for byte; verified by the same test file.
-- [ ] 2.6 Add writing with a source to the linear-growth suite; verified by
+  block and the read-back; verified by `tests/fixtures.rs`, where the corpus
+  lives.
+- [x] 2.5 Check that every unedited parse in the read-back corpus writes its
+  source byte for byte; verified by `tests/fixtures.rs`.
+- [x] 2.6 Add writing with a source to the linear-growth suite; verified by
   `tests/linear_growth.rs`.
 
 ### 3. Inline parse

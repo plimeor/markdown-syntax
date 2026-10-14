@@ -26,8 +26,8 @@ mod normalize;
 use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
-    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, FenceMarker, LineEnding,
-    LineIndex, OrderedDelimiter, SerializeOptions, Span,
+    parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker, Inline,
+    LineEnding, LineIndex, OrderedDelimiter, SerializeOptions, Span,
 };
 
 use deviations::{excerpt, input_hash};
@@ -234,6 +234,7 @@ fn line_index_uses_half_open_byte_offsets() {
 fn written(source: &str) -> String {
     parse(source)
         .document
+        .without_source()
         .to_markdown()
         .unwrap_or_else(|error| panic!("{source:?}: {error:?}"))
 }
@@ -271,6 +272,7 @@ fn list_markers_preserve_by_default_and_yield_when_overridden() {
     assert_eq!(
         parse("- a\n\n+ b\n\n* c\n")
             .document
+            .without_source()
             .to_markdown_with(&options)
             .expect("document serializes with options"),
         "+ a\n\n- b\n\n+ c\n"
@@ -281,6 +283,7 @@ fn list_markers_preserve_by_default_and_yield_when_overridden() {
     assert_eq!(
         parse("1) a\n\n1. b\n")
             .document
+            .without_source()
             .to_markdown_with(&options)
             .expect("document serializes with options"),
         "1. a\n\n1) b\n"
@@ -290,7 +293,7 @@ fn list_markers_preserve_by_default_and_yield_when_overridden() {
 #[test]
 fn some_marker_replaces_every_recorded_marker_and_none_keeps_it() {
     let input = "* a\n\n2) b\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n";
-    let document = parse(input).document;
+    let document = parse(input).document.without_source();
 
     let defaults = SerializeOptions::default();
     assert_eq!(defaults.bullet, None);
@@ -320,7 +323,7 @@ fn some_marker_replaces_every_recorded_marker_and_none_keeps_it() {
 fn crlf_output_keeps_a_values_crlf() {
     let mut crlf = SerializeOptions::default();
     crlf.line_ending = LineEnding::CrLf;
-    let document = parse("```\r\na\r\n```\r\nb").document;
+    let document = parse("```\r\na\r\n```\r\nb").document.without_source();
     let markdown = document
         .to_markdown_with(&crlf)
         .expect("document serializes");
@@ -513,11 +516,11 @@ fn read_back_corpus() -> Vec<Source> {
 /// serialization's tree comparison reads it, and serializes to the same
 /// Markdown again. Panics if it does not serialize.
 fn reads_back(source: &Source) -> Result<(), String> {
-    let document = parse(&source.input).document;
+    let document = parse(&source.input).document.without_source();
     let markdown = document
         .to_markdown()
         .unwrap_or_else(|error| panic!("{}: serialize failed: {error:?}", source.at()));
-    let reparsed = parse(&markdown).document;
+    let reparsed = parse(&markdown).document.without_source();
     if normalize::normalized(&reparsed.children) != normalize::normalized(&document.children) {
         return Err(format!("{markdown:?} reads back as a different tree"));
     }
@@ -567,6 +570,133 @@ fn sources_read_back() {
             ));
         }
     }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+// Writing with the source.
+
+#[test]
+fn unedited_sources_are_written_as_they_are() {
+    for source in read_back_corpus() {
+        let written = parse(&source.input).document.to_markdown();
+        assert_eq!(
+            written.as_deref().ok(),
+            Some(source.input.as_str()),
+            "{}",
+            source.at()
+        );
+    }
+}
+
+/// Appends " edited" to the first `Text` of the block's first leaf, or a line
+/// to a code block's value; false for a block holding neither.
+fn edit_block(block: &mut Block) -> bool {
+    fn edit_inlines(inlines: &mut [Inline]) -> bool {
+        inlines.iter_mut().any(|inline| match inline {
+            Inline::Text(text) => {
+                text.value.push_str(" edited");
+                true
+            }
+            _ => false,
+        })
+    }
+    fn edit_blocks(blocks: &mut [Block]) -> bool {
+        blocks.iter_mut().any(edit_block)
+    }
+    match block {
+        Block::Paragraph(node) => edit_inlines(&mut node.children),
+        Block::Heading(node) => edit_inlines(&mut node.children),
+        Block::BlockQuote(node) => edit_blocks(&mut node.children),
+        Block::Alert(node) => edit_blocks(&mut node.children),
+        Block::List(node) => node
+            .children
+            .iter_mut()
+            .any(|item| edit_blocks(&mut item.children)),
+        Block::Table(node) => node.rows.iter_mut().any(|row| {
+            row.cells
+                .iter_mut()
+                .any(|cell| edit_inlines(&mut cell.children))
+        }),
+        Block::CodeBlock(node) => {
+            node.value.push_str("edited\n");
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Whether `markdown` parses as `document` does, as tree comparison reads it.
+fn reads_as(markdown: &str, document: &Document) -> bool {
+    normalize::normalized(&parse(markdown).document.children)
+        == normalize::normalized(&document.children)
+}
+
+/// Each top-level block of each corpus input, edited alone and written with
+/// the source, leaves the source before the block that precedes it and after
+/// the block that follows it as it is, and the output reads back as the
+/// edited tree wherever the edited tree's canonical output does: the spike's
+/// simulated edits (`docs/plans/editor-syntax-layer/plan.md`, task 2.4).
+#[test]
+fn edited_blocks_keep_the_rest_of_the_source() {
+    let mut failures = Vec::new();
+    let mut edits = 0;
+    for source in read_back_corpus() {
+        let input = source.input.as_str();
+        let document = parse(input).document;
+        let span = |index: usize| {
+            document.children[index]
+                .span()
+                .expect("a parsed block has a span")
+        };
+        for index in 0..document.children.len() {
+            let mut edited = document.clone();
+            if !edit_block(&mut edited.children[index]) {
+                continue;
+            }
+            edits += 1;
+            let at = format!("{} block {index}", source.at());
+            let Ok(markdown) = edited.to_markdown() else {
+                if edited.clone().without_source().to_markdown().is_ok() {
+                    failures.push(format!("{at}: refused with its source only"));
+                }
+                continue;
+            };
+            if index > 0 {
+                let before = &input[..span(index - 1).end];
+                let before = before
+                    .strip_suffix("\r\n")
+                    .or_else(|| before.strip_suffix(['\n', '\r']))
+                    .unwrap_or(before);
+                if !markdown.starts_with(before) {
+                    failures.push(format!("{at}: {markdown:?} moves the source before it"));
+                }
+            }
+            // An indented block after an edited list or footnote definition
+            // is written again, as the indentation could carry it into the
+            // container.
+            let kept_from = match edited.children[index] {
+                Block::List(_) | Block::FootnoteDefinition(_) => index + 2,
+                _ => index + 1,
+            };
+            if kept_from < document.children.len()
+                && !markdown.ends_with(&input[span(kept_from).start..])
+            {
+                failures.push(format!("{at}: {markdown:?} moves the source after it"));
+            }
+            if !reads_as(&markdown, &edited) {
+                let canonical = edited.clone().without_source().to_markdown().unwrap();
+                if reads_as(&canonical, &edited) {
+                    failures.push(format!("{at}: {markdown:?} does not read back"));
+                }
+            }
+        }
+    }
+    assert!(edits > 3_000, "only {edits} edits");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",

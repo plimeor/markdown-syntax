@@ -185,11 +185,11 @@ fn generated(pieces: &[&str], max_pieces: usize, seed: u64) -> Vec<String> {
 /// Whether `input` reads back: its Markdown parses as the same tree, and
 /// serializes to the same Markdown again. Panics if it does not serialize.
 fn reads_back(input: &str) -> Result<(), String> {
-    let document = parse(input).document;
+    let document = parse(input).document.without_source();
     let markdown = document
         .to_markdown()
         .unwrap_or_else(|error| panic!("{input:?}: {error:?}"));
-    let reparsed = parse(&markdown).document;
+    let reparsed = parse(&markdown).document.without_source();
     if normalize::normalized(&reparsed.children) != normalize::normalized(&document.children) {
         return Err(format!("{input:?} -> {markdown:?}"));
     }

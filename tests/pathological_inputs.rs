@@ -512,7 +512,11 @@ fn serialize(document: &Document) {
 }
 
 fn parse_and_serialize(input: &impl AsRef<str>) {
-    assert!(parse(input.as_ref()).document.to_markdown().is_ok());
+    assert!(parse(input.as_ref())
+        .document
+        .without_source()
+        .to_markdown()
+        .is_ok());
 }
 
 #[test]

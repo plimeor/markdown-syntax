@@ -96,31 +96,232 @@ pub enum SerializeError {
 }
 
 impl Document {
-    /// Serialize this document to canonical Markdown with default options.
+    /// Write this document as Markdown with default options: the source of
+    /// every unchanged top-level block, and canonical Markdown for the rest.
     pub fn to_markdown(&self) -> Result<String, SerializeError> {
         self.to_markdown_with(&SerializeOptions::default())
     }
 
-    /// Serialize this document to canonical Markdown with explicit options.
+    /// Write this document as Markdown with explicit options. A document
+    /// with a source reuses it for each top-level block equal to the block
+    /// the source parses to at the same span; the options apply to the rest.
     pub fn to_markdown_with(&self, options: &SerializeOptions) -> Result<String, SerializeError> {
         let diagnostics = validate_document(self);
         if !diagnostics.is_empty() {
             return Err(SerializeError::InvalidDocument(diagnostics));
         }
-
-        let mut output = write_blocks(&self.children, options, Join::Gap, true)?;
-        if options.line_ending == LineEnding::CrLf {
-            output = lf_to_crlf(&output);
+        match self.source() {
+            Some(source) => write_reusing(&self.children, source, options),
+            None => write_canonical(&self.children, options),
         }
-        // Blocks end without a line ending, except an HTML block whose last
-        // line is empty (the final newline ends that line too) and an indented
-        // code block that keeps its value's `\r` or `\r\n` ending.
-        if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output)
-        {
-            output.push_str(options.line_ending.as_str());
-        }
-        Ok(output)
     }
+}
+
+/// The canonical Markdown of a document's top-level blocks.
+fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<String, SerializeError> {
+    let mut output = write_blocks(blocks, options, Join::Gap, true, None)?;
+    if options.line_ending == LineEnding::CrLf {
+        output = lf_to_crlf(&output);
+    }
+    // Blocks end without a line ending, except an HTML block whose last
+    // line is empty (the final newline ends that line too) and an indented
+    // code block that keeps its value's `\r` or `\r\n` ending.
+    if options.final_newline && !output.is_empty() && !ends_with_carriage_return_ending(&output) {
+        output.push_str(options.line_ending.as_str());
+    }
+    Ok(output)
+}
+
+/// Writes `blocks`, taking from `source` each one equal to the block the
+/// source parses to at the same span. Between two reused blocks adjacent in
+/// the source the source's own bytes are kept, as are the bytes before the
+/// source's first block and after its last when those blocks are reused
+/// there; every other boundary is a blank line.
+///
+/// A block is written canonically instead where its source would read
+/// differently in its new place: one a blank line and a paragraph after it
+/// would change, as they extend an unclosed fence, when it comes before a
+/// block other than its successor in the source; one whose source opens with
+/// indentation after a list or a footnote definition, or a list after a list
+/// with the same marker, when it comes after a block other than its
+/// predecessor; and a thematic break that comes to open the document, where
+/// it would open frontmatter.
+fn write_reusing(
+    blocks: &[Block],
+    source: &str,
+    options: &SerializeOptions,
+) -> Result<String, SerializeError> {
+    let base = crate::parse(source).document.children;
+    if blocks == base.as_slice() {
+        return Ok(source.into());
+    }
+    let span_of = |block: &Block| block.span().expect("a reused block has a span");
+    let mut reused: Vec<Option<usize>> = blocks
+        .iter()
+        .map(|block| {
+            let span = block.span()?;
+            let index = base
+                .binary_search_by_key(&span.start, |base| {
+                    base.span().map_or(usize::MAX, |span| span.start)
+                })
+                .ok()?;
+            (base[index] == *block).then_some(index)
+        })
+        .collect();
+    // Backward, so that each block knows whether its successor stays reused.
+    for index in (0..blocks.len().saturating_sub(1)).rev() {
+        let Some(at) = reused[index] else { continue };
+        if reused[index + 1] != Some(at + 1) {
+            let span = span_of(&blocks[index]);
+            if !closed_by_a_blank_line(&source[span.start..span.end]) {
+                reused[index] = None;
+            }
+        }
+    }
+
+    let mut output = String::with_capacity(source.len());
+    // The block written before the current one: its index in the source's
+    // parse, where its text ends there, and its line ending there when it was
+    // reused, and its marker when it is a list.
+    let mut previous_at: Option<usize> = None;
+    let mut previous_ending = "";
+    let mut previous_body_end = 0;
+    let mut previous_list: Option<char> = None;
+    // Whether the output ends with the source's own trailing bytes, which
+    // take the place of the final newline.
+    let mut ends_with_source_tail = false;
+    for (index, block) in blocks.iter().enumerate() {
+        let previous_takes_indented_lines = index > 0
+            && matches!(
+                blocks[index - 1],
+                Block::List(_) | Block::FootnoteDefinition(_)
+            );
+        let follows_predecessor = matches!(
+            (previous_at, reused[index]),
+            (Some(previous), Some(at)) if previous + 1 == at
+        );
+        let mut at = reused[index];
+        if let Some(position) = at {
+            let start = span_of(block).start;
+            let moved_after = index > 0 && !follows_predecessor;
+            let rewritten = match block {
+                Block::ThematicBreak(_) => index == 0 && position != 0,
+                Block::List(list) => moved_after && previous_list == Some(written_marker(list)),
+                _ => false,
+            } || (moved_after
+                && previous_takes_indented_lines
+                && source[start..].starts_with([' ', '\t']));
+            if rewritten {
+                at = None;
+            }
+        }
+        if index > 0 {
+            if follows_predecessor {
+                let start = span_of(block).start;
+                output.push_str(&source[previous_body_end..start]);
+            } else {
+                // A reused block keeps its own line ending; one more makes
+                // the blank line.
+                output.push_str(previous_ending);
+                match previous_ending {
+                    "" => push_gap(&mut output, options),
+                    "\r" => output.push('\r'),
+                    _ => output.push_str(options.line_ending.as_str()),
+                }
+            }
+        }
+        previous_ending = "";
+        match at {
+            Some(position) => {
+                let span = span_of(block);
+                let body = strip_line_ending(&source[span.start..span.end]);
+                let body_end = span.start + body.len();
+                if index == 0 && position == 0 {
+                    output.push_str(&source[..span.start]);
+                }
+                output.push_str(body);
+                if index + 1 == blocks.len() && position + 1 == base.len() {
+                    output.push_str(&source[body_end..]);
+                    ends_with_source_tail = true;
+                }
+                previous_ending = &source[body_end..span.end];
+                previous_body_end = body_end;
+                previous_list = match block {
+                    Block::List(list) => Some(written_marker(list)),
+                    _ => None,
+                };
+            }
+            None => {
+                let mut text = write_blocks(
+                    core::slice::from_ref(block),
+                    options,
+                    Join::Gap,
+                    index == 0,
+                    previous_list,
+                )?;
+                if options.line_ending == LineEnding::CrLf {
+                    text = lf_to_crlf(&text);
+                }
+                output.push_str(&text);
+                previous_list = match block {
+                    Block::List(list) => Some(list_marker(list, options, previous_list)),
+                    _ => None,
+                };
+            }
+        }
+        previous_at = at;
+    }
+    if !ends_with_source_tail
+        && options.final_newline
+        && !output.is_empty()
+        && !ends_with_carriage_return_ending(&output)
+    {
+        output.push_str(options.line_ending.as_str());
+    }
+    Ok(output)
+}
+
+/// Whether the block parsed from `text`, its source with its line ending,
+/// keeps that text when a blank line and a paragraph follow it, as a closed
+/// fence does and an unclosed one does not.
+fn closed_by_a_blank_line(text: &str) -> bool {
+    let gap = if text.ends_with('\n') {
+        "\n"
+    } else if text.ends_with('\r') {
+        "\r"
+    } else {
+        "\n\n"
+    };
+    let probe = format!("{text}{gap}x");
+    let children = crate::parse(&probe).document.children;
+    let Some((Block::Paragraph(last), rest)) = children.split_last() else {
+        return false;
+    };
+    last.meta
+        .span
+        .is_some_and(|span| span.start + 1 == probe.len())
+        && rest
+            .iter()
+            .all(|block| block.span().is_some_and(|span| span.end <= text.len()))
+}
+
+/// Pushes the gap between two top-level blocks in the options' line ending.
+fn push_gap(output: &mut String, options: &SerializeOptions) {
+    let from = output.len();
+    push_block_gap(output);
+    if options.line_ending == LineEnding::CrLf {
+        let gap = lf_to_crlf(&output[from..]);
+        output.truncate(from);
+        output.push_str(&gap);
+    }
+}
+
+/// `text` without one trailing `\n`, `\r\n`, or `\r`.
+fn strip_line_ending(text: &str) -> &str {
+    text.strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))
+        .unwrap_or(text)
 }
 
 /// Rewrites each bare `\n` as `\r\n`; existing `\r\n` and `\r` endings that
@@ -172,11 +373,12 @@ fn write_blocks(
     options: &SerializeOptions,
     join: Join,
     document_start: bool,
+    previous_list: Option<char>,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
     // The marker of the list written right before the current block; ordered
     // and unordered markers never share a char.
-    let mut previous_list: Option<char> = None;
+    let mut previous_list = previous_list;
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
             match join {
@@ -212,7 +414,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
         Block::Heading(node) => write_heading(node),
         Block::ThematicBreak(node) => Ok(write_thematic_break(node, false, false)),
         Block::BlockQuote(node) => {
-            let inner = write_blocks(&node.children, options, Join::Gap, false)?;
+            let inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
             Ok(if inner.is_empty() {
                 ">".into()
             } else {
@@ -229,7 +431,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
         Block::HtmlContainer(node) => write_html_container(node, options),
         Block::Definition(node) => Ok(write_definition(node)),
         Block::FootnoteDefinition(node) => {
-            let inner = write_blocks(&node.children, options, Join::Gap, false)?;
+            let inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
             // Content opening with a space or a tab (indented code, say)
             // starts on the line after the label, as in a list item, where
             // the label's line would take that whitespace as its separator.
@@ -260,7 +462,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             write_attributes(&node.attributes)
         )),
         Block::ContainerDirective(node) => {
-            let mut inner = write_blocks(&node.children, options, Join::Gap, false)?;
+            let mut inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
             let fence = directive_fence(&inner);
             // Content ends with a line ending before the closing fence; an
             // empty directive takes no blank line, which would loosen a list
@@ -344,7 +546,7 @@ fn write_html_container(
 ) -> Result<String, SerializeError> {
     match &node.content {
         HtmlContainerContent::Blocks(children) => {
-            let inner = write_blocks(children, options, Join::Gap, false)?;
+            let inner = write_blocks(children, options, Join::Gap, false, None)?;
             Ok(if inner.is_empty() {
                 format!("{}\n{}", node.opening.raw, node.closing.raw)
             } else {
@@ -371,7 +573,7 @@ fn write_alert(node: &Alert, options: &SerializeOptions) -> Result<String, Seria
             output.push_str(&title.replace(['\n', '\r'], " "));
         }
     }
-    let inner = write_blocks(&node.children, options, Join::Gap, false)?;
+    let inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
     if !inner.is_empty() {
         output.push('\n');
         output.push_str(&quote_lines(&inner));
@@ -556,7 +758,7 @@ fn write_item_blocks(
 ) -> Result<String, SerializeError> {
     let join = if tight { Join::Line } else { Join::Gap };
     let Some(checked) = task else {
-        return write_blocks(blocks, options, join, false);
+        return write_blocks(blocks, options, join, false, None);
     };
     let checkbox = if checked { "[x]" } else { "[ ]" };
     let definitions = blocks
@@ -564,8 +766,8 @@ fn write_item_blocks(
         .take_while(|block| matches!(block, Block::Definition(_)))
         .count();
     if matches!(blocks.get(definitions), Some(Block::Paragraph(_))) {
-        let before = write_blocks(&blocks[..definitions], options, join, false)?;
-        let rest = write_blocks(&blocks[definitions..], options, join, false)?;
+        let before = write_blocks(&blocks[..definitions], options, join, false, None)?;
+        let rest = write_blocks(&blocks[definitions..], options, join, false, None)?;
         let mut output = before;
         if !output.is_empty() {
             match join {
@@ -578,7 +780,7 @@ fn write_item_blocks(
         output.push_str(&rest);
         return Ok(output);
     }
-    let written = write_blocks(blocks, options, join, false)?;
+    let written = write_blocks(blocks, options, join, false, None)?;
     Ok(if written.is_empty() {
         checkbox.into()
     } else {

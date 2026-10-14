@@ -286,10 +286,18 @@ fn an_escaped_dot_after_a_bracket_is_an_escape() {
 #[test]
 fn delimiters_past_the_limit_stay_in_the_output() {
     let input = String::from("++") + &"==a ".repeat(32) + "x" + &" b==".repeat(32) + "++++c++";
-    let markdown = parse(&input).document.to_markdown().unwrap();
+    let markdown = parse(&input)
+        .document
+        .without_source()
+        .to_markdown()
+        .unwrap();
     assert_eq!(markdown.matches('+').count(), input.matches('+').count());
     let input = String::from("___") + &"*".repeat(32) + "x" + &"*".repeat(32) + "_ b__";
-    let markdown = parse(&input).document.to_markdown().unwrap();
+    let markdown = parse(&input)
+        .document
+        .without_source()
+        .to_markdown()
+        .unwrap();
     assert_eq!(markdown.matches('_').count(), input.matches('_').count());
 }
 
@@ -359,7 +367,7 @@ fn a_footnote_label_holds_no_unescaped_bracket() {
 
 #[test]
 fn an_angle_autolink_holds_whitespace_other_than_a_space() {
-    let document = parse("<http://a\u{a0}b>").document;
+    let document = parse("<http://a\u{a0}b>").document.without_source();
     let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
         panic!("{:?}", document.children);
     };

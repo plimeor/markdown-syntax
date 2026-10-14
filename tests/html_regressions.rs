@@ -230,15 +230,12 @@ fn html_options_and_validate_first_are_public_contract() {
         )
     );
 
-    let invalid = Document {
+    let invalid = Document::new(vec![Block::Heading(Heading {
         meta: NodeMeta::default(),
-        children: vec![Block::Heading(Heading {
-            meta: NodeMeta::default(),
-            depth: 0,
-            kind: HeadingKind::Atx,
-            children: Vec::new(),
-        })],
-    };
+        depth: 0,
+        kind: HeadingKind::Atx,
+        children: Vec::new(),
+    })]);
     assert!(matches!(
         invalid.to_html(),
         Err(HtmlError::InvalidDocument(diagnostics))

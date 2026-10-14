@@ -116,7 +116,7 @@ fn nul_is_replaced_in_every_value() {
         "[\u{0}]: /d\u{0}\n",
     );
     let output = parse(source);
-    let debug = format!("{:?}", output.document);
+    let debug = format!("{:?}", output.document.without_source());
     assert!(!debug.contains("\\0"), "NUL survived in {debug}");
     assert!(debug.contains('\u{FFFD}'));
 }

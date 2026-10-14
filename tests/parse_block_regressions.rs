@@ -1256,7 +1256,7 @@ mod paragraph_interruption {
 
     #[test]
     fn a_directive_attribute_without_a_valid_name_is_dropped() {
-        let document = parse(":b{<} :c{a <=1 d}").document;
+        let document = parse(":b{<} :c{a <=1 d}").document.without_source();
         let markdown = document.to_markdown().expect("document serializes");
         assert_eq!(markdown, ":b :c{a d}\n");
     }
@@ -2297,7 +2297,7 @@ mod directive_attributes {
     #[test]
     fn a_text_directives_nameless_attributes_are_reported() {
         let source = ":b{<} :c{a <=1 d}";
-        let document = parse(source).document;
+        let document = parse(source).document.without_source();
         assert_eq!(document.to_markdown().unwrap(), ":b :c{a d}\n");
         let spans = dropped(source);
         let texts: Vec<&str> = spans

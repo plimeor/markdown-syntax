@@ -9,11 +9,17 @@ of the document `parse` returns for the source, and equals that block with
 spans at every depth included, as that span's source text; SHALL keep the
 source between two such blocks that are adjacent in the source, and the source
 before the first block and after the last when that block is one of them; and
-SHALL write every other block as canonical output, with the separators
-canonical output uses. Options SHALL apply only to the text written as
-canonical output. Parsing the output SHALL yield a document equal to the
-written one as "Tree comparison" defines wherever parsing the canonical
-output of the same document does.
+SHALL write every other block as canonical output, with a blank line on each
+side. A block SHALL be written as canonical output even so where its source
+would read differently in its place: one that a blank line and a paragraph
+after it would change, before a block other than its successor in the source;
+one whose source opens with indentation after a list or a footnote definition,
+or a list after a list written with its marker, after a block other than its
+predecessor in the source; and a thematic break that comes to open the
+document. Options SHALL apply only to the text written as canonical output.
+Parsing the output SHALL yield a document equal to the written one as "Tree
+comparison" defines wherever parsing the canonical output of the same document
+does.
 
 #### Scenario: Unedited document
 - **WHEN** `parse(source).document.to_markdown()` runs with `source = "|a|b|\n|-|-|\n\n*  x\n\n\n# T #"`
@@ -22,6 +28,10 @@ output of the same document does.
 #### Scenario: One edited block
 - **WHEN** the second block of that document is replaced by a hand-built paragraph `Text("y")` and the document is written
 - **THEN** it returns `"|a|b|\n|-|-|\n\ny\n\n# T #"`: the table, the heading, and the missing final newline are kept, and the gaps beside the new paragraph are canonical
+
+#### Scenario: Unclosed fence before a new block
+- **WHEN** a hand-built paragraph `Text("y")` is appended to the document parsed from `"```\na"` and the document is written
+- **THEN** it returns `"```\na\n```\n\ny\n"`: the fence is written closed, as its source would take in the paragraph
 
 ## MODIFIED Requirements
 

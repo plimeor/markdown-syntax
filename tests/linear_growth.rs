@@ -1,8 +1,10 @@
-//! Parse and `to_markdown` time over inputs built from syntax fragments, so
-//! that a cost growing faster than the input is found without anyone having
-//! foreseen its shape. Every pair and triple of fragments, as one unit, is
-//! repeated `n` and `2n` times, and every pair also after a paragraph's first
-//! word; doubling the input must at most roughly double the time.
+//! Parse and `to_markdown` time over inputs built from syntax fragments,
+//! written without their source and, with their top-level blocks reversed,
+//! with it, so that a cost growing faster than the input is found without
+//! anyone having foreseen its shape. Every pair and triple of fragments, as
+//! one unit, is repeated `n` and `2n` times, and every pair also after a
+//! paragraph's first word; doubling the input must at most roughly double the
+//! time.
 //!
 //! Each unit is screened with quick measurements on all cores, and the
 //! suspects again at `n` and `4n`, where a quadratic cost stands further from
@@ -112,17 +114,26 @@ fn units() -> Vec<Unit> {
 struct Times {
     parse: Duration,
     serialize: Duration,
+    rewrite: Duration,
 }
 
 fn time(input: &str) -> Times {
     let started = Instant::now();
     let document = parse(input).document;
     let parse = started.elapsed();
+    let mut reversed = document.clone();
+    reversed.children.reverse();
+    let document = document.without_source();
     let started = Instant::now();
     let _ = document.to_markdown();
+    let serialize = started.elapsed();
+    // Every block comes after one other than its predecessor in the source.
+    let started = Instant::now();
+    let _ = reversed.to_markdown();
     Times {
         parse,
-        serialize: started.elapsed(),
+        serialize,
+        rewrite: started.elapsed(),
     }
 }
 
@@ -145,6 +156,7 @@ impl Growth {
         let slowest = Times {
             parse: Duration::MAX,
             serialize: Duration::MAX,
+            rewrite: Duration::MAX,
         };
         let (mut small, mut large) = (slowest, slowest);
         for _ in 0..runs {
@@ -152,6 +164,7 @@ impl Growth {
                 let times = time(input);
                 best.parse = best.parse.min(times.parse);
                 best.serialize = best.serialize.min(times.serialize);
+                best.rewrite = best.rewrite.min(times.rewrite);
             }
         }
         Growth {
@@ -167,12 +180,13 @@ impl Growth {
         let linear = |small: Duration, large: Duration| large <= small.mul_f64(ratio) + NOISE_FLOOR;
         linear(self.small.parse, self.large.parse)
             && linear(self.small.serialize, self.large.serialize)
+            && linear(self.small.rewrite, self.large.rewrite)
     }
 
     fn report(&self) -> String {
         let ratio = |small: Duration, large: Duration| large.as_secs_f64() / small.as_secs_f64();
         format!(
-            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x)",
+            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
             self.unit.0,
             self.unit.1,
             self.n,
@@ -183,6 +197,9 @@ impl Growth {
             self.small.serialize,
             self.large.serialize,
             ratio(self.small.serialize, self.large.serialize),
+            self.small.rewrite,
+            self.large.rewrite,
+            ratio(self.small.rewrite, self.large.rewrite),
         )
     }
 }

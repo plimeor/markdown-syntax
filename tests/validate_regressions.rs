@@ -13,16 +13,13 @@ mod validation {
 
     #[test]
     fn a_shortcode_name_outside_gemoji_is_invalid() {
-        let document = Document {
+        let document = Document::new(vec![Block::Paragraph(Paragraph {
             meta: NodeMeta::default(),
-            children: vec![Block::Paragraph(Paragraph {
+            children: vec![Inline::Shortcode(Shortcode {
                 meta: NodeMeta::default(),
-                children: vec![Inline::Shortcode(Shortcode {
-                    meta: NodeMeta::default(),
-                    name: "not_an_emoji_name".into(),
-                })],
+                name: "not_an_emoji_name".into(),
             })],
-        };
+        })]);
         assert!(!document.validate().is_empty());
         assert!(matches!(
             document.to_markdown(),
@@ -33,13 +30,10 @@ mod validation {
     #[test]
     fn empty_paragraph_is_invalid() {
         for children in [vec![], vec![Inline::Text(Text::from(""))]] {
-            let document = Document {
+            let document = Document::new(vec![Block::Paragraph(Paragraph {
                 meta: NodeMeta::default(),
-                children: vec![Block::Paragraph(Paragraph {
-                    meta: NodeMeta::default(),
-                    children,
-                })],
-            };
+                children,
+            })]);
             let diagnostics = document.validate();
             assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
             assert_eq!(diagnostics[0].message, "paragraph cannot be empty");
@@ -52,14 +46,11 @@ mod validation {
 
     #[test]
     fn empty_table_is_invalid() {
-        let document = Document {
+        let document = Document::new(vec![Block::Table(Table {
             meta: NodeMeta::default(),
-            children: vec![Block::Table(Table {
-                meta: NodeMeta::default(),
-                alignments: vec![],
-                rows: vec![],
-            })],
-        };
+            alignments: vec![],
+            rows: vec![],
+        })]);
 
         let diagnostics = document.validate();
         assert_eq!(diagnostics.len(), 1);
@@ -76,17 +67,14 @@ mod validation {
 
     #[test]
     fn zero_width_table_is_invalid() {
-        let document = Document {
+        let document = Document::new(vec![Block::Table(Table {
             meta: NodeMeta::default(),
-            children: vec![Block::Table(Table {
+            alignments: vec![],
+            rows: vec![TableRow {
                 meta: NodeMeta::default(),
-                alignments: vec![],
-                rows: vec![TableRow {
-                    meta: NodeMeta::default(),
-                    cells: vec![],
-                }],
-            })],
-        };
+                cells: vec![],
+            }],
+        })]);
 
         let diagnostics = document.validate();
         assert_eq!(diagnostics.len(), 1);
@@ -133,13 +121,10 @@ mod review_validate {
     use markdown_syntax::*;
 
     fn paragraph(children: Vec<Inline>) -> Document {
-        Document {
+        Document::new(vec![Block::Paragraph(Paragraph {
             meta: NodeMeta::default(),
-            children: vec![Block::Paragraph(Paragraph {
-                meta: NodeMeta::default(),
-                children,
-            })],
-        }
+            children,
+        })])
     }
 
     fn text(value: &str) -> Inline {
@@ -405,24 +390,21 @@ mod review_validate {
     // to a paragraph.
     #[test]
     fn sr4_ordered_list_start_overflow_is_invalid() {
-        let bad = Document {
+        let bad = Document::new(vec![Block::List(List {
             meta: NodeMeta::default(),
-            children: vec![Block::List(List {
+            ordered: true,
+            start: Some(1_000_000_000),
+            delimiter: ListDelimiter::Period,
+            tight: true,
+            children: vec![ListItem {
                 meta: NodeMeta::default(),
-                ordered: true,
-                start: Some(1_000_000_000),
-                delimiter: ListDelimiter::Period,
-                tight: true,
-                children: vec![ListItem {
+                checked: None,
+                children: vec![Block::Paragraph(Paragraph {
                     meta: NodeMeta::default(),
-                    checked: None,
-                    children: vec![Block::Paragraph(Paragraph {
-                        meta: NodeMeta::default(),
-                        children: vec![text("foo")],
-                    })],
-                }],
-            })],
-        };
+                    children: vec![text("foo")],
+                })],
+            }],
+        })]);
         assert!(!bad.validate().is_empty());
         assert!(matches!(
             bad.to_markdown(),
@@ -430,24 +412,21 @@ mod review_validate {
         ));
 
         // The largest 9-digit start is still representable.
-        let good = Document {
+        let good = Document::new(vec![Block::List(List {
             meta: NodeMeta::default(),
-            children: vec![Block::List(List {
+            ordered: true,
+            start: Some(999_999_999),
+            delimiter: ListDelimiter::Period,
+            tight: true,
+            children: vec![ListItem {
                 meta: NodeMeta::default(),
-                ordered: true,
-                start: Some(999_999_999),
-                delimiter: ListDelimiter::Period,
-                tight: true,
-                children: vec![ListItem {
+                checked: None,
+                children: vec![Block::Paragraph(Paragraph {
                     meta: NodeMeta::default(),
-                    checked: None,
-                    children: vec![Block::Paragraph(Paragraph {
-                        meta: NodeMeta::default(),
-                        children: vec![text("foo")],
-                    })],
-                }],
-            })],
-        };
+                    children: vec![text("foo")],
+                })],
+            }],
+        })]);
         assert!(good.validate().is_empty());
     }
 
@@ -480,30 +459,24 @@ mod review_validate {
     // existing footnote-definition empty-identifier check.
     #[test]
     fn l5_definition_empty_identifier_is_invalid() {
-        let bad = Document {
+        let bad = Document::new(vec![Block::Definition(Definition {
             meta: NodeMeta::default(),
-            children: vec![Block::Definition(Definition {
-                meta: NodeMeta::default(),
-                label: String::new(),
-                identifier: "   ".into(),
-                destination: "/uri".into(),
-                destination_kind: LinkDestinationKind::Bare,
-                title: None,
-            })],
-        };
+            label: String::new(),
+            identifier: "   ".into(),
+            destination: "/uri".into(),
+            destination_kind: LinkDestinationKind::Bare,
+            title: None,
+        })]);
         assert!(!bad.validate().is_empty());
 
-        let good = Document {
+        let good = Document::new(vec![Block::Definition(Definition {
             meta: NodeMeta::default(),
-            children: vec![Block::Definition(Definition {
-                meta: NodeMeta::default(),
-                label: "ref".into(),
-                identifier: "ref".into(),
-                destination: "/uri".into(),
-                destination_kind: LinkDestinationKind::Bare,
-                title: None,
-            })],
-        };
+            label: "ref".into(),
+            identifier: "ref".into(),
+            destination: "/uri".into(),
+            destination_kind: LinkDestinationKind::Bare,
+            title: None,
+        })]);
         assert!(good.validate().is_empty());
     }
 
@@ -522,7 +495,14 @@ mod review_validate {
             assert!(document.validate().is_empty(), "{source:?}");
             let markdown = document.to_markdown().expect("document serializes");
             assert_eq!(markdown, source);
-            assert_eq!(parse(&markdown).document.to_markdown().unwrap(), markdown);
+            assert_eq!(
+                parse(&markdown)
+                    .document
+                    .without_source()
+                    .to_markdown()
+                    .unwrap(),
+                markdown
+            );
         }
 
         // Emphasis closes only with a run that a line break before it does not
@@ -716,10 +696,7 @@ mod review_validate {
                 children: vec![item()],
             })
         };
-        let document = |first, second| Document {
-            meta: NodeMeta::default(),
-            children: vec![first, second],
-        };
+        let document = |first, second| Document::new(vec![first, second]);
         assert!(invalid(&document(
             list(false, ListDelimiter::Dash),
             list(false, ListDelimiter::Dash)
@@ -728,16 +705,13 @@ mod review_validate {
             list(true, ListDelimiter::Paren),
             list(true, ListDelimiter::Paren)
         )));
-        let quoted = Document {
+        let quoted = Document::new(vec![Block::BlockQuote(BlockQuote {
             meta: NodeMeta::default(),
-            children: vec![Block::BlockQuote(BlockQuote {
-                meta: NodeMeta::default(),
-                children: vec![
-                    list(false, ListDelimiter::Plus),
-                    list(false, ListDelimiter::Plus),
-                ],
-            })],
-        };
+            children: vec![
+                list(false, ListDelimiter::Plus),
+                list(false, ListDelimiter::Plus),
+            ],
+        })]);
         assert!(invalid(&quoted));
         assert!(document(
             list(false, ListDelimiter::Dash),
@@ -774,10 +748,7 @@ mod review_validate {
                 children: vec![item()],
             })
         };
-        let document = |first, second| Document {
-            meta: NodeMeta::default(),
-            children: vec![first, second],
-        };
+        let document = |first, second| Document::new(vec![first, second]);
         assert!(invalid(&document(
             list(false, ListDelimiter::Period),
             list(false, ListDelimiter::Dash)
@@ -840,10 +811,7 @@ mod written_shapes {
     }
 
     fn document(children: Vec<Block>) -> Document {
-        Document {
-            meta: NodeMeta::default(),
-            children,
-        }
+        Document::new(children)
     }
 
     fn paragraph(children: Vec<Inline>) -> Block {
@@ -1512,10 +1480,7 @@ mod emphasis_edges {
                 Text::from("a").into(),
             ],
         };
-        Document {
-            meta: NodeMeta::default(),
-            children: vec![Paragraph::new([Inline::Emphasis(emphasis)]).into()],
-        }
+        Document::new(vec![Paragraph::new([Inline::Emphasis(emphasis)]).into()])
     }
 
     #[test]

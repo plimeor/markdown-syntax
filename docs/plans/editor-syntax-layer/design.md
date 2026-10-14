@@ -152,6 +152,19 @@ they do for a document with a source.
   last, when that block is unchanged, the original leading and trailing bytes
   are kept: the BOM, leading blank lines, and the file's final newline or its
   absence.
+- A reused block keeps its own line ending; where a block other than its
+  successor in the source follows it, one more line ending makes the blank
+  line. Where its source would read differently in its new place, the block
+  is written canonically instead: one that a blank line and a paragraph after
+  it would change (an unclosed fence, directive, or math block, or a fence in
+  a list item that the next line closed), before a block other than its
+  successor; one whose source opens with indentation after a list or a
+  footnote definition, whose content could take it in, or a list after a list
+  written with its marker, after a block other than its predecessor; and a
+  thematic break that comes to open the document, where `---` would open
+  frontmatter. The first check parses the block's own text with a blank line
+  and `x` after it, so its cost is linear in the block and runs once per
+  block at most.
 - Validation runs on the document first, as for every write; the
   substitution never turns a valid document into an error.
 - `options` apply to the blocks the writer writes; reused bytes keep their own
