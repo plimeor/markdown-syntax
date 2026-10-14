@@ -150,26 +150,27 @@ ci --features html --test <name>`.
   live, through `tests/support/leaves.rs`.
 
 ### 5. WebAssembly crate
-- [ ] 5.1 Turn the repository into a workspace with `wasm/` as its member and
+- [x] 5.1 Turn the repository into a workspace with `wasm/` as its member and
   `default-members` the root package; verified by `cargo build` and
   `cargo test --no-run` at the root building only the core crate, with
   `Cargo.lock` holding no package outside the workspace.
-- [ ] 5.2 Write the C ABI exports and the two encodings; verified by
+- [x] 5.2 Write the C ABI exports and the two encodings; verified by
   `cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown` and
   Rust unit tests of the encoder and decoder in `wasm/src`.
   - Follows design › WebAssembly crate and › Transport.
-- [ ] 5.3 Write the JS wrapper (`wasm/js/index.js` with a hand-written
+- [x] 5.3 Write the JS wrapper (`wasm/js/index.js` with a hand-written
   `index.d.ts`) and its tests on `node:test`; verified by
-  `node --test wasm/js/` naming each `wasm-binding` requirement.
+  `node --test 'wasm/js/test/*.test.mjs'` naming each `wasm-binding`
+  requirement.
 - [ ] 5.4 Add the wasm build and the JS tests to CI and
   `scripts/pre-release-check.sh`, including the Rust 1.82 build of the
   member; verified by a green CI run on the branch.
 
 ### 6. Integration
-- [ ] 6.1 Run `wasm/js/bench.mjs` on the spike's 124 KB and 348-byte inputs;
+- [x] 6.1 Run `wasm/js/bench.mjs` on the spike's 124 KB and 348-byte inputs;
   verified by its output, observed and not stored, showing a one-paragraph
   `parseInline` under 0.1 ms and a full `parse` under 16 ms on the CI runner.
-- [ ] 6.2 Update `docs/overview.md`, `CLAUDE.md`, and `README.md` for the kept
+- [x] 6.2 Update `docs/overview.md`, `CLAUDE.md`, and `README.md` for the kept
   source, the workspace, the new entry point, and the golden rule of 0014;
   verified by `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps` and the README
   doc-test.

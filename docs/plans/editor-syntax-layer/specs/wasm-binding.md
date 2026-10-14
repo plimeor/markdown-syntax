@@ -45,8 +45,10 @@ without a span.
 `binding.parseInline(text, definitions)` SHALL return the inlines and
 diagnostics of the core crate's `parse_inline`, and
 `parsedDocument.inlineSource(path)` the text of the core crate's
-`inline_source` with a `toSource(offset)` function, or `null` where it returns
-`None`; `parsedDocument.definitions` SHALL hold the document's definitions.
+`inline_source` with `toSource(offset)` and `spanToSource(span)` functions
+that map as its `to_source` and `span_to_source` do, or `null` where it
+returns `None`; `parsedDocument.definitions` SHALL hold the labels of the
+document's definitions.
 
 #### Scenario: Paragraph in a list item
 - **WHEN** `inlineSource([0, 0, 0])` runs on the document parsed from `"- a\n  *b*"`

@@ -185,8 +185,10 @@ they do for a document with a source.
   unit tests run on the host), `publish = false`, `rust-version = "1.82"`, the
   core crate by path with the `html` feature off. It uses `std`; the target
   provides it.
-- Exports: `alloc`, `free`, `result_ptr`, `result_len`, `parse`,
-  `document_free`, `parse_inline`, `inline_source`, `to_markdown`. `parse`
+- Exports: `buffer_alloc`, `buffer_free`, `result_ptr`, `result_len`,
+  `parse`, `document_free`, `parse_inline`, `inline_source`, `to_markdown`.
+  The buffer exports are not named `alloc` and `free`, which would replace
+  the C allocator's symbols when the encoding's unit tests link on the host. `parse`
   keeps the `Document`, which holds its source, in a handle table and returns
   the handle; the later calls take it, so the source crosses into wasm once.
   `to_markdown` decodes the tree JS sends and gives it the handle's source.
@@ -196,22 +198,23 @@ they do for a document with a source.
 
 ### Transport
 
-One encoding per direction, private to the crate and the JS wrapper; neither
-is a promise.
+One encoding, private to the crate and the JS wrapper; it is not a promise.
 
-- **wasm → JS.** A header, then each node in preorder as four `u32`: kind,
-  start, end, child count. Offsets are UTF-16 code units, converted in wasm
-  from one byte-to-UTF-16 table per call. Non-text facts (heading depth and
-  kind, list marker and start, fence, link destination and title, …) go in an
-  attribute table keyed by node index. A value is sliced from the source by
-  JS when it equals its span's source text and is sent in a string table
-  otherwise (code block values, values after U+0000 replacement, decoded
-  values). The wrapper builds plain objects shaped like the Rust AST,
-  camelCased.
-- **JS → wasm.** The same records plus a string table holding every value,
-  because a hand-built or edited node has no source to slice. The wrapper
-  encodes the objects; wasm decodes them into a `Document`, rejecting an
-  unknown kind, a missing field, or a child of the wrong kind as malformed.
+- **One message shape both ways.** A header of two `u32` (word count,
+  string count), the words, a `(start, length)` pair per string, then every
+  string as one run of UTF-16 code units, which JS decodes with one
+  `TextDecoder("utf-16le")` call and slices. A node is its kind, its span as
+  two UTF-16 offsets, and its fields in the order of its Rust struct; a list
+  is its length and its nodes. Every value travels in the string table, so
+  the two directions share one reader and one writer on each side.
+- **wasm → JS.** Offsets are converted in wasm from one byte-to-UTF-16 table
+  per document, kept with its handle. The wrapper builds plain objects shaped
+  like the Rust AST, camelCased.
+- **JS → wasm.** The wrapper checks each node against the same field table
+  as it encodes it and throws a `TypeError` naming the first malformed
+  node's path; wasm decodes into a `Document` and refuses, as a status code,
+  a message that is still malformed. A span that falls between the halves of
+  a surrogate pair reads as none.
 - The spike's span tree for the 124 KB input was 60 KB against 159 KB of
   JSON, and parse plus encode plus read took 3.4–4.1 ms against 7.0 ms.
 
