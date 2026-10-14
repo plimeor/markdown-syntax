@@ -22,34 +22,44 @@ pub(super) enum Out {
     Kept(Span),
     /// As these lines.
     Lines(Vec<Line>),
+    /// As these lines, a list whose last item is not the base's last item
+    /// written from the source: indented source after it can read as that
+    /// item's content at a column the source did not give it.
+    OpenList(Vec<Line>),
     /// As canonical output.
     Render,
 }
 
-/// One written line: its text, its line ending (empty on the last line), and
+/// One written line: its text, its line ending (empty on the last line),
 /// whether it already holds every enclosing container's prefix, as a line
-/// copied from the source does, or takes them as content.
+/// copied from the source does, or takes them as content, and whether its
+/// ending is the source's, which the options' line ending leaves as it is.
 #[derive(Clone, Debug)]
 pub(super) struct Line {
     pub(super) body: String,
     pub(super) ending: String,
     pub(super) full: bool,
+    pub(super) copied_ending: bool,
 }
 
-/// `lines` as text.
-pub(super) fn join(lines: &[Line]) -> String {
+/// `lines` as text, each ending the writer gave in `line_ending`.
+pub(super) fn join(lines: &[Line], line_ending: &str) -> String {
     let mut output = String::new();
     for line in lines {
         output.push_str(&line.body);
-        output.push_str(&line.ending);
+        output.push_str(match line.ending.as_str() {
+            "\n" if !line.copied_ending => line_ending,
+            ending => ending,
+        });
     }
     output
 }
 
 /// The lines of `text`, split at `\n`, `\r\n`, and `\r` as the canonical
 /// writer's prefixing splits them: the first takes `first_full`, every later
-/// one `rest_full`. A final line ending ends the last line.
-fn split(text: &str, first_full: bool, rest_full: bool) -> Vec<Line> {
+/// one `rest_full`. A final line ending ends the last line. `copied` where
+/// `text` is the source's.
+fn split(text: &str, first_full: bool, rest_full: bool, copied: bool) -> Vec<Line> {
     let bytes = text.as_bytes();
     let mut lines = Vec::new();
     let mut start = 0;
@@ -66,6 +76,7 @@ fn split(text: &str, first_full: bool, rest_full: bool) -> Vec<Line> {
                 lines.push(Line {
                     body: text[start..cursor].into(),
                     ending: text[cursor..end].into(),
+                    copied_ending: copied,
                     full: if lines.is_empty() {
                         first_full
                     } else {
@@ -82,6 +93,7 @@ fn split(text: &str, first_full: bool, rest_full: bool) -> Vec<Line> {
         lines.push(Line {
             body: text[start..].into(),
             ending: String::new(),
+            copied_ending: copied,
             full: if lines.is_empty() {
                 first_full
             } else {
@@ -94,7 +106,7 @@ fn split(text: &str, first_full: bool, rest_full: bool) -> Vec<Line> {
 
 /// Rendered text as content lines.
 fn content(text: &str) -> Vec<Line> {
-    split(text, false, false)
+    split(text, false, false, false)
 }
 
 /// One empty content line.
@@ -103,6 +115,7 @@ fn empty() -> Line {
         body: String::new(),
         ending: String::new(),
         full: false,
+        copied_ending: false,
     }
 }
 
@@ -119,6 +132,7 @@ fn extend(lines: &mut Vec<Line>, more: Vec<Line>) {
     if let Some(last) = lines.last_mut() {
         if last.ending.is_empty() {
             last.ending.push('\n');
+            last.copied_ending = false;
         }
     }
     lines.extend(more);
@@ -128,16 +142,62 @@ fn extend(lines: &mut Vec<Line>, more: Vec<Line>) {
 /// the container's start, and the piece of it that opens the block's first
 /// line: content when that line is the container's first, else full.
 fn head_and_prefix(head: &str) -> (Vec<Line>, Line) {
-    let mut lines = split(head, false, true);
+    let mut lines = split(head, false, true, true);
     let prefix = match lines.last() {
         Some(last) if last.ending.is_empty() => lines.pop().expect("a last line"),
         _ => Line {
             body: String::new(),
             ending: String::new(),
             full: true,
+            copied_ending: true,
         },
     };
     (lines, prefix)
+}
+
+/// Ends the last of `lines` with `ending`, the source's, where it has none
+/// yet.
+fn end_with_source_ending(lines: &mut [Line], ending: Option<String>) {
+    if let (Some(last), Some(ending)) = (lines.last_mut(), ending) {
+        if last.ending.is_empty() && !ending.is_empty() {
+            last.ending = ending;
+            last.copied_ending = true;
+        }
+    }
+}
+
+/// A rendered item's lines, with the empty line its last line ending closes
+/// where it ends with blank lines.
+fn item_lines(text: &str) -> Vec<Line> {
+    let mut lines = content(text);
+    if text.ends_with(['\n', '\r']) {
+        lines.push(empty());
+    }
+    lines
+}
+
+/// Whether the list item read from `text`, its source without its
+/// containers, keeps that text when a blank line and another item of a list
+/// marked with `marker` follow it, as an item ending in an unclosed fence
+/// does not.
+fn closed_before_an_item(text: &str, marker: char) -> bool {
+    let text = strip_line_ending(text);
+    let marker = if matches!(marker, '.' | ')') {
+        format!("1{marker} x")
+    } else {
+        format!("{marker} x")
+    };
+    let probe = format!("{text}\n\n{marker}");
+    match crate::parse(&probe).document.children.as_slice() {
+        [Block::List(list)] => {
+            list.children.len() == 2
+                && list.children[0]
+                    .meta
+                    .span
+                    .is_some_and(|span| span.end <= text.len() + 1)
+        }
+        _ => false,
+    }
 }
 
 /// Appends `written`, a block's lines, to `lines` after `gap`, the source
@@ -145,11 +205,12 @@ fn head_and_prefix(head: &str) -> (Vec<Line>, Line) {
 /// last line, its whole lines follow, and its last piece is the prefix of
 /// `written`'s first line, which it makes full.
 fn splice(lines: &mut Vec<Line>, gap: &str, mut written: Vec<Line>) {
-    let mut pieces = split(gap, true, true);
+    let mut pieces = split(gap, true, true, true);
     let ending = pieces.remove(0);
     let last = lines.last_mut().expect("a block was written");
     last.body.push_str(&ending.body);
     last.ending = ending.ending;
+    last.copied_ending = true;
     let prefix = match pieces.last() {
         Some(line) if line.ending.is_empty() => pieces.pop().map(|line| line.body),
         _ => None,
@@ -163,20 +224,31 @@ fn splice(lines: &mut Vec<Line>, gap: &str, mut written: Vec<Line>) {
     lines.extend(written);
 }
 
-/// Prefixes each content line of `lines` with `prefix`, or with `empty`
-/// when it is empty; a full line stays as it is, and every line becomes
-/// content of the container around it, apart from full ones.
-fn prefixed(lines: Vec<Line>, prefix: &str, empty_prefix: &str) -> Vec<Line> {
+/// Prefixes each content line of `lines` with `prefix`, or with
+/// `empty_prefix` when it is empty, and the first, when it is a content
+/// line, with `opening` in their place: its text and whether that text holds
+/// every enclosing container's prefix, as text copied from a later source
+/// line does. A full line stays as it is, and every other line becomes
+/// content of the container around it.
+fn prefixed(
+    lines: Vec<Line>,
+    opening: Option<(&str, bool)>,
+    prefix: &str,
+    empty_prefix: &str,
+) -> Vec<Line> {
     lines
         .into_iter()
-        .map(|mut line| {
+        .enumerate()
+        .map(|(index, mut line)| {
             if !line.full {
-                let head = if line.body.is_empty() {
-                    empty_prefix
-                } else {
-                    prefix
-                };
-                line.body.insert_str(0, head);
+                match opening.filter(|_| index == 0) {
+                    Some((head, full)) => {
+                        line.body.insert_str(0, head);
+                        line.full = full;
+                    }
+                    None if line.body.is_empty() => line.body.insert_str(0, empty_prefix),
+                    None => line.body.insert_str(0, prefix),
+                }
             }
             line
         })
@@ -186,7 +258,7 @@ fn prefixed(lines: Vec<Line>, prefix: &str, empty_prefix: &str) -> Vec<Line> {
 /// Whether `gap`, the source between two siblings, holds a line of nothing
 /// but container prefixes: a blank line where the siblings stand.
 pub(super) fn holds_blank_line(gap: &str) -> bool {
-    split(gap, false, false)
+    split(gap, false, false, true)
         .iter()
         .skip(1)
         .filter(|line| !line.ending.is_empty())
@@ -264,15 +336,25 @@ pub(super) fn keeps_gap(
 /// Whether `block` holds blocks, whose last line can change what the line
 /// after it reads as.
 pub(super) fn holds_blocks(block: &Block) -> bool {
-    matches!(
-        block,
+    match block {
         Block::BlockQuote(_)
-            | Block::Alert(_)
-            | Block::List(_)
-            | Block::FootnoteDefinition(_)
-            | Block::ContainerDirective(_)
-            | Block::HtmlContainer(_)
-    )
+        | Block::Alert(_)
+        | Block::List(_)
+        | Block::FootnoteDefinition(_)
+        | Block::ContainerDirective(_)
+        | Block::HtmlContainer(_) => true,
+        Block::Paragraph(_)
+        | Block::Heading(_)
+        | Block::ThematicBreak(_)
+        | Block::CodeBlock(_)
+        | Block::HtmlBlock(_)
+        | Block::Definition(_)
+        | Block::Table(_)
+        | Block::MathBlock(_)
+        | Block::Frontmatter(_)
+        | Block::LeafDirective(_)
+        | Block::BlankLine(_) => false,
+    }
 }
 
 /// The base node among `base` at `span` of the same kind as `node`.
@@ -305,6 +387,59 @@ pub(super) struct Reuse<'a, 'c> {
     pub(super) base_definitions: &'a Definitions,
 }
 
+/// What the siblings written so far tell about the place of the next one
+/// written from the source: one rule (`super::moves_into_previous`) for the
+/// top level and every container.
+#[derive(Default)]
+pub(super) struct Placement<'b> {
+    /// Whether a sibling, a blank line included, was written.
+    started: bool,
+    /// The last sibling written other than a blank line.
+    last: Option<&'b Block>,
+    /// The marker of the list written last, with only blank lines after it.
+    previous_list: Option<char>,
+    /// Whether `last` was written as `Out::OpenList`.
+    open_list: bool,
+}
+
+impl<'b> Placement<'b> {
+    /// The last sibling written other than a blank line.
+    pub(super) fn last(&self) -> Option<&'b Block> {
+        self.last
+    }
+
+    /// The marker of the list written last, with only blank lines after it.
+    pub(super) fn previous_list(&self) -> Option<char> {
+        self.previous_list
+    }
+
+    /// Whether `block`, written from the source with text that opens with
+    /// `text`, reads as part of what is written before it. One that follows
+    /// its predecessor in the source across a kept gap (`follows`) reads as
+    /// there unless that predecessor is an open list, whose last item's
+    /// column moved.
+    pub(super) fn takes_in(&self, block: &Block, text: &str, follows: bool) -> bool {
+        self.started
+            && if follows {
+                self.open_list && super::moves_into_previous(block, text, self.last, None)
+            } else {
+                super::moves_into_previous(block, text, self.last, self.previous_list)
+            }
+    }
+
+    /// Records `block`, written after the siblings so far: the marker it was
+    /// written with when it is a list, and whether it is an open list.
+    pub(super) fn wrote(&mut self, block: &'b Block, marker: Option<char>, open_list: bool) {
+        self.started = true;
+        if matches!(block, Block::BlankLine(_)) {
+            return;
+        }
+        self.last = Some(block);
+        self.previous_list = marker;
+        self.open_list = open_list;
+    }
+}
+
 /// Children written against the base's children: whether they are the base
 /// children, all kept, and otherwise their lines.
 enum Children {
@@ -331,12 +466,13 @@ impl Reuse<'_, '_> {
     /// every later one full; text that ends with a line ending, as a node
     /// ending with a blank line does, ends with an empty line.
     fn source_lines(&self, start: usize, end: usize) -> Vec<Line> {
-        let mut lines = split(&self.source[start..end], false, true);
+        let mut lines = split(&self.source[start..end], false, true, true);
         if lines.last().is_some_and(|line| !line.ending.is_empty()) {
             lines.push(Line {
                 body: String::new(),
                 ending: String::new(),
                 full: true,
+                copied_ending: true,
             });
         }
         lines
@@ -391,7 +527,7 @@ impl Reuse<'_, '_> {
     /// a tab, or `>`: the node as it reads without its containers.
     fn unprefixed(&self, span: Span) -> String {
         let mut text = String::new();
-        for (index, line) in split(&self.source[span.start..span.end], false, true)
+        for (index, line) in split(&self.source[span.start..span.end], false, true, true)
             .iter()
             .enumerate()
         {
@@ -404,6 +540,24 @@ impl Reuse<'_, '_> {
             text.push_str(&line.ending);
         }
         text
+    }
+
+    /// The line ending in the source at `at`, the end of a line.
+    fn ending_at(&self, at: usize) -> String {
+        let rest = &self.source[at..];
+        String::from(if rest.starts_with("\r\n") {
+            "\r\n"
+        } else if rest.starts_with(['\n', '\r']) {
+            &rest[..1]
+        } else {
+            ""
+        })
+    }
+
+    /// The line ending in the source after the last line of the node at
+    /// `span`.
+    fn ending_after(&self, span: Span) -> String {
+        self.ending_at(self.line_end(self.body_end(span)))
     }
 
     /// The end of the source line `at` is on, before its line ending.
@@ -471,7 +625,7 @@ impl Reuse<'_, '_> {
         // nor a later one open with spaces or tabs, which the block parse
         // strips.
         if (!heading || output.contains(['\n', '\r']))
-            && (split(&output, false, false)
+            && (split(&output, false, false, false)
                 .iter()
                 .skip(1)
                 .any(|line| line.body.starts_with([' ', '\t']))
@@ -489,6 +643,30 @@ impl Reuse<'_, '_> {
         )
     }
 
+    /// `text`, a leaf's content written for the leaf at `span`, with the
+    /// source's indentation before its first line and, with `tail`, the
+    /// whitespace after its last: bytes of the leaf's span outside its
+    /// inline source, which a line ending does not cross.
+    fn padded(&mut self, span: Span, text: &str, tail: bool) -> String {
+        let Some((from, to)) = self
+            .correspondence
+            .source_of(span)
+            .map(|source| (source.to_source(0), source.to_source(source.text.len())))
+        else {
+            return text.into();
+        };
+        let body_end = self.body_end(span);
+        let mut padded = String::new();
+        if span.start <= from && !self.source[span.start..from].contains(['\n', '\r']) {
+            padded.push_str(&self.source[span.start..from]);
+        }
+        padded.push_str(text);
+        if tail && to <= body_end && !self.source[to..body_end].contains(['\n', '\r']) {
+            padded.push_str(&self.source[to..body_end]);
+        }
+        padded
+    }
+
     /// Writes `block`, matched to `base` (same kind, same span).
     pub(super) fn block(&mut self, block: &Block, base: &Block) -> Result<Out, SerializeError> {
         let span = block.span().expect("a matched block has a span");
@@ -500,7 +678,7 @@ impl Reuse<'_, '_> {
                     Out::Kept(span)
                 } else {
                     match self.leaf_text(span, kept, &node.children, &base.children, false)? {
-                        Some(text) => Out::Lines(content(&text)),
+                        Some(text) => Out::Lines(content(&self.padded(span, &text, true))),
                         None => Out::Render,
                     }
                 }
@@ -525,7 +703,7 @@ impl Reuse<'_, '_> {
                     Children::Lines(lines, _) => {
                         let first = &self.source[span.start..self.line_end(span.start)];
                         let mut written = content(first);
-                        extend(&mut written, prefixed(lines, "> ", ">"));
+                        extend(&mut written, prefixed(lines, None, "> ", ">"));
                         Out::Lines(written)
                     }
                     Children::Render => Out::Render,
@@ -550,17 +728,15 @@ impl Reuse<'_, '_> {
                         } else {
                             // Blocks that start on a later line keep it, and
                             // the lines before it.
+                            if !lines
+                                .first()
+                                .is_some_and(|first| !first.full && !first.body.is_empty())
+                            {
+                                return Ok(Out::Render);
+                            }
                             let (mut written, prefix) =
                                 head_and_prefix(&self.source[span.start..start]);
-                            let mut lines = prefixed(lines, "    ", "");
-                            match lines.first_mut() {
-                                Some(first) if !first.full && first.body.starts_with("    ") => {
-                                    first.body.replace_range(..4, &prefix.body);
-                                    first.full = true;
-                                }
-                                _ => return Ok(Out::Render),
-                            }
-                            written.extend(lines);
+                            written.extend(prefixed(lines, Some((&prefix.body, true)), "    ", ""));
                             Out::Lines(written)
                         }
                     }
@@ -571,11 +747,41 @@ impl Reuse<'_, '_> {
                 if own_block_fields_equal(block, base_block) =>
             {
                 let kept = node.label_source.as_deref();
-                if !self.leaf_holds(Some(span), kept, &node.label, &base.label) {
-                    return Ok(Out::Render);
-                }
+                let line_end = self.line_end(span.start);
+                let label_holds = self.leaf_holds(Some(span), kept, &node.label, &base.label);
+                // The opening line, with an edited label written inline by
+                // inline in its place.
+                let opening = if label_holds {
+                    String::from(&self.source[span.start..line_end])
+                } else {
+                    let Some((from, to)) = self
+                        .correspondence
+                        .source_of(span)
+                        .map(|source| (source.to_source(0), source.to_source(source.text.len())))
+                        .filter(|(from, to)| span.start <= *from && from <= to && *to <= line_end)
+                    else {
+                        return Ok(Out::Render);
+                    };
+                    match self.leaf_text(span, kept, &node.label, &base.label, true)? {
+                        Some(text) if !text.contains(['\n', '\r']) => format!(
+                            "{}{text}{}",
+                            &self.source[span.start..from],
+                            &self.source[to..line_end]
+                        ),
+                        _ => return Ok(Out::Render),
+                    }
+                };
                 match self.children(&node.children, &base.children, Join::Gap)? {
-                    Children::Kept => Out::Kept(span),
+                    Children::Kept if label_holds => Out::Kept(span),
+                    Children::Kept => {
+                        let mut rest = self.source_lines(line_end, self.body_end(span));
+                        let mut written = content(&opening);
+                        let ending = rest.remove(0);
+                        written[0].ending = ending.ending;
+                        written[0].copied_ending = true;
+                        written.extend(rest);
+                        Out::Lines(written)
+                    }
                     Children::Lines(lines, _) => {
                         // An unclosed directive's last line is its last
                         // child's.
@@ -590,8 +796,7 @@ impl Reuse<'_, '_> {
                             return Ok(Out::Render);
                         };
                         let closing = String::from(closing);
-                        let opening = &self.source[span.start..self.line_end(span.start)];
-                        let mut written = content(opening);
+                        let mut written = content(&opening);
                         extend(&mut written, lines);
                         extend(&mut written, content(&closing));
                         Out::Lines(written)
@@ -669,7 +874,7 @@ impl Reuse<'_, '_> {
                     return Ok(Out::Render);
                 };
                 let underline = String::from(underline);
-                let mut written = content(&text);
+                let mut written = content(&self.padded(span, &text, false));
                 extend(&mut written, content(&underline));
                 Out::Lines(written)
             }
@@ -704,11 +909,12 @@ impl Reuse<'_, '_> {
         first.body.insert_str(0, &prefix.body);
         first.full = prefix.full;
         written.extend(lines);
-        let mut closing = split(tail, true, true);
+        let mut closing = split(tail, true, true, true);
         let ending = closing.remove(0);
         let last = written.last_mut().expect("a block has a line");
         last.body.push_str(&ending.body);
         last.ending = ending.ending;
+        last.copied_ending = true;
         written.extend(closing);
         Out::Lines(written)
     }
@@ -726,39 +932,26 @@ impl Reuse<'_, '_> {
             .filter(|first| first.start <= self.line_end(span.start))
             .map(|first| &self.source[span.start..first.start])
             .filter(|marker| !marker.contains('\t'));
-        let mut lines = lines;
-        let opened = match (marker, lines.first_mut()) {
-            (Some(marker), Some(first)) if !first.full && !first.body.is_empty() => {
-                first.body.insert_str(0, marker);
-                first.full = true;
-                true
-            }
-            _ => false,
-        };
-        let mut lines = prefixed(lines, "> ", ">");
-        if opened {
-            lines[0].full = false;
-        }
-        Out::Lines(lines)
+        let opening = marker
+            .filter(|_| lines.first().is_some_and(|first| !first.body.is_empty()))
+            .map(|marker| (marker, false));
+        Out::Lines(prefixed(lines, opening, "> ", ">"))
     }
 
     /// A container whose first line opens with `marker`, before the first
     /// line of its children, and whose later content lines take `indent`.
     fn marked(&self, marker: &str, lines: Vec<Line>, indent: &str) -> Out {
-        let mut lines = lines.into_iter();
-        let Some(mut first) = lines.next() else {
-            return Out::Render;
-        };
         // A first line that opens with indentation or is blank would read
         // differently after the marker than as the canonical writer writes
         // it, as indented code does.
-        if first.full || first.body.is_empty() || first.body.starts_with([' ', '\t']) {
-            return Out::Render;
+        match lines.first() {
+            Some(first)
+                if !first.full
+                    && !first.body.is_empty()
+                    && !first.body.starts_with([' ', '\t']) => {}
+            _ => return Out::Render,
         }
-        first.body.insert_str(0, marker);
-        let mut written = alloc::vec![first];
-        written.extend(prefixed(lines.collect(), indent, ""));
-        Out::Lines(written)
+        Out::Lines(prefixed(lines, Some((marker, false)), indent, ""))
     }
 
     /// Writes sibling blocks against the base's siblings.
@@ -781,18 +974,28 @@ impl Reuse<'_, '_> {
                 (_, None) => Out::Render,
             });
         }
-        // A kept block before a sibling other than its successor in the
-        // source stays kept only where a blank line and a paragraph after it
-        // would not extend it, as they extend an unclosed fence.
+        // A block written from the source before a sibling other than its
+        // successor there stays so only where a blank line and a paragraph
+        // after it would not extend it, as they extend an unclosed fence.
         for index in 0..children.len() {
-            let (Out::Kept(span), Some((at, _))) = (&outs[index], matched[index]) else {
+            let Some((at, _)) = matched[index] else {
                 continue;
             };
             let successor = index + 1 == children.len()
                 || matched[index + 1].is_some_and(|(next, _)| next == at + 1)
                     && (matches!(children[index + 1], Block::BlankLine(_))
                         || !matches!(outs[index + 1], Out::Render));
-            if !successor && !super::closed_by_a_blank_line(&self.unprefixed(*span)) {
+            let text = match &outs[index] {
+                _ if successor => continue,
+                Out::Kept(span) => self.unprefixed(*span),
+                Out::Lines(lines) | Out::OpenList(lines) => {
+                    let mut text = self::join(lines, "\n");
+                    text.push('\n');
+                    text
+                }
+                Out::Render => continue,
+            };
+            if !super::closed_by_a_blank_line(&text) {
                 outs[index] = Out::Render;
             }
         }
@@ -817,21 +1020,22 @@ impl Reuse<'_, '_> {
         // The last block written: its index among the children, and its base
         // index when it was written from the source.
         let mut previous: Option<(usize, Option<usize>)> = None;
-        // The marker of the list written last, with only blank lines after it.
-        let mut previous_list: Option<char> = None;
+        let mut placement = Placement::default();
         let mut blank_lines = 0;
         let mut separated = false;
         for (index, (child, out)) in children.iter().zip(outs).enumerate() {
             if let Block::BlankLine(_) = child {
                 blank_lines += 1;
+                placement.wrote(child, None, false);
                 continue;
             }
             let mut at = matched[index]
                 .map(|(at, _)| at)
                 .filter(|_| !matches!(out, Out::Render));
+            let open_list = matches!(out, Out::OpenList(_));
             let mut written = match out {
                 Out::Kept(span) => Some(self.slice(span)),
-                Out::Lines(lines) => Some(lines),
+                Out::Lines(lines) | Out::OpenList(lines) => Some(lines),
                 Out::Render => None,
             };
             // The source between this block and the one written before it,
@@ -864,32 +1068,41 @@ impl Reuse<'_, '_> {
                 }
                 _ => None,
             };
-            // A block that does not follow its predecessor in the source
-            // reads as there only where nothing before it takes it in.
-            if gap.is_none() {
-                let last = previous.map(|(before, _)| &children[before]);
-                if written.as_ref().is_some_and(|written| {
-                    super::moves_into_previous(child, &written[0].body, last, previous_list)
-                }) {
-                    written = None;
-                    at = None;
-                }
+            // A break on the line after a paragraph's would underline it.
+            let underlines = join == Join::Line
+                && blank_lines == 0
+                && matches!(child, Block::ThematicBreak(_))
+                && matches!(placement.last(), Some(Block::Paragraph(_)));
+            if written.as_ref().is_some_and(|written| {
+                (gap.is_none() && underlines)
+                    || placement.takes_in(child, &written[0].body, gap.is_some())
+            }) {
+                written = None;
+                at = None;
             }
-            let written = match written {
-                Some(written) => written,
-                None => content(&write_blocks(
+            let written = match (written, child) {
+                (Some(written), _) => written,
+                (None, Block::ThematicBreak(node)) if underlines => {
+                    content(&super::write_thematic_break(node, false, true))
+                }
+                (None, _) => content(&write_blocks(
                     core::slice::from_ref(child),
                     self.options,
                     Join::Gap,
                     false,
-                    previous_list,
+                    placement.previous_list(),
                 )?),
             };
-            previous_list = match child {
+            let marker = match child {
                 Block::List(list) if at.is_some() => Some(super::written_marker(list)),
-                Block::List(list) => Some(super::list_marker(list, self.options, previous_list)),
+                Block::List(list) => Some(super::list_marker(
+                    list,
+                    self.options,
+                    placement.previous_list(),
+                )),
                 _ => None,
             };
+            placement.wrote(child, marker, open_list && at.is_some());
             match previous {
                 None => {
                     push_empty(&mut lines, blank_lines);
@@ -931,15 +1144,35 @@ impl Reuse<'_, '_> {
         // which a loose list needs to read back as loose.
         let mut separated = false;
         let marker_char = super::written_marker(node);
+        // Whether the item written last is the base's last item, written
+        // from the source.
+        let mut last_from_source = false;
+        // Where the lines of the item written last start.
+        let mut previous_start = 0;
         for (index, item) in node.children.iter().enumerate() {
             let found = matching(item.meta.span, item, &base.children, span_of);
-            let (out, item_separated) = match found {
+            let (mut out, mut item_separated) = match found {
                 Some((_, base_item)) => self.item(node, item, base_item, &mut previous_number)?,
                 None => (Out::Render, false),
             };
+            // An item indented in the source reads as the content of the item
+            // before it, unless that is its predecessor there.
+            let follows = found
+                .zip(previous_at)
+                .is_some_and(|((at, _), previous)| at == previous + 1);
+            if index > 0
+                && !follows
+                && !matches!(out, Out::Render)
+                && item
+                    .meta
+                    .span
+                    .is_some_and(|span| self.source[span.start..].starts_with([' ', '\t']))
+            {
+                (out, item_separated) = (Out::Render, false);
+            }
             separated |= match out {
                 Out::Kept(_) => item_separated,
-                Out::Lines(_) => item_separated,
+                Out::Lines(_) | Out::OpenList(_) => item_separated,
                 // Written canonically, a loose list's item separates its
                 // blocks with blank lines.
                 Out::Render => {
@@ -958,6 +1191,7 @@ impl Reuse<'_, '_> {
             let at = found
                 .map(|(at, _)| at)
                 .filter(|_| !matches!(out, Out::Render));
+            last_from_source = at.is_some_and(|at| at + 1 == base.children.len());
             let written = match out {
                 Out::Kept(span) => {
                     if let Some(number) = item.number {
@@ -965,15 +1199,14 @@ impl Reuse<'_, '_> {
                     }
                     self.slice(span)
                 }
-                Out::Lines(lines) => lines,
-                Out::Render => content(&write_item(
-                    node,
-                    item,
-                    self.options,
-                    marker_char,
-                    &mut previous_number,
-                )?),
+                Out::Lines(lines) | Out::OpenList(lines) => lines,
+                Out::Render => {
+                    let text =
+                        write_item(node, item, self.options, marker_char, &mut previous_number)?;
+                    item_lines(&text)
+                }
             };
+            let start = lines.len();
             if index == 0 {
                 lines = written;
             } else {
@@ -989,13 +1222,33 @@ impl Reuse<'_, '_> {
                 match gap {
                     Some(gap) => splice(&mut lines, gap, written),
                     None => {
-                        if !node.tight && !previous_holds_separator {
+                        // An item written from the source that a blank line
+                        // and another item would extend, as an unclosed
+                        // fence, is written canonically before a new one.
+                        let previous = &node.children[index - 1];
+                        let extended = previous_at.is_some()
+                            && previous.meta.span.is_some_and(|span| {
+                                !closed_before_an_item(&self.unprefixed(span), marker_char)
+                            });
+                        if extended {
+                            lines.truncate(previous_start);
+                            let mut number = None;
+                            let text =
+                                write_item(node, previous, self.options, marker_char, &mut number)?;
+                            if previous_start == 0 {
+                                lines = item_lines(&text);
+                            } else {
+                                extend(&mut lines, item_lines(&text));
+                            }
+                        }
+                        if !node.tight && (extended || !previous_holds_separator) {
                             extend(&mut lines, alloc::vec![empty()]);
                         }
                         extend(&mut lines, written);
                     }
                 }
             }
+            previous_start = start;
             previous_at = at;
             // An item written from the source that ends with blank lines
             // holds the separator to the next item before them.
@@ -1011,7 +1264,11 @@ impl Reuse<'_, '_> {
         if !node.tight && !separated {
             return Ok(Out::Render);
         }
-        Ok(Out::Lines(lines))
+        Ok(if last_from_source {
+            Out::Lines(lines)
+        } else {
+            Out::OpenList(lines)
+        })
     }
 
     /// Writes `item` against `base`, with whether a blank line separates
@@ -1100,10 +1357,54 @@ impl Reuse<'_, '_> {
             self.marked(&marker, lines, &indent)
         } else {
             let mut written = content(&marker);
-            extend(&mut written, prefixed(lines, &indent, ""));
+            extend(&mut written, prefixed(lines, None, &indent, ""));
             Out::Lines(written)
         };
         Ok((out, separated))
+    }
+
+    /// A row at `span` whose base is `base`, with the same cells there:
+    /// its source with each cell that changed written in its place, inline
+    /// by inline, and encoded as cell source.
+    fn row(
+        &mut self,
+        row: &TableRow,
+        base: &TableRow,
+        span: Span,
+    ) -> Result<Option<String>, SerializeError> {
+        if row.cells.len() != base.cells.len() {
+            return Ok(None);
+        }
+        let body_end = self.body_end(span);
+        let mut written = String::new();
+        let mut at = span.start;
+        for (cell, base_cell) in row.cells.iter().zip(&base.cells) {
+            let Some(cell_span) = cell.meta.span.filter(|cell_span| {
+                Some(*cell_span) == base_cell.meta.span
+                    && at <= cell_span.start
+                    && cell_span.end <= body_end
+            }) else {
+                return Ok(None);
+            };
+            written.push_str(&self.source[at..cell_span.start]);
+            let kept = cell.source.as_deref();
+            if self.leaf_holds(Some(cell_span), kept, &cell.children, &base_cell.children) {
+                written.push_str(&self.source[cell_span.start..cell_span.end]);
+            } else {
+                let Some(text) =
+                    self.leaf_text(cell_span, kept, &cell.children, &base_cell.children, true)?
+                else {
+                    return Ok(None);
+                };
+                if text.contains(['\n', '\r']) {
+                    return Ok(None);
+                }
+                written.push_str(&super::encode_cell(&text));
+            }
+            at = cell_span.end;
+        }
+        written.push_str(&self.source[at..body_end]);
+        Ok((!written.contains(['\n', '\r'])).then_some(written))
     }
 
     fn table(&mut self, node: &Table, base: &Table, span: Span) -> Result<Out, SerializeError> {
@@ -1113,12 +1414,14 @@ impl Reuse<'_, '_> {
             let after = self.body_end(header.meta.span?);
             let rest = &self.source[after..];
             let start = after + rest.len() - rest.trim_start_matches(['\r', '\n']).len();
-            let line =
-                self.source[start..self.line_end(start)].trim_start_matches([' ', '\t', '>']);
-            (start > after && !line.is_empty()).then(|| String::from(line))
+            let end = self.line_end(start);
+            let line = self.source[start..end].trim_start_matches([' ', '\t', '>']);
+            (start > after && !line.is_empty()).then(|| (String::from(line), self.ending_at(end)))
         });
         let mut all_kept = node.rows.len() == base.rows.len();
         let mut lines = Vec::new();
+        // The source's line ending after the line written last.
+        let mut ending: Option<String> = None;
         for (index, row) in node.rows.iter().enumerate() {
             let found = matching(row.meta.span, row, &base.rows, span_of);
             let holds = match found {
@@ -1141,16 +1444,25 @@ impl Reuse<'_, '_> {
                 None => false,
             };
             all_kept &= holds && found.is_some_and(|(at, _)| at == index);
-            let written = match (holds, row.meta.span) {
-                (true, Some(span)) => content(&self.source[span.start..self.body_end(span)]),
+            let written = match (holds, row.meta.span, found) {
+                (true, Some(span), _) => content(&self.source[span.start..self.body_end(span)]),
+                (false, Some(span), Some((_, base_row))) => match self.row(row, base_row, span)? {
+                    Some(text) => content(&text),
+                    None => content(&write_row(row)?),
+                },
                 _ => content(&write_row(row)?),
             };
+            end_with_source_ending(&mut lines, ending.take());
             extend(&mut lines, written);
+            ending = found.and(row.meta.span).map(|span| self.ending_after(span));
             if index == 0 {
-                let delimiter = delimiter
-                    .clone()
-                    .unwrap_or_else(|| write_delimiter_row(&node.alignments));
-                extend(&mut lines, content(&delimiter));
+                let written = match &delimiter {
+                    Some((line, _)) => line.clone(),
+                    None => write_delimiter_row(&node.alignments),
+                };
+                end_with_source_ending(&mut lines, ending.take());
+                extend(&mut lines, content(&written));
+                ending = delimiter.as_ref().map(|(_, ending)| ending.clone());
             }
         }
         if all_kept {

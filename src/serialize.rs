@@ -156,8 +156,9 @@ impl Document {
         };
         // A block written partly from the source stays so only where the
         // output reads back as it at its place.
+        let base = crate::parse(source).document;
         let mut whole = alloc::vec![false; blocks.len()];
-        let (output, partly) = write_reusing(blocks, source, options, &definitions, &whole)?;
+        let (output, partly) = write_reusing(blocks, &base, source, options, &definitions, &whole)?;
         if partly.is_empty() {
             return Ok((output, 0));
         }
@@ -167,7 +168,7 @@ impl Document {
         let rewritten = whole.iter().filter(|whole| **whole).count();
         if rewritten > 0 {
             return Ok((
-                write_reusing(blocks, source, options, &definitions, &whole)?.0,
+                write_reusing(blocks, &base, source, options, &definitions, &whole)?.0,
                 rewritten,
             ));
         }
@@ -195,34 +196,37 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
     Ok(output)
 }
 
-/// Writes `blocks`, taking from `source` each one equal to the block the
-/// source parses to at the same span. Between two reused blocks adjacent in
-/// the source the source's own bytes are kept, as are the bytes before the
-/// source's first block and after its last when those blocks are reused
-/// there; every other boundary is a blank line.
+/// Writes `blocks` against `base_document`, the parse of `source`: each
+/// block matched to the base block at its span as its source when it
+/// corresponds to it, partly from the source when only what it holds
+/// changed (`reuse`), and canonically otherwise; returns the output and the
+/// indices of the blocks written partly from the source, which `whole`
+/// writes canonically instead. Between two blocks written from the source
+/// and adjacent there the source's own bytes are kept where they read the
+/// same (`reuse::keeps_gap`), as are the bytes before the source's first
+/// block and after its last when those blocks are written from it there;
+/// every other boundary is a blank line.
 ///
 /// A block is written canonically instead where its source would read
 /// differently in its new place: one a blank line and a paragraph after it
 /// would change, as they extend an unclosed fence, when it comes before a
-/// block other than its successor in the source; one whose source opens with
-/// indentation after a list or a footnote definition, or a list after a list
-/// with the same marker, when it comes after a block other than its
-/// predecessor; and a thematic break that comes to open the document, where
-/// it would open frontmatter.
+/// block other than its successor in the source; one the block before it
+/// would take in (`moves_into_previous`); and a thematic break that comes to
+/// open the document, where it would open frontmatter.
 fn write_reusing(
     blocks: &[Block],
+    base_document: &Document,
     source: &str,
     options: &SerializeOptions,
     definitions: &Definitions,
     whole: &[bool],
 ) -> Result<(String, Vec<usize>), SerializeError> {
-    let base_document = crate::parse(source).document;
     let base = &base_document.children;
     let mut correspondence = Correspondence {
-        base: &base_document,
+        base: base_document,
         sources: None,
     };
-    let base_definitions = Definitions::of(&base_document);
+    let base_definitions = Definitions::of(base_document);
     let mut reuse = reuse::Reuse {
         source,
         options,
@@ -232,6 +236,8 @@ fn write_reusing(
     };
     let span_of = |block: &Block| block.span().expect("a reused block has a span");
     let mut outs = Vec::with_capacity(blocks.len());
+    // Whether each block written partly from the source is an open list.
+    let mut open_lists = alloc::vec![false; blocks.len()];
     for (index, block) in blocks.iter().enumerate() {
         let found = block.span().and_then(|span| {
             let at = base
@@ -246,8 +252,12 @@ fn write_reusing(
         outs.push(match found {
             Some(at) => match reuse.block(block, &base[at])? {
                 reuse::Out::Kept(_) => (Some(at), None),
-                reuse::Out::Lines(_) if whole[index] => (None, None),
+                reuse::Out::Lines(_) | reuse::Out::OpenList(_) if whole[index] => (None, None),
                 reuse::Out::Lines(lines) => (None, Some((at, lines))),
+                reuse::Out::OpenList(lines) => {
+                    open_lists[index] = true;
+                    (None, Some((at, lines)))
+                }
                 reuse::Out::Render => (None, None),
             },
             None => (None, None),
@@ -275,7 +285,7 @@ fn write_reusing(
     // separates two blocks; the source between two blocks adjacent in the
     // source is kept only where it still does or does not.
     let separated = separated_boundaries(blocks);
-    let base_separated = separated_boundaries(&base);
+    let base_separated = separated_boundaries(base);
     // Whether the source between the block at `index`, placed at `at`, and
     // the one before it, placed at `at - 1`, is kept: the boundary holds a
     // separating blank line exactly when it did, and the source reads the
@@ -318,7 +328,7 @@ fn write_reusing(
         }
         match &partly[index] {
             Some((_, lines)) => {
-                let mut text = reuse::join(lines);
+                let mut text = reuse::join(lines, "\n");
                 text.push('\n');
                 if !closed_by_a_blank_line(&text) {
                     partly[index] = None;
@@ -338,11 +348,9 @@ fn write_reusing(
     // parse, where its text ends there, and its line ending there when it was
     // reused, and its marker when it is a list.
     let mut previous_at: Option<usize> = None;
-    // The last block before the current one other than a blank line.
-    let mut last_block: Option<&Block> = None;
+    let mut placement = reuse::Placement::default();
     let mut previous_ending = "";
     let mut previous_body_end = 0;
-    let mut previous_list: Option<char> = None;
     // Whether the output ends with the source's own trailing bytes, which
     // take the place of the final newline.
     let mut ends_with_source_tail = false;
@@ -350,14 +358,10 @@ fn write_reusing(
     // its predecessor in the source.
     let mut run_follows = true;
     for (index, block) in blocks.iter().enumerate() {
-        let last = last_block;
-        if !matches!(block, Block::BlankLine(_)) {
-            last_block = Some(block);
-        }
         // A list written partly from the source keeps its recorded marker,
         // which a list before it may already use.
         if let (Block::List(list), Some(_)) = (block, &partly[index]) {
-            if previous_list == Some(written_marker(list)) {
+            if placement.previous_list() == Some(written_marker(list)) {
                 partly[index] = None;
             }
         }
@@ -371,23 +375,23 @@ fn write_reusing(
         // blank line did.
         let follows_run = follows_predecessor && run_follows;
         run_follows = index == 0 || !matches!(block, Block::BlankLine(_)) || follows_run;
-        if index > 0 && !follows_run {
-            if let Some((_, lines)) = &partly[index] {
-                if moves_into_previous(block, &lines[0].body, last, previous_list) {
-                    partly[index] = None;
-                }
+        // A block whose source the block before it could take in stays only
+        // after its predecessor in the source, written as it was there.
+        let taken_in = |text: &str| placement.takes_in(block, text, follows_run);
+        if let Some((_, lines)) = &partly[index] {
+            if taken_in(&lines[0].body) {
+                partly[index] = None;
             }
         }
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;
-            let moved_after = index > 0 && !follows_run;
             // `---` opening the document stays a break only while no later
             // line closes it as frontmatter.
             let rewritten = matches!(block, Block::ThematicBreak(_))
                 && index == 0
                 && (position != 0 || source[start..].starts_with("---"))
-                || moved_after && moves_into_previous(block, &source[start..], last, previous_list);
+                || taken_in(&source[start..]);
             if rewritten {
                 at = None;
             }
@@ -429,11 +433,11 @@ fn write_reusing(
                 }
                 previous_ending = &source[body_end..span.end];
                 previous_body_end = body_end;
-                previous_list = match block {
+                let marker = match block {
                     Block::List(list) => Some(written_marker(list)),
-                    Block::BlankLine(_) => previous_list,
                     _ => None,
                 };
+                placement.wrote(block, marker, false);
             }
             None if partly[index].is_some() => {
                 let (position, lines) = partly[index].as_ref().expect("written partly");
@@ -442,20 +446,17 @@ fn write_reusing(
                 if index == 0 && *position == 0 {
                     output.push_str(&source[..span.start]);
                 }
-                let mut text = reuse::join(lines);
-                if options.line_ending == LineEnding::CrLf {
-                    text = lf_to_crlf(&text);
-                }
-                output.push_str(&text);
+                output.push_str(&reuse::join(lines, options.line_ending.as_str()));
                 if index + 1 == blocks.len() && *position + 1 == base.len() {
                     output.push_str(&source[body_end..]);
                     ends_with_source_tail = true;
                 }
                 previous_body_end = body_end;
-                previous_list = match block {
+                let marker = match block {
                     Block::List(list) => Some(written_marker(list)),
                     _ => None,
                 };
+                placement.wrote(block, marker, open_lists[index]);
                 at = Some(*position);
             }
             None => {
@@ -464,17 +465,19 @@ fn write_reusing(
                     options,
                     Join::Gap,
                     index == 0,
-                    previous_list,
+                    placement.previous_list(),
                 )?;
                 if options.line_ending == LineEnding::CrLf {
                     text = lf_to_crlf(&text);
                 }
                 output.push_str(&text);
-                previous_list = match block {
-                    Block::List(list) => Some(list_marker(list, options, previous_list)),
-                    Block::BlankLine(_) => previous_list,
+                let marker = match block {
+                    Block::List(list) => {
+                        Some(list_marker(list, options, placement.previous_list()))
+                    }
                     _ => None,
                 };
+                placement.wrote(block, marker, false);
             }
         }
         previous_at = at;
@@ -549,7 +552,17 @@ fn number_items(blocks: &mut [Block]) {
                     number_items(children);
                 }
             }
-            _ => {}
+            Block::Paragraph(_)
+            | Block::Heading(_)
+            | Block::ThematicBreak(_)
+            | Block::CodeBlock(_)
+            | Block::HtmlBlock(_)
+            | Block::Definition(_)
+            | Block::Table(_)
+            | Block::MathBlock(_)
+            | Block::Frontmatter(_)
+            | Block::LeafDirective(_)
+            | Block::BlankLine(_) => {}
         }
     }
 }
@@ -629,6 +642,8 @@ fn separated_boundaries(blocks: &[Block]) -> Vec<bool> {
 /// indented code read as indented code, as a paragraph opened by definitions
 /// took them as a continuation; and a list after a list written with its
 /// marker continues that list. A blank line reads as one wherever it stands.
+/// `rewritten_after_an_edit` in `tests/support/edits.rs` states the same rule
+/// for the simulated edits.
 fn moves_into_previous(
     block: &Block,
     text: &str,
@@ -665,7 +680,8 @@ fn opens_with_code_indent(text: &str) -> bool {
 
 /// Whether the block parsed from `text`, its source with its line ending,
 /// keeps that text when a blank line and a paragraph follow it, as a closed
-/// fence does and an unclosed one does not.
+/// fence does and an unclosed one does not. `tests/support/edits.rs` holds a
+/// copy.
 fn closed_by_a_blank_line(text: &str) -> bool {
     let gap = if text.ends_with('\n') {
         "\n"

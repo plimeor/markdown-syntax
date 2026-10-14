@@ -86,7 +86,9 @@ fn edited_leaf(block: &Block) -> Option<Span> {
 /// Whether the reused block at `index` of `blocks` is written again after a
 /// block written canonically, as its indentation could carry it into that
 /// block: any indentation after a list or footnote definition, and code
-/// indentation on a block other than indented code.
+/// indentation on a block other than indented code. The writer's own rule is
+/// `moves_into_previous` in `src/serialize.rs`; a change to one is a change
+/// to both.
 pub(crate) fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usize) -> bool {
     let Some(block) = blocks.get(index) else {
         return false;
@@ -109,7 +111,9 @@ pub(crate) fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usiz
 
 /// Whether the block parsed from `text`, its source with its line ending,
 /// keeps that text when a blank line and a paragraph follow it, as a closed
-/// fence does and an unclosed one does not.
+/// fence does and an unclosed one does not: a copy of the writer's
+/// `closed_by_a_blank_line` in `src/serialize.rs`, which the tests cannot
+/// call.
 fn closed_by_a_blank_line(text: &str) -> bool {
     let gap = if text.ends_with('\n') {
         "\n"
@@ -231,17 +235,64 @@ fn edit_own_field(block: &mut Block) -> bool {
     }
 }
 
+/// Removes a list's first item or a table's last body row, where another
+/// stays, and adds an item or a row after them; false for other blocks.
+fn edit_children(block: &mut Block) -> bool {
+    match block {
+        Block::List(node) => {
+            if node.children.len() > 1 {
+                node.children.remove(0);
+            }
+            node.children
+                .push(ListItem::new([Paragraph::new([Text::from("new")])]));
+            true
+        }
+        Block::Table(node) if !node.rows.is_empty() => {
+            if node.rows.len() > 2 {
+                node.rows.pop();
+            }
+            let cells = node.rows[0]
+                .cells
+                .iter()
+                .map(|_| TableCell::new([Text::from("new")]))
+                .collect();
+            node.rows.push(TableRow {
+                meta: Default::default(),
+                cells,
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Removes the first inline of a paragraph or heading holding more than
+/// one, and adds a link after the rest; false for other blocks.
+fn edit_inlines(block: &mut Block) -> bool {
+    let children = match block {
+        Block::Paragraph(node) => &mut node.children,
+        Block::Heading(node) => &mut node.children,
+        _ => return false,
+    };
+    if children.len() > 1 {
+        children.remove(0);
+    }
+    children.push(Text::from(" ").into());
+    children.push(Link::new("/new", [Text::from("new")]).into());
+    true
+}
+
 /// Applies the simulated edits to `input`, pushing each edit whose written
 /// text does not read back as the edited tree where its canonical output
 /// does, needs the read-back check to write a block canonically, or moves
-/// the source of the top-level blocks around an edit inside one, and, with
-/// `leaf_lines`, each edit of a parsed leaf that changes a line other than
-/// that leaf's own; returns how many edits were checked. `at` names the
-/// input in failures.
+/// the source of the top-level blocks around an edit inside one; pushes to
+/// `leaf_lines`, when given, where each edit of a parsed leaf that changes a
+/// line other than that leaf's own was made; returns how many edits were
+/// checked. `at` names the input in failures.
 pub(crate) fn simulated_edits(
     at: &str,
     input: &str,
-    leaf_lines: bool,
+    mut leaf_lines: Option<&mut Vec<String>>,
     failures: &mut Vec<String>,
 ) -> usize {
     let mut edits = 0;
@@ -254,7 +305,9 @@ pub(crate) fn simulated_edits(
             .iter()
             .map(move |(path, index)| (document, path, *index))
     }) {
-        for edit in ["leaf", "own", "delete", "insert"] {
+        for edit in [
+            "leaf", "own", "delete", "insert", "break", "child", "inline", "task", "wide",
+        ] {
             let mut edited = document.clone();
             let siblings = siblings_at(&mut edited.children, path);
             let applied = match edit {
@@ -269,10 +322,37 @@ pub(crate) fn simulated_edits(
                     siblings.remove(index);
                     true
                 }
-                _ => {
+                "insert" => {
                     siblings.insert(index + 1, Paragraph::new([Text::from("new")]).into());
                     true
                 }
+                "break" => {
+                    siblings.insert(
+                        index + 1,
+                        Block::ThematicBreak(ThematicBreak {
+                            meta: Default::default(),
+                            marker: ThematicBreakMarker::Asterisk,
+                        }),
+                    );
+                    true
+                }
+                "child" => edit_children(&mut siblings[index]),
+                "inline" => edit_inlines(&mut siblings[index]),
+                "task" => match &mut siblings[index] {
+                    Block::List(node) if node.children[0].checked.is_none() => {
+                        node.children[0].checked = Some(false);
+                        true
+                    }
+                    _ => false,
+                },
+                _ => match &mut siblings[index] {
+                    Block::List(node) if node.ordered => {
+                        let number = node.children[0].number.unwrap_or(1);
+                        node.children[0].number = Some(number + 1000);
+                        true
+                    }
+                    _ => false,
+                },
             };
             if !applied {
                 continue;
@@ -292,7 +372,7 @@ pub(crate) fn simulated_edits(
             let at = format!("{at}{leaves} {path:?} {index} {edit}");
             // A leaf edited in a parsed document changes its own lines
             // only.
-            let outside_the_leaf = (leaf_lines && edit == "leaf" && leaves.is_empty())
+            let outside_the_leaf = (leaf_lines.is_some() && edit == "leaf" && leaves.is_empty())
                 .then(|| {
                     let mut original = document.clone();
                     let span = edited_leaf(&siblings_at(&mut original.children, path)[index])?;
@@ -322,9 +402,9 @@ pub(crate) fn simulated_edits(
                             || markdown.len() < before.len() + after.len()
                     }) =>
                 {
-                    failures.push(format!(
-                        "{at}: {markdown:?} rewrites more than the edited leaf"
-                    ))
+                    if let Some(leaf_lines) = leaf_lines.as_deref_mut() {
+                        leaf_lines.push(at.clone());
+                    }
                 }
                 Ok(markdown) => {
                     // An edit inside a top-level block keeps the source
@@ -332,7 +412,6 @@ pub(crate) fn simulated_edits(
                     let Some(Step::Child(top) | Step::Item(top, _)) = path.first() else {
                         continue;
                     };
-                    let input = input;
                     let span = |index: usize| parsed.children[index].span().expect("parsed");
                     // A leading `---` break is written again, as a later
                     // `---` line could close it as frontmatter.

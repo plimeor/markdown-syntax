@@ -200,7 +200,7 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
-    fn an_indented_block_after_an_edited_list_is_rewritten() {
+    fn an_indented_block_after_a_list_written_partly_from_the_source_is_kept() {
         let mut document = parse("-   a\n\n  b").document;
         let Block::List(list) = &mut document.children[0] else {
             panic!("{:?}", document.children);
@@ -636,5 +636,112 @@ mod source_reused_per_node {
         let canonical = document.clone().without_source().to_markdown().unwrap();
         assert_eq!(document.to_markdown().unwrap(), canonical);
         assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 1);
+    }
+
+    fn first_text(blocks: &mut [Block]) -> &mut Text {
+        fn in_inlines(inlines: &mut [Inline]) -> Option<&mut Text> {
+            inlines.iter_mut().find_map(|inline| match inline {
+                Inline::Text(text) => Some(text),
+                _ => None,
+            })
+        }
+        blocks
+            .iter_mut()
+            .find_map(|block| match block {
+                Block::Paragraph(node) => in_inlines(&mut node.children),
+                Block::Heading(node) => in_inlines(&mut node.children),
+                _ => None,
+            })
+            .expect("a leaf with text")
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn the_line_ending_option_leaves_copied_endings() {
+        let mut document = parse("x\n\n- a\n- b\n- c\n\ny\n").document;
+        first_text(&mut item_mut(&mut document, 1, 1).children).value = "bZ".into();
+        assert_eq!(
+            document.to_markdown_with(&crate::crlf()).unwrap(),
+            "x\n\n- a\n- bZ\n- c\n\ny\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_leaf_keeps_its_indentation_and_trailing_spaces() {
+        for (input, written) in [
+            ("x\n\n   b\n", "x\n\n   bZ\n"),
+            ("> x\n>\n>   b  \n", "> x\n>\n>   bZ  \n"),
+            ("x\n\n  b\n  ===\n", "x\n\n  bZ\n===\n"),
+        ] {
+            let mut document = parse(input).document;
+            let last = document.children.len() - 1;
+            let blocks = match &mut document.children[last] {
+                Block::BlockQuote(node) => &mut node.children[1..],
+                _ => &mut document.children[last..],
+            };
+            first_text(blocks).value.push('Z');
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written);
+            reads_back(&markdown, &document);
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_label_or_cell_keeps_the_rest_of_its_line() {
+        let mut document = parse(":::box[label]\n\n-   a\n:::\n").document;
+        let Block::ContainerDirective(directive) = &mut document.children[0] else {
+            panic!();
+        };
+        directive.label = vec![Text::from("labelZ").into()];
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, ":::box[labelZ]\n\n-   a\n:::\n");
+        reads_back(&markdown, &document);
+        let mut document = parse("|a|`` b ``|\n|-|-|\n").document;
+        let Block::Table(table) = &mut document.children[0] else {
+            panic!();
+        };
+        table.rows[0].cells[0].children = vec![Text::from("aZ").into()];
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "|aZ|`` b ``|\n|-|-|\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn items_written_around_an_edit_keep_reading_as_they_did() {
+        // A rendered item keeps its trailing blank line.
+        let mut document = parse("- foo\n\n- bar\n\n\n- baz").document;
+        item_mut(&mut document, 0, 1).checked = Some(false);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "- foo\n\n- [ ] bar\n\n\n- baz"
+        );
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // An indented item no longer after its predecessor is rendered.
+        let mut document = parse("1. a\n\n  2. b\n\n   3. c").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.remove(1);
+        assert_eq!(document.to_markdown().unwrap(), "1. a\n\n3. c");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // A break after a new paragraph in a tight item is spaced.
+        let mut document = parse("a\n* ---").document;
+        item_mut(&mut document, 1, 0)
+            .children
+            .insert(0, paragraph("new"));
+        assert_eq!(document.to_markdown().unwrap(), "a\n\n* new\n  - - -");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        // A new last item takes in no indented paragraph after the list.
+        let mut document = parse("-    foo\n\n  bar\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.push(ListItem::new([paragraph("new")]));
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "-    foo\n- new\n\nbar\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
     }
 }

@@ -41,7 +41,8 @@ decision is made once, where the information to make it exists:
 - **Gaps are kept only where they still read the same.** The source between
   two siblings written from the source and adjacent there is kept where the
   boundary holds a blank line exactly when it did; one without a blank line
-  is kept only where the lines around it are the source's or a leaf's, since
+  is kept only beside a blank line, between two siblings that hold no
+  blocks, or where a container's line on either side is the source's, since
   `> a` followed by `b`, with the quote's last block edited into a
   paragraph, would read `b` as its lazy continuation. A node with copied own
   syntax is not a rendered node here: its kind and own fields are the
@@ -58,7 +59,10 @@ decision is made once, where the information to make it exists:
   the source that reads back differently is written canonically instead,
   and when the block count differs every such block is. Rules are fixed
   where the simulated edits show a fallback, so the check is a guard, not a
-  mechanism.
+  mechanism; each kind refuses the own syntax it cannot copy, and three
+  fragment probes (a leaf's text, a block before a new sibling, an item
+  before a new item) decide before the check what it would otherwise
+  undo.
 - **Correspondence, not equality, decides what is unchanged.** A node
   corresponds to a base node when their spans and own fields are equal and
   their children correspond; a leaf built from text corresponds when that
@@ -145,8 +149,12 @@ must stay literal is built as `Escape` nodes.
 - Renumbering after an insertion is the caller's.
 - A leaf's text with a line that opens a block where it is written reads
   back as that block.
-- One edited node costs one more parse of the output, and at most one more
-  write, both linear.
+- One edited node costs a parse of the base, one more of the output, a
+  fragment parse per edited leaf and per block a new sibling follows, and
+  at most one more write, all linear.
+- Copied text keeps its source line endings; an edited leaf's soft breaks
+  take the options' ending, so an edited leaf in a CRLF source written with
+  the default options mixes endings.
 - A gap without a blank line beside an edited container becomes a blank
   line, and a loose list whose blank line went with an edit is written
   whole.

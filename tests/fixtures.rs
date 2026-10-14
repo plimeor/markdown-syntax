@@ -693,109 +693,36 @@ fn edited_blocks_keep_the_rest_of_the_source() {
     );
 }
 
-/// The corpus inputs where editing a leaf rewrites a line other than its
-/// own, each with what the writer renders around it.
+/// The leaf edits of the corpus that rewrite a line other than the leaf's
+/// own, each named as the simulated edits name it (input, path, index, edit
+/// kind), with what the writer renders around it.
+#[rustfmt::skip]
 const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
-    (
-        "core/blank_lines.md",
-        "a blank line at a quote's edge is written as its prefix",
-    ),
-    (
-        "cases/commonmark/block_quote.cases#19",
-        "a blank line at a quote's edge is written as its prefix",
-    ),
-    (
-        "cases/commonmark/frontmatter.cases#7",
-        "a leading `---` break is written spaced",
-    ),
-    (
-        "cases/commonmark/frontmatter.cases#8",
-        "a leading `---` break is written spaced",
-    ),
-    (
-        "cases/commonmark/frontmatter.cases#15",
-        "a leading `---` break is written spaced",
-    ),
-    (
-        "cases/commonmark/frontmatter.cases#19",
-        "a leading `---` break is written spaced",
-    ),
-    (
-        "extensions/gfm_task_list.md",
-        "a task checkbox split across lines renders its item",
-    ),
-    (
-        "cases/commonmark/fuzz.cases#18",
-        "a task checkbox split across lines renders its item",
-    ),
-    (
-        "cases/commonmark/gfm_task_list_item.cases#7",
-        "a task checkbox split across lines renders its item",
-    ),
-    (
-        "cases/commonmark/misc_tabs.cases#44",
-        "a marker followed by a tab renders its item",
-    ),
-    (
-        "cases/commonmark/list.cases#29",
-        "a marker line's trailing spaces are not copied",
-    ),
-    (
-        "cases/commonmark/list.cases#49",
-        "the gap without a blank line after a list whose last line changed is canonical",
-    ),
-    (
-        "cases/commonmark/gfm_table.cases#31",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/commonmark/gfm_table.cases#53",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/gfm/table.cases#5",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/gfm/table.cases#9",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/gfm/table.cases#11",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/gfm/table.cases#16",
-        "a table's own lines are copied without their indentation",
-    ),
-    (
-        "cases/gfm/table.cases#12",
-        "the edited row and the copied delimiter row take the options' line ending",
-    ),
-    (
-        "cases/gfm/table.cases#13",
-        "the edited row and the copied delimiter row take the options' line ending",
-    ),
-    (
-        "cases/gfm/alerts.cases#2",
-        "a `>>>` quote holding the edit is written with `>` prefixes",
-    ),
-    (
-        "cases/gfm/alerts.cases#4",
-        "a `>>>` quote holding the edit is written with `>` prefixes",
-    ),
-    (
-        "cases/gfm/sourcepos_chars.cases#5",
-        "a `>>>` quote holding the edit is written with `>` prefixes",
-    ),
-    (
-        "cases/gfm/multiline_block_quotes.cases#8",
-        "a `>>>` quote holding the edit is written with `>` prefixes",
-    ),
-    (
-        "cases/gfm/multiline_block_quotes.cases#10",
-        "a `>>>` quote holding the edit is written with `>` prefixes",
-    ),
+    ("core/blank_lines.md [Child(6)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
+    ("extensions/gfm_task_list.md [Item(3, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/block_quote.cases#19 [Child(0)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
+    ("cases/commonmark/frontmatter.cases#7 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#8 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#15 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/frontmatter.cases#19 [] 1 leaf", "a leading `---` break is written spaced"),
+    ("cases/commonmark/fuzz.cases#18 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/gfm_table.cases#31 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_table.cases#53 [Child(8)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_table.cases#53 [Child(9)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/commonmark/gfm_task_list_item.cases#7 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/list.cases#29 [Item(0, 0)] 0 leaf", "a marker line's trailing spaces are not copied"),
+    ("cases/commonmark/list.cases#49 [Item(0, 0)] 0 leaf", "the gap without a blank line after a list whose last line changed is canonical"),
+    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 0 leaf", "a marker followed by a tab renders its item"),
+    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 1 leaf", "a marker followed by a tab renders its item"),
+    ("cases/gfm/alerts.cases#2 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/alerts.cases#4 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/multiline_block_quotes.cases#8 [Child(0), Item(1, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/multiline_block_quotes.cases#10 [Child(0), Child(0), Item(2, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/sourcepos_chars.cases#5 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
+    ("cases/gfm/table.cases#5 [Item(0, 0)] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#9 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#11 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
+    ("cases/gfm/table.cases#16 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
 ];
 
 /// Each block at every depth of each corpus input, with its first leaf or
@@ -803,8 +730,8 @@ const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
 /// with the source, reads back as the edited tree wherever the edited tree's
 /// canonical output does, without a block the read-back check has to write
 /// canonically, and keeps the source of the top-level blocks around the one
-/// it edits inside; an edited leaf changes only its own lines, unless its
-/// input is listed in `NOT_KEPT_AROUND_A_LEAF_EDIT`; the same with every
+/// it edits inside; an edited leaf changes only its own lines, unless the
+/// edit is listed in `NOT_KEPT_AROUND_A_LEAF_EDIT`; the same with every
 /// leaf given as its text: the simulated edits of `per-node-reuse`, task
 /// 2.5.
 // serialization: Unchanged source is kept
@@ -812,28 +739,23 @@ const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
 fn edited_nodes_at_every_depth_read_back() {
     let mut failures = Vec::new();
     let mut edits = 0;
-    let mut seen = vec![false; NOT_KEPT_AROUND_A_LEAF_EDIT.len()];
+    let mut leaf_lines = Vec::new();
     for source in read_back_corpus() {
         let at = source.at();
-        let listed = NOT_KEPT_AROUND_A_LEAF_EDIT
-            .iter()
-            .position(|(name, _)| *name == at);
-        if let Some(index) = listed {
-            seen[index] = true;
-            let mut rewrites = Vec::new();
-            edits::simulated_edits(&at, &source.input, true, &mut rewrites);
-            if rewrites.is_empty() {
-                failures.push(format!(
-                    "{at}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but each edited leaf changes only its own lines"
-                ));
-            }
-        }
-        edits += edits::simulated_edits(&at, &source.input, listed.is_none(), &mut failures);
+        edits += edits::simulated_edits(&at, &source.input, Some(&mut leaf_lines), &mut failures);
     }
-    for ((name, _), seen) in NOT_KEPT_AROUND_A_LEAF_EDIT.iter().zip(seen) {
-        if !seen {
+    for at in &leaf_lines {
+        if !NOT_KEPT_AROUND_A_LEAF_EDIT
+            .iter()
+            .any(|(listed, _)| listed == at)
+        {
+            failures.push(format!("{at}: rewrites more than the edited leaf"));
+        }
+    }
+    for (listed, _) in NOT_KEPT_AROUND_A_LEAF_EDIT {
+        if !leaf_lines.iter().any(|at| at == listed) {
             failures.push(format!(
-                "{name}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but names no input"
+                "{listed}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but names no edit that rewrites more than its leaf"
             ));
         }
     }

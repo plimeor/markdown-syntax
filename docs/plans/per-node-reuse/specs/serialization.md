@@ -50,13 +50,15 @@ siblings that hold no blocks, or has the source's lines on both sides; which
 other boundaries without a blank line are kept is unspecified. It SHALL keep
 the source before the document's first block and after its last when that
 block is written from the source there; every other boundary SHALL be
-canonical. A node SHALL be written as canonical output even so where its source would read differently
-in its place; which placements make a node's source read differently is
-unspecified, except that a top-level block written partly from the source
-SHALL be written as canonical output where the parsed output holds a
-different block in its place. Options SHALL apply only to the text written as canonical
-output, and a list written with its own syntax from the source SHALL write a
-new item with the marker it records. Parsing the output SHALL yield a
+canonical. A node SHALL be written as canonical output even so where its
+source would read differently in its place; which placements make a node's
+source read differently is unspecified, except that a top-level block
+written partly from the source SHALL be written as canonical output where
+the parsed output holds a different block in its place. Options SHALL apply
+only to the text the writer produces, line endings included, and a list
+written with its own syntax from the source SHALL write a new item with the
+marker it records; text and line endings copied from the source SHALL be
+kept as they are. Parsing the output SHALL yield a
 document equal to the written one as "Round-trip stability" compares them
 wherever parsing the canonical output of the same document does.
 

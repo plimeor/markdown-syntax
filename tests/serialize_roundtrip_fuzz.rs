@@ -287,7 +287,7 @@ fn generated_documents_edited_at_every_depth_read_back() {
             edits += edits::simulated_edits(
                 &format!("{generator} {input:?}"),
                 &input,
-                false,
+                None,
                 &mut failures,
             );
         }

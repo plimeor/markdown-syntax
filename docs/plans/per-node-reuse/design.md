@@ -36,8 +36,10 @@ to_markdown[_with] ──► base = parse(source) once
 
 `to_markdown` and `to_markdown_with` keep their signatures. Nothing is stored
 between writes. The canonical writer (`write_canonical` and the `write_*`
-functions under it) is unchanged and stays the only renderer; reuse is a
-layer above it that decides, per node, between the source and the renderer.
+functions under it) keeps its output and stays the only renderer; the parts
+reuse renders on their own (an item, a row, a delimiter row, an item's
+number) are functions of it. Reuse is a layer above it that decides, per
+node, between the source and the renderer.
 
 ### Matching
 
@@ -101,10 +103,10 @@ no child covers, taken per kind:
 | Block quote | the `>` and the space after it before its first block, on its first line |
 | List item | marker, task checkbox, and the whitespace after them on its first line |
 | Alert | the `[!KIND]` line |
-| Fenced code, math block, container directive | opening line; closing line |
+| Fenced code, math block, container directive | opening line, with an edited label written in it; closing line |
 | HTML container | the source before its first block and after its last |
 | Footnote definition | the `[^label]:` and the whitespace after it, or, before blocks on a later line, the lines up to them |
-| Table | the delimiter row; each row that corresponds, as its line |
+| Table | the delimiter row; each row that corresponds, as its line; in a matched row, the pipes and padding around each changed cell |
 
 A line of own syntax that is not the node's first line (an underline, a
 closing fence, a delimiter row) is copied from its first character that is
@@ -134,7 +136,10 @@ delimiters; a link's brackets, destination, and title), and every other one
 is rendered. The text between two adjacent inlines that are copied and
 adjacent in the base is kept; nothing is written between others, as the
 canonical writer writes none. The inline source is prefix-free, so a leaf's
-lines are content lines and take the current prefixes.
+lines are content lines and take the current prefixes. A paragraph keeps its
+first line's indentation and its last line's trailing whitespace, and a
+setext heading's content its indentation, so an edit inside a line leaves
+the rest of the line as it was.
 
 A leaf built from text whose inlines were then edited has lost that text in
 the writer's pre-pass and is rendered, as in batch 1.
@@ -168,10 +173,20 @@ there is rendered where what is written before it would take it in:
 indentation after a list or a footnote definition, which blank lines do not
 end; four columns of indentation on a block other than indented code; a
 list after a list with its marker. One predicate states this for every
-sequence of siblings, the top level and every container alike; the top
-level adds the `---` break that would open frontmatter. A kept block that a
-blank line and a paragraph would extend, as an unclosed fence, is rendered
-before a sibling other than its successor.
+sequence of blocks, the top level and every container alike, through one
+record of the siblings written so far (`Placement`); the top level adds the
+`---` break that would open frontmatter. A list whose last item is not the
+base's last item written from the source is written as an open list, and
+takes in an indented block that follows it even across a kept gap, so such
+a block is rendered. Items are not blocks, and a list states the same rule
+for them in its own terms: in a list, an
+indented item that no longer follows its source predecessor is rendered,
+and an item that a following item would extend, as an unclosed fence, is
+rendered before a new item. A thematic break under a paragraph without a
+blank line between them is rendered in the form that cannot read as a
+setext underline. A kept block that a blank line and a paragraph would
+extend, as an unclosed fence, is rendered before a sibling other than its
+successor.
 
 ### Read-back check
 
@@ -182,12 +197,23 @@ stability" compares them (`normalized_blocks`). Each block that returned
 then the canonical writer's, which the spec already allows to differ. When
 the top-level counts differ, the document is written at batch 1's grain.
 The pure rendering path, a document without a source or with nothing
-reused, still never parses its output. The cost is one parse of the output
-and at most one more write, each linear.
+reused, still never parses its output.
+
+The check is the guard for the whole output. Three facts are decided before
+it, where a wrong copy would reach the check as a fallback: each kind
+refuses own syntax it cannot copy (a tab after a marker, a checkbox on its
+own line, a head that does not end its line), and three probes parse a
+fragment: an edited leaf's text read back as its inlines, a block before a
+new sibling read with a blank line and a paragraph after it, and an item
+before a new item read with that item after it. The cost is one parse of
+the base, one of the output, a fragment parse per edited leaf and per block
+that a new sibling follows, and at most one more write, each linear.
 
 ### Options
 
-Options apply only to rendered text. A list written with copied own syntax
+Options apply only to rendered text, line endings included: a copied line
+keeps its source ending, and every line the writer produces, an edited
+leaf's soft breaks among them, takes the options' ending. A list written with copied own syntax
 writes its new items with the list's recorded marker, not an overriding
 `bullet` or `ordered_delimiter`, so that one list is not split into two; the
 override applies to lists written whole.
@@ -211,6 +237,11 @@ override applies to lists written whole.
   canonical output reads back as the edited tree, is reported by the test,
   so that a rule is fixed, not left to the fallback.
 - The same edits on a document whose leaves are all rebuilt from text.
+- Nine edit kinds over the read-back corpus: a leaf's text, an own field,
+  deletion, insertion, a split paragraph, a child (an item or a row), an
+  inline, a task checkbox, and a wide edit. An edit to a leaf must leave
+  every byte outside the leaf's lines as it was; the edits that do not are
+  listed one by one, with reasons, in `tests/fixtures.rs`.
 - Cases for a multi-line item under a wider marker, a list under a marker
   option, a renumbered and a ticked item with nested blocks, and edits at
   the deepest nesting the parser allows.
@@ -235,7 +266,8 @@ override applies to lists written whole.
   unclosed fence, an underline under rendered content, a fence closed by
   changed code) grow with every construct and miss interactions. Turned
   down: a guard list, batch 1's approach, kept only for placement, where
-  one predicate serves every level.
+  one predicate serves every level, and for the copies each kind cannot
+  make, with three fragment probes (Read-back check).
 - Prefixes kept only inside kept source — because a changed child breaks
   the line-to-line mapping a copied prefix would need. Turned down:
   recording a prefix style per container, which is a spelling field.
