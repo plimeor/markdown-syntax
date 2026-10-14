@@ -106,28 +106,48 @@ inlines. The writer SHALL write:
   column where they fit;
 - every other node as canonical output, with its children by these rules.
 
+A line written where the base node has a source line keeps that line's
+source prefix (container markers and indentation) and the line ending before
+it: a setext underline, a table's delimiter row, and a blank line matched to
+the base's whole, unless it opens its container, whose own syntax opens it,
+and a list item's marker line that holds nothing else with its trailing
+whitespace; a later line of an edited leaf's text, a table's later row, or
+the line an alert's or a directive's first child starts on after the
+container's own, where it reads as that line does there: it is that line's
+text, it parses alone as a paragraph, or the source line stands where no
+line opens a block, as one indented four columns past its container does.
+Every other line SHALL take the canonical prefix.
+
 The writer SHALL keep the source between two siblings written from the
 source that are adjacent in the source, where the boundary holds a
 separating blank line exactly when it did there, and where the boundary
 holds a blank line, has a `BlankLine` on one side, stands between two
-siblings that hold no blocks, stands between one that holds no blocks and a
-container after it that, as written, starts on the line after it (after a
-paragraph, a definition, or a table, where it interrupts a paragraph), or
-has the source's lines on both sides; which other boundaries without a
-blank line are kept is unspecified. It SHALL keep
-the source before the document's first block and after its last when that
-block is written from the source there; every other boundary SHALL be
-canonical. A node SHALL be written as canonical output even so where its
-source would read differently in its place; which placements make a node's
-source read differently is unspecified, except that a top-level block
-written partly from the source SHALL be written as canonical output where
-the parsed output holds a different block in its place. Options SHALL apply
-only to the text the writer produces, line endings included, and a list
-written with its own syntax from the source SHALL write a new item with the
-marker it records; text and line endings copied from the source SHALL be
-kept as they are. Parsing the output SHALL yield a document equal to the
-written one as "Round-trip stability" compares them wherever parsing the
-canonical output of the same document does.
+siblings that hold no blocks, has the source's lines on both sides, or
+follows a last leaf, through the last child of each container before it,
+that as written does not take the sibling's first line: after a paragraph,
+a definition, or a table at the same level, where the sibling interrupts a
+paragraph (a table: ends a table); after a paragraph or a definition inside
+containers, or an alert without blocks, where that line as a lazy line ends
+those containers; after a directive's last leaf never, unless the source's
+lines are on both sides; after any other last leaf always; and, after a list
+whose last item is not the base's last item written from the source, only
+where the source's lines are on both sides. Which other boundaries without a
+blank line are kept is unspecified. It SHALL keep the source before the
+document's first block and after its last when that block is written from
+the source there; every other boundary SHALL be canonical. A `---` thematic
+break that opens the document in the source and in the output SHALL be kept
+from the source unless a later line of the output closes it as frontmatter.
+A node SHALL be written as canonical output even so where its source would
+read differently in its place; which placements make a node's source read
+differently is unspecified, except that a top-level block written partly
+from the source SHALL be written as canonical output where the parsed output
+holds a different block in its place. Options SHALL apply only to the text
+the writer produces, line endings included, and a list written with its own
+syntax from the source SHALL write a new item with the marker it records;
+text and line endings copied from the source SHALL be kept as they are.
+Parsing the output SHALL yield a document equal to the written one as
+"Round-trip stability" compares them wherever parsing the canonical output
+of the same document does.
 
 #### Scenario: Edited items
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
@@ -136,3 +156,7 @@ canonical output of the same document does.
 #### Scenario: One edited link
 - **WHEN** the target of the `WikiLink` in the document parsed from ``"see  [[A]] and `` b ``"`` is changed to `B` and the document is written
 - **THEN** it returns ``"see  [[B]] and `` b ``"``
+
+#### Scenario: Lines around an edited leaf
+- **WHEN** the paragraph of the quote parsed from `"> a\nb\n"` is given the text `"a\nbX"`, the paragraph in the quote parsed from `"> - a\n- b\n"` the text `"aX"`, and each document is written
+- **THEN** they return `"> a\nbX\n"` and `"> - aX\n- b\n"`: the lazy line stays lazy, and the list after the quote, which a lazy line's list marker starts, stays on the next line

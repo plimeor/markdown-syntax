@@ -158,23 +158,42 @@ impl Document {
         // A block written partly from the source stays so only where the
         // output reads back as it at its place.
         let base = crate::parse(source).document;
+        let write =
+            |whole: &[bool]| write_reusing(blocks, &base, source, options, &definitions, whole);
+        // A `---` break kept opening the document stays only while no later
+        // line closes it as frontmatter, which every write is checked for.
+        let opens_with_break = matches!(blocks.first(), Some(Block::ThematicBreak(_)));
         let mut whole = alloc::vec![false; blocks.len()];
-        let (output, partly) = write_reusing(blocks, &base, source, options, &definitions, &whole)?;
+        let (mut output, mut partly) = write(&whole)?;
+        if opens_with_break && opens_frontmatter(&output) {
+            whole[0] = true;
+            (output, partly) = write(&whole)?;
+        }
         if partly.is_empty() {
             return Ok((output, 0));
         }
-        for index in misread(blocks, &output, &partly) {
-            whole[index] = true;
+        let misread = misread(blocks, &output, &partly);
+        if misread.is_empty() {
+            return Ok((output, 0));
         }
-        let rewritten = whole.iter().filter(|whole| **whole).count();
-        if rewritten > 0 {
-            return Ok((
-                write_reusing(blocks, &base, source, options, &definitions, &whole)?.0,
-                rewritten,
-            ));
+        for index in &misread {
+            whole[*index] = true;
         }
-        Ok((output, 0))
+        output = write(&whole)?.0;
+        if opens_with_break && !whole[0] && opens_frontmatter(&output) {
+            whole[0] = true;
+            output = write(&whole)?.0;
+        }
+        Ok((output, misread.len()))
     }
+}
+
+/// Whether `output` opens with frontmatter: its first line is a fence that
+/// a later line closes.
+fn opens_frontmatter(output: &str) -> bool {
+    let mut lines = output.split(['\n', '\r']);
+    let opening = lines.next().and_then(crate::parse::frontmatter_fence_kind);
+    opening.is_some() && lines.any(|line| crate::parse::frontmatter_fence_kind(line) == opening)
 }
 
 /// The canonical Markdown of a document's top-level blocks.
@@ -313,6 +332,7 @@ fn write_reusing(
                 right,
                 partly[index].as_ref().map(|(_, lines)| lines.as_slice()),
             ),
+            open_lists[index - 1],
             true,
         )
     };
@@ -387,11 +407,13 @@ fn write_reusing(
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;
-            // `---` opening the document stays a break only while no later
-            // line closes it as frontmatter.
+            // A break that comes to open the document could open
+            // frontmatter; one that opened it there stays a break while no
+            // later line closes it as frontmatter (`Document::write`), which
+            // `whole` marks.
             let rewritten = matches!(block, Block::ThematicBreak(_))
                 && index == 0
-                && (position != 0 || source[start..].starts_with("---"))
+                && (position != 0 || whole[0] && source[start..].starts_with("---"))
                 || taken_in(&source[start..]);
             if rewritten {
                 at = None;

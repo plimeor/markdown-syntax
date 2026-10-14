@@ -413,10 +413,12 @@ pub(crate) fn simulated_edits(
                         continue;
                     };
                     let span = |index: usize| parsed.children[index].span().expect("parsed");
-                    // A leading `---` break is written again, as a later
-                    // `---` line could close it as frontmatter.
+                    // A leading `---` break is written again where a later
+                    // `---` line closes it as frontmatter.
+                    let fence = |line: &str| line.trim_end_matches([' ', '\t']) == "---";
                     let leading_dash_break = matches!(parsed.children[0], Block::ThematicBreak(_))
-                        && input[span(0).start..].starts_with("---");
+                        && input.split(['\n', '\r']).next().is_some_and(fence)
+                        && markdown.split(['\n', '\r']).skip(1).any(fence);
                     // A block before it that a blank line and a paragraph
                     // would extend, as an unclosed fence, is closed.
                     let previous = top.checked_sub(1).filter(|_| !leading_dash_break);
