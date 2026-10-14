@@ -192,6 +192,36 @@ pub(super) fn last_line_holds(
     }
 }
 
+/// Whether `gap`, the source between two siblings written from the source
+/// and adjacent there, reads the same between them as written: it holds a
+/// blank line, or one of them is a blank line, or the lines around it are
+/// the source's. A leaf's own edited lines read the same before any sibling;
+/// after a container, whose last line a leaf could continue, or before one,
+/// only its source lines do. `left` and `right` are each a block, its base
+/// span, and its lines when it was not kept whole; `top` where content lines
+/// take no prefix.
+pub(super) fn keeps_gap(
+    source: &str,
+    gap: &str,
+    left: (&Block, Span, Option<&[Line]>),
+    right: (&Block, Span, Option<&[Line]>),
+    top: bool,
+) -> bool {
+    let (left_block, left_span, left_lines) = left;
+    let (right_block, right_span, right_lines) = right;
+    let left_end =
+        left_span.start + strip_line_ending(&source[left_span.start..left_span.end]).len();
+    let containers = holds_blocks(left_block) || holds_blocks(right_block);
+    holds_blank_line(gap)
+        || matches!(left_block, Block::BlankLine(_))
+        || matches!(right_block, Block::BlankLine(_))
+        || (!holds_blocks(left_block)
+            || left_lines
+                .is_none_or(|lines| last_line_holds(source, lines, left_span, left_end, top)))
+            && (!containers
+                || right_lines.is_none_or(|lines| first_line_holds(source, lines, right_span)))
+}
+
 /// Whether `block` holds blocks, whose last line can change what the line
 /// after it reads as.
 pub(super) fn holds_blocks(block: &Block) -> bool {
@@ -397,13 +427,19 @@ impl Reuse<'_, '_> {
         if !write_inline_run(inlines, base, &read, &source.text, context, &mut output)? {
             return Ok(None);
         }
-        // Lines the source indented as continuation lines start at the
-        // container's column here, so no later line may open a block.
-        if output.contains(['\n', '\r'])
-            && !matches!(
-                crate::parse(&output).document.children.as_slice(),
-                [Block::Paragraph(_)]
-            )
+        // Lines the source indented, or wrote as lazy continuation lines,
+        // start at the container's column here, so no line may open a block,
+        // nor a later one open with spaces or tabs, which the block parse
+        // strips.
+        if (!heading || output.contains(['\n', '\r']))
+            && (split(&output, false, false)
+                .iter()
+                .skip(1)
+                .any(|line| line.body.starts_with([' ', '\t']))
+                || !matches!(
+                    crate::parse(&output).document.children.as_slice(),
+                    [Block::Paragraph(_)]
+                ))
         {
             return Ok(None);
         }
@@ -693,20 +729,18 @@ impl Reuse<'_, '_> {
                         let (Some(from), Some(to)) = (before_at, at) else {
                             return false;
                         };
-                        let left = base[from].span().expect("matched");
-                        let right = base[to].span().expect("matched");
                         gap.starts_with(['\n', '\r'])
-                            && (holds_blank_line(gap)
-                                || (!holds_blocks(&children[before])
-                                    || last_line_holds(
-                                        self.source,
-                                        &lines,
-                                        left,
-                                        self.body_end(left),
-                                        false,
-                                    ))
-                                    && (!holds_blocks(child)
-                                        || first_line_holds(self.source, &written, right)))
+                            && keeps_gap(
+                                self.source,
+                                gap,
+                                (
+                                    &children[before],
+                                    base[from].span().expect("matched"),
+                                    Some(&lines),
+                                ),
+                                (child, base[to].span().expect("matched"), Some(&written)),
+                                false,
+                            )
                     });
                     separated |= gap.map_or(join == Join::Gap || blank_lines > 0, holds_blank_line);
                     match gap {

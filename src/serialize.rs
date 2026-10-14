@@ -161,15 +161,8 @@ impl Document {
         if partly.is_empty() {
             return Ok((output, 0));
         }
-        let read = crate::parse(&output).document.children;
-        if read.len() == blocks.len() {
-            for index in partly {
-                whole[index] = !reads_as(&read[index], &blocks[index]);
-            }
-        } else {
-            for index in partly {
-                whole[index] = true;
-            }
+        for index in misread(blocks, &output, &partly) {
+            whole[index] = true;
         }
         let rewritten = whole.iter().filter(|whole| **whole).count();
         if rewritten > 0 {
@@ -278,22 +271,67 @@ fn write_reusing(
     {
         return Ok((source.into(), Vec::new()));
     }
-    // Backward, so that each block knows whether its successor stays reused.
-    for index in (0..blocks.len().saturating_sub(1)).rev() {
-        let Some(at) = reused[index] else { continue };
-        if placed(&reused, &partly, index + 1) != Some(at + 1) {
-            let span = span_of(&blocks[index]);
-            if !closed_by_a_blank_line(&source[span.start..span.end]) {
-                reused[index] = None;
-            }
-        }
-    }
-
     // Whether the boundary before each block holds the blank line that
     // separates two blocks; the source between two blocks adjacent in the
     // source is kept only where it still does or does not.
     let separated = separated_boundaries(blocks);
     let base_separated = separated_boundaries(&base);
+    // Whether the source between the block at `index`, placed at `at`, and
+    // the one before it, placed at `at - 1`, is kept: the boundary holds a
+    // separating blank line exactly when it did, and the source reads the
+    // same between them (`reuse::keeps_gap`).
+    let keeps_gap = |partly: &[Option<(usize, Vec<reuse::Line>)>], index: usize, at: usize| {
+        if index == 0 || at == 0 || separated[index] != base_separated[at] {
+            return false;
+        }
+        let left = base[at - 1].span().expect("a parsed block has a span");
+        let right = base[at].span().expect("a parsed block has a span");
+        let left_end = left.start + strip_line_ending(&source[left.start..left.end]).len();
+        reuse::keeps_gap(
+            source,
+            &source[left_end..right.start],
+            (
+                &blocks[index - 1],
+                left,
+                partly[index - 1]
+                    .as_ref()
+                    .map(|(_, lines)| lines.as_slice()),
+            ),
+            (
+                &blocks[index],
+                right,
+                partly[index].as_ref().map(|(_, lines)| lines.as_slice()),
+            ),
+            true,
+        )
+    };
+    // Backward, so that each block knows whether its successor stays reused,
+    // with the source between them.
+    for index in (0..blocks.len().saturating_sub(1)).rev() {
+        let Some(at) = placed(&reused, &partly, index) else {
+            continue;
+        };
+        if placed(&reused, &partly, index + 1) == Some(at + 1)
+            && keeps_gap(&partly, index + 1, at + 1)
+        {
+            continue;
+        }
+        match &partly[index] {
+            Some((_, lines)) => {
+                let mut text = reuse::join(lines);
+                text.push('\n');
+                if !closed_by_a_blank_line(&text) {
+                    partly[index] = None;
+                }
+            }
+            None => {
+                let span = span_of(&blocks[index]);
+                if !closed_by_a_blank_line(&source[span.start..span.end]) {
+                    reused[index] = None;
+                }
+            }
+        }
+    }
 
     let mut output = String::with_capacity(source.len());
     // The block written before the current one: its index in the source's
@@ -308,6 +346,9 @@ fn write_reusing(
     // Whether the output ends with the source's own trailing bytes, which
     // take the place of the final newline.
     let mut ends_with_source_tail = false;
+    // Whether every block since the last one other than a blank line follows
+    // its predecessor in the source.
+    let mut run_follows = true;
     for (index, block) in blocks.iter().enumerate() {
         // Blank lines between them do not end a list or a footnote
         // definition before an indented line.
@@ -325,32 +366,20 @@ fn write_reusing(
                 partly[index] = None;
             }
         }
-        let follows_predecessor = match (previous_at, placed(&reused, &partly, index)) {
-            (Some(previous), Some(at))
-                if previous + 1 == at && separated[index] == base_separated[at] =>
-            {
-                // A gap without a blank line stays only where the lines
-                // around it are the source's.
-                let left = base[previous].span().expect("a parsed block has a span");
-                let right = base[at].span().expect("a parsed block has a span");
-                let left_end = left.start + strip_line_ending(&source[left.start..left.end]).len();
-                reuse::holds_blank_line(&source[left_end..right.start])
-                    || (index == 0
-                        || !reuse::holds_blocks(&blocks[index - 1])
-                        || partly[index - 1].as_ref().is_none_or(|(_, lines)| {
-                            reuse::last_line_holds(source, lines, left, left_end, true)
-                        }))
-                        && (!reuse::holds_blocks(block)
-                            || partly[index].as_ref().is_none_or(|(_, lines)| {
-                                reuse::first_line_holds(source, lines, right)
-                            }))
-            }
-            _ => false,
-        };
+        let follows_predecessor = matches!(
+            (previous_at, placed(&reused, &partly, index)),
+            (Some(previous), Some(at)) if previous + 1 == at && keeps_gap(&partly, index, at)
+        );
+        // Blank lines between them do not end a list or a footnote
+        // definition before an indented line, so a block follows its
+        // predecessor only where every block since the last other than a
+        // blank line did.
+        let follows_run = follows_predecessor && run_follows;
+        run_follows = index == 0 || !matches!(block, Block::BlankLine(_)) || follows_run;
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;
-            let moved_after = index > 0 && !follows_predecessor;
+            let moved_after = index > 0 && !follows_run;
             let rewritten = match block {
                 // `---` opening the document stays a break only while no
                 // later line closes it as frontmatter.
@@ -360,6 +389,8 @@ fn write_reusing(
                 Block::List(list) => moved_after && previous_list == Some(written_marker(list)),
                 _ => false,
             } || (moved_after
+                // A line of spaces is a blank line wherever it stands.
+                && !matches!(block, Block::BlankLine(_))
                 && if previous_takes_indented_lines {
                     source[start..].starts_with([' ', '\t'])
                 } else {
@@ -479,6 +510,22 @@ fn write_reusing(
         .filter_map(|(index, lines)| lines.as_ref().map(|_| index))
         .collect();
     Ok((output, partly))
+}
+
+/// The blocks among `partly`, indices of `blocks` written partly from the
+/// source, that `output` reads back as something else in their place: each
+/// one that differs, or every one when the output holds a different number
+/// of top-level blocks.
+fn misread(blocks: &[Block], output: &str, partly: &[usize]) -> Vec<usize> {
+    let read = crate::parse(output).document.children;
+    if read.len() != blocks.len() {
+        return partly.to_vec();
+    }
+    partly
+        .iter()
+        .copied()
+        .filter(|index| !reads_as(&read[*index], &blocks[*index]))
+        .collect()
 }
 
 /// Whether `read`, a block of the parsed output, reads as `block` as
@@ -2019,4 +2066,21 @@ fn trim_up_to_three_indent_columns(input: &str) -> Option<&str> {
         bytes += 1;
     }
     (columns <= 3).then_some(&input[bytes..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn the_read_back_check_names_each_block_that_reads_differently() {
+        let blocks = crate::parse("> x\n\n# y\n\nz").document.children;
+        assert_eq!(misread(&blocks, "> x\n\n# y\n\nz", &[0, 2]), [0usize; 0]);
+        // A block read differently in its place.
+        assert_eq!(misread(&blocks, "> w\n\n# y\n\nz", &[0, 2]), [0]);
+        assert_eq!(misread(&blocks, "> w\n\n# y\n\nz", &[2]), [0usize; 0]);
+        // `z` read into the quote: the block count differs.
+        assert_eq!(misread(&blocks, "> x\nz\n\n# y", &[0, 2]), [0, 2]);
+    }
 }

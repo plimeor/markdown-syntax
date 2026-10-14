@@ -9,6 +9,9 @@ mod normalize;
 #[path = "support/leaves.rs"]
 mod leaves;
 
+#[path = "support/edits.rs"]
+mod edits;
+
 use markdown_syntax::parse;
 
 /// A small deterministic xorshift generator, so failures reproduce.
@@ -264,6 +267,28 @@ fn generated_leaves_read_again_from_their_inline_source() {
             }
         }
     }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The simulated edits of `per-node-reuse` on every generated document
+/// (`fixtures.rs`, `edited_nodes_at_every_depth_read_back`).
+// serialization: Unchanged source is kept
+#[test]
+fn generated_documents_edited_at_every_depth_read_back() {
+    let mut failures = Vec::new();
+    let mut edits = 0;
+    for &(generator, pieces, max_pieces, seed) in GENERATORS {
+        for input in generated(pieces, max_pieces, seed) {
+            edits +=
+                edits::simulated_edits(&format!("{generator} {input:?}"), &input, &mut failures);
+        }
+    }
+    assert!(edits > 10_000, "only {edits} edits");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",
