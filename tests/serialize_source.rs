@@ -371,13 +371,61 @@ mod source_reused_per_node {
 
     // serialization: Unchanged source is kept
     #[test]
-    fn one_edited_item() {
+    fn edited_items() {
         let mut document = parse("-   a\n-   b\n\n    c\n-   d\n").document;
         item_mut(&mut document, 0, 1).children[0] = paragraph("x");
         assert_eq!(
             document.to_markdown().unwrap(),
             "-   a\n-   x\n\n    c\n-   d\n"
         );
+        let mut document = parse("aa\n- b\n").document;
+        item_mut(&mut document, 1, 0).children[0] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), "aa\n- x\n");
+        let mut document = parse("aa\n- b\n").document;
+        item_mut(&mut document, 1, 0).children.clear();
+        assert_eq!(document.to_markdown().unwrap(), "aa\n\n-\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_container_after_a_leaf_keeps_the_gap_while_it_still_starts_there() {
+        let edited = |source: &str, edit: &dyn Fn(&mut Vec<Block>)| {
+            let mut document = parse(source).document;
+            let last = document.children.len() - 1;
+            match &mut document.children[last] {
+                Block::List(list) => edit(&mut list.children[0].children),
+                Block::BlockQuote(quote) => edit(&mut quote.children),
+                _ => panic!("{source:?} ends with a container"),
+            }
+            let markdown = document.to_markdown().unwrap();
+            reads_back(&markdown, &document);
+            assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+            markdown
+        };
+        let replace = |children: &mut Vec<Block>| children[0] = paragraph("x");
+        let clear = |children: &mut Vec<Block>| children.clear();
+        assert_eq!(edited("text\n> q\n", &replace), "text\n> x\n");
+        assert_eq!(edited("# h\n- b\n", &replace), "# h\n- x\n");
+        assert_eq!(edited("# h\n- b\n", &clear), "# h\n-\n");
+        assert_eq!(edited("|a|\n|-|\n- b\n", &replace), "|a|\n|-|\n- x\n");
+        assert_eq!(edited("|a|\n|-|\n- b\n", &clear), "|a|\n|-|\n\n-\n");
+        assert_eq!(edited("[a]: /u\n- b\n", &clear), "[a]: /u\n\n-\n");
+        // A break first in the item goes below the bullet, which would
+        // underline the paragraph.
+        let rule = |children: &mut Vec<Block>| {
+            children[0] = parse("- - -").document.children[0].clone();
+        };
+        assert_eq!(edited("aa\n- b\n", &rule), "aa\n\n-\n  ---\n");
+        assert_eq!(edited("aa\r\n- b\r\n", &replace), "aa\r\n- x\r\n");
+        // Nested in a quote, after a paragraph.
+        let mut document = parse("> aa\n> - b\n").document;
+        let Block::List(list) = &mut quote_mut(&mut document, 0)[1] else {
+            panic!();
+        };
+        list.children[0].children[0] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), "> aa\n> - x\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
     }
 
     // serialization: Unchanged source is kept
@@ -732,7 +780,7 @@ mod source_reused_per_node {
         item_mut(&mut document, 1, 0)
             .children
             .insert(0, paragraph("new"));
-        assert_eq!(document.to_markdown().unwrap(), "a\n\n* new\n  - - -");
+        assert_eq!(document.to_markdown().unwrap(), "a\n* new\n  - - -");
         assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
         // A new last item takes in no indented paragraph after the list.
         let mut document = parse("-    foo\n\n  bar\n").document;

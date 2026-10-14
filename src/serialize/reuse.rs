@@ -308,9 +308,10 @@ pub(super) fn last_line_holds(
 /// blank line, or one of them is a blank line, or the lines around it are
 /// the source's. A leaf's own edited lines read the same before any sibling;
 /// after a container, whose last line a leaf could continue, or before one,
-/// only its source lines do. `left` and `right` are each a block, its base
-/// span, and its lines when it was not kept whole; `top` where content lines
-/// take no prefix.
+/// only its source lines do, except that a container after a leaf may have
+/// any first line with which it still starts there (`starts_after_leaf`).
+/// `left` and `right` are each a block, its base span, and its lines when it
+/// was not kept whole; `top` where content lines take no prefix.
 pub(super) fn keeps_gap(
     source: &str,
     gap: &str,
@@ -330,7 +331,22 @@ pub(super) fn keeps_gap(
             || left_lines
                 .is_none_or(|lines| last_line_holds(source, lines, left_span, left_end, top)))
             && (!containers
-                || right_lines.is_none_or(|lines| first_line_holds(source, lines, right_span)))
+                || right_lines.is_none_or(|lines| first_line_holds(source, lines, right_span))
+                || (!holds_blocks(left_block) && starts_after_leaf(left_block, right_block)))
+}
+
+/// Whether `right`, a container written on the line after the leaf `left`,
+/// starts there whatever its first line became: after a leaf that takes the
+/// lines following it (a paragraph's continuation, a definition's title, a
+/// table's rows) only where it interrupts a paragraph as written, after any
+/// other leaf always.
+fn starts_after_leaf(left: &Block, right: &Block) -> bool {
+    match left {
+        Block::Paragraph(_) | Block::Definition(_) | Block::Table(_) => {
+            super::written_after_paragraph_interrupts(right)
+        }
+        _ => true,
+    }
 }
 
 /// Whether `block` holds blocks, whose last line can change what the line

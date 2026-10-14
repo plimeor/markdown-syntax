@@ -1206,6 +1206,21 @@ fn opens_with_padding(inner: &str) -> bool {
     !inner.starts_with("    ") && inner.starts_with([' ', '\t'])
 }
 
+/// Whether `block`, written with default options on the line after a
+/// paragraph's, starts there instead of continuing the paragraph: the
+/// parser's rule (`interrupts_paragraph`) for the block as the serializer
+/// writes it, a setext heading and a list whose first item starts below its
+/// bullet continuing the paragraph.
+pub(crate) fn written_after_paragraph_interrupts(block: &Block) -> bool {
+    match block {
+        Block::Heading(heading) => !writes_setext(heading),
+        Block::List(list) => {
+            crate::parse::interrupts_paragraph(block) && !first_item_starts_below_its_bullet(list)
+        }
+        _ => crate::parse::interrupts_paragraph(block),
+    }
+}
+
 /// Whether, with default options, the serializer starts `list`'s first item
 /// on a line after its bullet, so that the list, written after a paragraph's
 /// line, cannot interrupt the paragraph. Only a leaf block can open with
