@@ -77,6 +77,7 @@ fn inline_depth(nodes: &[Inline]) -> usize {
                     | Inline::Escape(_)
                     | Inline::CharacterReference(_)
                     | Inline::Shortcode(_)
+                    | Inline::Tag(_)
                     | Inline::Code(_)
                     | Inline::Html(_)
                     | Inline::SoftBreak(_)
@@ -558,6 +559,29 @@ fn literal_autolinks_in_open_labels_grow_linearly() {
     for unit in ["[ www.a](", "[ http://a]("] {
         assert_linear_growth(unit, 500, |n| unit.repeat(n), parse_input);
     }
+}
+
+// untrusted-input-cost: Linear time
+#[test]
+fn tags_grow_linearly() {
+    let _serial = one_at_a_time();
+    for unit in [" #a", "#a/b-c_d ", "*#a* ", "[x #a](u) ", " #a#b"] {
+        assert_linear_growth(unit, 2_000, |n| unit.repeat(n), parse_input);
+    }
+    assert_linear_growth(
+        "one long tag",
+        20_000,
+        |n| format!("#{}", "a".repeat(n)),
+        parse_input,
+    );
+    // Link text reads a demoted angle-bracket autolink without its brackets,
+    // so its tags find their offsets through one map of the text.
+    assert_linear_growth(
+        "tags beside demoted autolinks",
+        1_000,
+        |n| format!("[{}](u)", " #a <http://b.c>".repeat(n)),
+        parse_input,
+    );
 }
 
 #[test]

@@ -62,6 +62,7 @@ pub mod kind {
     pub const INLINE_FOOTNOTE: u32 = 59;
     pub const WIKI_LINK: u32 = 60;
     pub const TEXT_DIRECTIVE: u32 = 61;
+    pub const TAG: u32 = 62;
 }
 
 /// For each byte offset of `text`, its UTF-16 offset; `text.len()` included.
@@ -444,6 +445,10 @@ impl<'t> Writer<'t> {
             }
             Inline::Shortcode(Shortcode { meta, name }) => {
                 self.head(kind::SHORTCODE, meta);
+                self.str(name);
+            }
+            Inline::Tag(Tag { meta, name }) => {
+                self.head(kind::TAG, meta);
                 self.str(name);
             }
             Inline::Code(CodeInline { meta, value }) => {
@@ -1106,6 +1111,10 @@ impl<'m> Reader<'m> {
                 children: self.inlines()?,
             }),
             kind::SHORTCODE => Inline::Shortcode(Shortcode {
+                meta,
+                name: self.str()?,
+            }),
+            kind::TAG => Inline::Tag(Tag {
                 meta,
                 name: self.str()?,
             }),

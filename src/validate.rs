@@ -572,6 +572,14 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
                     ));
                 }
             }
+            Inline::Tag(node) => {
+                if !crate::unicode_letters::is_tag_name(&node.name) {
+                    diagnostics.push(Diagnostic::invalid(
+                        node.meta.span,
+                        "tag name must be a Unicode letter followed by letters, numbers, `/`, `_`, or `-`",
+                    ));
+                }
+            }
             Inline::Link(node) => {
                 validate_destination(
                     node.meta.span,

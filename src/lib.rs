@@ -11,6 +11,7 @@ mod gemoji;
 mod memo;
 #[cfg(test)]
 mod test_support;
+mod unicode_letters;
 mod unicode_punctuation;
 
 pub mod ast;

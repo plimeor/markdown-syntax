@@ -31,10 +31,10 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-The second batch for the editor: `#tag` in the syntax, then source reused per
-node and per node's own syntax down to inlines, blank lines as nodes, ordered
-item numbers, and every leaf's inline source in one pass. Lists stay nested;
-the editor flattens them.
+The second batch for the editor, after `#tag` joined the syntax: source
+reused per node and per node's own syntax down to inlines, blank lines as
+nodes, ordered item numbers, and every leaf's inline source in one pass.
+Lists stay nested; the editor flattens them.
 
 ## Non-goals
 

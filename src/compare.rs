@@ -139,6 +139,7 @@ fn normalize_inlines(inlines: &mut Vec<Inline>, heading: bool) {
             Inline::Math(node) => leaf(&mut node.meta),
             Inline::FootnoteReference(node) => leaf(&mut node.meta),
             Inline::WikiLink(node) => leaf(&mut node.meta),
+            Inline::Tag(node) => leaf(&mut node.meta),
         };
         match text {
             Some(value) => match normalized.last_mut() {

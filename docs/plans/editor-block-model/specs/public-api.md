@@ -24,7 +24,7 @@ exist.
 The AST SHALL provide `From` conversions into `Block` and `Inline` for every node
 type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
 `Document`, `Text`, `Paragraph`, `Heading`, `Link`, `Autolink`, `CodeInline`,
-`CharacterReference`, `List`, `ListItem`, and `BlankLine`, all defaulting
+`CharacterReference`, `Tag`, `List`, `ListItem`, and `BlankLine`, all defaulting
 `meta` to no span and a list item's number to `None`;
 `markdown_syntax::prelude::*` SHALL import this surface.
 

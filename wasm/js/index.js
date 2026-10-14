@@ -117,15 +117,18 @@ const KINDS = [
   [59, "inlineFootnote", [["children", "inlines"]]],
   [60, "wikiLink", [["target", "string"], ["label", "string"], ["embed", "boolean"]]],
   [61, "textDirective", [["name", "string"], ["label", "inlines"], ["attributes", "attributes"]]],
+  [62, "tag", [["name", "string"]]],
 ];
 
 const BY_NUMBER = new Map(KINDS.map(([number, name, fields]) => [number, { name, fields }]));
 const BY_NAME = new Map(KINDS.map(([number, name, fields]) => [name, { number, fields }]));
 
-// The kinds each list holds.
+// The kinds each list holds. Wire numbers group by list, so a new kind needs
+// only its row in KINDS: blocks below 30, items, rows, and cells at 30 to 32,
+// and inlines from 40.
 const LISTS = {
-  blocks: (number) => number >= 1 && number <= 16,
-  inlines: (number) => number >= 40 && number <= 61,
+  blocks: (number) => number >= 1 && number < 30,
+  inlines: (number) => number >= 40,
   items: (number) => number === 30,
   rows: (number) => number === 31,
   cells: (number) => number === 32,

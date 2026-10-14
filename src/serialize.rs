@@ -1083,6 +1083,10 @@ fn write_inline(
             out.push_str(&node.name);
             out.push(':');
         }
+        Inline::Tag(node) => {
+            out.push('#');
+            out.push_str(&node.name);
+        }
         Inline::Code(node) => write_code_span(node, out),
         Inline::Link(node) => {
             write_span(out, "[", &node.children, "](", context)?;

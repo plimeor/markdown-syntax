@@ -1,4 +1,4 @@
-//! Locks the one syntax `parse` reads (decisions/0012): the constructs it
+//! Locks the one syntax `parse` reads (decisions/0015): the constructs it
 //! recognizes, the ones it reads as text, and the spellings it records.
 
 use markdown_syntax::prelude::*;
@@ -36,6 +36,7 @@ fn removed_marks_stay_text() {
     assert!(texts_only(&inlines), "{inlines:?}");
 }
 
+// public-api: One syntax
 #[test]
 fn delimiter_collisions_resolve_to_the_one_syntax() {
     assert!(matches!(
@@ -53,6 +54,7 @@ fn delimiter_collisions_resolve_to_the_one_syntax() {
         first_para("a :tada: b").get(1),
         Some(Inline::Shortcode(_))
     ));
+    assert!(matches!(first_para("a #b c").get(1), Some(Inline::Tag(_))));
 }
 
 #[test]
@@ -144,11 +146,18 @@ fn constructed_nodes_take_the_default_spelling() {
 fn build_layer_round_trips() {
     let document = Document::new(vec![
         Heading::new(1, [Text::from("Title")]).into(),
-        Paragraph::new([Text::from("hello")]).into(),
+        Paragraph::new([
+            Inline::from(Text::from("hello ")),
+            Tag::new("ai/agents").into(),
+        ])
+        .into(),
     ]);
     // Hand-built nodes carry no span.
     assert_eq!(document.children[0].span(), None);
-    assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
+    assert_eq!(
+        document.to_markdown().unwrap(),
+        "# Title\n\nhello #ai/agents\n"
+    );
 }
 
 // inline-syntax: Shortcodes and text directives share the colon

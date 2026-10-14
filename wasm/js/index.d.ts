@@ -53,7 +53,8 @@ export type Inline =
   | FootnoteReference
   | InlineFootnote
   | WikiLink
-  | TextDirective;
+  | TextDirective
+  | Tag;
 
 export type DestinationKind = "bare" | "angle" | "omitted";
 export type ReferenceKind = "full" | "collapsed" | "shortcut";
@@ -180,6 +181,10 @@ export interface Mark extends Node<"mark"> {
   children: Inline[];
 }
 export interface Shortcode extends Node<"shortcode"> {
+  name: string;
+}
+export interface Tag extends Node<"tag"> {
+  /** The name as written, without the `#`; `/` separates levels. */
   name: string;
 }
 export interface Code extends Node<"code"> {

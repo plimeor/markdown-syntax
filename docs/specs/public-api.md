@@ -84,7 +84,7 @@ only by whitespace, apart from one leading U+FEFF before the first block.
 The AST SHALL provide `From` conversions into `Block` and `Inline` for every node
 type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
 `Document`, `Text`, `Paragraph`, `Heading`, `Link`, `Autolink`, `CodeInline`,
-`CharacterReference`, and `List`, all defaulting `meta` to no span; `markdown_syntax::prelude::*` SHALL import this surface.
+`CharacterReference`, `Tag`, and `List`, all defaulting `meta` to no span; `markdown_syntax::prelude::*` SHALL import this surface.
 
 ### Requirement: Byte order mark and NUL
 The parser SHALL ignore one leading U+FEFF and SHALL treat every U+0000 as
@@ -137,7 +137,8 @@ inline content of one leaf block, SHALL be the only ways to parse, and both
 SHALL recognize one fixed syntax with no configuration: CommonMark with raw HTML and indented code,
 `<details>` HTML containers, GFM tables, task list items, literal autolinks,
 and `~~` strikethrough, footnotes and inline footnotes, GitHub alerts,
-frontmatter, shortcodes, `==` highlight, wiki links, math, and directives.
+frontmatter, shortcodes, `==` highlight, wiki links, math, directives, and
+`#` tags.
 Subscript, superscript, insert, spoiler, underline, description lists,
 literal autolinks with a scheme other than `http`, `https`, `mailto`, and
 `xmpp`, and MDX SHALL NOT be recognized.

@@ -1,0 +1,61 @@
+Document
+  Heading depth=1 kind=atx
+    Text "Weekly "
+    Tag "work"
+  Paragraph
+    Text "今天读了 "
+    Tag "pkm"
+    Text " 相关的文章，标签 "
+    Tag "ai/agents"
+    Text " 和 "
+    Tag "读书笔记"
+    Text "。"
+  Paragraph
+    Strong delimiter=*
+      Tag "重点"
+    Text " 和 "
+    Emphasis delimiter=_
+      Tag "ok"
+    Text ", but not a#b, (#x), #123, or "
+    Strong delimiter=*
+      Text "粗体"
+    Text "#tag."
+  List ordered=false tight=true
+    ListItem checked=none
+      Paragraph
+        Link destination=https://example.com title=none
+          Text "see "
+          Tag "rust"
+        Text " and "
+        Link destination=https://example.com title=none
+          Text "#go"
+    ListItem checked=none
+      Paragraph
+        Code value="#include"
+        Text ", "
+        Escape "#"
+        Text "escaped, "
+        WikiLink target="笔记#小节" label="笔记#小节"
+        Text ", and "
+        Autolink form=literal text="https://example.com/page#section" destination=https://example.com/page#section
+  BlockQuote
+    Paragraph
+      Tag "quoted"
+      Text " line"
+      SoftBreak
+      Tag "second"
+      Text " line "
+      Tag "a"
+      Text "#b"
+  Table
+    Alignments none,none
+    Row
+      Cell
+        Text "tag"
+      Cell
+        Text "note"
+    Row
+      Cell
+        Tag "cell"
+      Cell
+        Text "text"
