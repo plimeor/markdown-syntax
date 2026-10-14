@@ -610,7 +610,7 @@ impl Reuse<'_, '_> {
         let Some(source) = self.correspondence.source_of(span).cloned() else {
             return Ok(None);
         };
-        let read = crate::parse_inline(&source.text, self.base_definitions).inlines;
+        let read = crate::parse::parse_inline_tree(&source.text, self.base_definitions).inlines;
         let context = if heading {
             Context::HEADING
         } else {
@@ -636,7 +636,7 @@ impl Reuse<'_, '_> {
         {
             return Ok(None);
         }
-        let reads = crate::parse_inline(&output, self.definitions).inlines;
+        let reads = crate::parse::parse_inline_tree(&output, self.definitions).inlines;
         Ok(
             (normalized_inlines(&reads, heading) == normalized_inlines(inlines, heading))
                 .then_some(output),

@@ -29,6 +29,9 @@ mod leaves;
 #[path = "support/edits.rs"]
 mod edits;
 
+#[path = "support/tokens.rs"]
+mod tokens;
+
 use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
@@ -1283,3 +1286,38 @@ const READ_BACK_INPUTS: &[&str] = &[
     "{}&#x20;\n\\",
     "{}&#x20; \n\\",
 ];
+
+/// The tokens of every corpus input read as one leaf's inline content, and of
+/// each of its leaves, tile the text, lie in their nodes, and read back as
+/// the fields they name.
+// public-api: Inline syntax tokens
+#[test]
+fn corpus_inline_tokens_tile_their_text() {
+    let mut failures = Vec::new();
+    let mut texts = 0;
+    for source in read_back_corpus() {
+        let document = parse(&source.input).document;
+        let definitions = markdown_syntax::Definitions::of(&document);
+        let leaves = document.leaf_sources();
+        for text in std::iter::once(source.input.clone())
+            .chain(leaves.into_iter().map(|(_, leaf)| leaf.text))
+        {
+            texts += 1;
+            for problem in tokens::token_problems(&text, &definitions) {
+                failures.push(format!("{} {text:?}: {problem}", source.at()));
+            }
+        }
+    }
+    assert!(texts > 5_000, "only {texts} texts");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(60)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}

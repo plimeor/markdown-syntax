@@ -563,6 +563,17 @@ impl<'t> Writer<'t> {
         }
     }
 
+    /// The tokens of an inline parse: each one's span, the pre-order index of
+    /// its node, and its role as its Rust name.
+    pub fn tokens(&mut self, tokens: &[InlineToken]) {
+        self.word(tokens.len() as u32);
+        for token in tokens {
+            self.span(Some(token.span));
+            self.word(token.node as u32);
+            self.str(&format!("{:?}", token.role));
+        }
+    }
+
     /// Diagnostics, with their severity and code as their Rust names.
     pub fn diagnostics(&mut self, diagnostics: &[Diagnostic]) {
         self.word(diagnostics.len() as u32);
@@ -1343,6 +1354,47 @@ mod tests {
         assert_eq!(&words[4..8], &[kind::PARAGRAPH, 0, 6, 0]);
         assert_eq!(&words[9..12], &[kind::TEXT, 0, 3]);
         assert_eq!(&words[13..16], &[kind::EMPHASIS, 3, 6]);
+    }
+
+    #[test]
+    fn tokens_carry_utf16_spans_nodes_and_roles() {
+        let source = "😀[a](u)";
+        let offsets = utf16_offsets(source);
+        let mut writer = Writer::new(&offsets);
+        writer.tokens(&parse_inline(source, &Definitions::default()).tokens);
+        let message = writer.finish();
+        let words: Vec<u32> = message[8..]
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+            .collect();
+        // The count, then per token its span, node, and role string: the text
+        // (node 0), the link's `[` (node 1), its label (node 2), and `](`,
+        // `u` and `)` of the link.
+        let spans: Vec<(u32, u32, u32)> = (0..words[0] as usize)
+            .map(|index| {
+                let at = 1 + 4 * index;
+                (words[at], words[at + 1], words[at + 2])
+            })
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (0, 2, 0),
+                (2, 3, 1),
+                (3, 4, 2),
+                (4, 6, 1),
+                (6, 7, 1),
+                (7, 8, 1)
+            ]
+        );
+        let reader = Reader::new(&message, &[]).unwrap();
+        let roles: Vec<String> = (0..spans.len())
+            .map(|index| reader.string(words[4 + 4 * index] as usize).unwrap())
+            .collect();
+        assert_eq!(
+            roles,
+            ["Text", "Syntax", "Text", "Syntax", "Destination", "Syntax"]
+        );
     }
 
     #[test]

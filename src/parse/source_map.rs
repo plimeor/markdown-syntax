@@ -295,6 +295,18 @@ pub(super) fn translate_inlines(
     }
 }
 
+/// Maps `tokens`, in order and tiling the text `map` maps, to the source, as
+/// `translate_inlines` maps a node's span.
+pub(super) fn translate_tokens(map: &SourceMap, tokens: &mut [crate::parse::InlineToken]) {
+    let mut translator = Translator {
+        segments: map.segments(),
+        cursor: 0,
+    };
+    for token in tokens {
+        token.span = translator.span(token.span);
+    }
+}
+
 /// The source span of `span`, a span in the text `map` maps, as
 /// `translate_inlines` maps a node's.
 pub(super) fn translate_span(map: &SourceMap, span: Span) -> Span {

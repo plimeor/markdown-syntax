@@ -68,6 +68,26 @@ export interface DirectiveAttribute {
   name: string;
   value: string | null;
 }
+/** What part of its node a token is. */
+export type TokenRole =
+  | "text"
+  | "syntax"
+  | "destination"
+  | "title"
+  | "label"
+  | "target"
+  | "name"
+  | "attributes";
+/**
+ * A run of an inline parse's text: the innermost inline that holds it, as an
+ * index into `nodes`, and the part of that inline it is. The tokens tile the
+ * text in order.
+ */
+export interface InlineToken {
+  span: [number, number];
+  node: number;
+  role: TokenRole;
+}
 export interface HtmlTag {
   span: Span;
   name: string;
@@ -324,5 +344,11 @@ export class MarkdownSyntax {
   parseInline(
     text: string,
     definitions?: string[] | ParsedDocument,
-  ): { inlines: Inline[]; diagnostics: Diagnostic[] };
+  ): {
+    inlines: Inline[];
+    tokens: InlineToken[];
+    /** Every inline of `inlines`, nested ones included, in pre-order: what a token's `node` indexes. */
+    nodes: Inline[];
+    diagnostics: Diagnostic[];
+  };
 }

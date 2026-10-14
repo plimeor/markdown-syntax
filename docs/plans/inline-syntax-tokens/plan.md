@@ -57,12 +57,12 @@ See `design.md`.
 ## Tasks
 
 ### 1. Tokens
-- [ ] 1.1 Add `InlineToken { span, node, role }`, `TokenRole`, and
+- [x] 1.1 Add `InlineToken { span, node, role }`, `TokenRole`, and
   `InlineOutput::nodes()`, exported from the crate root and the prelude;
   make `InlineOutput` `#[non_exhaustive]` and `Inline::children()`
   exhaustive; verified by `cargo doc` and a test that names them through
   `prelude`
-- [ ] 1.2 Compute the tokens in one pass over the inline tree and the
+- [x] 1.2 Compute the tokens in one pass over the inline tree and the
   content the parse read, before the `\r\n` mapping and the NUL rewrite,
   and return them from `parse_inline`; internal callers that read only the
   inlines take a crate-private entry without the pass; verified by
@@ -71,21 +71,21 @@ See `design.md`.
   destination, and nested containers through an image's alt and a
   directive's label
   - Design › Token pass
-- [ ] 1.3 Check the tokens of every corpus leaf and of seeded inline text:
+- [x] 1.3 Check the tokens of every corpus leaf and of seeded inline text:
   they tile the text in order; each lies within its node's span and
   outside that node's children; a container's children tile its content;
   and each part reads back as its field (Design › Read-back of parts);
   verified by `tests/inline_tokens.rs`
-- [ ] 1.4 Keep the pass linear and stack-bounded: `parse_inline` in
+- [x] 1.4 Keep the pass linear and stack-bounded: `parse_inline` in
   `tests/linear_growth.rs` and the deep inline cases of
   `tests/pathological_inputs.rs` include it; verified by those suites
 
 ### 2. WebAssembly binding
-- [ ] 2.1 Carry the tokens on the wire and return them from `parseInline`
+- [x] 2.1 Carry the tokens on the wire and return them from `parseInline`
   as `{ span, node, role }` with UTF-16 spans and the role in camelCase,
   with `nodes` holding the decoded inline objects in pre-order; verified by
   a unit test of the token encoding in `wasm/src/wire.rs` and a Node test
   that marks a link's destination and title in text holding a non-BMP
   character
-- [ ] 2.2 Add the token type and `nodes` to `index.d.ts`; verified by the
+- [x] 2.2 Add the token type and `nodes` to `index.d.ts`; verified by the
   Node test suite and a read of the declaration

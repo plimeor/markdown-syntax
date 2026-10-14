@@ -151,7 +151,7 @@ impl Document {
         let definitions = Definitions::of(self);
         visit_mut(&mut self.children, &mut |leaf| {
             if let Some(text) = leaf.source.as_deref() {
-                *leaf.inlines = crate::parse_inline(text, &definitions).inlines;
+                *leaf.inlines = crate::parse::parse_inline_tree(text, &definitions).inlines;
             }
         });
     }

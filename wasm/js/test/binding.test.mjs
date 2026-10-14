@@ -153,6 +153,30 @@ describe("Inline parse and inline source from JavaScript", () => {
     assert.equal(paragraph.children[1].children[0].value, "y");
   });
 
+  test("tokens mark a link's destination and title beyond the BMP", () => {
+    const text = '😀 [a *b*](/u "t")';
+    const { tokens, nodes } = binding.parseInline(text);
+    assert.deepEqual(
+      nodes.map((node) => node.type),
+      ["text", "link", "text", "emphasis", "text"],
+    );
+    const parts = tokens.map(({ span, node, role }) => [text.slice(...span), nodes[node].type, role]);
+    assert.deepEqual(parts, [
+      ["😀 ", "text", "text"],
+      ["[", "link", "syntax"],
+      ["a ", "text", "text"],
+      ["*", "emphasis", "syntax"],
+      ["b", "text", "text"],
+      ["*", "emphasis", "syntax"],
+      ["](", "link", "syntax"],
+      ["/u", "link", "destination"],
+      [' "', "link", "syntax"],
+      ["t", "link", "title"],
+      ['")', "link", "syntax"],
+    ]);
+    assert.equal(tokens.at(-1).span[1], text.length);
+  });
+
   test("the inline source reproduces the leaf beyond the BMP", () => {
     const source = "> 😀 *a*\n> b";
     const document = binding.parse(source);

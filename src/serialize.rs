@@ -141,7 +141,8 @@ impl Document {
             let mut blocks = self.children.clone();
             leaves::visit_mut(&mut blocks, &mut |leaf| {
                 if let Some(text) = leaf.source.as_deref() {
-                    if crate::parse_inline(text, &definitions).inlines != *leaf.inlines {
+                    if crate::parse::parse_inline_tree(text, &definitions).inlines != *leaf.inlines
+                    {
                         *leaf.source = None;
                     }
                 }
