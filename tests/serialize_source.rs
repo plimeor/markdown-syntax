@@ -896,14 +896,78 @@ mod lines_around_edits {
         ] {
             assert_eq!(edited(source, path, text), written, "{source:?}");
         }
-        // An open list's last item could take the indented line after it.
+        // An emptied item, written as its marker, would take the indented
+        // line after it.
         let mut document = parse("-\t(\n  <v>\n").document;
         let Block::List(list) = &mut document.children[0] else {
             panic!();
         };
         list.children[0].children.clear();
-        assert_eq!(document.to_markdown().unwrap(), "- \n\n  <v>\n");
+        assert_eq!(document.to_markdown().unwrap(), "-\n\n  <v>\n");
         assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_item_marker_with_a_tab_is_kept() {
+        for (source, path, text, written) in [
+            ("-\ta\n", &[0, 0, 0][..], "aX", "-\taX\n"),
+            ("-\ta\n\n\tb\n", &[0, 0, 1][..], "bX", "-\ta\n\n\tbX\n"),
+            (
+                "* [ ]\tText.\n",
+                &[0, 0, 0][..],
+                "Text.X",
+                "* [ ]\tText.X\n",
+            ),
+            ("> -\ta\n", &[0, 0, 0, 0][..], "aX", "> -\taX\n"),
+            ("10.\ta\n", &[0, 0, 0][..], "aX", "10.\taX\n"),
+            // A space and a tab could open indented code at another column,
+            // and the item renders.
+            (">* \t[x] a\n", &[0, 0, 0, 0][..], "aX", ">* [x] aX\n"),
+        ] {
+            assert_eq!(edited(source, path, text), written, "{source:?}");
+        }
+        // A block the writer indents in it stays in the item wherever the
+        // tab stands.
+        for source in ["-\ta\n\n\tb\n", "> -\ta\n>\n>\tb\n"] {
+            let mut document = parse(source).document;
+            let list = match &mut document.children[0] {
+                Block::List(list) => list,
+                Block::BlockQuote(quote) => match &mut quote.children[0] {
+                    Block::List(list) => list,
+                    _ => panic!(),
+                },
+                _ => panic!(),
+            };
+            list.children[0].children.push(paragraph("c"));
+            let markdown = document.to_markdown().unwrap();
+            assert!(markdown.ends_with("     c\n"), "{markdown:?}");
+            assert_eq!(
+                normalized_blocks(&parse(&markdown).document.children),
+                normalized_blocks(&document.children),
+            );
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_item_marker_over_lines_is_kept() {
+        for (source, path, text, written) in [
+            (
+                "* [x]\r\n  a\r\n",
+                &[0, 0, 0][..],
+                "aX",
+                "* [x]\r\n  aX\r\n",
+            ),
+            ("* [ ]\na\n", &[0, 0, 0][..], "aX", "* [ ]\naX\n"),
+            ("* [\n] a\n", &[0, 0, 0][..], "aX", "* [\n] aX\n"),
+            ("> * [\n> ] a\n", &[0, 0, 0, 0][..], "aX", "> * [\n> ] aX\n"),
+            ("-\n  a\n", &[0, 0, 0][..], "aX", "-\n  aX\n"),
+            // A lazy first line that would open a block is not kept lazy.
+            ("* [ ]\na\n", &[0, 0, 0][..], "# a", "* [ ] # a\n"),
+        ] {
+            assert_eq!(edited(source, path, text), written, "{source:?}");
+        }
     }
 
     // serialization: Unchanged source is kept
