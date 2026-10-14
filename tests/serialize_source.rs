@@ -8,6 +8,7 @@
 #[path = "support/leaves.rs"]
 mod leaves;
 
+use markdown_syntax::__private::normalized_blocks;
 use markdown_syntax::prelude::*;
 use markdown_syntax::{BulletMarker, LineEnding, SerializeOptions};
 
@@ -206,7 +207,7 @@ mod unchanged_source_is_kept {
         };
         list.children[0].children[0] = paragraph("c");
         let markdown = document.to_markdown().unwrap();
-        assert_eq!(markdown, "- c\n\nb\n");
+        assert_eq!(markdown, "-   c\n\n  b");
         assert_eq!(parse(&markdown).document.children.len(), 2);
         // After a paragraph, the indentation is kept.
         let mut document = parse("a\n\n   b").document;
@@ -354,6 +355,119 @@ mod leaves_given_as_text {
         assert_eq!(
             document.to_markdown().unwrap(),
             "| h  *i* |\n| --- |\n| a\\|b |\n\n## T  *u*\n\n::x[l  *m*]\n"
+        );
+    }
+}
+
+mod source_reused_per_node {
+    use super::*;
+
+    fn item_mut(document: &mut Document, list: usize, item: usize) -> &mut ListItem {
+        let Block::List(node) = &mut document.children[list] else {
+            panic!("not a list");
+        };
+        &mut node.children[item]
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn one_edited_item() {
+        let mut document = parse("-   a\n-   b\n\n    c\n-   d\n").document;
+        item_mut(&mut document, 0, 1).children[0] = paragraph("x");
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "-   a\n-   x\n\n    c\n-   d\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn one_edited_link() {
+        let mut document = parse("see  [[A]] and `` b ``").document;
+        let Block::Paragraph(paragraph) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        let Inline::WikiLink(link) = &mut paragraph.children[1] else {
+            panic!("{:?}", paragraph.children);
+        };
+        link.target = "B".into();
+        link.label = "B".into();
+        assert_eq!(document.to_markdown().unwrap(), "see  [[B]] and `` b ``");
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_emphasis_inside_a_link_keeps_the_link() {
+        let mut document = parse("> a [_b_ c]( /u  'T' ) d\n").document;
+        let Block::BlockQuote(quote) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        let Block::Paragraph(paragraph) = &mut quote.children[0] else {
+            panic!("{:?}", quote.children);
+        };
+        let Inline::Link(link) = &mut paragraph.children[1] else {
+            panic!("{:?}", paragraph.children);
+        };
+        let Inline::Emphasis(emphasis) = &mut link.children[0] else {
+            panic!("{:?}", link.children);
+        };
+        emphasis.children = vec![Text::from("e").into()];
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "> a [_e_ c]( /u  'T' ) d\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_renumbered_or_ticked_item_keeps_its_column() {
+        let source = "1.  a\n\n    > q\n2.  [ ] b\n\n        code\n";
+        let mut document = parse(source).document;
+        item_mut(&mut document, 0, 0).number = Some(7);
+        item_mut(&mut document, 0, 1).checked = Some(true);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "7.  a\n\n    > q\n2.  [x] b\n\n        code\n"
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_split_paragraph_and_a_moved_item() {
+        let mut document = parse("- a\n- b\n\nc d\n").document;
+        // Both halves of a split paragraph carry its span.
+        let half = document.children[1].clone();
+        document.children.push(half);
+        let moved;
+        // The second item moves into a new list.
+        {
+            let Block::List(list) = &mut document.children[0] else {
+                panic!();
+            };
+            moved = list.children.pop().unwrap();
+        }
+        document.children.push(List::new([moved]).into());
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- a\n\nc d\n\nc d\n\n- b\n");
+        assert_eq!(
+            normalized_blocks(&parse(&markdown).document.children),
+            normalized_blocks(&document.children)
+        );
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_new_item_takes_the_lists_recorded_marker() {
+        let mut document = parse("* a\n*   b\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children.push(ListItem::new(vec![paragraph("c")]));
+        let mut options = SerializeOptions::default();
+        options.bullet = Some(BulletMarker::Dash);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "* a\n*   b\n* c\n"
         );
     }
 }

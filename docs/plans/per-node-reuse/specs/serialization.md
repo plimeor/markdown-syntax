@@ -18,7 +18,6 @@ table cell's encoding adds before pipes.
 - **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized
 - **THEN** `to_markdown()` returns `"==a==\n"`, which reads back as a `Mark`
 
-
 ### Requirement: Unchanged source is kept
 For a document with a source, `to_markdown` and `to_markdown_with` SHALL
 match each node that carries a span to the node of its kind at that span in

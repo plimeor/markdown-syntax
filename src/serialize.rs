@@ -17,9 +17,11 @@ use alloc::{
 use alloc::collections::BTreeMap;
 
 use crate::{
-    ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource,
+    ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource, span::Span,
     validate::validate_document,
 };
+
+mod reuse;
 
 /// The newline style emitted by the serializer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,8 +120,8 @@ impl Document {
         // A leaf keeps its text only while its inlines are the ones the text
         // reads as.
         let current;
+        let definitions = Definitions::of(self);
         let blocks = if leaves::any_kept(&self.children) {
-            let definitions = Definitions::of(self);
             let mut blocks = self.children.clone();
             leaves::visit_mut(&mut blocks, &mut |leaf| {
                 if let Some(text) = leaf.source.as_deref() {
@@ -133,10 +135,30 @@ impl Document {
         } else {
             &self.children
         };
-        match self.source() {
-            Some(source) => write_reusing(blocks, source, options),
-            None => write_canonical(blocks, options),
+        let Some(source) = self.source() else {
+            return write_canonical(blocks, options);
+        };
+        // A block written partly from the source stays so only where the
+        // output reads back as it at its place.
+        let mut whole = alloc::vec![false; blocks.len()];
+        let (output, partly) = write_reusing(blocks, source, options, &definitions, &whole)?;
+        if partly.is_empty() {
+            return Ok(output);
         }
+        let read = crate::parse(&output).document.children;
+        if read.len() == blocks.len() {
+            for index in partly {
+                whole[index] = !reads_as(&read[index], &blocks[index]);
+            }
+        } else {
+            for index in partly {
+                whole[index] = true;
+            }
+        }
+        if whole.iter().any(|whole| *whole) {
+            return Ok(write_reusing(blocks, source, options, &definitions, &whole)?.0);
+        }
+        Ok(output)
     }
 }
 
@@ -178,38 +200,68 @@ fn write_reusing(
     blocks: &[Block],
     source: &str,
     options: &SerializeOptions,
-) -> Result<String, SerializeError> {
+    definitions: &Definitions,
+    whole: &[bool],
+) -> Result<(String, Vec<usize>), SerializeError> {
     let base_document = crate::parse(source).document;
     let base = &base_document.children;
     let mut correspondence = Correspondence {
         base: &base_document,
         sources: None,
     };
+    let base_definitions = Definitions::of(&base_document);
+    let mut reuse = reuse::Reuse {
+        source,
+        options,
+        correspondence: &mut correspondence,
+        definitions,
+        base_definitions: &base_definitions,
+    };
     let span_of = |block: &Block| block.span().expect("a reused block has a span");
-    let mut reused: Vec<Option<usize>> = blocks
-        .iter()
-        .map(|block| {
-            let span = block.span()?;
-            let index = base
+    let mut outs = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.iter().enumerate() {
+        let found = block.span().and_then(|span| {
+            let at = base
                 .binary_search_by_key(&span.start, |base| {
                     base.span().map_or(usize::MAX, |span| span.start)
                 })
                 .ok()?;
-            correspondence.holds(block, &base[index]).then_some(index)
-        })
-        .collect();
+            (base[at].span() == Some(span)
+                && core::mem::discriminant(&base[at]) == core::mem::discriminant(block))
+            .then_some(at)
+        });
+        outs.push(match found {
+            Some(at) => match reuse.block(block, &base[at])? {
+                reuse::Out::Kept(_) => (Some(at), None),
+                reuse::Out::Lines(_) if whole[index] => (None, None),
+                reuse::Out::Lines(lines) => (None, Some((at, lines))),
+                reuse::Out::Render => (None, None),
+            },
+            None => (None, None),
+        });
+    }
+    let mut reused: Vec<Option<usize>> = outs.iter().map(|(at, _)| *at).collect();
+    // The blocks written partly from the source, with their place in it.
+    let mut partly: Vec<Option<(usize, Vec<reuse::Line>)>> =
+        outs.into_iter().map(|(_, lines)| lines).collect();
+    // Where each block written from the source, whole or partly, stands in
+    // the source.
+    let placed =
+        |reused: &[Option<usize>], partly: &[Option<(usize, Vec<reuse::Line>)>], index: usize| {
+            reused[index].or(partly[index].as_ref().map(|(at, _)| *at))
+        };
     if blocks.len() == base.len()
         && reused
             .iter()
             .enumerate()
             .all(|(index, at)| *at == Some(index))
     {
-        return Ok(source.into());
+        return Ok((source.into(), Vec::new()));
     }
     // Backward, so that each block knows whether its successor stays reused.
     for index in (0..blocks.len().saturating_sub(1)).rev() {
         let Some(at) = reused[index] else { continue };
-        if reused[index + 1] != Some(at + 1) {
+        if placed(&reused, &partly, index + 1) != Some(at + 1) {
             let span = span_of(&blocks[index]);
             if !closed_by_a_blank_line(&source[span.start..span.end]) {
                 reused[index] = None;
@@ -246,8 +298,15 @@ fn write_reusing(
         if !matches!(block, Block::BlankLine(_)) {
             last_block = Some(block);
         }
+        // A list written partly from the source keeps its recorded marker,
+        // which a list before it may already use.
+        if let (Block::List(list), Some(_)) = (block, &partly[index]) {
+            if previous_list == Some(written_marker(list)) {
+                partly[index] = None;
+            }
+        }
         let follows_predecessor = matches!(
-            (previous_at, reused[index]),
+            (previous_at, placed(&reused, &partly, index)),
             (Some(previous), Some(at)) if previous + 1 == at && separated[index] == base_separated[at]
         );
         let mut at = reused[index];
@@ -319,6 +378,29 @@ fn write_reusing(
                     _ => None,
                 };
             }
+            None if partly[index].is_some() => {
+                let (position, lines) = partly[index].as_ref().expect("written partly");
+                let span = base[*position].span().expect("a parsed block has a span");
+                let body_end = span.start + strip_line_ending(&source[span.start..span.end]).len();
+                if index == 0 && *position == 0 {
+                    output.push_str(&source[..span.start]);
+                }
+                let mut text = reuse::join(lines);
+                if options.line_ending == LineEnding::CrLf {
+                    text = lf_to_crlf(&text);
+                }
+                output.push_str(&text);
+                if index + 1 == blocks.len() && *position + 1 == base.len() {
+                    output.push_str(&source[body_end..]);
+                    ends_with_source_tail = true;
+                }
+                previous_body_end = body_end;
+                previous_list = match block {
+                    Block::List(list) => Some(written_marker(list)),
+                    _ => None,
+                };
+                at = Some(*position);
+            }
             None => {
                 let mut text = write_blocks(
                     core::slice::from_ref(block),
@@ -353,7 +435,50 @@ fn write_reusing(
             own => own,
         });
     }
-    Ok(output)
+    let partly = partly
+        .iter()
+        .enumerate()
+        .filter_map(|(index, lines)| lines.as_ref().map(|_| index))
+        .collect();
+    Ok((output, partly))
+}
+
+/// Whether `read`, a block of the parsed output, reads as `block` as
+/// "Round-trip stability" compares them, an ordered item without a number
+/// reading as the number it is written with.
+fn reads_as(read: &Block, block: &Block) -> bool {
+    let mut read = crate::compare::normalized_blocks(core::slice::from_ref(read));
+    let mut block = crate::compare::normalized_blocks(core::slice::from_ref(block));
+    number_items(&mut read);
+    number_items(&mut block);
+    read == block
+}
+
+/// Gives each ordered item without a number the one it is written with.
+fn number_items(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::List(list) => {
+                let mut previous = None;
+                for item in &mut list.children {
+                    if list.ordered {
+                        item.number = Some(item_number(item, &mut previous));
+                    }
+                    number_items(&mut item.children);
+                }
+            }
+            Block::BlockQuote(node) => number_items(&mut node.children),
+            Block::Alert(node) => number_items(&mut node.children),
+            Block::FootnoteDefinition(node) => number_items(&mut node.children),
+            Block::ContainerDirective(node) => number_items(&mut node.children),
+            Block::HtmlContainer(node) => {
+                if let HtmlContainerContent::Blocks(children) = &mut node.content {
+                    number_items(children);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Whether a block corresponds to a block of the document its source parses
@@ -368,18 +493,28 @@ struct Correspondence<'a> {
 }
 
 impl Correspondence<'_> {
-    fn holds(&mut self, block: &Block, base: &Block) -> bool {
-        if !leaves::any_kept(core::slice::from_ref(block)) {
-            return block == base;
-        }
+    /// The inline source of each leaf of the base, by span.
+    fn sources(&mut self) -> &BTreeMap<(usize, usize), InlineSource> {
         let base_document = self.base;
-        let sources = self.sources.get_or_insert_with(|| {
+        self.sources.get_or_insert_with(|| {
             let mut sources = BTreeMap::new();
             base_document.each_leaf_source(|_, span, source| {
                 sources.insert((span.start, span.end), source);
             });
             sources
-        });
+        })
+    }
+
+    /// The inline source of the base leaf at `span`.
+    fn source_of(&mut self, span: Span) -> Option<&InlineSource> {
+        self.sources().get(&(span.start, span.end))
+    }
+
+    fn holds(&mut self, block: &Block, base: &Block) -> bool {
+        if !leaves::any_kept(core::slice::from_ref(block)) {
+            return block == base;
+        }
+        let sources = self.sources();
         // Each leaf whose text is its base leaf's inline source takes the
         // inlines that text reads as there.
         let mut block = block.clone();
@@ -869,34 +1004,59 @@ fn write_list(
         if index > 0 {
             output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
-        let marker = if node.ordered {
-            // An item without a number counts on from the previous one, and
-            // stops at the largest number a marker can hold.
-            let number = item.number.unwrap_or_else(|| {
-                previous.map_or(1, |previous| {
-                    previous
-                        .saturating_add(1)
-                        .min(crate::parse::MAX_ORDERED_NUMBER)
-                })
-            });
-            previous = Some(number);
-            format!("{number}{marker_char} ")
-        } else {
-            format!("{marker_char} ")
-        };
-        let inner = write_item_blocks(&item.children, options, node.tight, item.checked)?;
-        let break_after_bullet = breaks_after_bullet(node, item, marker_char);
-        let opens_with_whitespace = opens_with_padding(&inner);
-        if break_after_bullet || opens_with_whitespace {
-            output.push_str(marker.trim_end());
-            output.push('\n');
-            output.push_str(&prefix_container_lines(&inner, &" ".repeat(marker.len())));
-        } else {
-            output.push_str(&marker);
-            output.push_str(&indent_after_first_line(&inner, marker.len()));
-        }
+        output.push_str(&write_item(
+            node,
+            item,
+            options,
+            marker_char,
+            &mut previous,
+        )?);
     }
     Ok(output)
+}
+
+/// The number an ordered item is written with: its own, or else one more than
+/// the previous item's, `previous`, which it then becomes.
+fn item_number(item: &ListItem, previous: &mut Option<u64>) -> u64 {
+    // An item without a number counts on from the previous one, and stops at
+    // the largest number a marker can hold.
+    let number = item.number.unwrap_or_else(|| {
+        previous.map_or(1, |previous| {
+            previous
+                .saturating_add(1)
+                .min(crate::parse::MAX_ORDERED_NUMBER)
+        })
+    });
+    *previous = Some(number);
+    number
+}
+
+/// One item of `list`, written with `marker_char`; `previous` is the number
+/// the item before it was written with.
+fn write_item(
+    list: &List,
+    item: &ListItem,
+    options: &SerializeOptions,
+    marker_char: char,
+    previous: &mut Option<u64>,
+) -> Result<String, SerializeError> {
+    let marker = if list.ordered {
+        format!("{}{marker_char} ", item_number(item, previous))
+    } else {
+        format!("{marker_char} ")
+    };
+    let inner = write_item_blocks(&item.children, options, list.tight, item.checked)?;
+    let break_after_bullet = breaks_after_bullet(list, item, marker_char);
+    let opens_with_whitespace = opens_with_padding(&inner);
+    Ok(if break_after_bullet || opens_with_whitespace {
+        format!(
+            "{}\n{}",
+            marker.trim_end(),
+            prefix_container_lines(&inner, &" ".repeat(marker.len()))
+        )
+    } else {
+        format!("{marker}{}", indent_after_first_line(&inner, marker.len()))
+    })
 }
 
 fn thematic_break_char(marker: ThematicBreakMarker) -> char {
@@ -1083,8 +1243,22 @@ fn char_reference(char: char) -> String {
 }
 
 fn write_table(node: &Table) -> Result<String, SerializeError> {
-    let delimiter_row = node
-        .alignments
+    let mut output = String::new();
+    for (row_index, row) in node.rows.iter().enumerate() {
+        if row_index > 0 {
+            output.push('\n');
+        }
+        output.push_str(&write_row(row)?);
+        if row_index == 0 {
+            output.push('\n');
+            output.push_str(&write_delimiter_row(&node.alignments));
+        }
+    }
+    Ok(output)
+}
+
+fn write_delimiter_row(alignments: &[TableAlignment]) -> String {
+    let cells = alignments
         .iter()
         .map(|alignment| match alignment {
             TableAlignment::None => "---",
@@ -1092,29 +1266,22 @@ fn write_table(node: &Table) -> Result<String, SerializeError> {
             TableAlignment::Center => ":---:",
             TableAlignment::Right => "---:",
         })
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let mut output = String::new();
-    for (row_index, row) in node.rows.iter().enumerate() {
-        if row_index > 0 {
-            output.push('\n');
-        }
-        let cells = row
-            .cells
-            .iter()
-            .map(|cell| {
-                Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
-                    Some(text) => text.into(),
-                    None => write_inlines(&cell.children, Context::BLOCK)?,
-                }))
-            })
-            .collect::<Result<Vec<_>, SerializeError>>()?;
-        output.push_str(&format!("| {} |", cells.join(" | ")));
-        if row_index == 0 {
-            output.push_str(&format!("\n| {delimiter_row} |"));
-        }
-    }
-    Ok(output)
+        .collect::<Vec<_>>();
+    format!("| {} |", cells.join(" | "))
+}
+
+fn write_row(row: &TableRow) -> Result<String, SerializeError> {
+    let cells = row
+        .cells
+        .iter()
+        .map(|cell| {
+            Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
+                Some(text) => text.into(),
+                None => write_inlines(&cell.children, Context::BLOCK)?,
+            }))
+        })
+        .collect::<Result<Vec<_>, SerializeError>>()?;
+    Ok(format!("| {} |", cells.join(" | ")))
 }
 
 /// A cell's inline content, written as anywhere else, encoded as cell
