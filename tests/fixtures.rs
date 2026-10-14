@@ -329,7 +329,7 @@ fn crlf_output_keeps_a_values_crlf() {
 
 // Source read-back.
 
-/// What the AST does not record (decision 0008, Consequences), and so
+/// What the AST does not record (decision 0013, Consequences), and so
 /// what keeps a listed input from reading back.
 #[derive(Clone, Copy, Debug)]
 enum Unrecorded {
