@@ -14,9 +14,10 @@ side. A block SHALL be written as canonical output even so where its source
 would read differently in its place: one that a blank line and a paragraph
 after it would change, before a block other than its successor in the source;
 one whose source opens with indentation after a list or a footnote definition,
-or a list after a list written with its marker, after a block other than its
-predecessor in the source; and a thematic break that comes to open the
-document. Options SHALL apply only to the text written as canonical output.
+one other than indented code whose source opens with four columns of
+indentation, or a list after a list written with its marker, after a block
+other than its predecessor in the source; and a thematic break that comes to
+open the document, or that opens it written as `---`. Options SHALL apply only to the text written as canonical output.
 Parsing the output SHALL yield a document equal to the written one as "Tree
 comparison" defines wherever parsing the canonical output of the same document
 does.

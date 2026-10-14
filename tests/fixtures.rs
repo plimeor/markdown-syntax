@@ -30,7 +30,8 @@ use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
     parse, Block, BulletMarker, DiagnosticCode, DiagnosticSeverity, Document, FenceMarker, Inline,
-    LineEnding, LineIndex, OrderedDelimiter, SerializeOptions, Span,
+    LineEnding, LineIndex, NodeMeta, OrderedDelimiter, SerializeOptions, Span, ThematicBreak,
+    ThematicBreakMarker,
 };
 
 use deviations::{excerpt, input_hash};
@@ -629,7 +630,31 @@ fn edit_block(block: &mut Block) -> bool {
             node.value.push_str("edited\n");
             true
         }
+        Block::Definition(node) => {
+            node.destination.push_str("/edited");
+            true
+        }
         _ => false,
+    }
+}
+
+/// Whether the reused block at `index` of `blocks` is written again after a
+/// block written canonically, as its indentation could carry it into that
+/// block: any indentation after a list or footnote definition, and code
+/// indentation on a block other than indented code.
+fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usize) -> bool {
+    let Some(block) = blocks.get(index) else {
+        return false;
+    };
+    let rest = &input[block.span().expect("a parsed block has a span").start..];
+    let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+    let columns = rest[..indent].chars().fold(0, |column, char| match char {
+        '\t' => column + 4 - column % 4,
+        _ => column + 1,
+    });
+    match blocks[index - 1] {
+        Block::List(_) | Block::FootnoteDefinition(_) => indent > 0,
+        _ => columns >= 4 && !matches!(block, Block::CodeBlock(_)),
     }
 }
 
@@ -669,7 +694,11 @@ fn edited_blocks_keep_the_rest_of_the_source() {
                 }
                 continue;
             };
-            if index > 0 {
+            // A leading `---` break is written again, as a later `---` line
+            // could close it as frontmatter.
+            let leading_dash_break = matches!(document.children[0], Block::ThematicBreak(_))
+                && input[span(0).start..].starts_with("---");
+            if index > 0 && !leading_dash_break {
                 let before = &input[..span(index - 1).end];
                 let before = before
                     .strip_suffix("\r\n")
@@ -679,13 +708,10 @@ fn edited_blocks_keep_the_rest_of_the_source() {
                     failures.push(format!("{at}: {markdown:?} moves the source before it"));
                 }
             }
-            // An indented block after an edited list or footnote definition
-            // is written again, as the indentation could carry it into the
-            // container.
-            let kept_from = match edited.children[index] {
-                Block::List(_) | Block::FootnoteDefinition(_) => index + 2,
-                _ => index + 1,
-            };
+            let mut kept_from = index + 1;
+            while rewritten_after_an_edit(input, &edited.children, kept_from) {
+                kept_from += 1;
+            }
             if kept_from < document.children.len()
                 && !markdown.ends_with(&input[span(kept_from).start..])
             {
@@ -700,6 +726,58 @@ fn edited_blocks_keep_the_rest_of_the_source() {
         }
     }
     assert!(edits > 3_000, "only {edits} edits");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Each top-level block of each corpus input deleted, duplicated, or
+/// followed by an appended `---` break, written with the source, reads back
+/// as the moved tree wherever its canonical output does: blocks that move
+/// next to new neighbours ("Unchanged source is kept").
+#[test]
+fn moved_blocks_read_back() {
+    let mut failures = Vec::new();
+    let mut moves = 0;
+    let appended = Block::ThematicBreak(ThematicBreak {
+        meta: NodeMeta::default(),
+        marker: ThematicBreakMarker::Dash,
+    });
+    for source in read_back_corpus() {
+        let document = parse(source.input.as_str()).document;
+        let count = document.children.len();
+        let mut check = |what: String, edited: Document| {
+            moves += 1;
+            let canonical = edited.clone().without_source().to_markdown();
+            let Ok(canonical) = canonical else {
+                return;
+            };
+            match edited.to_markdown() {
+                Err(_) => failures.push(format!("{what}: refused with its source only")),
+                Ok(markdown) if !reads_as(&markdown, &edited) && reads_as(&canonical, &edited) => {
+                    failures.push(format!("{what}: {markdown:?} does not read back"))
+                }
+                Ok(_) => {}
+            }
+        };
+        for index in 0..count {
+            let mut deleted = document.clone();
+            deleted.children.remove(index);
+            check(format!("{} delete {index}", source.at()), deleted);
+            let mut duplicated = document.clone();
+            duplicated
+                .children
+                .insert(index, document.children[index].clone());
+            check(format!("{} duplicate {index}", source.at()), duplicated);
+        }
+        let mut followed = document.clone();
+        followed.children.push(appended.clone());
+        check(format!("{} append ---", source.at()), followed);
+    }
+    assert!(moves > 5_000, "only {moves} moves");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",

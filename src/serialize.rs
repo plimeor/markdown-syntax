@@ -205,12 +205,23 @@ fn write_reusing(
             let start = span_of(block).start;
             let moved_after = index > 0 && !follows_predecessor;
             let rewritten = match block {
-                Block::ThematicBreak(_) => index == 0 && position != 0,
+                // `---` opening the document stays a break only while no
+                // later line closes it as frontmatter.
+                Block::ThematicBreak(_) => {
+                    index == 0 && (position != 0 || source[start..].starts_with("---"))
+                }
                 Block::List(list) => moved_after && previous_list == Some(written_marker(list)),
                 _ => false,
             } || (moved_after
-                && previous_takes_indented_lines
-                && source[start..].starts_with([' ', '\t']));
+                && if previous_takes_indented_lines {
+                    source[start..].starts_with([' ', '\t'])
+                } else {
+                    // Indentation that a paragraph opened by definitions
+                    // took as a continuation reads as indented code after
+                    // another block.
+                    !matches!(block, Block::CodeBlock(_))
+                        && opens_with_code_indent(&source[start..])
+                });
             if rewritten {
                 at = None;
             }
@@ -276,9 +287,31 @@ fn write_reusing(
         && !output.is_empty()
         && !ends_with_carriage_return_ending(&output)
     {
-        output.push_str(options.line_ending.as_str());
+        // A reused last block keeps its own line ending, which can be part
+        // of its value, as in indented code.
+        output.push_str(match previous_ending {
+            "" => options.line_ending.as_str(),
+            own => own,
+        });
     }
     Ok(output)
+}
+
+/// Whether `text` opens with four columns of indentation, which starts
+/// indented code where no paragraph continues.
+fn opens_with_code_indent(text: &str) -> bool {
+    let mut column = 0;
+    for char in text.chars() {
+        match char {
+            ' ' => column += 1,
+            '\t' => column += 4 - column % 4,
+            _ => break,
+        }
+        if column >= 4 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Whether the block parsed from `text`, its source with its line ending,

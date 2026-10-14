@@ -237,6 +237,44 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
+    fn a_kept_dash_break_opening_the_document_is_rewritten() {
+        let mut document = parse("---\n\nHello\n").document;
+        document.children.push(
+            ThematicBreak {
+                meta: NodeMeta::default(),
+                marker: ThematicBreakMarker::Dash,
+            }
+            .into(),
+        );
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- - -\n\nHello\n\n---\n");
+        assert_eq!(parse(&markdown).document.children.len(), 3);
+    }
+
+    #[test]
+    fn a_code_indented_continuation_after_another_block_is_rewritten() {
+        let mut document = parse("[a]: /u\n    text\n").document;
+        let Block::Definition(definition) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        definition.destination = "/v".into();
+        definition.meta = NodeMeta::default();
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "[a]: /v\n\ntext\n");
+        assert!(matches!(
+            parse(&markdown).document.children.as_slice(),
+            [Block::Definition(_), Block::Paragraph(_)]
+        ));
+    }
+
+    #[test]
+    fn a_kept_last_block_keeps_its_own_line_ending() {
+        let mut document = parse("    a\r\n    b\r\n\r\nc").document;
+        document.children.remove(1);
+        assert_eq!(document.to_markdown().unwrap(), "    a\r\n    b\r\n");
+    }
+
+    #[test]
     fn validation_still_comes_first() {
         let mut document = parse("- a\n\np\n\n- b").document;
         document.children.remove(1);
