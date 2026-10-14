@@ -244,7 +244,7 @@ sits in a table cell or a directive label:
 
 #### Scenario: Hard line break ending link text
 - **WHEN** `parse("[a\\\n](u)").document.validate()` runs
-- **THEN** it returns an empty list, and `to_markdown()` writes `[a\\\n](u)\n`
+- **THEN** it returns an empty list, and `without_source().to_markdown()` writes `[a\\\n](u)\n`
 
 #### Scenario: No-break space in an angle-bracket autolink
 - **WHEN** `parse("<http://a\u{a0}b>").document.validate()` runs

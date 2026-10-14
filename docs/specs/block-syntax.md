@@ -189,7 +189,7 @@ warning-severity diagnostic.
 - **THEN** the document holds a `ContainerDirective` named `call-out`
 
 #### Scenario: Directive attribute without a valid name
-- **WHEN** `":b{<} :c{a <=1 d}"` is parsed with `parse` and serialized
+- **WHEN** `":b{<} :c{a <=1 d}"` is parsed with `parse` and serialized without its source
 - **THEN** `to_markdown()` returns `":b :c{a d}\n"`, and one warning-severity `InvalidDirectiveAttribute` diagnostic is reported for each of `<` and `<=1`
 
 #### Scenario: Dotted and colon-led attribute names

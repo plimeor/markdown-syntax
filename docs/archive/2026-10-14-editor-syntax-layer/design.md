@@ -316,6 +316,6 @@ model first.
 
 ## Open questions
 
-- Whether the editor needs `inline_source` for table cells before the second
-  batch — answered by the Settle editor spike; it changes only whether a cell
-  mode is pulled into this plan.
+- Shipped unanswered: whether the editor needs `inline_source` for table
+  cells before the second batch — answered by the Settle editor spike; it
+  changes only whether a cell mode is pulled forward.

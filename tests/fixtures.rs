@@ -668,7 +668,8 @@ fn reads_as(markdown: &str, document: &Document) -> bool {
 /// the source, leaves the source before the block that precedes it and after
 /// the block that follows it as it is, and the output reads back as the
 /// edited tree wherever the edited tree's canonical output does: the spike's
-/// simulated edits (`docs/plans/editor-syntax-layer/plan.md`, task 2.4).
+/// simulated edits (`docs/archive/2026-10-14-editor-syntax-layer/plan.md`,
+/// task 2.4).
 #[test]
 fn edited_blocks_keep_the_rest_of_the_source() {
     let mut failures = Vec::new();

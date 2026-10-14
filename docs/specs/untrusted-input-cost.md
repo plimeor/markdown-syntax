@@ -10,8 +10,9 @@ the tree walkers that depend on its nesting limits.
 ## Requirements
 
 ### Requirement: Linear time
-Parsing, `to_markdown`, `to_html`, and `validate` SHALL take time linear in the
-input size.
+Parsing with `parse` and `parse_inline`, `to_markdown`, `to_html`, `validate`,
+and `Document::inline_source` SHALL take time linear in the input size: the
+input, the inline text, or the document and its kept source together.
 
 #### Scenario: Unclosed openers
 - **WHEN** an input of tens of thousands of unclosed openers of one construct (for example `[`, `==`, `^[`, or `<!X`) is parsed
@@ -52,6 +53,10 @@ input size.
 #### Scenario: Pathological suite
 - **WHEN** `tests/pathological_inputs.rs` runs
 - **THEN** every case finishes within its time limit
+
+#### Scenario: Inline parse and source reuse
+- **WHEN** the repeated fragment combinations are parsed with `parse_inline`, and documents parsed from them are edited in one top-level block and written with their source
+- **THEN** doubling the repetitions at most roughly doubles the time of each
 
 ### Requirement: Bounded stack
 The native stack these operations use SHALL NOT grow with how deeply the input

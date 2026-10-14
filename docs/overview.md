@@ -31,15 +31,14 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-The editor syntax layer (`docs/plans/editor-syntax-layer/`): the kept source
-and source reuse in `to_markdown`, `parse_inline`, `inline_source`, and the
-WebAssembly binding with its JavaScript wrapper.
+The block model for the editor, planned from meowdown's design: every block
+spelling recorded, blank lines as content, flat lists, `#tag` in the syntax,
+and source reused per node rather than per top-level block.
 
 ## Next
 
-- The block model for the editor, planned from meowdown's design: every
-  block spelling recorded, blank lines as content, flat lists, `#tag` in the
-  syntax, and source reused per node rather than per top-level block.
+- Bring the specs back within the spec budget: most scenarios move to the
+  tests that already cover them.
 
 ## Non-goals
 

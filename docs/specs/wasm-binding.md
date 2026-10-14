@@ -1,4 +1,4 @@
-# WebAssembly binding — spec changes
+# WebAssembly binding
 Type: api
 
 ## Purpose
@@ -8,7 +8,7 @@ leaf block's inline content, reads a leaf's inline source, and writes an
 edited tree back, all with the core crate's own code compiled to WebAssembly.
 Owned by the `markdown-syntax-wasm` crate in `wasm/` and its JS wrapper.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Build
 `markdown-syntax-wasm` SHALL build for `wasm32-unknown-unknown` with MSRV 1.82
