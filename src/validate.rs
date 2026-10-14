@@ -13,13 +13,10 @@ use crate::{
     },
     diagnostic::Diagnostic,
     parse::{
-        alert_title, frontmatter_fence_kind, interrupts_paragraph, is_blank, is_footnote_label,
-        is_reference_label, is_written_footnote_label, normalize_label, reads_as_inline_math,
-        MAX_BLOCK_NESTING,
+        alert_title, frontmatter_fence_kind, is_blank, is_footnote_label, is_reference_label,
+        is_written_footnote_label, normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
     },
-    serialize::{
-        first_item_starts_below_its_bullet, write_inline_math, writes_setext, written_marker,
-    },
+    serialize::{write_inline_math, written_after_paragraph_interrupts, written_marker},
     span::Span,
 };
 
@@ -261,14 +258,7 @@ fn validate_tight_item(item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
         let [Block::Paragraph(_), block] = pair else {
             continue;
         };
-        let interrupts = match block {
-            Block::Heading(heading) => !writes_setext(heading),
-            Block::List(list) => {
-                interrupts_paragraph(block) && !first_item_starts_below_its_bullet(list)
-            }
-            _ => interrupts_paragraph(block),
-        };
-        if !interrupts {
+        if !written_after_paragraph_interrupts(block) {
             diagnostics.push(Diagnostic::invalid(
                 block.span(),
                 "in a tight list item, a block after a paragraph must be able to interrupt it",

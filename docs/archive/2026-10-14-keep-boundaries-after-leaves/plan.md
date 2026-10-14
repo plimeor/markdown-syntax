@@ -10,8 +10,8 @@ line between them (`"aa\n- b\n"` → `"aa\n\n- bX\n"`). The writer keeps the
 source between a leaf and a container only when the container's first line
 is the source's, because an edited first line might no longer start the
 container there. Whether a block starts on the line after a paragraph is
-already one rule in the parser (`interrupts_paragraph`, which validation
-uses too); asking it about the block as written keeps the gap wherever the
+already one rule (`interrupts_paragraph` in the parser, and validation's
+tight-item check for the block as the serializer writes it); asking it keeps the gap wherever the
 container still starts, and keeps the blank-line fallback where it does not.
 
 - Scope: the source between a leaf and a container after it is kept
@@ -42,8 +42,11 @@ Specs:
 ### 1. Boundaries
 - [x] 1.1 In `reuse::keeps_gap`, keep the gap before a container after a
   leaf whatever its first line became where it still starts there
-  (`starts_after_leaf`, asking `interrupts_paragraph` after a paragraph, a
-  definition, or a table); verified by `tests/serialize_source.rs`
+  (`starts_after_leaf`, asking after a paragraph, a definition, or a table
+  the rule validation's tight-item check uses, now shared as
+  `written_after_paragraph_interrupts`: `interrupts_paragraph` for the
+  block as written, a list whose first item starts below its bullet
+  continuing the paragraph); verified by `tests/serialize_source.rs`
   (`edited_items`, `a_container_after_a_leaf_keeps_the_gap_while_it_still_starts_there`,
   with no block rewritten by the read-back check) and the full
   `cargo test --profile ci --features html`

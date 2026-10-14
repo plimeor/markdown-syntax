@@ -338,12 +338,12 @@ pub(super) fn keeps_gap(
 /// Whether `right`, a container written on the line after the leaf `left`,
 /// starts there whatever its first line became: after a leaf that takes the
 /// lines following it (a paragraph's continuation, a definition's title, a
-/// table's rows) only where it interrupts a paragraph, after any other leaf
-/// always.
+/// table's rows) only where it interrupts a paragraph as written, after any
+/// other leaf always.
 fn starts_after_leaf(left: &Block, right: &Block) -> bool {
     match left {
         Block::Paragraph(_) | Block::Definition(_) | Block::Table(_) => {
-            crate::parse::interrupts_paragraph(right)
+            super::written_after_paragraph_interrupts(right)
         }
         _ => true,
     }

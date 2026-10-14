@@ -411,6 +411,13 @@ mod source_reused_per_node {
         assert_eq!(edited("|a|\n|-|\n- b\n", &replace), "|a|\n|-|\n- x\n");
         assert_eq!(edited("|a|\n|-|\n- b\n", &clear), "|a|\n|-|\n\n-\n");
         assert_eq!(edited("[a]: /u\n- b\n", &clear), "[a]: /u\n\n-\n");
+        // A break first in the item goes below the bullet, which would
+        // underline the paragraph.
+        let rule = |children: &mut Vec<Block>| {
+            children[0] = parse("- - -").document.children[0].clone();
+        };
+        assert_eq!(edited("aa\n- b\n", &rule), "aa\n\n-\n  ---\n");
+        assert_eq!(edited("aa\r\n- b\r\n", &replace), "aa\r\n- x\r\n");
         // Nested in a quote, after a paragraph.
         let mut document = parse("> aa\n> - b\n").document;
         let Block::List(list) = &mut quote_mut(&mut document, 0)[1] else {
