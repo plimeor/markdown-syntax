@@ -110,8 +110,11 @@ The writer SHALL keep the source between two siblings written from the
 source that are adjacent in the source, where the boundary holds a
 separating blank line exactly when it did there, and where the boundary
 holds a blank line, has a `BlankLine` on one side, stands between two
-siblings that hold no blocks, or has the source's lines on both sides; which
-other boundaries without a blank line are kept is unspecified. It SHALL keep
+siblings that hold no blocks, stands between one that holds no blocks and a
+container after it that, as written, starts on the line after it (after a
+paragraph, a definition, or a table, where it interrupts a paragraph), or
+has the source's lines on both sides; which other boundaries without a
+blank line are kept is unspecified. It SHALL keep
 the source before the document's first block and after its last when that
 block is written from the source there; every other boundary SHALL be
 canonical. A node SHALL be written as canonical output even so where its
@@ -126,9 +129,9 @@ kept as they are. Parsing the output SHALL yield a document equal to the
 written one as "Round-trip stability" compares them wherever parsing the
 canonical output of the same document does.
 
-#### Scenario: One edited item
-- **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"` is replaced by a hand-built paragraph `Text("x")` and the document is written
-- **THEN** it returns `"-   a\n-   x\n\n    c\n-   d\n"`: the item keeps its marker, its gap, and its second paragraph at four columns, and the other items are kept
+#### Scenario: Edited items
+- **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
+- **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n-\n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which would underline the paragraph, is written canonically
 
 #### Scenario: One edited link
 - **WHEN** the target of the `WikiLink` in the document parsed from ``"see  [[A]] and `` b ``"`` is changed to `B` and the document is written
