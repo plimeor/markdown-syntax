@@ -862,3 +862,53 @@ mod former_tilde_scenarios {
         );
     }
 }
+
+mod tags {
+    use super::*;
+
+    fn tag(name: &str) -> Inline {
+        Tag::new(name).into()
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn a_tag_is_written_as_a_hash_and_its_name() {
+        let document = paragraph_document(vec![
+            tag("读书笔记"),
+            text(" and "),
+            Inline::Emphasis(Emphasis {
+                meta: NodeMeta::default(),
+                delimiter: EmphasisDelimiter::Asterisk,
+                children: vec![tag("ai/agents")],
+            }),
+        ]);
+        let markdown = rendered(&document);
+        assert_eq!(markdown, "#读书笔记 and *#ai/agents*\n");
+        assert_eq!(
+            normalized(&parse(&markdown).document),
+            normalized(&document)
+        );
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn parsed_tags_are_written_back() {
+        for source in [
+            "# Weekly #work",
+            "a #b c\n#d",
+            "[see #rust](u) **#重点**",
+            "| #a | b |\n| --- | --- |",
+        ] {
+            assert_eq!(written(source), format!("{source}\n"), "{source:?}");
+        }
+    }
+
+    // serialization: Rendering only
+    #[test]
+    fn text_that_would_read_as_a_tag_is_the_builders_to_escape() {
+        assert_eq!(rendered(&paragraph_document(vec![text("#a")])), "#a\n");
+        let escaped = paragraph_document(vec![escape('#'), text("a")]);
+        assert_eq!(rendered(&escaped), "\\#a\n");
+        assert_eq!(normalized(&parse("\\#a").document), normalized(&escaped));
+    }
+}

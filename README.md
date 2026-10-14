@@ -12,7 +12,7 @@ A `no_std + alloc` Rust crate that parses Markdown source into an owned AST and 
 - **AST-first** — `parse` returns an owned enum tree over `alloc`; the output verbs live on the `Document` you hold.
 - **Tolerant** — problems are collected as diagnostics, never thrown; `parse` is infallible.
 - **The source is the only truth** — a parsed `Document` keeps its source, and writing it back reuses the bytes of every unchanged block.
-- **One syntax** — CommonMark + GFM + footnotes + alerts + math + frontmatter + wikilinks + directives + `==` highlight + shortcodes, with nothing to configure.
+- **One syntax** — CommonMark + GFM + footnotes + alerts + math + frontmatter + wikilinks + directives + `==` highlight + shortcodes + `#` tags, with nothing to configure.
 - **Lean core** — zero runtime dependencies, `no_std + alloc`, MSRV 1.82.
 
 ## Install
@@ -267,7 +267,7 @@ cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown --profile wa
 | CommonMark | everything, including raw HTML and indented code |
 | GFM | tables, task list items, `~~` strikethrough, literal autolinks (`http://`, `https://`, `www.`, emails, `mailto:`, `xmpp:`), alerts |
 | Footnotes | `[^id]` references and definitions, inline `^[note]` |
-| Extensions | frontmatter (`---` / `+++`), inline and block math, wikilinks (`[[target\|title]]`, embeds `![[x]]`), `==` highlight, gemoji shortcodes (`:tada:`), `:name` / `::name` / `:::name` directives, `<details>` HTML containers |
+| Extensions | frontmatter (`---` / `+++`), inline and block math, wikilinks (`[[target\|title]]`, embeds `![[x]]`), `==` highlight, gemoji shortcodes (`:tada:`), `#` tags (`#ai/agents`), `:name` / `::name` / `:::name` directives, `<details>` HTML containers |
 
 Where one node has more than one spelling, the parse records it: `Emphasis` and `Strong` record `*` or `_`, and `Autolink` records an angle-bracket or a literal autolink; `Link` is the inline `[text](destination)` form. A node stores each written fact once: an `Autolink` derives its `destination()` from its text, a `CharacterReference` decodes its `value()` from the reference, and a `CodeInline` holds only its value, its fence chosen when written.
 

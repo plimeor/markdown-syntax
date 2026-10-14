@@ -528,6 +528,8 @@ pub enum Inline {
     WikiLink(WikiLink),
     /// A text directive: `:name[label]{attrs}`.
     TextDirective(TextDirective),
+    /// A tag: `#name`.
+    Tag(Tag),
 }
 
 /// Literal text content.
@@ -614,6 +616,16 @@ pub struct Shortcode {
     /// Node metadata (source span).
     pub meta: NodeMeta,
     /// The shortcode name between the colons (e.g. `smile` for `:smile:`).
+    pub name: String,
+}
+
+/// A tag: `#` and a name, such as `#rust` or `#ai/agents`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Tag {
+    /// Node metadata (source span).
+    pub meta: NodeMeta,
+    /// The name as written, without the `#`. A `/` separates levels, which
+    /// the caller splits.
     pub name: String,
 }
 
@@ -964,6 +976,7 @@ impl_meta_accessors!(Inline {
     InlineFootnote,
     WikiLink,
     TextDirective,
+    Tag,
 });
 
 impl_from_variants!(Inline {
@@ -973,7 +986,7 @@ impl_from_variants!(Inline {
     LinkReference(LinkReference), ImageReference(ImageReference), Html(HtmlInline),
     SoftBreak(SoftBreak), LineBreak(LineBreak), Math(MathInline),
     FootnoteReference(FootnoteReference), InlineFootnote(InlineFootnote), WikiLink(WikiLink),
-    TextDirective(TextDirective),
+    TextDirective(TextDirective), Tag(Tag),
 });
 
 impl Inline {
@@ -1054,6 +1067,16 @@ impl Shortcode {
     /// name, or `None` for a name the table does not hold.
     pub fn glyph(&self) -> Option<&'static str> {
         crate::gemoji::glyph(&self.name)
+    }
+}
+
+impl Tag {
+    /// A tag named `name`, written without its `#`.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            name: name.into(),
+        }
     }
 }
 

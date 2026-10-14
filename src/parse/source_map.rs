@@ -380,6 +380,7 @@ impl Translator<'_> {
                 Inline::Math(node) => self.meta(&mut node.meta),
                 Inline::FootnoteReference(node) => self.meta(&mut node.meta),
                 Inline::WikiLink(node) => self.meta(&mut node.meta),
+                Inline::Tag(node) => self.meta(&mut node.meta),
                 Inline::Emphasis(node) => self.container(&mut node.meta, &mut node.children),
                 Inline::Strong(node) => self.container(&mut node.meta, &mut node.children),
                 Inline::Delete(node) => self.container(&mut node.meta, &mut node.children),

@@ -50,6 +50,7 @@ const FRAGMENTS: &[&str] = &[
     " www.a",
     " http://a",
     "a@b.c",
+    "#a",
     "a",
     " ",
     "\n",

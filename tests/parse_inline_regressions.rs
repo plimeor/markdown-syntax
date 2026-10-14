@@ -1313,3 +1313,220 @@ mod literal_autolinks_after_an_open_bracket {
         assert_eq!(autolinks("^[see [https://example.com]"), [] as [&str; 0]);
     }
 }
+
+mod tags {
+    //! `#` tags, from Settle's tag tests and meowdown's hashtag cases where
+    //! Settle's rule agrees.
+
+    use markdown_syntax::{parse, parse_inline, Block, Definitions, Inline};
+
+    /// The name and source slice of every tag in `source`, in order.
+    fn tags(source: &str) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        let document = parse(source).document;
+        collect_blocks(&document.children, source, &mut found);
+        found
+    }
+
+    fn names(source: &str) -> Vec<String> {
+        tags(source).into_iter().map(|(name, _)| name).collect()
+    }
+
+    fn collect_blocks(blocks: &[Block], source: &str, found: &mut Vec<(String, String)>) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(node) => collect_inlines(&node.children, source, found),
+                Block::Heading(node) => collect_inlines(&node.children, source, found),
+                Block::BlockQuote(node) => collect_blocks(&node.children, source, found),
+                Block::List(node) => node
+                    .children
+                    .iter()
+                    .for_each(|item| collect_blocks(&item.children, source, found)),
+                Block::Table(node) => node
+                    .rows
+                    .iter()
+                    .flat_map(|row| &row.cells)
+                    .for_each(|cell| collect_inlines(&cell.children, source, found)),
+                Block::LeafDirective(node) => collect_inlines(&node.label, source, found),
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_inlines(inlines: &[Inline], source: &str, found: &mut Vec<(String, String)>) {
+        for inline in inlines {
+            if let Inline::Tag(tag) = inline {
+                let span = tag.meta.span.expect("a parsed tag has a span");
+                found.push((tag.name.clone(), source[span.start..span.end].into()));
+            }
+            collect_inlines(inline.children(), source, found);
+        }
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn a_tag_follows_whitespace_or_the_start_of_the_content() {
+        assert_eq!(names("今天读了 #pkm 相关的文章"), ["pkm"]);
+        assert_eq!(names("#读书笔记 第三章"), ["读书笔记"]);
+        assert_eq!(names("# 周报 #work"), ["work"]);
+        assert_eq!(names("第一行\n#second 行"), ["second"]);
+        assert_eq!(names("a\n#x"), ["x"]);
+        assert_eq!(names("a\\\n#x"), ["x"]);
+        for source in [
+            "#meow",
+            "#MeOw",
+            "#v2",
+            "#my-tag",
+            "#my_tag",
+            "#日本語",
+            "#café",
+            "#тег",
+        ] {
+            assert_eq!(names(source), [&source[1..]], "{source:?}");
+        }
+        assert_eq!(names("#tag-"), ["tag-"]);
+        assert_eq!(names("#ai/agents"), ["ai/agents"]);
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn a_tag_starts_with_a_letter_after_whitespace() {
+        for source in [
+            "#",
+            "第 #123 号",
+            "#2024",
+            "#1a",
+            "#_",
+            "#-",
+            "#🐱",
+            "##tag",
+            "abc#def",
+            "a#b (#x) **粗体**#tag",
+            "\"#a\"",
+            "*#a",
+        ] {
+            assert_eq!(names(source), [] as [&str; 0], "{source:?}");
+        }
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn a_tag_ends_at_the_first_char_it_cannot_hold() {
+        for (source, name) in [
+            ("#a#b", "a"),
+            ("#tag.", "tag"),
+            ("#café!", "café"),
+            ("#a🐱", "a"),
+            ("#a b", "a"),
+        ] {
+            assert_eq!(names(source), [name], "{source:?}");
+        }
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn emphasis_delimiters_are_transparent() {
+        assert_eq!(names("**#重点** 和 _#ok_"), ["重点", "ok"]);
+        assert_eq!(names("~~#a~~ ==#b=="), ["a", "b"]);
+        assert_eq!(names("x *y* #c"), ["c"]);
+        // The spec's scenario: the tag sits inside the emphasis, and `#c`
+        // after a strong span has `b` before it.
+        let document = parse("*#a* **b**#c").document;
+        let [Block::Paragraph(paragraph)] = document.children.as_slice() else {
+            panic!("{document:?}");
+        };
+        let [Inline::Emphasis(emphasis), Inline::Text(_), Inline::Strong(_), Inline::Text(c)] =
+            paragraph.children.as_slice()
+        else {
+            panic!("{paragraph:?}");
+        };
+        assert!(matches!(emphasis.children.as_slice(), [Inline::Tag(tag)] if tag.name == "a"));
+        assert_eq!(c.value, "#c");
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn a_tag_lies_in_one_text_node() {
+        // The name ends where its text ends, and a `#` at the end of text
+        // opens no tag in the span after it.
+        assert_eq!(names("#a*b*"), ["a"]);
+        assert_eq!(names("#*a*"), [] as [&str; 0]);
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn link_text_holds_tags_and_its_edges_are_not_whitespace() {
+        assert_eq!(names("[看 #rust 的文章](https://example.com)"), ["rust"]);
+        assert_eq!(names("[see #rust](u) [#go](u)"), ["rust"]);
+        assert_eq!(
+            names("![x #a](u) ^[y #b] :d[z #c] [w #d][]\n\n[w #d]: u"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(names("![#a](u) ^[#b] :d[#c] [x](u)#e"), [] as [&str; 0]);
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn nothing_inside_other_inlines_is_read() {
+        for source in [
+            "用 `#include` 引入\n\n```\n#not-tag\n```",
+            "见 https://example.com/page#section",
+            "<http://x.com/#tag>",
+            "[[笔记#小节]]",
+            "[[note #tag]]",
+            "<span>#html</span>",
+            "<a href=\"#tag\">x</a>",
+            "---\ntags: [pkm]\n---\n正文",
+            "\\#不是标签",
+            "&amp;#a",
+            "$x$#a :smile:#b [^n]#c\n\n[^n]: n",
+            "    #indented",
+        ] {
+            assert_eq!(names(source), [] as [&str; 0], "{source:?}");
+        }
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn tags_in_lists_quotes_tables_and_labels() {
+        assert_eq!(
+            names("- 项 #a\n\n> 引 #b\n\n| x |\n| - |\n| #c |\n\n::d[#e]"),
+            ["a", "b", "c", "e"]
+        );
+    }
+
+    // public-api: Source spans
+    #[test]
+    fn a_tag_span_covers_the_hash_and_the_name() {
+        assert_eq!(
+            tags("> 第一行\n> 讨论 #pkm 和 *#a*"),
+            [("pkm".into(), "#pkm".into()), ("a".into(), "#a".into())]
+        );
+        assert_eq!(tags("- x\r\n  y #b\r\n"), [("b".into(), "#b".into())]);
+        // Link text reads a demoted autolink without its brackets.
+        assert_eq!(
+            tags("[x <http://a.b> #c <http://d.e>#f](u)"),
+            [("c".into(), "#c".into())]
+        );
+        assert_eq!(
+            tags("| #a \\| #b |\n| - |"),
+            [("a".into(), "#a".into()), ("b".into(), "#b".into())]
+        );
+    }
+
+    // inline-syntax: Tags
+    #[test]
+    fn parse_inline_finds_the_tags_parse_finds() {
+        let output = parse_inline("# a #b\n#c", &Definitions::default());
+        let names: Vec<_> = output
+            .inlines
+            .iter()
+            .filter_map(|inline| match inline {
+                Inline::Tag(tag) => Some((tag.name.as_str(), tag.meta.span.unwrap())),
+                _ => None,
+            })
+            .map(|(name, span)| (name.to_string(), span.start, span.end))
+            .collect();
+        assert_eq!(names, [("b".into(), 4, 6), ("c".into(), 7, 9)]);
+    }
+}

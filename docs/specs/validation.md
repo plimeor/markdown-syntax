@@ -91,6 +91,8 @@ sits in a table cell or a directive label:
   reference.
 - `Shortcode`: a name not in the crate's pinned gemoji table.
 - `WikiLink`: an empty target.
+- `Tag`: a name that is not one Unicode letter followed by Unicode letters,
+  Unicode numbers, `/`, `_`, or `-`.
 - `CodeInline`: an empty value, or a value holding a line ending.
 - `MathInline`: an empty value; a dollar fence of length 0; code-form math
   whose value holds a backtick followed by `$`; dollar math that, written

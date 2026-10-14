@@ -27,6 +27,22 @@ mod validation {
         ));
     }
 
+    // validation: Shapes that cannot be written
+    #[test]
+    fn a_tag_name_must_read_back_after_its_hash() {
+        let validate = |name: &str| {
+            Document::new(vec![Block::Paragraph(Paragraph::new([Tag::new(name)]))]).validate()
+        };
+        for name in ["a", "ai/agents", "读书笔记", "v2", "tag-", "my_tag", "café"] {
+            assert_eq!(validate(name), [], "{name:?}");
+        }
+        for name in ["", "1a", "_a", "-a", "/a", "a b", "a#b", "a.b", "🐱"] {
+            let diagnostics = validate(name);
+            assert_eq!(diagnostics.len(), 1, "{name:?}: {diagnostics:?}");
+            assert!(diagnostics[0].message.starts_with("tag name"), "{name:?}");
+        }
+    }
+
     // validation: Validate reports invalid shapes
     #[test]
     fn empty_paragraph_is_invalid() {

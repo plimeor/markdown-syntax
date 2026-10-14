@@ -20,6 +20,7 @@ syntax gives the editor and the index one reading.
 ### Parsing
 - `inline-syntax` › Tags: added
 - `public-api` › One syntax: modified — the syntax includes tags
+- `public-api` › Hand construction: modified — `Tag::new`
 
 ### Writing and validation
 - `validation` › Shapes that cannot be written: modified — a tag whose name
@@ -69,7 +70,9 @@ over the leaf's content flattened as Settle flattens it today:
   tag.
 
 Code blocks, HTML blocks, and frontmatter hold no inline content, so they
-hold no tags.
+hold no tags. A tag lies in one text node, so its name also ends where that
+text ends: `#a*b*` holds the tag `a`, where Settle's flattening reads `ab`,
+and `#*a*` holds none.
 
 ### Parsing
 
@@ -80,6 +83,16 @@ emphasis-like content, and splits a `Text` node where a tag starts and ends.
 It runs inside the inline parse, before spans are translated to the source,
 so a tag's span is the `#` and its name in the source, and `parse_inline`
 finds the same tags `parse` does. It is linear in the leaf's content.
+
+A text node's value is its span's slice, except for trailing spaces before a
+line break and an angle-bracket autolink that link text demotes to text
+without its brackets. The pass maps a tag's offsets through the value to the
+input, building the map once for a text node that is not a prefix of its
+slice, and a tag ends where the value skips a byte of the input.
+
+Letters and numbers are the Unicode `L` and `N` categories, from tables
+generated from the Unicode Character Database, as the punctuation table is,
+so a parse does not depend on the compiler's Unicode version.
 
 ### Node
 
@@ -111,6 +124,8 @@ the conformance oracles, which have no tags, see the same output.
 - A pass after delimiter pairing — because transparency of `*` depends on
   pairing. Turned down: recognizing `#` in the inline scanner, which would
   need to know the pairing before it is made.
+- A tag lies in one text node — because no node can hold a tag across an
+  emphasis edge. Turned down: Settle's reading of `#a*b*` as the tag `ab`.
 - Tags render as text in HTML — because the crate offers no tag URL scheme.
   Turned down: a `<span>` or link, which would add a class name or URL rule
   the crate cannot choose for its users.
@@ -126,38 +141,43 @@ the conformance oracles, which have no tags, see the same output.
 Inner loop: `cargo test --profile ci --features html --test <name>`.
 
 ### 1. Decision
-- [ ] 1.1 Write decision 0015 superseding 0012 with tags added to the syntax,
+- [x] 1.1 Write decision 0015 superseding 0012 with tags added to the syntax,
   `git mv` 0012 to `docs/decisions/superseded/`, and update links outside the
   archive; verified by `rg -n '0012' docs CLAUDE.md README.md` showing only
   superseded, archived, or updated references.
 
 ### 2. Parse
-- [ ] 2.1 Add `Tag` to the AST with `Tag::new`, `From<Tag> for Inline`, and
+- [x] 2.1 Add `Tag` to the AST with `Tag::new`, `From<Tag> for Inline`, and
   the prelude export; verified by `cargo test --no-run`.
-- [ ] 2.2 Add the tag pass to the inline parse; verified by
+- [x] 2.2 Add the tag pass to the inline parse; verified by
   `tests/parse_inline_regressions.rs` cases naming `Tags`, ported from
   Settle's `tags.rs` tests and meowdown's recognized, rejected, and
   truncation lists where Settle's rule agrees.
-- [ ] 2.3 Regenerate the `.ast` goldens that hold tags and read each moved
+- [x] 2.3 Regenerate the `.ast` goldens that hold tags and read each moved
   golden in review; verified by `cargo test --profile ci --features html
   --test fixtures`.
-- [ ] 2.4 Add tag-dense inputs to the linear-growth and pathological suites;
+  - No golden held a tag, so none moved; `extensions/tags` is a new golden.
+- [x] 2.4 Add tag-dense inputs to the linear-growth and pathological suites;
   verified by `tests/linear_growth.rs` and `tests/pathological_inputs.rs`.
 
 ### 3. Write, validate, render
-- [ ] 3.1 Write tags as `#name`, validate their names, and escape `#` in the
+- [x] 3.1 Write tags as `#name`, validate their names, and escape `#` in the
   seeded round-trip generator's text where it would form a tag; verified by
   `tests/serialize_regressions.rs`, `tests/validate_regressions.rs`, and
   `tests/serialize_roundtrip_fuzz.rs`.
-- [ ] 3.2 Render tags as text in HTML; verified by `tests/html_regressions.rs`
+  - The seeded generator builds Markdown text, not trees, so nothing needs
+    escaping; its emphasis pieces already form tags, and they read back.
+- [x] 3.2 Render tags as text in HTML; verified by `tests/html_regressions.rs`
   naming `Tags render as their text`, and the conformance bench unchanged.
 
 ### 4. Binding
-- [ ] 4.1 Carry `tag` through both wire directions and `index.d.ts`;
+- [x] 4.1 Carry `tag` through both wire directions and `index.d.ts`;
   verified by `cargo test -p markdown-syntax-wasm` and
   `node --test 'wasm/js/test/*.test.mjs'`.
 
 ### 5. Integration
-- [ ] 5.1 Run Settle's tag tests against a build of this branch with
+- [x] 5.1 Run Settle's tag tests against a build of this branch with
   `tags.rs` reading `Tag` nodes; verified by `cargo test -p settle-core tags`
   in a Settle checkout pointing at this branch, observed and not stored.
+  - All ten tag tests pass with `collect` reading `Tag` nodes and keeping
+    its first-spelling dedup.

@@ -116,6 +116,10 @@ fn flatten_into(inlines: &[Inline], out: &mut String) {
                     out.push(':');
                 }
             },
+            Inline::Tag(t) => {
+                out.push('#');
+                out.push_str(&t.name);
+            }
             Inline::FootnoteReference(_) => {}
             Inline::TextDirective(d) => flatten_into(&d.label, out),
         }

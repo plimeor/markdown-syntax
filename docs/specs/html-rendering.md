@@ -61,3 +61,7 @@ writes for a wiki link, with a `data-wikilink-embed="true"` attribute after
 write a wiki link's `decoded_target()` and `decoded_label()`, the target and
 label with their escapes and character references decoded, the target encoded
 as a link destination is.
+
+### Requirement: Tags render as their text
+The renderer SHALL write a `Tag` as the text `#` followed by its name,
+escaped as text, with no element around it.

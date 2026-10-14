@@ -509,6 +509,7 @@ fn snapshot_inlines(inlines: &[Inline], indent: usize, lines: &mut Vec<String>) 
             Inline::Shortcode(node) => {
                 push(lines, indent, format!("Shortcode {}", quote(&node.name)));
             }
+            Inline::Tag(node) => push(lines, indent, format!("Tag {}", quote(&node.name))),
             Inline::Code(node) => push(lines, indent, format!("Code value={}", quote(&node.value))),
             Inline::Link(node) => {
                 push(

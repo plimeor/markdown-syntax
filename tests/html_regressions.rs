@@ -370,6 +370,16 @@ fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
     );
 }
 
+// html-rendering: Tags render as their text
+#[test]
+fn tags_render_as_their_text() {
+    let html = parse_render("a #b/c **#d** ![x #e](i.png)", &HtmlOptions::default());
+    assert_eq!(
+        html.trim_end(),
+        "<p>a #b/c <strong>#d</strong> <img src=\"i.png\" alt=\"x #e\" /></p>"
+    );
+}
+
 // html-rendering: Shortcodes render their glyph
 #[test]
 fn shortcodes_render_their_gemoji_glyph() {

@@ -122,6 +122,7 @@ fn inlines(inlines: &mut [Inline]) {
             Inline::Mark(node) => self::inlines(&mut node.children),
             Inline::InlineFootnote(node) => self::inlines(&mut node.children),
             Inline::Shortcode(node) => string(&mut node.name),
+            Inline::Tag(node) => string(&mut node.name),
             Inline::Code(node) => string(&mut node.value),
             Inline::Link(node) => {
                 string(&mut node.destination);

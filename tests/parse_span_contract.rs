@@ -315,15 +315,11 @@ const CONTAINER_CASES: &[(&str, &str, &[&str])] = &[
         "- 项目\n  - **[[A]]** 和 ==[[B]]==\n",
         &["[[A]]", "[[B]]"],
     ),
+    ("C25 tag, nested", "- 项目\n  - 讨论 #pkm\n", &["#pkm"]),
     (
-        "C25 hashtag text, nested",
-        "- 项目\n  - 讨论 #pkm\n",
-        &["讨论 #pkm"],
-    ),
-    (
-        "C26 hashtag text, blockquote line 2",
+        "C26 tag, blockquote line 2",
         "> 第一行\n> 讨论 #pkm\n",
-        &["讨论 #pkm"],
+        &["#pkm"],
     ),
     (
         "C27 table cells",
@@ -356,7 +352,7 @@ fn collect_addressed_inlines(inlines: &[Inline], out: &mut Vec<Inline>) {
     for inline in inlines {
         match inline {
             Inline::WikiLink(_) | Inline::Link(_) | Inline::Image(_) => out.push(inline.clone()),
-            Inline::Text(text) if text.value.contains('#') => out.push(inline.clone()),
+            Inline::Tag(_) => out.push(inline.clone()),
             _ => {}
         }
         collect_addressed_inlines(inline.children(), out);

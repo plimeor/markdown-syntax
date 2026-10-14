@@ -24,6 +24,7 @@ mod nul_replacement;
 #[cfg(test)]
 mod scan_tests;
 mod source_map;
+mod tags;
 
 pub(crate) use blocks::interrupts_paragraph;
 use source_map::{DerivedText, Segment, SourceMap};
@@ -2478,6 +2479,7 @@ fn parse_inlines_in(
     }
     let first_diagnostic = diagnostics.len();
     let mut nodes = parse_inlines_with_context(input, 0, definitions, diagnostics, &mut state);
+    tags::split_tags(input, &mut nodes);
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
     nodes
 }

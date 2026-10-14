@@ -1,4 +1,4 @@
-//! All 30 `Inline` arms.
+//! Every `Inline` arm.
 
 use alloc::format;
 use alloc::string::String;
@@ -19,7 +19,7 @@ pub fn render_inlines(children: &[Inline], ctx: &Ctx) -> String {
     out
 }
 
-/// Render a single inline node. Every one of the 30 `Inline` arms is handled
+/// Render a single inline node. Every `Inline` arm is handled
 /// explicitly — there is no catch-all.
 pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
     match inline {
@@ -53,6 +53,9 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
             Some(glyph) => escape_text(glyph),
             None => escape_text(&format!(":{}:", s.name)),
         },
+
+        // Tag — its text, `#` and the name, with no element around it.
+        Inline::Tag(t) => escape_text(&format!("#{}", t.name)),
 
         // 9. Code — `value` already code-span-normalized; text-escape only.
         Inline::Code(c) => format!("<code>{}</code>", escape_text(&c.value)),

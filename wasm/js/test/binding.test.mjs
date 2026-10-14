@@ -70,7 +70,7 @@ describe("Parse from JavaScript", () => {
       "$$\nx\n$$",
       "::leaf[l]{a=b c}",
       ":::box\nx\n:::",
-      "[l](/u) <http://a> ![i](/j) [d][] ![d] a\\\nb $x$ [^f] ^[n] [[w]] :t[l]{k}",
+      "[l](/u) <http://a> ![i](/j) [d][] ![d] a\\\nb $x$ [^f] ^[n] [[w]] :t[l]{k} #tag",
     ].join("\n\n");
     const types = new Set([...nodes(binding.parse(source).tree)].map(([node]) => node.type));
     for (const type of [
@@ -79,7 +79,7 @@ describe("Parse from JavaScript", () => {
       "htmlContainer", "definition", "footnoteDefinition", "table", "tableRow", "tableCell",
       "mathBlock", "leafDirective", "containerDirective", "link", "autolink", "image",
       "linkReference", "imageReference", "lineBreak", "math", "footnoteReference",
-      "inlineFootnote", "wikiLink", "textDirective",
+      "inlineFootnote", "wikiLink", "textDirective", "tag",
     ]) {
       assert.ok(types.has(type), type);
     }
@@ -166,6 +166,27 @@ describe("Write from JavaScript", () => {
     const document = binding.parse(source);
     assert.equal(document.toMarkdown(document.tree), source);
     assert.equal(document.toMarkdown(), source);
+  });
+
+  test("a tag built in JavaScript", () => {
+    const document = binding.parse("a");
+    const tree = {
+      type: "document",
+      span: null,
+      children: [
+        {
+          type: "paragraph",
+          span: null,
+          children: [
+            { type: "text", span: null, value: "see " },
+            { type: "tag", span: null, name: "ai/agents" },
+          ],
+        },
+      ],
+    };
+    assert.equal(document.toMarkdown(tree), "see #ai/agents\n");
+    const [tag] = binding.parse("#读书笔记").tree.children[0].children;
+    assert.deepEqual([tag.type, tag.name, tag.span], ["tag", "读书笔记", [0, 5]]);
   });
 
   test("an edited block is written canonically between kept ones", () => {
