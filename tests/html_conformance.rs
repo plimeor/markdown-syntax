@@ -68,6 +68,7 @@ fn report() -> &'static report::Report {
 /// The measurement: parse → render → compare every runnable oracle tuple and
 /// print a per-suite / per-file conformance breakdown. Does NOT assert a
 /// threshold — it reports a number and dumps failures for triage.
+// block-syntax: CommonMark blocks
 #[test]
 fn html_conformance_report() {
     let report = report();

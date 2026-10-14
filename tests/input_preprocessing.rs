@@ -21,6 +21,7 @@ fn text_of(inlines: &[Inline]) -> String {
         .collect()
 }
 
+// public-api: Byte order mark and NUL
 #[test]
 fn leading_bom_is_ignored_and_spans_stay_in_source_coordinates() {
     let document = parse("\u{feff}# title").document;

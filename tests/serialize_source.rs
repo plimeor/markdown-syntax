@@ -50,6 +50,7 @@ mod unchanged_source_is_kept {
 
     const SOURCE: &str = "|a|b|\n|-|-|\n\n*  x\n\n\n# T #";
 
+    // public-api: Output verbs on Document
     #[test]
     fn an_unedited_document_writes_its_source() {
         assert_eq!(parse(SOURCE).document.to_markdown().unwrap(), SOURCE);
@@ -74,6 +75,7 @@ mod unchanged_source_is_kept {
         );
     }
 
+    // serialization: Unchanged source is kept
     #[test]
     fn one_edited_block_is_written_canonically_between_kept_ones() {
         let mut document = parse(SOURCE).document;

@@ -28,6 +28,8 @@ fn underscore_strong_stays_strong() {
     ));
 }
 
+// inline-syntax: Extension marks
+// public-api: One syntax
 #[test]
 fn removed_marks_stay_text() {
     let inlines = first_para("H~2~O and x^2^ ++a++ ||b||");
@@ -60,6 +62,7 @@ fn prose_from_the_issue_stays_text() {
     assert!(texts_only(&first_para("^12.0.0 or ^13.0.0")));
 }
 
+// inline-syntax: Inline math needs tight delimiters
 #[test]
 fn dollar_amounts_stay_text() {
     // The math parser needs tight delimiters, so `$5 to $10` is not inline math.
@@ -70,6 +73,7 @@ fn dollar_amounts_stay_text() {
     );
 }
 
+// inline-syntax: Wikilinks
 #[test]
 fn wikilink_title_is_after_the_pipe() {
     let inlines = first_para("see [[target|label]] here");
@@ -80,6 +84,7 @@ fn wikilink_title_is_after_the_pipe() {
     assert_eq!(link.label, "label");
 }
 
+// block-syntax: Extension blocks
 #[test]
 fn html_containers_are_recognized() {
     let out = parse("<details>\n<summary>Open</summary>\n\nbody\n\n</details>\n");
@@ -102,6 +107,7 @@ fn mdx_syntax_is_raw_html_or_text() {
     assert!(texts_only(&expression.children));
 }
 
+// public-api: Recorded syntax forms
 #[test]
 fn underscore_delimiters_are_recorded() {
     let inlines = first_para("_a_ __b__");
@@ -112,6 +118,7 @@ fn underscore_delimiters_are_recorded() {
     assert_eq!(strong.delimiter, EmphasisDelimiter::Underscore);
 }
 
+// public-api: Each written fact is stored once
 #[test]
 fn link_forms_are_recorded() {
     let inlines = first_para("www.a.b <http://c.d> [e](f)");
@@ -132,6 +139,7 @@ fn constructed_nodes_take_the_default_spelling() {
     assert_eq!(EmphasisDelimiter::default(), EmphasisDelimiter::Asterisk);
 }
 
+// public-api: Hand construction
 #[test]
 fn build_layer_round_trips() {
     let document = Document::new(vec![
@@ -143,6 +151,7 @@ fn build_layer_round_trips() {
     assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
 }
 
+// inline-syntax: Shortcodes and text directives share the colon
 #[test]
 fn a_text_directive_ends_at_whitespace_or_written_punctuation() {
     let directives = |md: &str| {

@@ -6,7 +6,7 @@ Type: api
 The JavaScript surface through which an editor parses Markdown, parses one
 leaf block's inline content, reads a leaf's inline source, and writes an
 edited tree back, all with the core crate's own code compiled to WebAssembly.
-Owned by the `markdown-syntax-wasm` crate in `wasm/` and its JS wrapper.
+Owned by the `markdown-syntax-wasm` crate and its JS wrapper.
 
 ## Requirements
 
@@ -16,10 +16,6 @@ and no dependency other than the core crate, SHALL NOT be published, and SHALL
 leave the core crate's build surface, dependencies, and default-build behavior
 unchanged. The JS wrapper SHALL need no npm package and SHALL run on Node 22
 and in WKWebView.
-
-#### Scenario: Core build unchanged
-- **WHEN** `cargo build` runs at the repository root
-- **THEN** only the core crate builds, and `cargo tree -p markdown-syntax-wasm` lists the core crate as its only dependency
 
 ### Requirement: Parse from JavaScript
 `MarkdownSyntax.load(wasm)` SHALL return a binding whose `parse(source)`
@@ -37,10 +33,6 @@ Every `span` the binding returns or accepts SHALL be `[from, to]` in UTF-16
 code units of the JavaScript string it refers to, or `null` for a node
 without a span.
 
-#### Scenario: Text beyond the BMP
-- **WHEN** `binding.parse("😀 *a*")` runs
-- **THEN** the `emphasis` span is `[3, 6]`
-
 ### Requirement: Inline parse and inline source from JavaScript
 `binding.parseInline(text, definitions)` SHALL return the inlines and
 diagnostics of the core crate's `parse_inline`, and
@@ -49,10 +41,6 @@ diagnostics of the core crate's `parse_inline`, and
 that map as its `to_source` and `span_to_source` do, or `null` where it
 returns `None`; `parsedDocument.definitions` SHALL hold the labels of the
 document's definitions.
-
-#### Scenario: Paragraph in a list item
-- **WHEN** `inlineSource([0, 0, 0])` runs on the document parsed from `"- a\n  *b*"`
-- **THEN** it returns the text `"a\n*b*"`, and `toSource(2)` returns 6
 
 ### Requirement: Write from JavaScript
 `parsedDocument.toMarkdown(tree, options)` SHALL return the text the core

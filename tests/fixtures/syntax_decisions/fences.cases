@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1: syntax decisions
 source: fences
-decision: Fence edges follow commonmark.js, as block-syntax "CommonMark oracle cases" requires.
+decision: Fence edges follow commonmark.js, as block-syntax "CommonMark blocks" requires.
 count: 6
 
 --- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 84 input-bytes 7 expected-bytes 25

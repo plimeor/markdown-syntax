@@ -1412,6 +1412,7 @@ mod unicode_whitespace {
 mod footnotes_and_directives {
     use markdown_syntax::{parse, Block, DiagnosticCode, Inline};
 
+    // block-syntax: Footnote definition content
     #[test]
     fn a_footnote_definitions_first_line_keeps_a_hard_break() {
         let blocks = parse("[^1]: a  \nb").document.children;
@@ -1461,6 +1462,7 @@ mod footnotes_and_directives {
         );
     }
 
+    // block-syntax: Block directives
     #[test]
     fn block_directive_names_are_runs_of_letters_joined_by_dashes() {
         let output = parse(":::call-out\nbody\n:::");
@@ -2089,6 +2091,7 @@ mod one_pass_over_open_blocks {
         assert_eq!(paragraph(&nested[1].children[0]), ["b", "\n", "c"]);
     }
 
+    // block-syntax: Block extensions indent at most three columns
     #[test]
     fn block_extensions_indent_at_most_three_columns() {
         for (source, value) in [("    [^1]: x", "[^1]: x\n"), ("    ::name", "::name\n")] {
@@ -2127,6 +2130,7 @@ mod one_pass_over_open_blocks {
         assert_eq!(code(&quote(&blocks[0])[0]).1, "a\n\n");
     }
 
+    // block-syntax: One pass over open blocks
     #[test]
     fn container_lines_follow_the_open_blocks() {
         let blocks = blocks_of("2. a\n   1. ```\n\n2. b");
@@ -2160,6 +2164,7 @@ mod one_pass_over_open_blocks {
         assert_eq!(paragraph(&blocks[1]), ["x"]);
     }
 
+    // block-syntax: GFM blocks
     #[test]
     fn an_alerts_paragraph_takes_lazy_lines() {
         let blocks = parse("> [!NOTE]\n> a\n===").document.children;

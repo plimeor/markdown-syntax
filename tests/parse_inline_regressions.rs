@@ -252,6 +252,7 @@ mod inline_delimiter {
         assert_text(delete.children.as_slice(), "xxx");
     }
 
+    // inline-syntax: Extension marks
     #[test]
     fn strikethrough_takes_two_tildes() {
         let inlines = paragraph("a ~one~ b and ~~two~~ c\n");
@@ -348,6 +349,7 @@ mod review_inline {
         ));
     }
 
+    // inline-syntax: Hard line breaks from spaces
     #[test]
     fn i2_pure_double_space_remains_a_hard_break() {
         let inlines = only_paragraph("aaa  \nbb\n");
@@ -629,6 +631,7 @@ mod escapes_and_references {
         }
     }
 
+    // inline-syntax: Escapes and character references are nodes
     #[test]
     fn escaped_punctuation_is_an_escape_node() {
         assert_eq!(
@@ -654,6 +657,7 @@ mod escapes_and_references {
         assert_eq!(paragraph("`\\*`"), ["Code(\\*)"]);
     }
 
+    // inline-syntax: Escapes and character references are nodes
     #[test]
     fn an_escaped_pipe_in_a_cell_is_an_escape_in_text_and_a_pipe_in_raw_text() {
         assert_eq!(
@@ -691,6 +695,7 @@ mod wiki_embeds {
         );
     }
 
+    // inline-syntax: Wikilinks
     #[test]
     fn a_bang_before_a_wikilink_makes_an_embed_spanning_from_it() {
         let inlines = paragraph("see ![[x.png]]");
@@ -704,6 +709,7 @@ mod wiki_embeds {
         );
     }
 
+    // inline-syntax: Wikilinks
     #[test]
     fn an_escaped_bang_leaves_a_plain_wikilink() {
         let inlines = paragraph("\\![[x.png]]");
@@ -835,6 +841,7 @@ mod literal_autolink_boundaries {
             .collect()
     }
 
+    // inline-syntax: Literal autolinks
     #[test]
     fn a_literal_autolink_ends_where_the_spec_says() {
         for (source, expected) in [
@@ -965,6 +972,7 @@ mod gemoji_shortcodes {
         }
     }
 
+    // inline-syntax: Shortcodes and text directives share the colon
     #[test]
     fn a_gemoji_name_between_colons_is_a_shortcode() {
         assert!(
@@ -975,6 +983,7 @@ mod gemoji_shortcodes {
         );
     }
 
+    // inline-syntax: Shortcodes and text directives share the colon
     #[test]
     fn a_letter_or_digit_beside_a_colon_or_an_unknown_name_is_no_shortcode() {
         for source in [
@@ -1000,6 +1009,7 @@ mod gemoji_shortcodes {
         );
     }
 
+    // public-api: Shortcode glyph
     #[test]
     fn a_shortcode_gives_its_glyph() {
         let inlines = inlines(":tada:");
@@ -1062,6 +1072,7 @@ mod autolinks_inside_link_text {
         }
     }
 
+    // inline-syntax: CommonMark inlines
     #[test]
     fn link_text_holds_no_link_inside_image_alt_or_a_directive_label() {
         // An autolink in an image's alt inside link text reads as its text; a
@@ -1100,6 +1111,7 @@ mod autolinks_inside_link_text {
         }
     }
 
+    // inline-syntax: CommonMark inlines
     #[test]
     fn an_angle_bracket_autolink_in_link_text_reads_as_its_text() {
         // cmark-gfm, commonmark.js, and micromark nest the autolink's `<a>`
@@ -1153,6 +1165,7 @@ mod wikilinks_as_written {
         link.clone()
     }
 
+    // inline-syntax: Wikilinks
     #[test]
     fn escapes_and_references_stay_as_written() {
         let link = wikilink("[[a\\$b]]");
@@ -1194,6 +1207,7 @@ mod wikilinks_as_written {
         assert_eq!(link.decoded_label(), "a$b");
     }
 
+    // public-api: Wiki link decoding
     #[test]
     fn a_decoded_target_compares_with_a_link_destination() {
         let document = parse("[[a&amp;b]] [x](a&amp;b)").document;
@@ -1266,6 +1280,7 @@ mod literal_autolinks_after_an_open_bracket {
         out
     }
 
+    // inline-syntax: Literal autolinks
     #[test]
     fn a_url_after_an_open_bracket_is_text() {
         for source in [
@@ -1277,6 +1292,7 @@ mod literal_autolinks_after_an_open_bracket {
         }
     }
 
+    // inline-syntax: Literal autolinks
     #[test]
     fn an_email_after_an_open_bracket_links() {
         assert_eq!(autolinks("[a@b.com]"), ["a@b.com"]);

@@ -247,6 +247,7 @@ mod value_encodings {
         );
     }
 
+    // serialization: Table cells encoded by one rule
     #[test]
     fn a_text_pipe_in_a_cell_is_written_escaped() {
         // The cell reads `\|` as an escaped pipe, which compares as text.
@@ -292,6 +293,7 @@ mod value_encodings {
         );
     }
 
+    // validation: Shapes that cannot be written
     #[test]
     fn a_cell_value_holding_an_escaped_pipe_is_invalid() {
         // No cell source reads as the value `a\|b`: `a\|b` reads as `a|b`,
@@ -771,6 +773,7 @@ mod recorded_spellings {
 mod text_as_recorded {
     use super::*;
 
+    // serialization: Rendering only
     #[test]
     fn hand_built_text_is_written_as_it_is() {
         for value in [
@@ -818,6 +821,7 @@ mod text_as_recorded {
         );
     }
 
+    // serialization: Invalid documents are rejected
     #[test]
     fn invalid_shapes_are_rejected_before_rendering() {
         let link = |children: Vec<Inline>| Inline::Link(Link::new("/u", children));
