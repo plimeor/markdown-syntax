@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 
 use markdown_syntax::{parse, parse_inline, Block, Definitions, Document, Inline};
 
+#[path = "support/deepest_edit.rs"]
+mod deepest_edit;
+
 /// Generous for an unoptimized build; every input below parses in
 /// milliseconds when parsing is linear. It catches a hang; growth is checked
 /// by `assert_linear_growth` below and by `tests/linear_growth.rs`.
@@ -43,6 +46,7 @@ fn parse_bounded(name: &str, input: String) -> Document {
             let started = Instant::now();
             let document = parse(&input).document;
             let _ = document.clone().without_source().to_markdown();
+            let _ = edited_at_depth(&document).to_markdown();
             let _ = document.validate();
             let _ = parse_inline(&input, &Definitions::of(&document));
             (document, started.elapsed())
@@ -55,6 +59,14 @@ fn parse_bounded(name: &str, input: String) -> Document {
         "{name}: took {elapsed:?}, limit {TIME_LIMIT:?}"
     );
     document
+}
+
+/// `document` with an edit at its deepest level, written partly from its
+/// source.
+fn edited_at_depth(document: &Document) -> Document {
+    let mut edited = document.clone();
+    deepest_edit::edit_deepest(&mut edited.children);
+    edited
 }
 
 fn first_paragraph(document: &Document) -> &[Inline] {
@@ -785,6 +797,12 @@ fn nested_quote_depth_grows_time_linearly() {
     );
 
     assert_depth_growth("nested quotes", [4, 8, 16], quoted, parse_and_serialize);
+    assert_depth_growth(
+        "nested quotes edited at depth",
+        [4, 8, 16],
+        |depth| edited_at_depth(&parse(&quoted(depth)).document),
+        serialize,
+    );
 }
 
 #[test]
@@ -811,6 +829,12 @@ fn nested_list_depth_grows_time_linearly() {
     );
 
     assert_depth_growth("nested lists", [8, 16, 32], listed, parse_and_serialize);
+    assert_depth_growth(
+        "nested lists edited at depth",
+        [8, 16, 32],
+        |depth| edited_at_depth(&parse(&listed(depth)).document),
+        serialize,
+    );
 }
 
 #[test]
