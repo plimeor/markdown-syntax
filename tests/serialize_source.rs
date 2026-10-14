@@ -582,4 +582,59 @@ mod source_reused_per_node {
         item_mut(&mut document, 0, 0).children[1] = paragraph("x");
         assert_eq!(document.to_markdown().unwrap(), "* [ ] a\n\n  x\n");
     }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_nested_block_that_a_list_would_take_in_is_rendered() {
+        // Without `b`, the indented `c` would continue the item.
+        let mut document = parse("> # T #\n>\n> - a\n>\n> b\n>\n>   c\n").document;
+        quote_mut(&mut document, 0).remove(2);
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "> # T #\n>\n> - a\n>\n> c\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn containers_keep_their_own_opening_lines() {
+        let mut document = parse(">b\n>\n>c\n").document;
+        quote_mut(&mut document, 0)[1] = paragraph("x");
+        assert_eq!(document.to_markdown().unwrap(), ">b\n>\n> x\n");
+        let mut document = parse("[^1]:\n\n    a\n\nb [^1]\n").document;
+        let Block::FootnoteDefinition(note) = &mut document.children[0] else {
+            panic!();
+        };
+        note.children[0] = paragraph("x");
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "[^1]:\n\n    x\n\nb [^1]\n");
+        reads_back(&markdown, &document);
+        let mut document = parse("<details><summary>S</summary>\n\nbody\n\n</details>\n").document;
+        let Block::HtmlContainer(container) = &mut document.children[0] else {
+            panic!();
+        };
+        let HtmlContainerContent::Blocks(children) = &mut container.content else {
+            panic!();
+        };
+        children[1] = paragraph("x");
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(
+            markdown,
+            "<details><summary>S</summary>\n\nx\n\n</details>\n"
+        );
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_block_that_reads_differently_is_written_canonically() {
+        // A copied underline under content that opens a list.
+        let mut document = parse("a\n===\n\nb\n").document;
+        let Block::Heading(heading) = &mut document.children[0] else {
+            panic!();
+        };
+        heading.children = vec![Text::from("- x").into()];
+        let canonical = document.clone().without_source().to_markdown().unwrap();
+        assert_eq!(document.to_markdown().unwrap(), canonical);
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 1);
+    }
 }

@@ -350,12 +350,7 @@ fn write_reusing(
     // its predecessor in the source.
     let mut run_follows = true;
     for (index, block) in blocks.iter().enumerate() {
-        // Blank lines between them do not end a list or a footnote
-        // definition before an indented line.
-        let previous_takes_indented_lines = matches!(
-            last_block,
-            Some(Block::List(_) | Block::FootnoteDefinition(_))
-        );
+        let last = last_block;
         if !matches!(block, Block::BlankLine(_)) {
             last_block = Some(block);
         }
@@ -376,30 +371,23 @@ fn write_reusing(
         // blank line did.
         let follows_run = follows_predecessor && run_follows;
         run_follows = index == 0 || !matches!(block, Block::BlankLine(_)) || follows_run;
+        if index > 0 && !follows_run {
+            if let Some((_, lines)) = &partly[index] {
+                if moves_into_previous(block, &lines[0].body, last, previous_list) {
+                    partly[index] = None;
+                }
+            }
+        }
         let mut at = reused[index];
         if let Some(position) = at {
             let start = span_of(block).start;
             let moved_after = index > 0 && !follows_run;
-            let rewritten = match block {
-                // `---` opening the document stays a break only while no
-                // later line closes it as frontmatter.
-                Block::ThematicBreak(_) => {
-                    index == 0 && (position != 0 || source[start..].starts_with("---"))
-                }
-                Block::List(list) => moved_after && previous_list == Some(written_marker(list)),
-                _ => false,
-            } || (moved_after
-                // A line of spaces is a blank line wherever it stands.
-                && !matches!(block, Block::BlankLine(_))
-                && if previous_takes_indented_lines {
-                    source[start..].starts_with([' ', '\t'])
-                } else {
-                    // Indentation that a paragraph opened by definitions
-                    // took as a continuation reads as indented code after
-                    // another block.
-                    !matches!(block, Block::CodeBlock(_))
-                        && opens_with_code_indent(&source[start..])
-                });
+            // `---` opening the document stays a break only while no later
+            // line closes it as frontmatter.
+            let rewritten = matches!(block, Block::ThematicBreak(_))
+                && index == 0
+                && (position != 0 || source[start..].starts_with("---"))
+                || moved_after && moves_into_previous(block, &source[start..], last, previous_list);
             if rewritten {
                 at = None;
             }
@@ -630,6 +618,32 @@ fn separated_boundaries(blocks: &[Block]) -> Vec<bool> {
         separated[index] = block_follows && !matches!(blocks[index - 1], Block::BlankLine(_));
     }
     separated
+}
+
+/// Whether a block written from the source, whose text opens with `text`,
+/// reads differently where it does not follow its predecessor in the
+/// source, after `last`, the last block written before it other than a blank
+/// line, and `previous_list`, the marker of a list written just before it:
+/// indentation after a list or a footnote definition, which blank lines do
+/// not end, continues them; four columns of it on a block other than
+/// indented code read as indented code, as a paragraph opened by definitions
+/// took them as a continuation; and a list after a list written with its
+/// marker continues that list. A blank line reads as one wherever it stands.
+fn moves_into_previous(
+    block: &Block,
+    text: &str,
+    last: Option<&Block>,
+    previous_list: Option<char>,
+) -> bool {
+    match block {
+        Block::BlankLine(_) => false,
+        Block::List(list) if previous_list == Some(written_marker(list)) => true,
+        _ if matches!(last, Some(Block::List(_) | Block::FootnoteDefinition(_))) => {
+            text.starts_with([' ', '\t'])
+        }
+        Block::CodeBlock(_) => false,
+        _ => opens_with_code_indent(text),
+    }
 }
 
 /// Whether `text` opens with four columns of indentation, which starts

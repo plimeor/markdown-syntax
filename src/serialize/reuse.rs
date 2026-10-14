@@ -124,6 +124,45 @@ fn extend(lines: &mut Vec<Line>, more: Vec<Line>) {
     lines.extend(more);
 }
 
+/// The lines of `head`, the source before a container's first block from
+/// the container's start, and the piece of it that opens the block's first
+/// line: content when that line is the container's first, else full.
+fn head_and_prefix(head: &str) -> (Vec<Line>, Line) {
+    let mut lines = split(head, false, true);
+    let prefix = match lines.last() {
+        Some(last) if last.ending.is_empty() => lines.pop().expect("a last line"),
+        _ => Line {
+            body: String::new(),
+            ending: String::new(),
+            full: true,
+        },
+    };
+    (lines, prefix)
+}
+
+/// Appends `written`, a block's lines, to `lines` after `gap`, the source
+/// between the block before it and this one: the gap's first piece ends the
+/// last line, its whole lines follow, and its last piece is the prefix of
+/// `written`'s first line, which it makes full.
+fn splice(lines: &mut Vec<Line>, gap: &str, mut written: Vec<Line>) {
+    let mut pieces = split(gap, true, true);
+    let ending = pieces.remove(0);
+    let last = lines.last_mut().expect("a block was written");
+    last.body.push_str(&ending.body);
+    last.ending = ending.ending;
+    let prefix = match pieces.last() {
+        Some(line) if line.ending.is_empty() => pieces.pop().map(|line| line.body),
+        _ => None,
+    };
+    lines.extend(pieces);
+    let first = written.first_mut().expect("a block has a line");
+    if let Some(prefix) = prefix {
+        first.body.insert_str(0, &prefix);
+    }
+    first.full = true;
+    lines.extend(written);
+}
+
 /// Prefixes each content line of `lines` with `prefix`, or with `empty`
 /// when it is empty; a full line stays as it is, and every line becomes
 /// content of the container around it, apart from full ones.
@@ -453,6 +492,7 @@ impl Reuse<'_, '_> {
     /// Writes `block`, matched to `base` (same kind, same span).
     pub(super) fn block(&mut self, block: &Block, base: &Block) -> Result<Out, SerializeError> {
         let span = block.span().expect("a matched block has a span");
+        let base_block = base;
         Ok(match (block, base) {
             (Block::Paragraph(node), Block::Paragraph(base)) => {
                 let kept = node.source.as_deref();
@@ -465,16 +505,20 @@ impl Reuse<'_, '_> {
                     }
                 }
             }
-            (Block::Heading(node), Block::Heading(base)) => self.heading(node, base, span)?,
+            (Block::Heading(node), Block::Heading(base))
+                if own_block_fields_equal(block, base_block) =>
+            {
+                self.heading(node, base, span)?
+            }
             (Block::BlockQuote(node), Block::BlockQuote(base)) => {
                 match self.children(&node.children, &base.children, Join::Gap)? {
                     Children::Kept => Out::Kept(span),
-                    Children::Lines(lines, _) => Out::Lines(prefixed(lines, "> ", ">")),
+                    Children::Lines(lines, _) => self.quoted(span, &base.children, lines),
                     Children::Render => Out::Render,
                 }
             }
             (Block::Alert(node), Block::Alert(base))
-                if node.kind == base.kind && node.title == base.title =>
+                if own_block_fields_equal(block, base_block) =>
             {
                 match self.children(&node.children, &base.children, Join::Gap)? {
                     Children::Kept => Out::Kept(span),
@@ -487,15 +531,11 @@ impl Reuse<'_, '_> {
                     Children::Render => Out::Render,
                 }
             }
-            (Block::List(node), Block::List(base))
-                if node.ordered == base.ordered
-                    && node.delimiter == base.delimiter
-                    && node.tight == base.tight =>
-            {
+            (Block::List(node), Block::List(base)) if own_block_fields_equal(block, base_block) => {
                 self.list(node, base, span)?
             }
             (Block::FootnoteDefinition(node), Block::FootnoteDefinition(base))
-                if node.label == base.label && node.identifier == base.identifier =>
+                if own_block_fields_equal(block, base_block) =>
             {
                 match self.children(&node.children, &base.children, Join::Gap)? {
                     Children::Kept => Out::Kept(span),
@@ -503,17 +543,32 @@ impl Reuse<'_, '_> {
                         let start = first_block(&base.children)
                             .and_then(Block::span)
                             .map_or(usize::MAX, |at| at.start);
-                        if start > self.line_end(span.start) {
-                            return Ok(Out::Render);
+                        let line_end = self.line_end(span.start);
+                        if start <= line_end {
+                            let marker = &self.source[span.start..start];
+                            self.marked(marker, lines, "    ")
+                        } else {
+                            // Blocks that start on a later line keep it, and
+                            // the lines before it.
+                            let (mut written, prefix) =
+                                head_and_prefix(&self.source[span.start..start]);
+                            let mut lines = prefixed(lines, "    ", "");
+                            match lines.first_mut() {
+                                Some(first) if !first.full && first.body.starts_with("    ") => {
+                                    first.body.replace_range(..4, &prefix.body);
+                                    first.full = true;
+                                }
+                                _ => return Ok(Out::Render),
+                            }
+                            written.extend(lines);
+                            Out::Lines(written)
                         }
-                        let marker = &self.source[span.start..start];
-                        self.marked(marker, lines, "    ")
                     }
                     Children::Render => Out::Render,
                 }
             }
             (Block::ContainerDirective(node), Block::ContainerDirective(base))
-                if node.name == base.name && node.attributes == base.attributes =>
+                if own_block_fields_equal(block, base_block) =>
             {
                 let kept = node.label_source.as_deref();
                 if !self.leaf_holds(Some(span), kept, &node.label, &base.label) {
@@ -544,7 +599,25 @@ impl Reuse<'_, '_> {
                     Children::Render => Out::Render,
                 }
             }
-            (Block::Table(node), Block::Table(base)) if node.alignments == base.alignments => {
+            (Block::HtmlContainer(node), Block::HtmlContainer(base))
+                if own_block_fields_equal(block, base_block) =>
+            {
+                match (&node.content, &base.content) {
+                    (
+                        HtmlContainerContent::Blocks(children),
+                        HtmlContainerContent::Blocks(base),
+                    ) if !base.is_empty() => match self.children(children, base, Join::Gap)? {
+                        Children::Kept => Out::Kept(span),
+                        Children::Lines(lines, _) => self.enclosed(span, base, lines),
+                        Children::Render => Out::Render,
+                    },
+                    _ if self.correspondence.holds(block, base_block) => Out::Kept(span),
+                    _ => Out::Render,
+                }
+            }
+            (Block::Table(node), Block::Table(base))
+                if own_block_fields_equal(block, base_block) =>
+            {
                 self.table(node, base, span)?
             }
             _ => {
@@ -563,9 +636,6 @@ impl Reuse<'_, '_> {
         base: &Heading,
         span: Span,
     ) -> Result<Out, SerializeError> {
-        if node.depth != base.depth || node.kind != base.kind {
-            return Ok(Out::Render);
-        }
         let kept = node.source.as_deref();
         if self.leaf_holds(Some(span), kept, &node.children, &base.children) {
             return Ok(Out::Kept(span));
@@ -604,6 +674,72 @@ impl Reuse<'_, '_> {
                 Out::Lines(written)
             }
         })
+    }
+
+    /// An HTML container at `span` whose base holds the blocks `base` and
+    /// whose children were written as `lines`: the source before its first
+    /// block, the opening tag with what follows it, and after its last, the
+    /// closing tag with what precedes it, around them.
+    fn enclosed(&self, span: Span, base: &[Block], mut lines: Vec<Line>) -> Out {
+        let (Some(first), Some(last)) = (
+            base.first().and_then(Block::span),
+            base.last().and_then(Block::span),
+        ) else {
+            return Out::Render;
+        };
+        let (head, tail) = (
+            &self.source[span.start..first.start],
+            &self.source[self.body_end(last)..self.body_end(span)],
+        );
+        // The head runs into the first block's line, so it stays only before
+        // that line as the source holds it.
+        if !tail.contains(['\n', '\r'])
+            || matches!(base[0], Block::BlankLine(_))
+            || !first_line_holds(self.source, &lines, first)
+        {
+            return Out::Render;
+        }
+        let (mut written, prefix) = head_and_prefix(head);
+        let first = &mut lines[0];
+        first.body.insert_str(0, &prefix.body);
+        first.full = prefix.full;
+        written.extend(lines);
+        let mut closing = split(tail, true, true);
+        let ending = closing.remove(0);
+        let last = written.last_mut().expect("a block has a line");
+        last.body.push_str(&ending.body);
+        last.ending = ending.ending;
+        written.extend(closing);
+        Out::Lines(written)
+    }
+
+    /// A block quote at `span` whose base holds `base` and whose children
+    /// were written as `lines`: its first line opens with the source's own
+    /// marker, the `>` and the space after it, where the base's first block
+    /// starts on that line; every other content line takes the canonical
+    /// prefix.
+    fn quoted(&self, span: Span, base: &[Block], lines: Vec<Line>) -> Out {
+        let marker = base
+            .first()
+            .filter(|first| !matches!(first, Block::BlankLine(_)))
+            .and_then(Block::span)
+            .filter(|first| first.start <= self.line_end(span.start))
+            .map(|first| &self.source[span.start..first.start])
+            .filter(|marker| !marker.contains('\t'));
+        let mut lines = lines;
+        let opened = match (marker, lines.first_mut()) {
+            (Some(marker), Some(first)) if !first.full && !first.body.is_empty() => {
+                first.body.insert_str(0, marker);
+                first.full = true;
+                true
+            }
+            _ => false,
+        };
+        let mut lines = prefixed(lines, "> ", ">");
+        if opened {
+            lines[0].full = false;
+        }
+        Out::Lines(lines)
     }
 
     /// A container whose first line opens with `marker`, before the first
@@ -681,6 +817,8 @@ impl Reuse<'_, '_> {
         // The last block written: its index among the children, and its base
         // index when it was written from the source.
         let mut previous: Option<(usize, Option<usize>)> = None;
+        // The marker of the list written last, with only blank lines after it.
+        let mut previous_list: Option<char> = None;
         let mut blank_lines = 0;
         let mut separated = false;
         for (index, (child, out)) in children.iter().zip(outs).enumerate() {
@@ -688,47 +826,28 @@ impl Reuse<'_, '_> {
                 blank_lines += 1;
                 continue;
             }
-            let at = matched[index]
+            let mut at = matched[index]
                 .map(|(at, _)| at)
                 .filter(|_| !matches!(out, Out::Render));
             let mut written = match out {
-                Out::Kept(span) => self.slice(span),
-                Out::Lines(lines) => lines,
-                Out::Render => content(&write_blocks(
-                    core::slice::from_ref(child),
-                    self.options,
-                    Join::Gap,
-                    false,
-                    None,
-                )?),
+                Out::Kept(span) => Some(self.slice(span)),
+                Out::Lines(lines) => Some(lines),
+                Out::Render => None,
             };
-            match previous {
-                None => {
-                    push_empty(&mut lines, blank_lines);
-                    extend(&mut lines, written);
-                }
-                Some((before, before_at)) => {
-                    let gap = match (before_at, at) {
-                        (Some(from), Some(to))
-                            if to.checked_sub(from) == Some(index - before)
-                                && (before + 1..index).all(|between| {
-                                    matched[between]
-                                        .is_some_and(|(at, _)| at == from + between - before)
-                                }) =>
-                        {
-                            let start = self.body_end(base[from].span().expect("matched"));
-                            let end = base[to].span().expect("matched").start;
-                            Some(&self.source[start..end])
-                        }
-                        _ => None,
-                    };
-                    // A gap without a blank line stays only where the
-                    // lines around it are the source's, so that neither
-                    // sibling reads into the other.
-                    let gap = gap.filter(|gap| {
-                        let (Some(from), Some(to)) = (before_at, at) else {
-                            return false;
-                        };
+            // The source between this block and the one written before it,
+            // kept where they are adjacent in the source, every block
+            // between them is a blank line written from there, and the
+            // gap reads the same between them as written.
+            let gap = match (previous, at, &written) {
+                (Some((before, Some(from))), Some(to), Some(written))
+                    if to.checked_sub(from) == Some(index - before)
+                        && (before + 1..index).all(|between| {
+                            matched[between].is_some_and(|(at, _)| at == from + between - before)
+                        }) =>
+                {
+                    let start = self.body_end(base[from].span().expect("matched"));
+                    let end = base[to].span().expect("matched").start;
+                    Some(&self.source[start..end]).filter(|gap| {
                         gap.starts_with(['\n', '\r'])
                             && keeps_gap(
                                 self.source,
@@ -738,35 +857,48 @@ impl Reuse<'_, '_> {
                                     base[from].span().expect("matched"),
                                     Some(&lines),
                                 ),
-                                (child, base[to].span().expect("matched"), Some(&written)),
+                                (child, base[to].span().expect("matched"), Some(written)),
                                 false,
                             )
-                    });
+                    })
+                }
+                _ => None,
+            };
+            // A block that does not follow its predecessor in the source
+            // reads as there only where nothing before it takes it in.
+            if gap.is_none() {
+                let last = previous.map(|(before, _)| &children[before]);
+                if written.as_ref().is_some_and(|written| {
+                    super::moves_into_previous(child, &written[0].body, last, previous_list)
+                }) {
+                    written = None;
+                    at = None;
+                }
+            }
+            let written = match written {
+                Some(written) => written,
+                None => content(&write_blocks(
+                    core::slice::from_ref(child),
+                    self.options,
+                    Join::Gap,
+                    false,
+                    previous_list,
+                )?),
+            };
+            previous_list = match child {
+                Block::List(list) if at.is_some() => Some(super::written_marker(list)),
+                Block::List(list) => Some(super::list_marker(list, self.options, previous_list)),
+                _ => None,
+            };
+            match previous {
+                None => {
+                    push_empty(&mut lines, blank_lines);
+                    extend(&mut lines, written);
+                }
+                Some(_) => {
                     separated |= gap.map_or(join == Join::Gap || blank_lines > 0, holds_blank_line);
                     match gap {
-                        Some(gap) => {
-                            let mut pieces = split(gap, true, true);
-                            // The gap's first piece is the line ending of the
-                            // line before it, and its last the prefix of the
-                            // next block's first line.
-                            let ending = pieces.remove(0);
-                            let last = lines.last_mut().expect("a block was written");
-                            last.body.push_str(&ending.body);
-                            last.ending = ending.ending;
-                            let prefix = match pieces.last() {
-                                Some(line) if line.ending.is_empty() => {
-                                    pieces.pop().map(|line| line.body)
-                                }
-                                _ => None,
-                            };
-                            lines.extend(pieces);
-                            let first = written.first_mut().expect("a block has a line");
-                            if let Some(prefix) = prefix {
-                                first.body.insert_str(0, &prefix);
-                            }
-                            first.full = true;
-                            lines.extend(written);
-                        }
+                        Some(gap) => splice(&mut lines, gap, written),
                         None => {
                             let separator = usize::from(join == Join::Gap);
                             push_empty(&mut lines, separator + blank_lines);
@@ -855,27 +987,7 @@ impl Reuse<'_, '_> {
                 };
                 separated |= gap.map_or(!node.tight, holds_blank_line);
                 match gap {
-                    Some(gap) => {
-                        let mut pieces = split(gap, true, true);
-                        let ending = pieces.remove(0);
-                        let last = lines.last_mut().expect("an item was written");
-                        last.body.push_str(&ending.body);
-                        last.ending = ending.ending;
-                        let prefix = match pieces.last() {
-                            Some(line) if line.ending.is_empty() => {
-                                pieces.pop().map(|line| line.body)
-                            }
-                            _ => None,
-                        };
-                        lines.extend(pieces);
-                        let mut written = written;
-                        let first = written.first_mut().expect("an item has a line");
-                        if let Some(prefix) = prefix {
-                            first.body.insert_str(0, &prefix);
-                        }
-                        first.full = true;
-                        lines.extend(written);
-                    }
+                    Some(gap) => splice(&mut lines, gap, written),
                     None => {
                         if !node.tight && !previous_holds_separator {
                             extend(&mut lines, alloc::vec![empty()]);
@@ -912,7 +1024,7 @@ impl Reuse<'_, '_> {
         previous_number: &mut Option<u64>,
     ) -> Result<(Out, bool), SerializeError> {
         let span = item.meta.span.expect("a matched item has a span");
-        let own = item.checked == base.checked && item.number == base.number;
+        let own = own_item_fields_equal(item, base);
         let join = if list.tight { Join::Line } else { Join::Gap };
         let children = self.children(&item.children, &base.children, join)?;
         if own && matches!(children, Children::Kept) {
@@ -1176,35 +1288,186 @@ fn write_inline_run(
     Ok(true)
 }
 
-/// Whether two inlines of one kind hold the same fields, children aside.
+/// Whether two inlines hold the same own fields, children aside: false for
+/// two kinds, and for the kinds that hold no children, whose change is a
+/// change of their own fields. Each kind is taken apart whole, so that a new
+/// field is compared here.
 fn own_fields_equal(one: &Inline, other: &Inline) -> bool {
-    match (one, other) {
-        (Inline::Emphasis(a), Inline::Emphasis(b)) => a.delimiter == b.delimiter,
-        (Inline::Strong(a), Inline::Strong(b)) => a.delimiter == b.delimiter,
-        (Inline::Delete(_), Inline::Delete(_))
-        | (Inline::Mark(_), Inline::Mark(_))
-        | (Inline::InlineFootnote(_), Inline::InlineFootnote(_)) => true,
-        (Inline::Link(a), Inline::Link(b)) => {
-            a.destination == b.destination
-                && a.destination_kind == b.destination_kind
-                && a.title == b.title
-        }
-        (Inline::Image(a), Inline::Image(b)) => {
-            a.destination == b.destination
-                && a.destination_kind == b.destination_kind
-                && a.title == b.title
-        }
-        (Inline::LinkReference(a), Inline::LinkReference(b)) => {
-            a.identifier == b.identifier && a.label == b.label && a.kind == b.kind
-        }
-        (Inline::ImageReference(a), Inline::ImageReference(b)) => {
-            a.identifier == b.identifier && a.label == b.label && a.kind == b.kind
-        }
-        (Inline::TextDirective(a), Inline::TextDirective(b)) => {
-            a.name == b.name && a.attributes == b.attributes
-        }
-        // The other kinds hold no children: a change is a change of their
-        // own fields.
-        _ => false,
+    match one {
+        Inline::Emphasis(Emphasis {
+            meta: _,
+            delimiter,
+            children: _,
+        }) => matches!(other, Inline::Emphasis(other) if other.delimiter == *delimiter),
+        Inline::Strong(Strong {
+            meta: _,
+            delimiter,
+            children: _,
+        }) => matches!(other, Inline::Strong(other) if other.delimiter == *delimiter),
+        Inline::Delete(Delete {
+            meta: _,
+            children: _,
+        }) => matches!(other, Inline::Delete(_)),
+        Inline::Mark(Mark {
+            meta: _,
+            children: _,
+        }) => matches!(other, Inline::Mark(_)),
+        Inline::InlineFootnote(InlineFootnote {
+            meta: _,
+            children: _,
+        }) => matches!(other, Inline::InlineFootnote(_)),
+        Inline::Link(Link {
+            meta: _,
+            destination,
+            destination_kind,
+            title,
+            children: _,
+        }) => matches!(other, Inline::Link(other)
+            if other.destination == *destination
+                && other.destination_kind == *destination_kind
+                && other.title == *title),
+        Inline::Image(Image {
+            meta: _,
+            destination,
+            destination_kind,
+            title,
+            alt: _,
+        }) => matches!(other, Inline::Image(other)
+            if other.destination == *destination
+                && other.destination_kind == *destination_kind
+                && other.title == *title),
+        Inline::LinkReference(LinkReference {
+            meta: _,
+            identifier,
+            label,
+            kind,
+            children: _,
+        }) => matches!(other, Inline::LinkReference(other)
+            if other.identifier == *identifier && other.label == *label && other.kind == *kind),
+        Inline::ImageReference(ImageReference {
+            meta: _,
+            identifier,
+            label,
+            kind,
+            alt: _,
+        }) => matches!(other, Inline::ImageReference(other)
+            if other.identifier == *identifier && other.label == *label && other.kind == *kind),
+        Inline::TextDirective(TextDirective {
+            meta: _,
+            name,
+            label: _,
+            attributes,
+        }) => matches!(other, Inline::TextDirective(other)
+            if other.name == *name && other.attributes == *attributes),
+        Inline::Text(_)
+        | Inline::Escape(_)
+        | Inline::CharacterReference(_)
+        | Inline::Shortcode(_)
+        | Inline::Code(_)
+        | Inline::Autolink(_)
+        | Inline::Html(_)
+        | Inline::SoftBreak(_)
+        | Inline::LineBreak(_)
+        | Inline::Math(_)
+        | Inline::FootnoteReference(_)
+        | Inline::WikiLink(_)
+        | Inline::Tag(_) => false,
     }
+}
+
+/// Whether two blocks hold the same own fields, children and a leaf's
+/// inlines and kept text aside: false for two kinds, and for the kinds whose
+/// own syntax is not copied, which are kept whole or rendered. Each kind is
+/// taken apart whole, so that a new field is compared here.
+fn own_block_fields_equal(one: &Block, other: &Block) -> bool {
+    match one {
+        Block::Paragraph(Paragraph {
+            meta: _,
+            children: _,
+            source: _,
+        }) => matches!(other, Block::Paragraph(_)),
+        Block::Heading(Heading {
+            meta: _,
+            depth,
+            kind,
+            children: _,
+            source: _,
+        }) => {
+            matches!(other, Block::Heading(other) if other.depth == *depth && other.kind == *kind)
+        }
+        Block::BlockQuote(BlockQuote {
+            meta: _,
+            children: _,
+        }) => matches!(other, Block::BlockQuote(_)),
+        Block::Alert(Alert {
+            meta: _,
+            kind,
+            title,
+            children: _,
+        }) => matches!(other, Block::Alert(other) if other.kind == *kind && other.title == *title),
+        Block::List(List {
+            meta: _,
+            ordered,
+            delimiter,
+            tight,
+            children: _,
+        }) => matches!(other, Block::List(other)
+            if other.ordered == *ordered && other.delimiter == *delimiter && other.tight == *tight),
+        Block::FootnoteDefinition(FootnoteDefinition {
+            meta: _,
+            label,
+            identifier,
+            children: _,
+        }) => matches!(other, Block::FootnoteDefinition(other)
+            if other.label == *label && other.identifier == *identifier),
+        Block::ContainerDirective(ContainerDirective {
+            meta: _,
+            name,
+            label: _,
+            attributes,
+            children: _,
+            label_source: _,
+        }) => matches!(other, Block::ContainerDirective(other)
+            if other.name == *name && other.attributes == *attributes),
+        Block::Table(Table {
+            meta: _,
+            alignments,
+            rows: _,
+        }) => matches!(other, Block::Table(other) if other.alignments == *alignments),
+        Block::HtmlContainer(HtmlContainer {
+            meta: _,
+            opening,
+            content,
+            closing,
+        }) => matches!(other, Block::HtmlContainer(other)
+            if tag_fields_equal(&other.opening, opening)
+                && tag_fields_equal(&other.closing, closing)
+                && discriminant(&other.content) == discriminant(content)),
+        Block::ThematicBreak(_)
+        | Block::CodeBlock(_)
+        | Block::HtmlBlock(_)
+        | Block::Definition(_)
+        | Block::MathBlock(_)
+        | Block::Frontmatter(_)
+        | Block::LeafDirective(_)
+        | Block::BlankLine(_) => false,
+    }
+}
+
+/// Whether two tags of an HTML container hold the same fields, their spans
+/// aside.
+fn tag_fields_equal(one: &HtmlTag, other: &HtmlTag) -> bool {
+    let HtmlTag { meta: _, name, raw } = one;
+    other.name == *name && other.raw == *raw
+}
+
+/// Whether two list items hold the same own fields, children aside.
+fn own_item_fields_equal(one: &ListItem, other: &ListItem) -> bool {
+    let ListItem {
+        meta: _,
+        checked,
+        number,
+        children: _,
+    } = one;
+    other.checked == *checked && other.number == *number
 }

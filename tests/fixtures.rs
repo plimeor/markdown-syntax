@@ -693,20 +693,149 @@ fn edited_blocks_keep_the_rest_of_the_source() {
     );
 }
 
+/// The corpus inputs where editing a leaf rewrites a line other than its
+/// own, each with what the writer renders around it.
+const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
+    (
+        "core/blank_lines.md",
+        "a blank line at a quote's edge is written as its prefix",
+    ),
+    (
+        "cases/commonmark/block_quote.cases#19",
+        "a blank line at a quote's edge is written as its prefix",
+    ),
+    (
+        "cases/commonmark/frontmatter.cases#7",
+        "a leading `---` break is written spaced",
+    ),
+    (
+        "cases/commonmark/frontmatter.cases#8",
+        "a leading `---` break is written spaced",
+    ),
+    (
+        "cases/commonmark/frontmatter.cases#15",
+        "a leading `---` break is written spaced",
+    ),
+    (
+        "cases/commonmark/frontmatter.cases#19",
+        "a leading `---` break is written spaced",
+    ),
+    (
+        "extensions/gfm_task_list.md",
+        "a task checkbox split across lines renders its item",
+    ),
+    (
+        "cases/commonmark/fuzz.cases#18",
+        "a task checkbox split across lines renders its item",
+    ),
+    (
+        "cases/commonmark/gfm_task_list_item.cases#7",
+        "a task checkbox split across lines renders its item",
+    ),
+    (
+        "cases/commonmark/misc_tabs.cases#44",
+        "a marker followed by a tab renders its item",
+    ),
+    (
+        "cases/commonmark/list.cases#29",
+        "a marker line's trailing spaces are not copied",
+    ),
+    (
+        "cases/commonmark/list.cases#49",
+        "the gap without a blank line after a list whose last line changed is canonical",
+    ),
+    (
+        "cases/commonmark/gfm_table.cases#31",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/commonmark/gfm_table.cases#53",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/gfm/table.cases#5",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/gfm/table.cases#9",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/gfm/table.cases#11",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/gfm/table.cases#16",
+        "a table's own lines are copied without their indentation",
+    ),
+    (
+        "cases/gfm/table.cases#12",
+        "the edited row and the copied delimiter row take the options' line ending",
+    ),
+    (
+        "cases/gfm/table.cases#13",
+        "the edited row and the copied delimiter row take the options' line ending",
+    ),
+    (
+        "cases/gfm/alerts.cases#2",
+        "a `>>>` quote holding the edit is written with `>` prefixes",
+    ),
+    (
+        "cases/gfm/alerts.cases#4",
+        "a `>>>` quote holding the edit is written with `>` prefixes",
+    ),
+    (
+        "cases/gfm/sourcepos_chars.cases#5",
+        "a `>>>` quote holding the edit is written with `>` prefixes",
+    ),
+    (
+        "cases/gfm/multiline_block_quotes.cases#8",
+        "a `>>>` quote holding the edit is written with `>` prefixes",
+    ),
+    (
+        "cases/gfm/multiline_block_quotes.cases#10",
+        "a `>>>` quote holding the edit is written with `>` prefixes",
+    ),
+];
+
 /// Each block at every depth of each corpus input, with its first leaf or
 /// one own field edited, deleted, or followed by a new paragraph, written
 /// with the source, reads back as the edited tree wherever the edited tree's
 /// canonical output does, without a block the read-back check has to write
 /// canonically, and keeps the source of the top-level blocks around the one
-/// it edits inside; the same with every leaf given as its text: the
-/// simulated edits of `per-node-reuse`, task 2.5.
+/// it edits inside; an edited leaf changes only its own lines, unless its
+/// input is listed in `NOT_KEPT_AROUND_A_LEAF_EDIT`; the same with every
+/// leaf given as its text: the simulated edits of `per-node-reuse`, task
+/// 2.5.
 // serialization: Unchanged source is kept
 #[test]
 fn edited_nodes_at_every_depth_read_back() {
     let mut failures = Vec::new();
     let mut edits = 0;
+    let mut seen = vec![false; NOT_KEPT_AROUND_A_LEAF_EDIT.len()];
     for source in read_back_corpus() {
-        edits += edits::simulated_edits(&source.at(), &source.input, &mut failures);
+        let at = source.at();
+        let listed = NOT_KEPT_AROUND_A_LEAF_EDIT
+            .iter()
+            .position(|(name, _)| *name == at);
+        if let Some(index) = listed {
+            seen[index] = true;
+            let mut rewrites = Vec::new();
+            edits::simulated_edits(&at, &source.input, true, &mut rewrites);
+            if rewrites.is_empty() {
+                failures.push(format!(
+                    "{at}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but each edited leaf changes only its own lines"
+                ));
+            }
+        }
+        edits += edits::simulated_edits(&at, &source.input, listed.is_none(), &mut failures);
+    }
+    for ((name, _), seen) in NOT_KEPT_AROUND_A_LEAF_EDIT.iter().zip(seen) {
+        if !seen {
+            failures.push(format!(
+                "{name}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but names no input"
+            ));
+        }
     }
     assert!(edits > 20_000, "only {edits} edits");
     assert!(

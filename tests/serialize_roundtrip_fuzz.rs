@@ -284,8 +284,12 @@ fn generated_documents_edited_at_every_depth_read_back() {
     let mut edits = 0;
     for &(generator, pieces, max_pieces, seed) in GENERATORS {
         for input in generated(pieces, max_pieces, seed) {
-            edits +=
-                edits::simulated_edits(&format!("{generator} {input:?}"), &input, &mut failures);
+            edits += edits::simulated_edits(
+                &format!("{generator} {input:?}"),
+                &input,
+                false,
+                &mut failures,
+            );
         }
     }
     assert!(edits > 10_000, "only {edits} edits");

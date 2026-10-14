@@ -58,8 +58,9 @@ Group 2 needs 1; group 3 needs 2. Inner loop:
   source; verified by the One edited link scenario and a case that changes
   one emphasis's text inside a link.
 - [x] 2.3 Add the read-back check with its fallback per top-level block and
-  to batch 1's grain; verified by a case whose copied underline would read
-  differently under its rendered content.
+  to batch 1's grain; verified by `tests/serialize_source.rs` with a setext
+  heading whose content comes to open a list under its copied underline,
+  and by the check's own unit test in `src/serialize.rs`.
 - [x] 2.4 Apply options only to rendered text, with new items of a list
   written from the source taking its recorded marker; verified by
   `tests/serialize_source.rs` with `bullet: Some(..)`.

@@ -44,10 +44,13 @@ inlines. The writer SHALL write:
 
 The writer SHALL keep the source between two siblings written from the
 source that are adjacent in the source, where the boundary holds a
-separating blank line exactly when it did there, and the source before the
-document's first block and after its last when that block is written from
-the source there; every other boundary SHALL be canonical. A node SHALL be
-written as canonical output even so where its source would read differently
+separating blank line exactly when it did there, and where the boundary
+holds a blank line, has a `BlankLine` on one side, stands between two
+siblings that hold no blocks, or has the source's lines on both sides; which
+other boundaries without a blank line are kept is unspecified. It SHALL keep
+the source before the document's first block and after its last when that
+block is written from the source there; every other boundary SHALL be
+canonical. A node SHALL be written as canonical output even so where its source would read differently
 in its place; which placements make a node's source read differently is
 unspecified, except that a top-level block written partly from the source
 SHALL be written as canonical output where the parsed output holds a

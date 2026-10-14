@@ -48,6 +48,11 @@ decision is made once, where the information to make it exists:
   base's. Every other boundary is canonical, and a kept block that a
   following blank line and paragraph would extend, as an unclosed fence, is
   rendered where a new sibling follows it.
+- **Placement is one rule at every level.** A block written from the
+  source that no longer follows its predecessor there is rendered where
+  what comes before it would take it in: indentation after a list or a
+  footnote definition, code indentation, a list after a list with its
+  marker. The same predicate serves the top level and every container.
 - **One read-back check decides the rest.** A document written partly from
   its source is parsed once more; each top-level block written partly from
   the source that reads back differently is written canonically instead,

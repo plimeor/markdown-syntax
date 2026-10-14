@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use markdown_syntax::prelude::*;
-use markdown_syntax::Document;
+use markdown_syntax::{Document, Span};
 
 use super::leaves;
 use super::normalize;
@@ -53,6 +53,36 @@ pub(crate) fn edit_block(block: &mut Block) -> bool {
     }
 }
 
+/// The span of the leaf whose `Text` `edit_block` edits in `block`: a
+/// paragraph, a heading, or a table cell.
+fn edited_leaf(block: &Block) -> Option<Span> {
+    fn holds_text(inlines: &[Inline]) -> bool {
+        inlines
+            .iter()
+            .any(|inline| matches!(inline, Inline::Text(_)))
+    }
+    fn in_blocks(blocks: &[Block]) -> Option<Span> {
+        blocks.iter().find_map(edited_leaf)
+    }
+    match block {
+        Block::Paragraph(node) => holds_text(&node.children).then_some(node.meta.span?),
+        Block::Heading(node) => holds_text(&node.children).then_some(node.meta.span?),
+        Block::BlockQuote(node) => in_blocks(&node.children),
+        Block::Alert(node) => in_blocks(&node.children),
+        Block::List(node) => node
+            .children
+            .iter()
+            .find_map(|item| in_blocks(&item.children)),
+        Block::Table(node) => node.rows.iter().find_map(|row| {
+            row.cells
+                .iter()
+                .find(|cell| holds_text(&cell.children))
+                .and_then(|cell| cell.meta.span)
+        }),
+        _ => None,
+    }
+}
+
 /// Whether the reused block at `index` of `blocks` is written again after a
 /// block written canonically, as its indentation could carry it into that
 /// block: any indentation after a list or footnote definition, and code
@@ -81,8 +111,10 @@ pub(crate) fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usiz
 /// keeps that text when a blank line and a paragraph follow it, as a closed
 /// fence does and an unclosed one does not.
 fn closed_by_a_blank_line(text: &str) -> bool {
-    let gap = if text.ends_with(['\n', '\r']) {
+    let gap = if text.ends_with('\n') {
         "\n"
+    } else if text.ends_with('\r') {
+        "\r"
     } else {
         "\n\n"
     };
@@ -202,9 +234,16 @@ fn edit_own_field(block: &mut Block) -> bool {
 /// Applies the simulated edits to `input`, pushing each edit whose written
 /// text does not read back as the edited tree where its canonical output
 /// does, needs the read-back check to write a block canonically, or moves
-/// the source of the top-level blocks around an edit inside one; returns
-/// how many edits were checked. `at` names the input in failures.
-pub(crate) fn simulated_edits(at: &str, input: &str, failures: &mut Vec<String>) -> usize {
+/// the source of the top-level blocks around an edit inside one, and, with
+/// `leaf_lines`, each edit of a parsed leaf that changes a line other than
+/// that leaf's own; returns how many edits were checked. `at` names the
+/// input in failures.
+pub(crate) fn simulated_edits(
+    at: &str,
+    input: &str,
+    leaf_lines: bool,
+    failures: &mut Vec<String>,
+) -> usize {
     let mut edits = 0;
     let parsed = parse(input).document;
     let rebuilt = leaves::rebuilt_from_leaf_sources(&parsed);
@@ -251,6 +290,23 @@ pub(crate) fn simulated_edits(at: &str, input: &str, failures: &mut Vec<String>)
                 ""
             };
             let at = format!("{at}{leaves} {path:?} {index} {edit}");
+            // A leaf edited in a parsed document changes its own lines
+            // only.
+            let outside_the_leaf = (leaf_lines && edit == "leaf" && leaves.is_empty())
+                .then(|| {
+                    let mut original = document.clone();
+                    let span = edited_leaf(&siblings_at(&mut original.children, path)[index])?;
+                    let body = input[span.start..span.end].trim_end_matches(['\n', '\r']);
+                    let start = input[..span.start]
+                        .rfind(['\n', '\r'])
+                        .map_or(0, |at| at + 1);
+                    let end = span.start + body.len();
+                    let end = input[end..]
+                        .find(['\n', '\r'])
+                        .map_or(input.len(), |at| end + at);
+                    Some((&input[..start], &input[end..]))
+                })
+                .flatten();
             match edited.to_markdown() {
                 Err(_) => failures.push(format!("{at}: refused with its source only")),
                 Ok(markdown) if !reads_as(&markdown, &edited) => {
@@ -258,6 +314,17 @@ pub(crate) fn simulated_edits(at: &str, input: &str, failures: &mut Vec<String>)
                 }
                 Ok(markdown) if markdown_syntax::__private::rewritten_blocks(&edited) > 0 => {
                     failures.push(format!("{at}: {markdown:?} rewritten by the check"))
+                }
+                Ok(markdown)
+                    if outside_the_leaf.is_some_and(|(before, after)| {
+                        !markdown.starts_with(before)
+                            || !markdown.ends_with(after)
+                            || markdown.len() < before.len() + after.len()
+                    }) =>
+                {
+                    failures.push(format!(
+                        "{at}: {markdown:?} rewrites more than the edited leaf"
+                    ))
                 }
                 Ok(markdown) => {
                     // An edit inside a top-level block keeps the source

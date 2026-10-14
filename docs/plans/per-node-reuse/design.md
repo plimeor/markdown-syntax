@@ -98,10 +98,12 @@ no child covers, taken per kind:
 |---|---|
 | ATX heading | opening sequence and the whitespace after it; closing sequence and the whitespace around it |
 | Setext heading | the underline line |
+| Block quote | the `>` and the space after it before its first block, on its first line |
 | List item | marker, task checkbox, and the whitespace after them on its first line |
 | Alert | the `[!KIND]` line |
-| Fenced code, math block, directive, HTML container | opening line; closing line |
-| Footnote definition | the `[^label]:` and the whitespace after it |
+| Fenced code, math block, container directive | opening line; closing line |
+| HTML container | the source before its first block and after its last |
+| Footnote definition | the `[^label]:` and the whitespace after it, or, before blocks on a later line, the lines up to them |
 | Table | the delimiter row; each row that corresponds, as its line |
 
 A line of own syntax that is not the node's first line (an underline, a
@@ -142,16 +144,34 @@ the writer's pre-pass and is rendered, as in batch 1.
 Between two siblings that are matched, written from the source (kept or
 with copied own syntax), and adjacent in the base, the source between them
 is kept, where the boundary still does or does not hold a separating blank
-line as in the base; every other boundary gets the canonical separator, with
-`BlankLine` nodes written as their lines. A node with copied own syntax is
-not a rendered node in decision 0016's sense ("a kept gap is never written
-beside a rendered node"): its kind and own fields are the base's.
+line as in the base. A gap without a blank line stays only where it still
+reads the same: between two siblings that hold no blocks, beside a
+`BlankLine`, or where the line before it and the line after it are the
+source's, since a leaf's edited last line could read the next sibling's
+first line as its lazy continuation inside a container. Every other boundary
+gets the canonical separator, with `BlankLine` nodes written as their lines.
+A node with copied own syntax is not a rendered node in decision 0016's
+sense ("a kept gap is never written beside a rendered node"): its kind and
+own fields are the base's. A loose list whose kept gaps no longer hold a
+blank line is rendered, as it would read back tight.
 
 ### Top level
 
-The top level keeps batch 1's writer and its guards for kept blocks. A
-top-level block that returns `Lines` is written as those lines where a
-rendered block would be written, with canonical separators around it.
+The top level keeps batch 1's writer. A top-level block that returns
+`Lines` is written as those lines where a rendered block would be written,
+with canonical separators around it.
+
+### Placement
+
+A block written from the source that no longer follows its predecessor
+there is rendered where what is written before it would take it in:
+indentation after a list or a footnote definition, which blank lines do not
+end; four columns of indentation on a block other than indented code; a
+list after a list with its marker. One predicate states this for every
+sequence of siblings, the top level and every container alike; the top
+level adds the `---` break that would open frontmatter. A kept block that a
+blank line and a paragraph would extend, as an unclosed fence, is rendered
+before a sibling other than its successor.
 
 ### Read-back check
 
@@ -214,7 +234,8 @@ override applies to lists written whole.
 - One read-back check of the output — because guards per construct (an
   unclosed fence, an underline under rendered content, a fence closed by
   changed code) grow with every construct and miss interactions. Turned
-  down: a guard list, batch 1's approach, kept only for the top level.
+  down: a guard list, batch 1's approach, kept only for placement, where
+  one predicate serves every level.
 - Prefixes kept only inside kept source — because a changed child breaks
   the line-to-line mapping a copied prefix would need. Turned down:
   recording a prefix style per container, which is a spelling field.
