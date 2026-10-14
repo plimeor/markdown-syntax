@@ -305,18 +305,30 @@ pub fn inline_spans_to_source(source: &InlineSource, inlines: &mut [Inline]) {
 }
 
 impl Document {
-    /// The inline content the parser read for the paragraph or heading at
-    /// `path`, read again from the source of the top-level block holding it,
-    /// so that the cost is linear in that block. `None` for a document
-    /// without a source, or a path that names no paragraph or heading, or a
-    /// node without a span or one the source does not hold.
+    /// The inline content the parser read for the leaf at `path`: a
+    /// paragraph, a heading, a table cell (its table's path, its row's index,
+    /// and its own), or the label of a leaf or container directive (its
+    /// directive's path), read again from the source of the top-level block
+    /// holding it, so that the cost is linear in that block. `None` for a
+    /// document without a source, or a path that names no such leaf, a
+    /// directive without a label, or a node without a span or one the source
+    /// does not hold.
     pub fn inline_source(&self, path: &NodePath) -> Option<InlineSource> {
         let source = self.source()?;
         let (&first, rest) = path.0.split_first()?;
         let top = self.children.get(first)?;
         let mut block = top;
         let mut rest = rest.iter();
-        while let Some(&index) = rest.next() {
+        let leaf = loop {
+            let Some(&index) = rest.next() else {
+                break match block {
+                    Block::Paragraph(node) => node.meta.span?,
+                    Block::Heading(node) => node.meta.span?,
+                    Block::LeafDirective(node) => node.meta.span?,
+                    Block::ContainerDirective(node) => node.meta.span?,
+                    _ => return None,
+                };
+            };
             block = match block {
                 Block::BlockQuote(node) => node.children.get(index)?,
                 Block::Alert(node) => node.children.get(index)?,
@@ -330,13 +342,15 @@ impl Document {
                     let item = node.children.get(index)?;
                     item.children.get(*rest.next()?)?
                 }
+                Block::Table(node) => {
+                    let cell = node.rows.get(index)?.cells.get(*rest.next()?)?;
+                    if rest.next().is_some() {
+                        return None;
+                    }
+                    break cell.meta.span?;
+                }
                 _ => return None,
             };
-        }
-        let leaf = match block {
-            Block::Paragraph(node) => node.meta.span?,
-            Block::Heading(node) => node.meta.span?,
-            _ => return None,
         };
         let end = top.span()?.end;
         // The top-level block is read with the definitions right before it,
@@ -369,6 +383,89 @@ impl Document {
             .find(|(span, _)| *span == leaf)?;
         let (text, map) = text.into_parts();
         Some(InlineSource { text, map })
+    }
+
+    /// The path and inline source of every leaf of the document, in document
+    /// order, each as [`Document::inline_source`] returns it, read in one
+    /// pass over the source. Empty for a document without a source.
+    pub fn leaf_sources(&self) -> Vec<(NodePath, InlineSource)> {
+        let Some(source) = self.source() else {
+            return Vec::new();
+        };
+        let start = if source.starts_with('\u{feff}') {
+            '\u{feff}'.len_utf8()
+        } else {
+            0
+        };
+        let map = SourceMap::verbatim(source.len() - start, start);
+        let lines = collect_lines(&source[start..], &map);
+        let mut contents: Vec<(Span, Option<DerivedText>)> = blocks::leaf_contents(&lines)
+            .into_iter()
+            .map(|(span, text)| (span, Some(text)))
+            .collect();
+        let mut found = Vec::new();
+        // The contents are in document order, so their starts never fall.
+        let mut take = |path: &[usize], span: Option<Span>| {
+            let Some(span) = span else { return };
+            let first = contents.partition_point(|(other, _)| other.start < span.start);
+            let entry = contents[first..]
+                .iter_mut()
+                .take_while(|(other, _)| other.start == span.start)
+                .find(|(other, text)| *other == span && text.is_some());
+            if let Some((_, text)) = entry {
+                let (text, map) = text.take().expect("found unused").into_parts();
+                found.push((NodePath(path.to_vec()), InlineSource { text, map }));
+            }
+        };
+        visit_leaves(&self.children, &mut Vec::new(), &mut take);
+        found
+    }
+}
+
+/// Calls `visit` with the path and span of every leaf in `blocks`, in
+/// document order, where `path` is the path of their container.
+fn visit_leaves(
+    blocks: &[Block],
+    path: &mut Vec<usize>,
+    visit: &mut impl FnMut(&[usize], Option<Span>),
+) {
+    for (index, block) in blocks.iter().enumerate() {
+        path.push(index);
+        match block {
+            Block::Paragraph(node) => visit(path, node.meta.span),
+            Block::Heading(node) => visit(path, node.meta.span),
+            Block::LeafDirective(node) => visit(path, node.meta.span),
+            Block::ContainerDirective(node) => {
+                visit(path, node.meta.span);
+                visit_leaves(&node.children, path, visit);
+            }
+            Block::Table(node) => {
+                for (row, cells) in node.rows.iter().enumerate() {
+                    for (cell, node) in cells.cells.iter().enumerate() {
+                        path.extend([row, cell]);
+                        visit(path, node.meta.span);
+                        path.truncate(path.len() - 2);
+                    }
+                }
+            }
+            Block::BlockQuote(node) => visit_leaves(&node.children, path, visit),
+            Block::Alert(node) => visit_leaves(&node.children, path, visit),
+            Block::FootnoteDefinition(node) => visit_leaves(&node.children, path, visit),
+            Block::HtmlContainer(node) => {
+                if let HtmlContainerContent::Blocks(children) = &node.content {
+                    visit_leaves(children, path, visit);
+                }
+            }
+            Block::List(node) => {
+                for (item, node) in node.children.iter().enumerate() {
+                    path.push(item);
+                    visit_leaves(&node.children, path, visit);
+                    path.pop();
+                }
+            }
+            _ => {}
+        }
+        path.pop();
     }
 }
 
@@ -2448,39 +2545,18 @@ fn parse_inlines(
     definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
-    parse_inlines_in(input, map, InlineState::default(), definitions, diagnostics)
-}
-
-/// The inline content of a table cell, whose input reads each `\|` as `|`:
-/// `escaped_pipes` holds the offset of each such `|`, which is an `Escape`
-/// where it stands in text.
-fn parse_cell_inlines(
-    input: &str,
-    map: &SourceMap,
-    escaped_pipes: Vec<usize>,
-    definitions: Option<Labels<'_>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<Inline> {
-    let state = InlineState {
-        escaped_pipes,
-        ..InlineState::default()
-    };
-    parse_inlines_in(input, map, state, definitions, diagnostics)
-}
-
-fn parse_inlines_in(
-    input: &str,
-    map: &SourceMap,
-    mut state: InlineState,
-    definitions: Option<Labels<'_>>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
     if definitions.is_none() {
         return Vec::new();
     }
     let first_diagnostic = diagnostics.len();
-    let mut nodes = parse_inlines_with_context(input, 0, definitions, diagnostics, &mut state);
+    let mut nodes = parse_inlines_with_context(
+        input,
+        0,
+        definitions,
+        diagnostics,
+        &mut InlineState::default(),
+    );
     tags::split_tags(input, &mut nodes);
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
     nodes
@@ -2499,15 +2575,6 @@ const MAX_INLINE_NESTING: usize = 32;
 struct InlineState {
     /// How many inline parses enclose the current one.
     depth: usize,
-    /// In a table cell, the sorted offsets of the `|`s the cell's input reads
-    /// from `\|`.
-    escaped_pipes: Vec<usize>,
-}
-
-impl InlineState {
-    fn is_escaped_pipe(&self, offset: usize) -> bool {
-        !self.escaped_pipes.is_empty() && self.escaped_pipes.binary_search(&offset).is_ok()
-    }
 }
 
 /// What one inline pass threads through its construct parsers: the state it
@@ -2599,21 +2666,6 @@ fn parse_inline_content(
                 text_start = index;
                 continue;
             }
-        }
-
-        // A cell's `|` read from `\|` is an escape.
-        if bytes[index] == b'|' && pass.state.is_escaped_pipe(base_offset + index) {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            nodes.push(Inline::Escape(Escape {
-                meta: NodeMeta::new(Some(Span::new(
-                    base_offset + index,
-                    base_offset + index + 1,
-                ))),
-                value: '|',
-            }));
-            index += 1;
-            text_start = index;
-            continue;
         }
 
         if bytes[index] == b'\n' {
@@ -4564,8 +4616,8 @@ fn table_delimiter_alignment(cell: &str) -> Option<TableAlignment> {
 }
 
 /// The cell-delimiter pipes of a table row, in order: every `|` that is not
-/// escaped by an odd backslash run. An escaped pipe is an escape in the cell's
-/// inline content.
+/// escaped by an odd backslash run. The cell's inline content reads an
+/// escaped pipe as `|`.
 fn table_row_delimiters(row: &str) -> Vec<usize> {
     let bytes = row.as_bytes();
     let mut delimiters = Vec::new();
@@ -4622,8 +4674,6 @@ fn table_row_cell_ranges(input: &str) -> Vec<(usize, usize)> {
 /// `|`), its source map, and its span.
 struct TableCellSource {
     text: DerivedText,
-    /// The offsets in `text` of the `|`s read from `\|`.
-    escaped_pipes: Vec<usize>,
     span: Span,
 }
 
@@ -4643,7 +4693,6 @@ fn table_row_cells(line: &Line<'_>, row: &str) -> Vec<TableCellSource> {
                 line.source_end(offset + content.len()),
             );
             let mut text = DerivedText::default();
-            let mut escaped_pipes = Vec::new();
             // GitHub/cmark-gfm reads an odd backslash run before `|` as a
             // literal pipe; the run keeps its other backslashes, which the
             // inline parser resolves as written. The `|` read from `\|` maps
@@ -4656,7 +4705,6 @@ fn table_row_cells(line: &Line<'_>, row: &str) -> Vec<TableCellSource> {
                     let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
                     if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
                         text.append(line, &content[copied..pipe - 1]);
-                        escaped_pipes.push(text.text.len());
                         text.append_replacing(
                             "|",
                             line.source_start(offset + pipe - 1),
@@ -4670,11 +4718,7 @@ fn table_row_cells(line: &Line<'_>, row: &str) -> Vec<TableCellSource> {
                 }
             }
             text.append(line, &content[copied..]);
-            TableCellSource {
-                text,
-                escaped_pipes,
-                span,
-            }
+            TableCellSource { text, span }
         })
         .collect()
 }

@@ -3,25 +3,19 @@ Document
     Alignments none,none,none
     Row
       Cell
-        Text "A"
-        Escape "|"
-        Text "B"
+        Text "A|B"
       Cell
         Text "Code"
       Cell
         Text "Link"
     Row
       Cell
-        Text "x"
-        Escape "|"
-        Text "y"
+        Text "x|y"
       Cell
         Code value="a|b"
       Cell
         Link destination=https://example.com title=none
-          Text "p"
-          Escape "|"
-          Text "q"
+          Text "p|q"
   Table
     Alignments none
     Row

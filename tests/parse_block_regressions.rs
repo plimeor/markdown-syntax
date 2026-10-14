@@ -797,14 +797,14 @@ mod parser {
             ["", ""]
         );
         assert_eq!(body_cells("| x | y |\n|---|---|\n||a|| | d |"), ["", "a"]);
-        // Escaped pipes stay literal text in their own cells.
+        // Escaped pipes read as `|` in their own cells.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
-            ["a \\|\\| b", "or, like c \\|\\| d"]
+            ["a || b", "or, like c || d"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
-            ["\\| a", "b \\|"]
+            ["| a", "b |"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),

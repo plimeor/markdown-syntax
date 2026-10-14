@@ -59,12 +59,39 @@ mod inline_source_of_a_leaf_block {
     }
 
     #[test]
+    fn table_cell() {
+        let input = "| h |\n| - |\n| a\\|b *c* |";
+        let source = inline_source(input, &[0, 1, 0]).unwrap();
+        assert_eq!(source.text, "a|b *c*");
+        assert_eq!(source.span_to_source(Span::new(1, 2)), Span::new(15, 17));
+        assert_eq!(source.to_source(3), 18);
+        assert_eq!(leaves::leaves_reproduce(input), Ok(2));
+    }
+
+    #[test]
+    fn directive_labels() {
+        let input = "::leaf[a *b*]
+
+:::box[c]
+d
+:::";
+        assert_eq!(inline_source(input, &[0]).unwrap().text, "a *b*");
+        let label = inline_source(input, &[1]).unwrap();
+        assert_eq!(label.text, "c");
+        assert_eq!(label.to_source(0), 22);
+        assert_eq!(inline_source(input, &[1, 0]).unwrap().text, "d");
+        assert_eq!(leaves::leaves_reproduce(input), Ok(3));
+    }
+
+    #[test]
     fn none_where_there_is_no_leaf_or_source() {
         assert!(inline_source("- a", &[0]).is_none());
         assert!(inline_source("- a", &[0, 1, 0]).is_none());
         assert!(inline_source("a", &[1]).is_none());
         assert!(inline_source("a", &[]).is_none());
-        assert!(inline_source("| a |\n| - |", &[0, 0, 0]).is_none());
+        assert!(inline_source("| a |\n| - |", &[0, 0]).is_none());
+        assert!(inline_source("| a |\n| - |", &[0, 0, 0, 0]).is_none());
+        assert!(inline_source(":::d\nx\n:::", &[0]).is_none());
         assert!(parse("a")
             .document
             .without_source()
@@ -82,6 +109,8 @@ mod inline_source_of_a_leaf_block {
             "a\0*b*\n\n# \0",
             "- a\n\n      code\n  b *c*\n",
             ":::d\n# h\n:::",
+            "| a | b |\n|-|-|\n| `x\\|y` | [c] |\n\n[c]: /u",
+            "> | a |\n> |---|\n> | b\n\n- ::x[*y*]",
             "[^n]: x *y*\n    z",
         ] {
             assert!(

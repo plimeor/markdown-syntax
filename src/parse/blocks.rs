@@ -26,8 +26,10 @@ pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnosti
     read_document(lines, diagnostics, None)
 }
 
-/// The inline content the parser reads for each paragraph and heading of the
-/// document split into `lines`, with the span of its node, in document order.
+/// The inline content the parser reads for each leaf of the document split
+/// into `lines` (paragraphs, headings, table cells, and directive labels),
+/// with the span of its node (a label's is its directive's), in document
+/// order. The inlines themselves are not read.
 pub(super) fn leaf_contents(lines: &[Line<'_>]) -> Vec<(Span, DerivedText)> {
     let leaves = RefCell::new(Vec::new());
     read_document(lines, &mut Vec::new(), Some(&leaves));
@@ -826,7 +828,6 @@ impl<'a> BlockParser<'a> {
                 while cells.len() < table.alignments.len() {
                     cells.push(TableCellSource {
                         text: DerivedText::default(),
-                        escaped_pipes: Vec::new(),
                         span: Span::new(line.end, line.end),
                     });
                 }
@@ -2435,8 +2436,8 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
     definitions: Labels<'o>,
-    /// Where each paragraph's and heading's inline content is kept, when
-    /// `leaf_contents` asks for it.
+    /// Where each leaf's inline content is kept, in place of its inlines,
+    /// when `leaf_contents` asks for it.
     leaves: Option<&'o RefCell<Vec<(Span, DerivedText)>>>,
 }
 
@@ -2445,18 +2446,21 @@ impl Finish<'_> {
         parse_inlines(&text.text, text.map(), Some(self.definitions), diagnostics)
     }
 
-    /// The inlines of the paragraph or heading at `span`, read from `text`.
+    /// The inlines of the leaf at `span` (a label's is its directive's), read
+    /// from `text`, or none when `text` is kept for `leaf_contents`.
     fn leaf_inlines(
         &self,
         span: Span,
         text: DerivedText,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Vec<Inline> {
-        let inlines = self.inlines(&text, diagnostics);
-        if let Some(leaves) = self.leaves {
-            leaves.borrow_mut().push((span, text));
+        match self.leaves {
+            Some(leaves) => {
+                leaves.borrow_mut().push((span, text));
+                Vec::new()
+            }
+            None => self.inlines(&text, diagnostics),
         }
-        inlines
     }
 
     fn blocks(&self, children: Vec<Child<'_>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
@@ -2508,13 +2512,7 @@ impl Finish<'_> {
                             .into_iter()
                             .map(|cell| TableCell {
                                 meta: meta(cell.span),
-                                children: parse_cell_inlines(
-                                    &cell.text.text,
-                                    cell.text.map(),
-                                    cell.escaped_pipes,
-                                    Some(self.definitions),
-                                    diagnostics,
-                                ),
+                                children: self.leaf_inlines(cell.span, cell.text, diagnostics),
                             })
                             .collect(),
                     })
@@ -2610,7 +2608,7 @@ impl Finish<'_> {
                 meta: meta(span),
                 name,
                 label: label
-                    .map(|label| self.inlines(&label, diagnostics))
+                    .map(|label| self.leaf_inlines(span, label, diagnostics))
                     .unwrap_or_default(),
                 attributes,
             }),
@@ -2622,7 +2620,7 @@ impl Finish<'_> {
                 children,
             } => {
                 let label = label
-                    .map(|label| self.inlines(&label, diagnostics))
+                    .map(|label| self.leaf_inlines(span, label, diagnostics))
                     .unwrap_or_default();
                 Block::ContainerDirective(ContainerDirective {
                     meta: meta(span),
