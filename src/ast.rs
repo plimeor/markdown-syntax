@@ -80,6 +80,30 @@ impl From<Vec<Block>> for Document {
     }
 }
 
+/// Child indices from a document down to one node. A list's children are its
+/// items, a table's are its rows, and a row's are its cells; every other
+/// container's are its blocks.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NodePath(pub Vec<usize>);
+
+impl From<Vec<usize>> for NodePath {
+    fn from(indices: Vec<usize>) -> Self {
+        Self(indices)
+    }
+}
+
+impl From<&[usize]> for NodePath {
+    fn from(indices: &[usize]) -> Self {
+        Self(indices.into())
+    }
+}
+
+impl<const N: usize> From<[usize; N]> for NodePath {
+    fn from(indices: [usize; N]) -> Self {
+        Self(indices.into())
+    }
+}
+
 /// A block-level node: the building blocks of a document's vertical structure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Block {

@@ -1,10 +1,10 @@
-//! Parse, `parse_inline`, and `to_markdown` time over inputs built from
-//! syntax fragments, written without their source and, with their top-level
-//! blocks reversed, with it, so that a cost growing faster than the input is
-//! found without anyone having foreseen its shape. Every pair and triple of
-//! fragments, as one unit, is repeated `n` and `2n` times, and every pair
-//! also after a paragraph's first word; doubling the input must at most
-//! roughly double the time.
+//! Parse, `parse_inline` and `inline_source`, and `to_markdown` time over
+//! inputs built from syntax fragments, written without their source and,
+//! with their top-level blocks reversed, with it, so that a cost growing
+//! faster than the input is found without anyone having foreseen its shape.
+//! Every pair and triple of fragments, as one unit, is repeated `n` and `2n`
+//! times, and every pair also after a paragraph's first word; doubling the
+//! input must at most roughly double the time.
 //!
 //! Each unit is screened with quick measurements on all cores, and the
 //! suspects again at `n` and `4n`, where a quadratic cost stands further from
@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use markdown_syntax::{parse, parse_inline, Definitions};
+use markdown_syntax::{parse, parse_inline, Definitions, NodePath};
 
 /// Openers, closers, and prefixes of the constructs the parser reads. The
 /// literal autolinks start with a space, after which they may begin.
@@ -125,6 +125,7 @@ fn time(input: &str) -> Times {
     let definitions = Definitions::of(&document);
     let started = Instant::now();
     let _ = parse_inline(input, &definitions);
+    let _ = document.inline_source(&NodePath::from([0]));
     let inline = started.elapsed();
     let mut reversed = document.clone();
     reversed.children.reverse();
@@ -195,7 +196,7 @@ impl Growth {
     fn report(&self) -> String {
         let ratio = |small: Duration, large: Duration| large.as_secs_f64() / small.as_secs_f64();
         format!(
-            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), parse_inline {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
+            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), parse_inline and inline_source {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
             self.unit.0,
             self.unit.1,
             self.n,

@@ -97,8 +97,11 @@ impl Document {
   that keeps each leaf's content string and source map instead of dropping
   them after the inline pass, and returns the one at `path`. A top-level
   block parses the same alone as in its document, apart from reference
-  definitions, which do not change block structure. The cost is linear in
-  that block.
+  definitions, which do not change block structure. The slice starts at the
+  start of the block's line and takes in the definitions right before it,
+  which may have opened its paragraph and so made a tab-indented line a
+  continuation rather than indented code. The cost is linear in that block
+  and those definitions.
 - The text is what the inline pass read: container markers, indentation, and
   an ATX heading's opening and closing sequences removed, lines joined with
   their line endings, a setext heading without its underline.

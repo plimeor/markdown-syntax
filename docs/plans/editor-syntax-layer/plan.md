@@ -138,14 +138,16 @@ ci --features html --test <name>`.
   verified by `tests/linear_growth.rs` and `tests/pathological_inputs.rs`.
 
 ### 4. Inline source
-- [ ] 4.1 Add `NodePath`, `InlineSource`, and `Document::inline_source`;
+- [x] 4.1 Add `NodePath`, `InlineSource`, and `Document::inline_source`;
   verified by `tests/inline_source.rs` naming `Inline source of a leaf block`.
   - Follows design › Inline source.
-- [ ] 4.2 Check, over the read-back corpus and the seeded generators, that
+- [x] 4.2 Check, over the read-back corpus and the seeded generators, that
   every paragraph and heading at every depth, parsed again with
   `parse_inline` from its inline source and the document's definitions,
   yields the inlines the document holds once its spans are mapped through
-  the inline source; verified by the same test file.
+  the inline source; verified by `tests/fixtures.rs` and
+  `tests/serialize_roundtrip_fuzz.rs`, where the corpus and the generators
+  live, through `tests/support/leaves.rs`.
 
 ### 5. WebAssembly crate
 - [ ] 5.1 Turn the repository into a workspace with `wasm/` as its member and

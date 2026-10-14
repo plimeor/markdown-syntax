@@ -17,10 +17,28 @@ use alloc::boxed::Box;
 use core::mem;
 
 use super::*;
+use core::cell::RefCell;
+
 use crate::memo::BracketMemo;
 
 /// Reads the blocks of the document split into `lines`.
 pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
+    read_document(lines, diagnostics, None)
+}
+
+/// The inline content the parser reads for each paragraph and heading of the
+/// document split into `lines`, with the span of its node, in document order.
+pub(super) fn leaf_contents(lines: &[Line<'_>]) -> Vec<(Span, DerivedText)> {
+    let leaves = RefCell::new(Vec::new());
+    read_document(lines, &mut Vec::new(), Some(&leaves));
+    leaves.into_inner()
+}
+
+fn read_document(
+    lines: &[Line<'_>],
+    diagnostics: &mut Vec<Diagnostic>,
+    leaves: Option<&RefCell<Vec<(Span, DerivedText)>>>,
+) -> Vec<Block> {
     let mut parser = BlockParser::new(lines);
     for index in 0..lines.len() {
         parser.read_line(index);
@@ -39,6 +57,7 @@ pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnosti
     let mut found = parser.diagnostics;
     let finish = Finish {
         definitions: Labels { own: &definitions },
+        leaves,
     };
     let blocks = document
         .children
@@ -2413,11 +2432,28 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
     definitions: Labels<'o>,
+    /// Where each paragraph's and heading's inline content is kept, when
+    /// `leaf_contents` asks for it.
+    leaves: Option<&'o RefCell<Vec<(Span, DerivedText)>>>,
 }
 
 impl Finish<'_> {
     fn inlines(&self, text: &DerivedText, diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
         parse_inlines(&text.text, text.map(), Some(self.definitions), diagnostics)
+    }
+
+    /// The inlines of the paragraph or heading at `span`, read from `text`.
+    fn leaf_inlines(
+        &self,
+        span: Span,
+        text: DerivedText,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Vec<Inline> {
+        let inlines = self.inlines(&text, diagnostics);
+        if let Some(leaves) = self.leaves {
+            leaves.borrow_mut().push((span, text));
+        }
+        inlines
     }
 
     fn blocks(&self, children: Vec<Child<'_>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
@@ -2440,7 +2476,7 @@ impl Finish<'_> {
                 text.trim_final_whitespace();
                 Block::Paragraph(Paragraph {
                     meta: meta(span),
-                    children: self.inlines(&text, diagnostics),
+                    children: self.leaf_inlines(span, text, diagnostics),
                 })
             }
             Pending::Heading {
@@ -2452,7 +2488,7 @@ impl Finish<'_> {
                 meta: meta(span),
                 depth,
                 kind,
-                children: self.inlines(&text, &mut Vec::new()),
+                children: self.leaf_inlines(span, text, &mut Vec::new()),
             }),
             Pending::Table {
                 span,

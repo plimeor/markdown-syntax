@@ -6,6 +6,9 @@
 #[path = "support/normalize.rs"]
 mod normalize;
 
+#[path = "support/leaves.rs"]
+mod leaves;
+
 use markdown_syntax::parse;
 
 /// A small deterministic xorshift generator, so failures reproduce.
@@ -219,6 +222,26 @@ fn generated_documents_round_trip() {
     for (listed, _) in NOT_READING_BACK {
         if !listed_seen.iter().any(|seen| seen == listed) {
             failures.push(format!("{listed:?}: listed, but not generated"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Every paragraph and heading of the generated documents reads again from
+/// its inline source as the document holds it (`inline_source.rs`).
+#[test]
+fn generated_leaves_read_again_from_their_inline_source() {
+    let mut failures = Vec::new();
+    for &(generator, pieces, max_pieces, seed) in GENERATORS {
+        for input in generated(pieces, max_pieces, seed) {
+            if let Err(failure) = leaves::leaves_reproduce(&input) {
+                failures.push(format!("{generator} {failure}"));
+            }
         }
     }
     assert!(

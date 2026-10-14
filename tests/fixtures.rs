@@ -23,6 +23,9 @@ mod deviations;
 #[path = "support/normalize.rs"]
 mod normalize;
 
+#[path = "support/leaves.rs"]
+mod leaves;
+
 use std::path::{Path, PathBuf};
 
 use markdown_syntax::{
@@ -697,6 +700,27 @@ fn edited_blocks_keep_the_rest_of_the_source() {
         }
     }
     assert!(edits > 3_000, "only {edits} edits");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Every paragraph and heading of the corpus reads again from its inline
+/// source as the document holds it (`inline_source.rs`).
+#[test]
+fn leaves_read_again_from_their_inline_source() {
+    let mut leaves_read = 0;
+    let mut failures = Vec::new();
+    for source in read_back_corpus() {
+        match leaves::leaves_reproduce(&source.input) {
+            Ok(count) => leaves_read += count,
+            Err(failure) => failures.push(format!("{}: {failure}", source.at())),
+        }
+    }
+    assert!(leaves_read > 4_000, "only {leaves_read} leaves");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",

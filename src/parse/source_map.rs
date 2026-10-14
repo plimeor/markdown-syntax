@@ -210,6 +210,10 @@ impl DerivedText {
         &self.map
     }
 
+    pub(super) fn into_parts(self) -> (String, SourceMap) {
+        (self.text, self.map)
+    }
+
     fn join(&mut self) {
         if !self.text.is_empty() || self.pending_eol.is_some() {
             let (start, end) = self.pending_eol.unwrap_or_else(|| {
@@ -289,6 +293,16 @@ pub(super) fn translate_inlines(
             diagnostic.span = Some(translator.span(span));
         }
     }
+}
+
+/// The source span of `span`, a span in the text `map` maps, as
+/// `translate_inlines` maps a node's.
+pub(super) fn translate_span(map: &SourceMap, span: Span) -> Span {
+    let segments = map.segments();
+    let cursor = segments
+        .partition_point(|segment| segment.text_end <= span.start)
+        .min(segments.len().saturating_sub(1));
+    Translator { segments, cursor }.span(span)
 }
 
 /// Maps spans with a cursor that only moves forward: in preorder, node starts

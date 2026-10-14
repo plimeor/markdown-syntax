@@ -268,6 +268,107 @@ pub fn parse_inline(text: &str, definitions: &Definitions) -> InlineOutput {
     }
 }
 
+/// The inline content the parser read for one paragraph or heading, from
+/// [`Document::inline_source`], with where each of its offsets sits in the
+/// document's source.
+#[derive(Clone, Debug)]
+pub struct InlineSource {
+    /// The text the inline pass read: container markers, indentation, and an
+    /// ATX heading's opening and closing sequences removed, lines joined with
+    /// `\n`, and a setext heading without its underline.
+    pub text: String,
+    map: SourceMap,
+}
+
+impl InlineSource {
+    /// The source offset of `text[offset..]`; `offset == text.len()` maps to
+    /// the end of the leaf's content.
+    pub fn to_source(&self, offset: usize) -> usize {
+        self.span_to_source(Span::new(offset, offset)).start
+    }
+
+    /// The source span of `span`, a span in `text`, as the parser maps the
+    /// spans of the inlines it reads from `text`.
+    pub fn span_to_source(&self, span: Span) -> Span {
+        source_map::translate_span(&self.map, span)
+    }
+}
+
+/// Maps the spans of `inlines`, read from `source.text`, to the source, as
+/// the parser maps a leaf's inlines. For tests.
+#[doc(hidden)]
+pub fn inline_spans_to_source(source: &InlineSource, inlines: &mut [Inline]) {
+    source_map::translate_inlines(&source.map, inlines, &mut []);
+}
+
+impl Document {
+    /// The inline content the parser read for the paragraph or heading at
+    /// `path`, read again from the source of the top-level block holding it,
+    /// so that the cost is linear in that block. `None` for a document
+    /// without a source, or a path that names no paragraph or heading, or a
+    /// node without a span or one the source does not hold.
+    pub fn inline_source(&self, path: &NodePath) -> Option<InlineSource> {
+        let source = self.source()?;
+        let (&first, rest) = path.0.split_first()?;
+        let top = self.children.get(first)?;
+        let mut block = top;
+        let mut rest = rest.iter();
+        while let Some(&index) = rest.next() {
+            block = match block {
+                Block::BlockQuote(node) => node.children.get(index)?,
+                Block::Alert(node) => node.children.get(index)?,
+                Block::FootnoteDefinition(node) => node.children.get(index)?,
+                Block::ContainerDirective(node) => node.children.get(index)?,
+                Block::HtmlContainer(node) => match &node.content {
+                    HtmlContainerContent::Blocks(children) => children.get(index)?,
+                    _ => return None,
+                },
+                Block::List(node) => {
+                    let item = node.children.get(index)?;
+                    item.children.get(*rest.next()?)?
+                }
+                _ => return None,
+            };
+        }
+        let leaf = match block {
+            Block::Paragraph(node) => node.meta.span?,
+            Block::Heading(node) => node.meta.span?,
+            _ => return None,
+        };
+        let end = top.span()?.end;
+        // The top-level block is read with the definitions right before it,
+        // which may have opened its paragraph, so that a line reads as a
+        // continuation there and not as indented code; and from the start of
+        // its line, where it reads as it does in the document.
+        let opening = self.children[..first]
+            .iter()
+            .rev()
+            .take_while(|block| matches!(block, Block::Definition(_)))
+            .last()
+            .unwrap_or(top);
+        let start = opening.span()?.start;
+        if end > source.len() || start > end || !source.is_char_boundary(start) {
+            return None;
+        }
+        let bytes = source.as_bytes();
+        let mut start = start;
+        while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
+            start -= 1;
+        }
+        if start == 0 && source.starts_with('\u{feff}') {
+            start = '\u{feff}'.len_utf8().min(end);
+        }
+        let slice = source.get(start..end)?;
+        let map = SourceMap::verbatim(slice.len(), start);
+        let lines = collect_lines(slice, &map);
+        let (_, text) = blocks::leaf_contents(&lines)
+            .into_iter()
+            .find(|(span, _)| *span == leaf)?;
+        let (text, map) = text.into_parts();
+        Some(InlineSource { text, map })
+    }
+}
+
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
 /// between the two call this; node values are rewritten after parsing by
 /// `nul_replacement::replace_in_document`, so spans stay in source coordinates.

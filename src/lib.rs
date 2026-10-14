@@ -26,7 +26,7 @@ pub use ast::*;
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 #[cfg(feature = "html")]
 pub use html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
-pub use parse::{parse, parse_inline, Definitions, InlineOutput, ParseOutput};
+pub use parse::{parse, parse_inline, Definitions, InlineOutput, InlineSource, ParseOutput};
 pub use serialize::{BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions};
 pub use span::{LineIndex, LinePosition, Span};
 
@@ -35,6 +35,7 @@ pub use span::{LineIndex, LinePosition, Span};
 #[doc(hidden)]
 pub mod __private {
     pub use crate::compare::normalized_blocks;
+    pub use crate::parse::inline_spans_to_source;
 }
 
 /// Common imports for working with `markdown-syntax`: `use
@@ -46,7 +47,9 @@ pub mod prelude {
     pub use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
     #[cfg(feature = "html")]
     pub use crate::html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
-    pub use crate::parse::{parse, parse_inline, Definitions, InlineOutput, ParseOutput};
+    pub use crate::parse::{
+        parse, parse_inline, Definitions, InlineOutput, InlineSource, ParseOutput,
+    };
     pub use crate::serialize::{
         BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions,
     };
