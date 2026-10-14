@@ -63,7 +63,7 @@ For a parsed document without its source, parsing the Markdown that
 `to_markdown` writes SHALL
 yield a document equal to the first as "Tree comparison" defines, and
 serializing that reparsed document SHALL yield the same text byte for byte,
-unless the source holds a detail the AST does not record (decision 0008): a
+unless the source holds a detail the AST does not record (decision 0013): a
 lazy continuation line, an indentation width, or a count of blank lines.
 
 The tests check serialization one flow at a time, each against one oracle:

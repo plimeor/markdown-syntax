@@ -1,7 +1,7 @@
 # 0013: The source is the only truth
 
 Status: Accepted
-Date: <landing date>
+Date: 2026-10-14
 Supersedes: 0008
 
 ## Context

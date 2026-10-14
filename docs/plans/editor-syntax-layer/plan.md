@@ -13,8 +13,7 @@ editor the entry points it calls.
 - Scope: the kept source and source reuse in `to_markdown`, `parse_inline`,
   `inline_source`, and a new zero-dependency `markdown-syntax-wasm` crate with
   a thin JS wrapper in the same repository.
-- Decisions 0007, 0008, and 0010 are superseded by 0012, 0013, and 0014
-  (drafts in `decisions/`).
+- Decisions 0007, 0008, and 0010 are superseded by 0012, 0013, and 0014.
 - Breaking: `to_markdown` on a parsed document returns its source where
   nothing changed, and `Document { meta, children }` no longer compiles.
 - Largest risk: the read-back of a rendered block beside reused ones; the
@@ -102,7 +101,7 @@ order; group 5 needs 2–4; group 6 needs 5. Inner loop: `cargo test --profile
 ci --features html --test <name>`.
 
 ### 1. Decisions
-- [ ] 1.1 Land decisions 0012, 0013, and 0014 from this plan's drafts,
+- [x] 1.1 Land decisions 0012, 0013, and 0014 from this plan's drafts,
   `git mv` 0007, 0008, and 0010 to `docs/decisions/superseded/` with their
   status lines changed, and update every link to them outside
   `docs/archive/`; verified by `rg -n '000[78]|0010' docs CLAUDE.md AGENTS.md

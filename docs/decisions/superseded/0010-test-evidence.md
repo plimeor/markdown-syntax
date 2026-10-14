@@ -1,8 +1,8 @@
-# 0014: Test evidence
+# 0010: Test evidence
 
-Status: Accepted
-Date: <landing date>
-Supersedes: 0010
+Status: Superseded by 0014
+Date: 2026-10-08
+Supersedes: 0003, 0004
 
 ## Context
 
@@ -11,11 +11,6 @@ together; it does not prove the first parse is correct, and a serializer can
 mask a stably wrong parse. A generated snapshot can faithfully record a wrong
 parse, and a status file that no test checks drifts and is then taken as
 authority.
-
-Regenerating every changed golden by hand guards against blessing a wrong
-parse, but it is no safer than generating it with a command (a hand-written
-golden can be wrong too) and it scales with the size of a change: a change of
-AST shape moves nearly every `.ast` golden at once.
 
 ## Decision
 
@@ -40,10 +35,9 @@ never stored in documents.
 
 Correctness work pairs parser and serializer reasoning: a parse fix is
 checked against both the AST shape and the written Markdown. There is no
-bless in CI: a golden a correct fix moves is regenerated in the same change,
-by hand or by a local command, and every changed golden is read in the
-change's review for structural correctness, with the reason it moved; a
-golden is never edited to make a failing test pass. Focused regression tests own stable public behavior; the bench is
+bless flag: a golden a correct fix moves is regenerated in the same change
+and read for structural correctness, never edited to make a failing test
+pass. Focused regression tests own stable public behavior; the bench is
 evidence, not a contract.
 
 ## Considered options
@@ -55,10 +49,8 @@ evidence, not a contract.
   checking what the syntax produces.
 - Audit snapshots that are not executed, or hand-maintained result documents:
   they imply coverage or results that no command derives.
-- Parser-only fixes, serializer shims for parser defects, or blessing changed
-  goldens without reading each: each lets a wrong AST survive.
-- No regeneration command at all: as safe as a command whose output is read,
-  and far costlier when a change moves many goldens.
+- Parser-only fixes, serializer shims for parser defects, or bulk blessing
+  changed goldens: each lets a wrong AST survive.
 - Relying on the bench alone: stable public behavior needs focused tests with
   known output.
 

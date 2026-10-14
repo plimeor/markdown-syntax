@@ -1,7 +1,7 @@
 # 0012: Parse entry points and one normative syntax
 
 Status: Accepted
-Date: <landing date>
+Date: 2026-10-14
 Supersedes: 0007
 
 ## Context

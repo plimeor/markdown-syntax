@@ -151,7 +151,7 @@ const INPUTS_PER_GENERATOR: usize = 2_000;
 /// reason.
 ///
 /// Each difference is whitespace or a blank line that the AST does not
-/// record, as decision 0008 (Consequences) accepts.
+/// record, as decision 0013 (Consequences) accepts.
 const NOT_READING_BACK: &[(&str, &str)] = &[
     (
         "__$$++\t\\\t\n}$==",
