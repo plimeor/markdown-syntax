@@ -162,7 +162,7 @@ ci --features html --test <name>`.
   `index.d.ts`) and its tests on `node:test`; verified by
   `node --test 'wasm/js/test/*.test.mjs'` naming each `wasm-binding`
   requirement.
-- [ ] 5.4 Add the wasm build and the JS tests to CI and
+- [x] 5.4 Add the wasm build and the JS tests to CI and
   `scripts/pre-release-check.sh`, including the Rust 1.82 build of the
   member; verified by a green CI run on the branch.
 
