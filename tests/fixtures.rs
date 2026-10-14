@@ -696,26 +696,13 @@ fn edited_blocks_keep_the_rest_of_the_source() {
     );
 }
 
-/// The leaf edits of the corpus that rewrite a line other than the leaf's
-/// own, each named as the simulated edits name it (input, path, index, edit
-/// kind), with what the writer renders around it.
-#[rustfmt::skip]
-const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
-    ("extensions/gfm_task_list.md [Item(3, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/fuzz.cases#18 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/gfm_task_list_item.cases#7 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 0 leaf", "a marker followed by a tab renders its item"),
-    ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 1 leaf", "a marker followed by a tab renders its item"),
-];
-
 /// Each block at every depth of each corpus input, with its first leaf or
 /// one own field edited, deleted, or followed by a new paragraph, written
 /// with the source, reads back as the edited tree wherever the edited tree's
 /// canonical output does, without a block the read-back check has to write
 /// canonically, and keeps the source of the top-level blocks around the one
-/// it edits inside; an edited leaf changes only its own lines, unless the
-/// edit is listed in `NOT_KEPT_AROUND_A_LEAF_EDIT`; the same with every
-/// leaf given as its text: the simulated edits of `per-node-reuse`, task
+/// it edits inside; an edited leaf changes only its own lines; the same with
+/// every leaf given as its text: the simulated edits of `per-node-reuse`, task
 /// 2.5.
 // serialization: Unchanged source is kept
 #[test]
@@ -728,19 +715,7 @@ fn edited_nodes_at_every_depth_read_back() {
         edits += edits::simulated_edits(&at, &source.input, Some(&mut leaf_lines), &mut failures);
     }
     for at in &leaf_lines {
-        if !NOT_KEPT_AROUND_A_LEAF_EDIT
-            .iter()
-            .any(|(listed, _)| listed == at)
-        {
-            failures.push(format!("{at}: rewrites more than the edited leaf"));
-        }
-    }
-    for (listed, _) in NOT_KEPT_AROUND_A_LEAF_EDIT {
-        if !leaf_lines.iter().any(|at| at == listed) {
-            failures.push(format!(
-                "{listed}: listed in NOT_KEPT_AROUND_A_LEAF_EDIT, but names no edit that rewrites more than its leaf"
-            ));
-        }
+        failures.push(format!("{at}: rewrites more than the edited leaf"));
     }
     assert!(edits > 20_000, "only {edits} edits");
     assert!(
@@ -756,16 +731,7 @@ fn edited_nodes_at_every_depth_read_back() {
 /// leaf path), with what the writer does there.
 #[rustfmt::skip]
 const NOT_KEPT_AFTER_APPENDING: &[(&str, &str)] = &[
-    ("extensions/gfm_task_list.md [3, 0, 0]", "a task checkbox split across lines renders its item"),
-    ("extensions/gfm_task_list.md [8, 0, 0]", "a tab after a checkbox renders its item"),
-    ("cases/commonmark/fuzz.cases#18 [0, 0, 0]", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/gfm_task_list_item.cases#7 [0, 0, 0]", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/gfm_task_list_item.cases#7 [0, 2, 0]", "a tab after a checkbox renders its item"),
-    ("cases/commonmark/misc_tabs.cases#44 [0, 0, 0]", "a tab after a marker renders its item"),
-    ("cases/commonmark/misc_tabs.cases#44 [0, 0, 1]", "a tab after a marker renders its item"),
-    ("cases/gfm/fuzz.cases#19 [0, 0, 0]", "a tab after a marker renders its item"),
-    ("READ_BACK_INPUTS \">* \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a tab after a marker renders its item"),
-    ("READ_BACK_INPUTS \"-\\t(\\n  <v>\" [0, 0, 0]", "a tab after a marker renders its item"),
+    ("READ_BACK_INPUTS \">* \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a space and a tab after a marker, which could open indented code at another column, render its item"),
 ];
 
 /// The block at `path`, through list items, table rows, and containers;

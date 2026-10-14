@@ -390,8 +390,16 @@ pub(super) fn keeps_gap(
                     .map(|line| line.body.as_str()),
                 None => source[right_span.start..].split(['\n', '\r']).next(),
             };
+            // A sibling kept whole whose line holds whitespace before it:
+            // inside a container, whose prefix ends with a space, nearly
+            // always, which leaves the probe for an empty item to the top
+            // level.
+            let indented =
+                right_lines.is_none() && source[..right_span.start].ends_with([' ', '\t']);
             match last_leaf(source, left_block) {
-                Some((leaf, markers)) => starts_after_leaf(leaf, &markers, right_block, first),
+                Some((leaf, markers)) => {
+                    starts_after_leaf(leaf, &markers, right_block, first, indented)
+                }
                 None => true,
             }
         }
@@ -403,7 +411,8 @@ pub(super) fn keeps_gap(
 /// for a block quote or an alert, `[^a]: ` for a footnote definition. `None` where
 /// nothing can take the line after it: the last child of a container is no
 /// leaf, a blank line, or an HTML container, which its closing tag ends. A
-/// directive stands for its last leaf, whose lines no probe stands for.
+/// directive stands for its last leaf, whose lines no probe stands for, and
+/// a list whose last item is empty for that item, its marker last.
 fn last_leaf<'b>(source: &str, block: &'b Block) -> Option<(&'b Block, String)> {
     let (children, marker) = match block {
         Block::BlockQuote(node) => (&node.children, String::from("> ")),
@@ -413,6 +422,14 @@ fn last_leaf<'b>(source: &str, block: &'b Block) -> Option<(&'b Block, String)> 
         Block::FootnoteDefinition(node) => (&node.children, String::from("[^a]: ")),
         Block::List(list) => {
             let item = list.children.last()?;
+            // An empty item, written as its marker, stands for itself.
+            if item.children.is_empty() {
+                let marker = item.meta.span.map(|span| {
+                    let text = source[span.start..span.end].trim_start();
+                    &text[..text.find(char::is_whitespace).unwrap_or(text.len())]
+                });
+                return Some((block, String::from(marker.unwrap_or("-"))));
+            }
             (&item.children, item_marker(source, item))
         }
         Block::ContainerDirective(_) => return Some((block, String::new())),
@@ -440,15 +457,33 @@ fn last_leaf<'b>(source: &str, block: &'b Block) -> Option<(&'b Block, String)> 
 /// content starts at on its marker's line, so that a line indented less
 /// than that column stays out of it: four spaces or more after the marker
 /// count as one, the rest opening indented code, and a checkbox is content.
-/// `- ` where the source does not tell, which leaves fewer lines out.
+/// A lone tab after the marker, which `item` copies, stays a tab, as wide
+/// as the probe's column makes it. `- ` where the source does not tell,
+/// which leaves fewer lines out.
 fn item_marker(source: &str, item: &ListItem) -> String {
-    let width = item
+    let marker = item
         .meta
         .span
         .zip(item.children.first().and_then(Block::span))
         .filter(|(item, first)| item.start < first.start)
         .map(|(item, first)| &source[item.start..first.start])
-        .filter(|marker| !marker.contains(['\n', '\r', '\t']))
+        .filter(|marker| !marker.contains(['\n', '\r']))
+        // A checkbox is content.
+        .map(
+            |marker| match marker.find('[').filter(|_| item.checked.is_some()) {
+                Some(checkbox) => &marker[..checkbox],
+                None => marker,
+            },
+        );
+    if let Some(tab) = marker.and_then(|marker| marker.find('\t')) {
+        let lone = marker.is_some_and(|marker| content_column(marker, false, true).is_some());
+        return if lone {
+            format!("-{}\t", " ".repeat(tab - 1))
+        } else {
+            String::from("- ")
+        };
+    }
+    let width = marker
         .and_then(|marker| {
             let rest = marker.trim_start_matches(' ');
             let after = rest.trim_start_matches(|char: char| !char.is_ascii_whitespace());
@@ -468,9 +503,17 @@ fn item_marker(source: &str, item: &ListItem) -> String {
 /// (`first`) ends a table; where they are some, only where that line, as a
 /// lazy line, ends the containers holding a paragraph, which no row
 /// continues a table with. After an alert's marker line, which takes a lazy
-/// line as its paragraph's, the same; after a directive, whose lines no
-/// probe stands for, never; after any other leaf always.
-fn starts_after_leaf(left: &Block, markers: &str, right: &Block, first: Option<&str>) -> bool {
+/// line as its paragraph's, the same; after an empty item, a list, where
+/// the line is no deeper than its marker, which `indented`, a sibling kept
+/// whole after whitespace on its line, leaves unknown; after a directive,
+/// whose lines no probe stands for, never; after any other leaf always.
+fn starts_after_leaf(
+    left: &Block,
+    markers: &str,
+    right: &Block,
+    first: Option<&str>,
+    indented: bool,
+) -> bool {
     // Whether `first`, after `before`, starts a block of its own after the
     // first block `before` opens, or after the first item of a list.
     let ends = |before: &str| {
@@ -492,6 +535,10 @@ fn starts_after_leaf(left: &Block, markers: &str, right: &Block, first: Option<&
         Block::Paragraph(_) | Block::Definition(_) => ends(&format!("{markers}a")),
         Block::Alert(_) => ends(&format!("{markers}> [!NOTE]")),
         Block::Table(_) if markers.is_empty() => ends("| a |\n| - |"),
+        // An empty item, its marker last in `markers`, takes a line indented
+        // past its marker: one kept from the source after indentation,
+        // which the probe does not see, always.
+        Block::List(_) => !indented && ends(markers),
         // No lazy line continues a table.
         Block::Table(_) => true,
         // Each ends where its own syntax or line does.
@@ -505,7 +552,6 @@ fn starts_after_leaf(left: &Block, markers: &str, right: &Block, first: Option<&
         // `last_leaf` returns no other block; one that holds blocks may
         // take the line.
         Block::BlockQuote(_)
-        | Block::List(_)
         | Block::FootnoteDefinition(_)
         | Block::HtmlContainer(_)
         | Block::BlankLine(_) => false,
@@ -1608,8 +1654,8 @@ impl Reuse<'_, '_> {
         let first_start = first.span().map_or(usize::MAX, |at| at.start);
         let line_end = self.line_end(span.start);
         let same_line = first_start <= line_end;
-        // A checkbox split across lines is not a marker to copy.
-        if base.checked.is_some() && !same_line {
+        // A checkbox split across lines is not a marker to edit.
+        if base.checked.is_some() && !same_line && !own {
             return Ok((Out::Render, false));
         }
         let marker = if same_line {
@@ -1617,15 +1663,11 @@ impl Reuse<'_, '_> {
         } else {
             self.source[span.start..line_end].trim_end()
         };
-        if marker.contains('\t') || !marker.is_ascii() {
+        if !marker.is_ascii() || !own && marker.contains('\t') {
             return Ok((Out::Render, false));
         }
-        // A task item's content starts at its checkbox, which its first
-        // paragraph's text leaves out.
-        let column = match marker.find('[').filter(|_| base.checked.is_some()) {
-            Some(checkbox) => checkbox,
-            None if same_line => marker.len(),
-            None => marker.len() + 1,
+        let Some(column) = content_column(marker, base.checked.is_some(), same_line) else {
+            return Ok((Out::Render, false));
         };
         let marker = if own {
             if let Some(number) = item.number {
@@ -1667,15 +1709,28 @@ impl Reuse<'_, '_> {
             Out::Render
         } else if same_line {
             self.marked(&marker, lines, &indent)
+        } else if own {
+            // An unchanged marker is its source up to the first child, whose
+            // line keeps its source prefix. After a checkbox that line is a
+            // lazy one, which only a paragraph's text continues.
+            let source_line = &self.source[first_start..self.line_end(first_start)];
+            if !lines.first().is_some_and(|first| {
+                !first.full
+                    && !first.body.is_empty()
+                    && (base.checked.is_none()
+                        || first.body == source_line
+                        || matches!(
+                            crate::parse(&first.body).document.children.as_slice(),
+                            [Block::Paragraph(_)]
+                        ))
+            }) {
+                return Ok((Out::Render, false));
+            }
+            let (mut written, prefix) = head_and_prefix(&self.source[span.start..first_start]);
+            written.extend(prefixed(lines, Some((&prefix.body, true)), &indent, ""));
+            Out::Lines(written)
         } else {
-            // A marker kept from the source keeps its line's trailing
-            // whitespace.
-            let marker = if own {
-                &self.source[span.start..line_end]
-            } else {
-                &marker
-            };
-            let mut written = content(marker);
+            let mut written = content(&marker);
             extend(&mut written, prefixed(lines, None, &indent, ""));
             Out::Lines(written)
         };
@@ -1806,6 +1861,34 @@ impl Reuse<'_, '_> {
             return Ok(Out::Kept(span));
         }
         Ok(Out::Lines(lines))
+    }
+}
+
+/// The column, from an item's start, that the lines the writer indents in
+/// it take: `marker` is the item's source on its first line, up to its first
+/// child where that starts there, and a checkbox, `task`, is content. A
+/// lone tab after the marker, whose width depends on the column it stands
+/// at, counts as its widest, four columns, which leaves those lines in the
+/// item, short of indented code, wherever it is written; `None` for any
+/// other tab before the content.
+fn content_column(marker: &str, task: bool, same_line: bool) -> Option<usize> {
+    let rest = marker.trim_start_matches(' ');
+    if rest.starts_with(|char: char| char.is_ascii_whitespace()) {
+        return None;
+    }
+    let after = rest.trim_start_matches(|char: char| !char.is_ascii_whitespace());
+    let width = marker.len() - after.len();
+    let space = if task {
+        &after[..after.find('[')?]
+    } else if same_line {
+        &after[..after.len() - after.trim_start_matches([' ', '\t']).len()]
+    } else {
+        return Some(width + 1);
+    };
+    match space {
+        "\t" => Some(width + 4),
+        space if space.contains('\t') => None,
+        space => Some(width + space.len()),
     }
 }
 

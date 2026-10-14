@@ -109,14 +109,18 @@ inlines. The writer SHALL write:
 A line written where the base node has a source line keeps that line's
 source prefix (container markers and indentation) and the line ending before
 it: a setext underline, a table's delimiter row, and a blank line matched to
-the base's whole, unless it opens its container, whose own syntax opens it,
-and a list item's marker line that holds nothing else with its trailing
-whitespace; a later line of an edited leaf's text, a table's later row, or
-the line an alert's or a directive's first child starts on after the
-container's own, where it reads as that line does there: it is that line's
-text, it parses alone as a paragraph, or the source line stands where no
-line opens a block, as one indented four columns past its container does.
-Every other line SHALL take the canonical prefix.
+the base's whole, unless it opens its container, whose own syntax opens it;
+an item's marker, for an item whose own fields are equal and whose
+whitespace before its content is spaces or one tab, as its source text up
+to its first child, tabs and line endings included, the line its
+first child starts on keeping that line's source prefix where it reads as
+that line does there, after a checkbox as a paragraph's; a later line of an
+edited leaf's text, a table's later row, or the line an alert's or a
+directive's first child starts on after the container's own, where it
+reads as that line does there: it is that line's text, it parses alone as a
+paragraph, or the source line stands where no line opens a block, as one
+indented four columns past its container does. Every other line SHALL take
+the canonical prefix.
 
 The writer SHALL keep the source between two siblings written from the
 source that are adjacent in the source, where the boundary holds a
@@ -128,11 +132,12 @@ that as written does not take the sibling's first line: after a paragraph,
 a definition, or a table at the same level, where the sibling interrupts a
 paragraph (a table: ends a table); after a paragraph or a definition inside
 containers, or an alert without blocks, where that line as a lazy line ends
-those containers; after a directive's last leaf never, unless the source's
-lines are on both sides; after any other last leaf always; and, after a list
-whose last item is not the base's last item written from the source, only
-where the source's lines are on both sides. Which other boundaries without a
-blank line are kept is unspecified. It SHALL keep the source before the
+those containers; after an empty last item, where that line stands outside
+it; after a directive's last leaf never, unless the source's lines are on
+both sides; after any other last leaf always; and, after a list whose last
+item is not the base's last item written from the source, only where the
+source's lines are on both sides. Which other boundaries without a blank
+line are kept is unspecified. It SHALL keep the source before the
 document's first block and after its last when that block is written from
 the source there; every other boundary SHALL be canonical. A `---` thematic
 break that opens the document in the source and in the output SHALL be kept
