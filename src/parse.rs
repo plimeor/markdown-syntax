@@ -413,7 +413,7 @@ impl Document {
             .map(|(span, text)| (span, Some(text)))
             .collect();
         // The contents are in document order, so their starts never fall.
-        let mut take = |path: &[usize], span: Option<Span>| {
+        let mut take = |path: &[usize], span: Option<Span>, _: Option<&str>| {
             let Some(span) = span else { return };
             let first = contents.partition_point(|(other, _)| other.start < span.start);
             let entry = contents[first..]

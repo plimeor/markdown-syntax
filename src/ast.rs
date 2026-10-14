@@ -1167,7 +1167,10 @@ impl Paragraph {
     /// [`parse_inline`](crate::parse_inline) reads it with `definitions`, and
     /// the diagnostics of that read. The paragraph keeps `text`, which the
     /// writer writes in place of its inlines while they are the ones `text`
-    /// reads as; the spans of its inlines are offsets in `text`.
+    /// reads as; the spans of its inlines are offsets in `text`. Pass the
+    /// definitions of the document the paragraph will be written in
+    /// ([`Definitions::of`]); after they change, or for a leaf built with
+    /// others, [`Document::reread_kept_sources`] reads its text again.
     pub fn with_source(text: &str, definitions: &Definitions) -> (Self, Vec<Diagnostic>) {
         let (children, diagnostics) = read_source(text, definitions);
         let paragraph = Self {

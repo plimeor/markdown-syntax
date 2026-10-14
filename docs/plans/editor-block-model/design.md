@@ -172,7 +172,9 @@ matches by one relation, **correspondence**, defined recursively:
   equal, their own fields are equal, and their children correspond pairwise.
 - A leaf with a kept source, whose inlines are the ones it parsed from,
   corresponds to a base leaf when its kept text equals the base leaf's inline
-  source text; its inlines are not compared further.
+  source text; its inlines, which are the ones that text reads as, then
+  equal the base leaf's once their spans are mapped to the source, which
+  the comparison checks.
 - Any other leaf corresponds when its inlines are equal, spans included.
 
 At the top-level grain this plan writes, a block that corresponds to the base

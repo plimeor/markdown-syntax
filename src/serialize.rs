@@ -580,6 +580,9 @@ fn write_blocks(
     Ok(output)
 }
 
+/// Writes `block` as canonical Markdown, and a leaf that keeps its text as
+/// that text: `to_markdown_with` has cleared every kept text its leaf's
+/// inlines no longer read as.
 fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
     match block {
         Block::BlankLine(_) => Ok(String::new()),

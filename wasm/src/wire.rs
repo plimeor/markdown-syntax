@@ -790,11 +790,8 @@ impl<'m> Reader<'m> {
             return malformed("words follow the tree");
         }
         // A leaf's source reads with the definitions of the whole tree.
-        if self.sourced {
-            let definitions = Definitions::of(&document);
-            if definitions != Definitions::default() {
-                read_sources(&mut document.children, &definitions);
-            }
+        if self.sourced && Definitions::of(&document) != Definitions::default() {
+            document.reread_kept_sources();
         }
         Ok(document)
     }
@@ -1396,56 +1393,5 @@ mod tests {
     fn a_span_inside_a_surrogate_pair_reads_as_none() {
         let offsets = byte_offsets("😀a");
         assert_eq!(offsets, vec![0, NO_SPAN, 4, 5]);
-    }
-}
-
-/// Reads the inlines of each leaf of `blocks` that holds a source again
-/// from it with `definitions`, as its `with_source` constructor reads them.
-fn read_sources(blocks: &mut [Block], definitions: &Definitions) {
-    for block in blocks {
-        match block {
-            Block::Paragraph(node) => {
-                if let Some(text) = node.source() {
-                    node.children = parse_inline(text, definitions).inlines;
-                }
-            }
-            Block::Heading(node) => {
-                if let Some(text) = node.source() {
-                    node.children = parse_inline(text, definitions).inlines;
-                }
-            }
-            Block::Table(node) => {
-                for cell in node.rows.iter_mut().flat_map(|row| &mut row.cells) {
-                    if let Some(text) = cell.source() {
-                        cell.children = parse_inline(text, definitions).inlines;
-                    }
-                }
-            }
-            Block::LeafDirective(node) => {
-                if let Some(text) = node.label_source() {
-                    node.label = parse_inline(text, definitions).inlines;
-                }
-            }
-            Block::ContainerDirective(node) => {
-                if let Some(text) = node.label_source() {
-                    node.label = parse_inline(text, definitions).inlines;
-                }
-                read_sources(&mut node.children, definitions);
-            }
-            Block::BlockQuote(node) => read_sources(&mut node.children, definitions),
-            Block::Alert(node) => read_sources(&mut node.children, definitions),
-            Block::FootnoteDefinition(node) => read_sources(&mut node.children, definitions),
-            Block::HtmlContainer(node) => {
-                if let HtmlContainerContent::Blocks(children) = &mut node.content {
-                    read_sources(children, definitions);
-                }
-            }
-            Block::List(node) => {
-                for item in &mut node.children {
-                    read_sources(&mut item.children, definitions);
-                }
-            }
-            _ => {}
-        }
     }
 }

@@ -292,7 +292,12 @@ export class ParsedDocument {
   readonly source: string;
   readonly tree: Document;
   readonly diagnostics: Diagnostic[];
-  /** The path and inline source of every leaf, in document order. */
+  /**
+   * The path and inline source of every leaf, in document order. A path is
+   * child indices from the document (a list item counts as its list's
+   * child); a table cell's is its table's, then its row's index and its own;
+   * a directive's label has its directive's path.
+   */
   readonly leafSources: { path: number[]; source: InlineSource }[];
   /** The labels of the document's link reference definitions. */
   readonly definitions: string[];

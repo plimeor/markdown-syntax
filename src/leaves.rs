@@ -6,6 +6,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::*;
+use crate::parse::Definitions;
 use crate::span::Span;
 
 /// One leaf: its span (a label's is its directive's), its inlines, and the
@@ -16,28 +17,30 @@ pub(crate) struct LeafMut<'a> {
     pub(crate) source: &'a mut Option<String>,
 }
 
-/// Calls `visit` with the path and span of every leaf in `blocks`, in
-/// document order, where `path` is the path of their container.
+/// Calls `visit_leaf` with the path, span, and kept text of every leaf in
+/// `blocks`, in document order, where `path` is the path of their container.
 pub(crate) fn visit(
     blocks: &[Block],
     path: &mut Vec<usize>,
-    visit_leaf: &mut impl FnMut(&[usize], Option<Span>),
+    visit_leaf: &mut impl FnMut(&[usize], Option<Span>, Option<&str>),
 ) {
     for (index, block) in blocks.iter().enumerate() {
         path.push(index);
         match block {
-            Block::Paragraph(node) => visit_leaf(path, node.meta.span),
-            Block::Heading(node) => visit_leaf(path, node.meta.span),
-            Block::LeafDirective(node) => visit_leaf(path, node.meta.span),
+            Block::Paragraph(node) => visit_leaf(path, node.meta.span, node.source.as_deref()),
+            Block::Heading(node) => visit_leaf(path, node.meta.span, node.source.as_deref()),
+            Block::LeafDirective(node) => {
+                visit_leaf(path, node.meta.span, node.label_source.as_deref())
+            }
             Block::ContainerDirective(node) => {
-                visit_leaf(path, node.meta.span);
+                visit_leaf(path, node.meta.span, node.label_source.as_deref());
                 visit(&node.children, path, visit_leaf);
             }
             Block::Table(node) => {
                 for (row, cells) in node.rows.iter().enumerate() {
                     for (cell, node) in cells.cells.iter().enumerate() {
                         path.extend([row, cell]);
-                        visit_leaf(path, node.meta.span);
+                        visit_leaf(path, node.meta.span, node.source.as_deref());
                         path.truncate(path.len() - 2);
                     }
                 }
@@ -45,11 +48,10 @@ pub(crate) fn visit(
             Block::BlockQuote(node) => visit(&node.children, path, visit_leaf),
             Block::Alert(node) => visit(&node.children, path, visit_leaf),
             Block::FootnoteDefinition(node) => visit(&node.children, path, visit_leaf),
-            Block::HtmlContainer(node) => {
-                if let HtmlContainerContent::Blocks(children) = &node.content {
-                    visit(children, path, visit_leaf);
-                }
-            }
+            Block::HtmlContainer(node) => match &node.content {
+                HtmlContainerContent::Blocks(children) => visit(children, path, visit_leaf),
+                HtmlContainerContent::Inlines(_) => {}
+            },
             Block::List(node) => {
                 for (item, node) in node.children.iter().enumerate() {
                     path.push(item);
@@ -57,7 +59,13 @@ pub(crate) fn visit(
                     path.pop();
                 }
             }
-            _ => {}
+            Block::ThematicBreak(_)
+            | Block::CodeBlock(_)
+            | Block::HtmlBlock(_)
+            | Block::Definition(_)
+            | Block::MathBlock(_)
+            | Block::Frontmatter(_)
+            | Block::BlankLine(_) => {}
         }
         path.pop();
     }
@@ -102,41 +110,49 @@ pub(crate) fn visit_mut(blocks: &mut [Block], visit_leaf: &mut impl FnMut(LeafMu
             Block::BlockQuote(node) => visit_mut(&mut node.children, visit_leaf),
             Block::Alert(node) => visit_mut(&mut node.children, visit_leaf),
             Block::FootnoteDefinition(node) => visit_mut(&mut node.children, visit_leaf),
-            Block::HtmlContainer(node) => {
-                if let HtmlContainerContent::Blocks(children) = &mut node.content {
-                    visit_mut(children, visit_leaf);
-                }
-            }
+            Block::HtmlContainer(node) => match &mut node.content {
+                HtmlContainerContent::Blocks(children) => visit_mut(children, visit_leaf),
+                HtmlContainerContent::Inlines(_) => {}
+            },
             Block::List(node) => {
                 for item in &mut node.children {
                     visit_mut(&mut item.children, visit_leaf);
                 }
             }
-            _ => {}
+            Block::ThematicBreak(_)
+            | Block::CodeBlock(_)
+            | Block::HtmlBlock(_)
+            | Block::Definition(_)
+            | Block::MathBlock(_)
+            | Block::Frontmatter(_)
+            | Block::BlankLine(_) => {}
         }
     }
 }
 
 /// Whether a leaf in `blocks` keeps the text it was built from.
 pub(crate) fn any_kept(blocks: &[Block]) -> bool {
-    blocks.iter().any(|block| match block {
-        Block::Paragraph(node) => node.source.is_some(),
-        Block::Heading(node) => node.source.is_some(),
-        Block::LeafDirective(node) => node.label_source.is_some(),
-        Block::ContainerDirective(node) => node.label_source.is_some() || any_kept(&node.children),
-        Block::Table(node) => node
-            .rows
-            .iter()
-            .flat_map(|row| &row.cells)
-            .any(|cell| cell.source.is_some()),
-        Block::BlockQuote(node) => any_kept(&node.children),
-        Block::Alert(node) => any_kept(&node.children),
-        Block::FootnoteDefinition(node) => any_kept(&node.children),
-        Block::HtmlContainer(node) => match &node.content {
-            HtmlContainerContent::Blocks(children) => any_kept(children),
-            HtmlContainerContent::Inlines(_) => false,
-        },
-        Block::List(node) => node.children.iter().any(|item| any_kept(&item.children)),
-        _ => false,
-    })
+    let mut kept = false;
+    visit(blocks, &mut Vec::new(), &mut |_, _, source| {
+        kept |= source.is_some()
+    });
+    kept
+}
+
+impl Document {
+    /// Builds again, with this document's definitions, every leaf that keeps
+    /// the text it was built from (`with_source`), as `with_source` builds it,
+    /// keeping the leaf's span and its other fields. A leaf built with other
+    /// definitions than the document's, or kept after the document's
+    /// definitions changed, holds inlines its text no longer reads as, and
+    /// the writer then writes it from its inlines; this makes it read as its
+    /// text again.
+    pub fn reread_kept_sources(&mut self) {
+        let definitions = Definitions::of(self);
+        visit_mut(&mut self.children, &mut |leaf| {
+            if let Some(text) = leaf.source.as_deref() {
+                *leaf.inlines = crate::parse_inline(text, &definitions).inlines;
+            }
+        });
+    }
 }

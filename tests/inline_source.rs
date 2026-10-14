@@ -166,6 +166,28 @@ mod leaves_built_from_their_source {
         assert_eq!(paragraph.children[1].meta().span, Some(Span::new(2, 5)));
     }
 
+    // public-api: Leaves built from their source
+    #[test]
+    fn a_leaf_built_before_its_definition_reads_its_text_again() {
+        let mut document = parse("[a]: /u").document.without_source();
+        let (paragraph, _) = Paragraph::with_source("[a] [l]( x )", &Definitions::default());
+        document.children.push(paragraph.into());
+        let stale = document.to_markdown().unwrap();
+        // Written from its inlines: the link loses its padding.
+        assert!(stale.ends_with("\n\n[a] [l](x)\n"), "{stale:?}");
+        document.reread_kept_sources();
+        let Block::Paragraph(paragraph) = &document.children[1] else {
+            panic!("{:?}", document.children);
+        };
+        assert!(matches!(
+            paragraph.children.as_slice(),
+            [Inline::LinkReference(_), Inline::Text(_), Inline::Link(_)]
+        ));
+        assert_eq!(paragraph.source(), Some("[a] [l]( x )"));
+        let written = document.to_markdown().unwrap();
+        assert!(written.ends_with("\n\n[a] [l]( x )\n"), "{written:?}");
+    }
+
     #[test]
     fn constructors_and_parses_keep_no_text() {
         assert_eq!(Paragraph::new([Text::from("a")]).source(), None);

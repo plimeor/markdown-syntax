@@ -17,7 +17,13 @@ content `parse_inline(text, definitions)` reads from `text`, return its
 diagnostics, and keep `text` as the leaf's source, which `source()` (for a
 directive, `label_source()`) returns; the spans of its inlines SHALL be byte
 ranges into `text`. No other way to give a leaf a source SHALL exist, and a
-parsed or `new` leaf SHALL keep none.
+parsed or `new` leaf SHALL keep none. `Document::reread_kept_sources` SHALL
+build the inlines of every leaf that keeps a source again from it, with the
+document's definitions.
+
+#### Scenario: Leaf built before its definition
+- **WHEN** a document holding `[a]: /u` gets a paragraph built with `Paragraph::with_source("[a] [l]( x )", &Definitions::default())`, and `reread_kept_sources` runs
+- **THEN** the paragraph opens with a reference to `a`, and the document writes it as `[a] [l]( x )`
 
 ## MODIFIED Requirements
 
