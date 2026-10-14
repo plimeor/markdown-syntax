@@ -21,6 +21,7 @@ fn gfm_html_options() -> HtmlOptions {
     options
 }
 
+// html-rendering: Document layout
 #[test]
 fn commonmark_blocks_and_core_inlines_render() {
     let markdown = concat!(
@@ -70,6 +71,7 @@ fn commonmark_blocks_and_core_inlines_render() {
     );
 }
 
+// html-rendering: Document layout
 #[test]
 fn extension_blocks_and_inlines_render() {
     let markdown = concat!(
@@ -196,6 +198,9 @@ fn former_mdx_syntax_renders_as_text_and_raw_html() {
     );
 }
 
+// html-rendering: Validate before rendering
+// html-rendering: Raw HTML is escaped by default
+// html-rendering: Task list checkboxes are disabled by default
 #[test]
 fn html_options_and_validate_first_are_public_contract() {
     let markdown = concat!(
@@ -243,6 +248,7 @@ fn html_options_and_validate_first_are_public_contract() {
     ));
 }
 
+// html-rendering: Dangerous protocols are blanked by default
 #[test]
 fn dangerous_protocol_matrix_matches_public_options() {
     assert_eq!(
@@ -323,6 +329,7 @@ fn dangerous_protocol_matrix_matches_public_options() {
     );
 }
 
+// html-rendering: Raw HTML is escaped by default
 #[test]
 fn raw_html_and_tagfilter_options_are_independent() {
     assert_eq!(
@@ -354,6 +361,7 @@ fn raw_html_and_tagfilter_options_are_independent() {
     );
 }
 
+// html-rendering: Wiki embeds are marked
 #[test]
 fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
     assert_eq!(
@@ -362,12 +370,14 @@ fn a_wiki_embed_is_marked_and_its_target_left_unresolved() {
     );
 }
 
+// html-rendering: Shortcodes render their glyph
 #[test]
 fn shortcodes_render_their_gemoji_glyph() {
     let html = parse_render(":sparkles:", &HtmlOptions::default());
     assert_eq!(html.trim_end(), "<p>\u{2728}</p>");
 }
 
+// html-rendering: Shortcodes render their glyph
 #[test]
 fn a_shortcode_in_image_alt_text_reads_as_its_glyph() {
     let html = parse_render("![:tada: x](i.png)", &HtmlOptions::default());

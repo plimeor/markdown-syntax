@@ -132,6 +132,7 @@ fn contains_link(nodes: &[Inline]) -> bool {
     false
 }
 
+// untrusted-input-cost: Bounded stack
 #[test]
 fn nested_link_labels_parse_in_bounded_time() {
     let _serial = one_at_a_time();
@@ -226,6 +227,8 @@ fn many_definitions_parse_in_bounded_time() {
     parse_bounded("definitions", input);
 }
 
+// untrusted-input-cost: Bounded stack
+// untrusted-input-cost: Block nesting limit
 #[test]
 fn block_nesting_stops_at_the_limit() {
     let _serial = one_at_a_time();
@@ -259,6 +262,7 @@ fn long_marker_runs_on_a_quote_continuation_line_are_bounded() {
     }
 }
 
+// untrusted-input-cost: Inline nesting limit
 #[test]
 fn inline_nesting_stops_at_the_limit() {
     let _serial = one_at_a_time();
@@ -370,6 +374,7 @@ fn nesting_through_directive_labels_stops_at_the_limit() {
     );
 }
 
+// untrusted-input-cost: Inline nesting limit
 #[test]
 fn emphasis_inside_marks_shares_the_inline_limit() {
     let _serial = one_at_a_time();
@@ -523,6 +528,7 @@ fn parse_and_serialize(input: &impl AsRef<str>) {
         .is_ok());
 }
 
+// untrusted-input-cost: Linear time
 #[test]
 fn parsing_grows_linearly_with_lines_and_diagnostics() {
     let _serial = one_at_a_time();
@@ -682,6 +688,7 @@ fn serialization_grows_linearly_with_definitions_and_lists() {
     );
 }
 
+// untrusted-input-cost: Linear time
 #[test]
 fn serialization_grows_linearly_with_runs() {
     let _serial = one_at_a_time();

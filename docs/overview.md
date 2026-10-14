@@ -31,14 +31,10 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-The block model for the editor, planned from meowdown's design: every block
-spelling recorded, blank lines as content, flat lists, `#tag` in the syntax,
-and source reused per node rather than per top-level block.
-
-## Next
-
-- Bring the specs back within the spec budget: most scenarios move to the
-  tests that already cover them.
+The second batch for the editor: `#tag` in the syntax, then source reused per
+node and per node's own syntax down to inlines, blank lines as nodes, ordered
+item numbers, and every leaf's inline source in one pass. Lists stay nested;
+the editor flattens them.
 
 ## Non-goals
 

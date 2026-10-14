@@ -268,6 +268,7 @@ fn confirm(suspects: Vec<Unit>) -> Vec<Growth> {
         .unwrap_or_else(|_| panic!("confirm thread panicked"))
 }
 
+// untrusted-input-cost: Linear time
 #[test]
 fn repeated_fragment_combinations_grow_linearly() {
     let units = units();

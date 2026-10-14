@@ -255,6 +255,7 @@ fn canonical_goldens_match() {
     }
 }
 
+// serialization: Canonical output
 #[test]
 fn canonical_inputs_are_written_as_listed() {
     for (source, expected) in CANONICAL_INPUTS {
@@ -294,6 +295,8 @@ fn list_markers_preserve_by_default_and_yield_when_overridden() {
     );
 }
 
+// serialization: Serialize options
+// public-api: Serialize option types
 #[test]
 fn some_marker_replaces_every_recorded_marker_and_none_keeps_it() {
     let input = "* a\n\n2) b\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n";
@@ -323,6 +326,7 @@ fn some_marker_replaces_every_recorded_marker_and_none_keeps_it() {
     );
 }
 
+// serialization: Values are encoded by rule
 #[test]
 fn crlf_output_keeps_a_values_crlf() {
     let mut crlf = SerializeOptions::default();
@@ -534,6 +538,7 @@ fn reads_back(source: &Source) -> Result<(), String> {
     }
 }
 
+// serialization: Round-trip stability
 #[test]
 fn sources_read_back() {
     let mut failures = Vec::new();
@@ -977,7 +982,7 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     // An emphasis-like span may open with a backslash break.
     ("*\\\na*", "*\\\na*\n"),
     ("~~\\\na~~", "~~\\\na~~\n"),
-    // Code spans written from their value.
+    // Values are encoded by rule: code spans are written from their value.
     ("``\nfoo\nbar\n``", "`foo bar`\n"),
     ("`` a`b ``", "``a`b``\n"),
     ("```a``b```", "`a``b`\n"),
@@ -989,7 +994,7 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     ("\\`` `a`", "\\`` `a`\n"),
     ("\\` `a`", "\\` `a`\n"),
     ("$`a`$ <b c='`'> `d`", "$`a`$ <b c='`'> `d`\n"),
-    // ATX content ending in a closing-like run keeps a closing sequence.
+    // Round-trip stability: ATX content ending in a closing-like run keeps a closing sequence.
     ("# C # #", "# C # #\n"),
     ("# # #", "# # #\n"),
     ("## a #", "## a\n"),

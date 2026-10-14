@@ -30,6 +30,7 @@ function* nodes(node, path = []) {
 }
 
 describe("Build", () => {
+  // wasm-binding: Build
   test("the module loads from bytes and from a compiled module", async () => {
     const bytes = await readFile(wasmPath);
     const compiled = await WebAssembly.compile(bytes);
@@ -42,6 +43,7 @@ describe("Build", () => {
 });
 
 describe("Parse from JavaScript", () => {
+  // wasm-binding: Parse from JavaScript
   test("heading and paragraph", () => {
     const { tree, diagnostics } = binding.parse("# T\n\na *b*");
     assert.deepEqual(diagnostics, []);
@@ -93,6 +95,7 @@ describe("Parse from JavaScript", () => {
 });
 
 describe("UTF-16 offsets", () => {
+  // wasm-binding: UTF-16 offsets
   test("text beyond the BMP", () => {
     const [paragraph] = binding.parse("😀 *a*").tree.children;
     assert.deepEqual(paragraph.children[1].span, [3, 6]);
@@ -109,6 +112,7 @@ describe("UTF-16 offsets", () => {
 });
 
 describe("Inline parse and inline source from JavaScript", () => {
+  // wasm-binding: Inline parse and inline source from JavaScript
   test("paragraph in a list item", () => {
     const document = binding.parse("- a\n  *b*");
     const source = document.inlineSource([0, 0, 0]);
@@ -156,6 +160,7 @@ describe("Inline parse and inline source from JavaScript", () => {
 });
 
 describe("Write from JavaScript", () => {
+  // wasm-binding: Write from JavaScript
   test("untouched tree", () => {
     const source = "|a|b|\n|-|-|\n\n*  x\n\n\n# T #";
     const document = binding.parse(source);
@@ -207,6 +212,7 @@ describe("Write from JavaScript", () => {
 });
 
 describe("Malformed trees", () => {
+  // wasm-binding: Malformed trees
   test("each throws a TypeError naming the node's path", () => {
     const document = binding.parse("> a\n\n- b");
     const malformed = [
@@ -243,6 +249,7 @@ describe("Malformed trees", () => {
 });
 
 describe("Released memory", () => {
+  // wasm-binding: Released memory
   test("a freed document throws and others are unaffected", () => {
     const freed = binding.parse("a");
     const kept = binding.parse("b *c*");

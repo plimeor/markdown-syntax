@@ -94,6 +94,7 @@ fn options(case: &Case) -> HtmlOptions {
     options
 }
 
+// inline-syntax: CommonMark inlines
 #[test]
 fn decision_cases_render_as_verified() {
     let mut paths: Vec<_> = fs::read_dir(ROOT)

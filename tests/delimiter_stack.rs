@@ -53,6 +53,7 @@ fn parsed(markdown: &str) -> String {
     }
 }
 
+// inline-syntax: Marks pair in closing order
 #[test]
 fn strong_closes_before_a_highlight() {
     assert_eq!(parsed("**a ==b** c=="), r#"Strong["a ==b"]" c==""#);
@@ -68,6 +69,7 @@ fn highlight_closes_before_strong() {
     assert_eq!(parsed("==a **b== c**"), r#"Mark["a **b"]" c**""#);
 }
 
+// inline-syntax: Extension marks
 #[test]
 fn marks_that_do_not_cross_nest_as_written() {
     assert_eq!(parsed("==a *b* c=="), r#"Mark["a "Emphasis["b"]" c"]"#);
@@ -77,6 +79,7 @@ fn marks_that_do_not_cross_nest_as_written() {
     );
 }
 
+// inline-syntax: Marks pair in closing order
 #[test]
 fn emphasis_right_inside_a_mark_stays_inside_it() {
     // The `*` touching `~~` could also close the outer `*`; inside the mark
@@ -118,6 +121,7 @@ fn deeply_nested_highlights_stop_at_32_levels() {
     assert_eq!(shape.matches("Mark[").count(), 32, "{shape}");
 }
 
+// untrusted-input-cost: Inline nesting limit
 #[test]
 fn deep_emphasis_stops_at_16_levels() {
     let depth = 20;
@@ -126,12 +130,14 @@ fn deep_emphasis_stops_at_16_levels() {
     assert_eq!(shape.matches("Emphasis[").count(), 16, "{shape}");
 }
 
+// inline-syntax: Marks pair in closing order
 #[test]
 fn code_spans_bind_tighter_than_marks() {
     assert_eq!(parsed("^a `^` b^"), r#""^a "Code("^")" b^""#);
     assert_eq!(parsed("==a `b== c` d=="), r#"Mark["a "Code("b== c")" d"]"#);
 }
 
+// inline-syntax: Marks pair in closing order
 #[test]
 fn a_mark_opened_inside_a_link_stays_inside_it() {
     assert_eq!(parsed("[a ==b](u) c=="), r#"Link["a ==b"]" c==""#);
@@ -161,11 +167,13 @@ fn links_resolve_at_the_innermost_bracket() {
     assert_eq!(parsed("![a [b](u) c](v)"), r#"Image["a "Link["b"]" c"]"#);
 }
 
+// inline-syntax: Inline footnotes
 #[test]
 fn an_unclosed_inline_footnote_stays_text() {
     assert_eq!(parsed("^a ^[b"), r#""^a ^[b""#);
 }
 
+// inline-syntax: Inline footnotes
 #[test]
 fn a_caret_before_a_bracket_opens_an_inline_footnote() {
     assert_eq!(
@@ -354,6 +362,7 @@ fn a_bare_destination_ends_at_a_space_inside_parentheses() {
     );
 }
 
+// inline-syntax: Footnote labels
 #[test]
 fn a_footnote_label_holds_no_unescaped_bracket() {
     for source in ["^*[^[^]]", "[^a[b]", "[^a[b]: x\n\n[^a[b]"] {
@@ -379,6 +388,7 @@ fn an_angle_autolink_holds_whitespace_other_than_a_space() {
     assert_eq!(document.to_markdown().unwrap(), "<http://a\u{a0}b>\n");
 }
 
+// inline-syntax: Hard line breaks from spaces
 #[test]
 fn a_referenced_space_makes_no_hard_break() {
     let blocks = parse("a&#x20; \nb").document.children;

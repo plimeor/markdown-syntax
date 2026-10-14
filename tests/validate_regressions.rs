@@ -27,6 +27,7 @@ mod validation {
         ));
     }
 
+    // validation: Validate reports invalid shapes
     #[test]
     fn empty_paragraph_is_invalid() {
         for children in [vec![], vec![Inline::Text(Text::from(""))]] {
@@ -44,6 +45,7 @@ mod validation {
         }
     }
 
+    // validation: Validate reports invalid shapes
     #[test]
     fn empty_table_is_invalid() {
         let document = Document::new(vec![Block::Table(Table {
@@ -89,6 +91,7 @@ mod validation {
         ));
     }
 
+    // public-api: One diagnostic type
     #[test]
     fn validation_and_serializer_reject_invalid_ast() {
         let mut document = Document::default();
@@ -187,6 +190,7 @@ mod review_validate {
         }
     }
 
+    // validation: Validate reports invalid shapes
     #[test]
     fn code_math_holding_its_close_is_invalid() {
         let bad = math("a`$b", MathInlineKind::Code);
@@ -238,6 +242,7 @@ mod review_validate {
         }
     }
 
+    // validation: Shapes that cannot be written
     #[test]
     fn frontmatter_after_a_paragraph_is_left_to_the_builder() {
         let mut document = paragraph(vec![text("a")]);
@@ -537,6 +542,7 @@ mod review_validate {
         })
     }
 
+    // validation: Shapes that cannot be written
     #[test]
     fn emphasis_like_content_with_whitespace_at_an_edge_is_invalid() {
         let soft_break = || {
@@ -1042,6 +1048,7 @@ mod written_shapes {
 
     /// A written label reads back only in the label grammar: no unescaped
     /// bracket, no escaped close, no blank line, at most 999 chars.
+    // validation: Shapes that cannot be written
     #[test]
     fn a_written_label_is_one_the_parser_reads() {
         let long = "a".repeat(1000);
@@ -1255,6 +1262,7 @@ mod written_shapes {
 
     /// A tight item writes a block on the line after a paragraph's, where
     /// only a block that interrupts the paragraph starts.
+    // validation: Shapes that cannot be written
     #[test]
     fn a_block_after_a_paragraph_in_a_tight_item_interrupts_it() {
         let after = |tight, block| {

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 #[allow(dead_code)]
 mod fixtures;
 
+// public-api: Top-level spans tile the source
 #[test]
 fn top_level_block_spans_slice_the_original_source() {
     for (name, source) in [
@@ -666,6 +667,7 @@ fn derived_case_files() -> Vec<PathBuf> {
     files
 }
 
+// public-api: Infallible parse
 #[test]
 fn spans_nest_in_generated_inputs() {
     for (index, source) in generated_inputs(20_000).iter().enumerate() {
@@ -710,6 +712,7 @@ fn nth_span(source: &str, kind: &str, nth: usize) -> (usize, usize) {
         .unwrap_or_else(|| panic!("{source:?}: no {kind} #{nth}"))
 }
 
+// public-api: Source spans
 #[test]
 fn spans_map_stripped_lines_back_to_the_source() {
     // Leading whitespace on a paragraph line.
