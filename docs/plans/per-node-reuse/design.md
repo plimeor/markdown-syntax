@@ -16,133 +16,183 @@ file on every save. Copying a node's own syntax from the source keeps those
 spellings and also the ones no field captures: tabs, padding, trailing
 spaces, lazy continuation lines.
 
-Largest risks: a node written from the source beside a rendered sibling or
+Largest risk: a node written from the source beside a rendered sibling or
 child that reads back differently (a reused setext underline under rendered
-content, a reused fence around changed code), and the writer's cost. Both
-are met by generalizing batch 1's simulated-edit test to every node at every
-depth, and by the linear-growth suite.
+content, a reused fence around changed code). It is met by one read-back
+check of the whole output, with a fallback to the top-level grain, and by
+generalizing batch 1's simulated edits to every node at every depth.
 
 ## Architecture
 
 ```
-to_markdown[_with] ──► base = parse(source) once, with its syntax map
-                       match nodes to the base by span, write per node
+to_markdown[_with] ──► base = parse(source) once
+                       write each node bottom-up against its base node
+                         ├─ Kept(span)      the node is its source slice
+                         └─ Lines           own syntax copied or rendered,
+                                            children as they were written
+                       join the top level as today (batch 1 guards)
+                       read-back check ──► fallback per top-level block
 ```
 
 `to_markdown` and `to_markdown_with` keep their signatures. Nothing is stored
-between writes.
+between writes. The canonical writer (`write_canonical` and the `write_*`
+functions under it) is unchanged and stays the only renderer; reuse is a
+layer above it that decides, per node, between the source and the renderer.
 
-### Base and own syntax
+### Matching
 
-For a document with a source, the writer parses the source once and builds
-a syntax map from the base tree: for each base node, the byte ranges of its
-one-time syntax, the ranges its children cover, and the gaps between them;
-for each leaf, its inline source, taken from `leaf_sources`. The ranges come
-from the spans the parse already records; where a node's one-time syntax is
-not the complement of its children (a list item's marker and the indentation
-of its continuation lines), the map takes it from the first line.
+A node is matched to a base node only through its parent: a top-level block
+to the base top-level block at its span, as today; any other node to the
+child of its parent's base node at its span (a list item to an item of the
+base list, a cell to the cell at its row and column). The base node must be
+of the same kind. A node with no match is new. Matching claims nothing:
+two nodes carrying one span (a split paragraph) both match it, and the
+read-back check decides what their copies may keep.
 
-**One-time syntax** of each kind, the bytes written once per node:
+Matching through the parent is narrower than "any base node at its span":
+a node moved into another container is new there and is rendered. That
+costs bytes only on a move, and keeps every copied line's container
+prefixes valid (see Line model).
 
-| Node | One-time syntax |
+### Bottom-up correspondence
+
+Each node is written after its children, and returns either `Kept(span)` or
+`Lines`. A node returns `Kept` when it is matched, its own fields equal its
+base node's, and its children returned `Kept` for exactly its base node's
+children in order; a leaf returns `Kept` when it corresponds to its base
+leaf as batch 1 defines it (kept text included). So correspondence is
+computed once per node, never by comparing subtrees top-down, and `Kept`
+needs no text until a parent that is not kept takes the slice. Own fields
+are compared by one exhaustive function over node kinds that ignores
+children, the counterpart of `compare.rs`.
+
+### Line model
+
+A node that is not kept returns its text as lines, each marked:
+
+- **content** — the line as its parent's content: every enclosing container
+  adds its prefix to it, as the canonical writer does now;
+- **full** — the line already holds every enclosing container's prefix, as
+  copied from the source, and no container adds one.
+
+A kept child's slice gives its first line as content (a span starts after
+its containers' markers) and every later line as full. A kept gap between
+two siblings gives full lines, and the part of the last line before the next
+sibling makes that sibling's first line full too. Rendered text gives
+content lines.
+
+Full lines are valid only where every enclosing container writes the same
+prefixes as in the source. So a container passes its children's full lines
+through only when it is matched and its content column is unchanged; under
+a new container, or one whose column changed, its matched children write
+nothing from the source but their leaves' inlines (Leaves, below) and their
+own first-line syntax.
+
+### Own syntax
+
+A matched node that is not kept copies its own syntax from the source and
+writes its children by these rules. Own syntax is the bytes of its span that
+no child covers, taken per kind:
+
+| Node | Own syntax copied |
 |---|---|
 | ATX heading | opening sequence and the whitespace after it; closing sequence and the whitespace around it |
 | Setext heading | the underline line |
 | List item | marker, task checkbox, and the whitespace after them on its first line |
 | Alert | the `[!KIND]` line |
-| Fenced code, math block, directive, HTML container | opening line, closing line |
-| Table | the delimiter row |
-| Table row | its leading and trailing pipe and the excess cells past the delimiter row's width |
-| Link, image, reference | everything outside the text or alt: brackets, destination, title |
-| Emphasis-like | delimiters |
-| Text directive | name, brackets, attributes |
+| Fenced code, math block, directive, HTML container | opening line; closing line |
+| Footnote definition | the `[^label]:` and the whitespace after it |
+| Table | the delimiter row; each row that corresponds, as its line |
 
-**Line prefixes** (a block quote's `>`, a list item's continuation
-indentation, an indented code block's indentation, a table cell's padding)
-are not one-time syntax: once a child changes, the lines no longer map one to
-one. A prefix is kept where it lies inside kept source, which is inside the
-slice of a child written from the source (its continuation lines) or inside a
-kept gap (the line a reused child starts on). Every line the writer renders
-takes the canonical prefix.
+A line of own syntax that is not the node's first line (an underline, a
+closing fence, a delimiter row) is copied from its first character that is
+not a space, a tab, or `>`, and written as a content line: those characters
+are the containers' prefixes, which no own-syntax line opens with.
 
-### Matching
+A node whose own fields changed renders its own syntax, except that a list
+item whose number or checkbox changed keeps its marker's gap: it renders the
+marker and checkbox and pads them to the source's content column when they
+fit in it, so a renumbered or ticked item keeps its children's columns. A
+code, math, or HTML block whose value changed renders as a whole: its value
+is an own field.
 
-A node with a span is the successor of the base node of the same kind at the
-same span, if the base has one and no earlier node in document order has
-claimed it; ProseMirror copies attributes when it splits a node, so two nodes
-can carry one span. A node with no successor in the base is new. Inline
-nodes in a parsed leaf match the base leaf's inlines by their document spans;
-inline nodes in a leaf built from text match the inlines `parse_inline`
-reads from that leaf's kept text, by their spans in it.
+Rendered lines in a list item take its content column, which is the copied
+marker's width when the marker is copied, so `-   x` keeps its continuation
+lines at four columns.
 
-"Unchanged" below is correspondence, as the `editor-block-model` design
-defines it, not `==`.
+### Leaves
 
-### Write rules
+A matched leaf that is not kept is written as inline content: each inline
+that corresponds to the base inline at its span is copied from the base
+leaf's inline source, each matched inline whose own fields are equal copies
+its own syntax around children written by the same rules (emphasis
+delimiters; a link's brackets, destination, and title), and every other one
+is rendered. The text between two adjacent inlines that are copied and
+adjacent in the base is kept; nothing is written between others, as the
+canonical writer writes none. The inline source is prefix-free, so a leaf's
+lines are content lines and take the current prefixes.
 
-Applied at every node from the top:
-
-1. *Unchanged node, unchanged context*: the node corresponds to its base, so
-   does every ancestor's one-time syntax, and it follows the same sibling it
-   followed in the base. It is written as the source slice of its span; the
-   slice holds the ancestors' prefixes on its continuation lines, which are
-   what the writer would write there.
-2. *Unchanged node, changed context*: it is written as its content lines, the
-   source lines with the base ancestors' prefixes removed, under the current
-   prefixes. Lazy continuation lines take the full prefix.
-3. *Own fields unchanged, children changed*: its one-time syntax is copied
-   from the source, and its children are written by these rules.
-4. *Own fields changed, or new*: its own syntax is rendered canonically, and
-   its children are written by these rules.
-
-Leaves follow the same rules with inline nodes as children: an edited leaf is
-written as its inline content, each unchanged inline copied from the leaf's
-inline source and each changed one rendered, then its lines prefixed. A leaf
-with a kept source and unchanged inlines is written as that source.
+A leaf built from text whose inlines were then edited has lost that text in
+the writer's pre-pass and is rendered, as in batch 1.
 
 ### Gaps
 
-Between two siblings written by rule 1 or 3 that are adjacent in the base,
-the source between them is kept; every other boundary gets the canonical
-separator, with `BlankLine` nodes written as their lines. Before the first
-and after the last top-level block, the source's leading and trailing bytes
-are kept when that block is reused there, as today.
+Between two siblings that are matched, written from the source (kept or
+with copied own syntax), and adjacent in the base, the source between them
+is kept, where the boundary still does or does not hold a separating blank
+line as in the base; every other boundary gets the canonical separator, with
+`BlankLine` nodes written as their lines. A node with copied own syntax is
+not a rendered node in decision 0016's sense ("a kept gap is never written
+beside a rendered node"): its kind and own fields are the base's.
 
-### Read-back guards
+### Top level
 
-Batch 1's guards move from the top level to every container: a reused node
-that a blank line and a paragraph after it would change (an unclosed fence)
-is rendered when it comes before a node other than its base successor; a
-reused node whose source opens with indentation is rendered after a node
-other than its base predecessor where that indentation would read
-differently; a reused list after a list with the same marker is rendered.
-Rule 3 adds two: a reused setext underline is rendered when the rendered
-content's last line would read as something else above it, and a reused
-fence is rendered when the changed code holds a line that would close it.
-Each guard asks the parser, as batch 1's do, and costs time linear in the
-node it checks.
+The top level keeps batch 1's writer and its guards for kept blocks. A
+top-level block that returns `Lines` is written as those lines where a
+rendered block would be written, with canonical separators around it.
+
+### Read-back check
+
+After writing, the writer parses the output once and compares it with the
+document as "Round-trip stability" compares them (`normalized_blocks`).
+When they differ, it compares top-level blocks pairwise and writes each
+differing block that returned `Lines` canonically instead, then checks once
+more; if the output still differs, or the top-level counts differ, it writes
+the document at batch 1's grain. Rendering itself still never parses its
+output: the check guards only what reuse adds. The cost is one parse of the
+output, and at most two more writes and a parse, each linear.
+
+### Options
+
+Options apply only to rendered text. A list written with copied own syntax
+writes its new items with the list's recorded marker, not an overriding
+`bullet` or `ordered_delimiter`, so that one list is not split into two; the
+override applies to lists written whole.
 
 ## Flows
 
 - **Save (editor).** The adapter sends every node with its span and every
   leaf as `source`; one edited item in a 2000-item list rewrites only that
-  item's text, and a renumbered item only its marker.
+  item's leaf, and a renumbered or ticked item only its number or checkbox.
 - **Rust edit (Settle rename).** Parse a note, change a `WikiLink`'s target,
-  write: the paragraph is written by rule 3 with every other inline copied,
-  and every other block by rule 1.
+  write: the paragraph copies every other inline and the gaps between them,
+  and every other block is kept.
 
 ## Test scope
 
 - Simulated edits, generalizing batch 1's over the read-back corpus and the
   seeded generators: for every node at every depth, change one own field,
-  change one child, delete it, move it to a sibling container, and insert a
-  new sibling; check that the bytes outside the edited node are unchanged
-  where the rules say they are, and that the written text reads back to the
-  edited tree. A failure is fixed in a write rule or a guard, never listed
-  away.
+  change one child, delete it, and insert a new sibling; check that the
+  written text reads back to the edited tree, and that a node the rules keep
+  is kept byte for byte. A read-back failure the check had to catch is
+  reported by the test, so that it is fixed in a rule, not left to the
+  fallback.
 - The same edits on a document whose leaves are all rebuilt from text.
-- meowdown's graded round-trip cases and its blank-line cases, ported as
-  inputs whose writes are checked byte for byte where the rules promise it.
+- Cases for a multi-line item under a wider marker, a list under a marker
+  option, a renumbered and a ticked item with nested blocks, and edits at
+  the deepest nesting the parser allows.
+- meowdown's graded round-trip and blank-line inputs, as inputs only: their
+  expected outputs are meowdown's canonical form, not this writer's.
 - Cost: writing with edits at depth in `tests/linear_growth.rs`; deep
   nesting in `tests/pathological_inputs.rs`.
 
@@ -152,26 +202,28 @@ node it checks.
   notes the user has not opened, and must not move the rest of a paragraph.
   Turned down: stopping at leaves, which renders the whole paragraph around
   one changed link.
-- Line prefixes kept only inside kept source — because a changed child
-  breaks the line-to-line mapping a copied prefix would need. Turned down:
+- Matching through the parent — because a copied line holds its containers'
+  prefixes, which are valid only under the same containers. Turned down:
+  matching any base node at the span with first claimant wins, which needs
+  prefix stripping to move a node and a claim order to split one.
+- Correspondence bottom-up, returning `Kept(span)` — because a top-down
+  `==` at every node compares each subtree once per ancestor. Turned down:
+  a separate syntax map, which would restate what spans and correspondence
+  already give.
+- One read-back check of the output — because guards per construct (an
+  unclosed fence, an underline under rendered content, a fence closed by
+  changed code) grow with every construct and miss interactions. Turned
+  down: a guard list, batch 1's approach, kept only for the top level.
+- Prefixes kept only inside kept source — because a changed child breaks
+  the line-to-line mapping a copied prefix would need. Turned down:
   recording a prefix style per container, which is a spelling field.
-- Matching by span, first claimant wins — because the editor then reports
-  nothing beyond the tree, as in batch 1. Turned down: node identifiers,
-  which the AST and the wire would carry for every node.
 
 ## Risks
 
-- [A reused own syntax and a rendered child read back differently] → the
-  simulated edits at every depth; a failure becomes a guard that renders the
-  own syntax.
-- [The writer is no longer linear when every node consults the base] → the
-  syntax map is built once; matching is one sorted lookup per node;
+- [Reuse that reads back differently] → the read-back check falls back per
+  top-level block; the simulated edits report every fallback.
+- [The writer is no longer linear] → correspondence once per node, matching
+  by binary search within the parent, one parse for the check;
   linear-growth tests at depth.
-- [Two nodes claim one span] → first claimant wins, tested with a split
-  paragraph and a split list item.
-
-## Open questions
-
-- Whether a gap with no blank line (`# h\npara`) can be kept beside a node
-  rendered by rule 3 whose kind did not change; the simulated edits decide
-  it, and it changes no requirement.
+- [The check hides a weak rule] → the simulated edits fail on any fallback
+  they trigger, so rules are fixed rather than masked.
