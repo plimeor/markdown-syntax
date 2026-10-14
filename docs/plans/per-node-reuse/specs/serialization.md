@@ -2,6 +2,23 @@
 
 ## MODIFIED Requirements
 
+### Requirement: Rendering only
+`Document::to_markdown` SHALL produce the text of each node it does not
+write from the source from that node, its kept text, and the options alone,
+by fixed rules; it SHALL parse its output only to check the nodes it writes
+partly from the source (see "Unchanged source is kept"), and SHALL NOT parse
+it for a document without a source; when the output would read back as a
+different tree, it SHALL still return it. It SHALL write each `Text` value as
+it is, each `Escape` as a backslash and its char, each `CharacterReference`
+as its reference, and raw HTML node values as they are, without safety
+filtering, and SHALL add no escape of its own, apart from the backslashes a
+table cell's encoding adds before pipes.
+
+#### Scenario: Text that reads as syntax
+- **WHEN** a hand-built paragraph holding `Text("==a==")` is serialized
+- **THEN** `to_markdown()` returns `"==a==\n"`, which reads back as a `Mark`
+
+
 ### Requirement: Unchanged source is kept
 For a document with a source, `to_markdown` and `to_markdown_with` SHALL
 match each node that carries a span to the node of its kind at that span in
@@ -33,7 +50,9 @@ document's first block and after its last when that block is written from
 the source there; every other boundary SHALL be canonical. A node SHALL be
 written as canonical output even so where its source would read differently
 in its place; which placements make a node's source read differently is
-unspecified. Options SHALL apply only to the text written as canonical
+unspecified, except that a top-level block written partly from the source
+SHALL be written as canonical output where the parsed output holds a
+different block in its place. Options SHALL apply only to the text written as canonical
 output, and a list written with its own syntax from the source SHALL write a
 new item with the marker it records. Parsing the output SHALL yield a
 document equal to the written one as "Round-trip stability" compares them

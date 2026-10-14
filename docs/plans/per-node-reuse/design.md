@@ -82,11 +82,11 @@ sibling makes that sibling's first line full too. Rendered text gives
 content lines.
 
 Full lines are valid only where every enclosing container writes the same
-prefixes as in the source. So a container passes its children's full lines
-through only when it is matched and its content column is unchanged; under
-a new container, or one whose column changed, its matched children write
-nothing from the source but their leaves' inlines (Leaves, below) and their
-own first-line syntax.
+prefixes as in the source. Matching through the parent makes every
+container above a written-from-source node matched; the one way a matched
+container changes its prefix is a list item whose marker no longer fits its
+content column, and such an item is rendered whole (Own syntax). So a full
+line is never rewritten, and each line is written once.
 
 ### Own syntax
 
@@ -112,7 +112,9 @@ are the containers' prefixes, which no own-syntax line opens with.
 A node whose own fields changed renders its own syntax, except that a list
 item whose number or checkbox changed keeps its marker's gap: it renders the
 marker and checkbox and pads them to the source's content column when they
-fit in it, so a renumbered or ticked item keeps its children's columns. A
+fit in it, so a renumbered or ticked item keeps its children's columns; an
+item whose marker does not fit, or whose marker line holds a tab, is
+rendered whole. A
 code, math, or HTML block whose value changed renders as a whole: its value
 is an own field.
 
@@ -153,14 +155,15 @@ rendered block would be written, with canonical separators around it.
 
 ### Read-back check
 
-After writing, the writer parses the output once and compares it with the
-document as "Round-trip stability" compares them (`normalized_blocks`).
-When they differ, it compares top-level blocks pairwise and writes each
-differing block that returned `Lines` canonically instead, then checks once
-more; if the output still differs, or the top-level counts differ, it writes
-the document at batch 1's grain. Rendering itself still never parses its
-output: the check guards only what reuse adds. The cost is one parse of the
-output, and at most two more writes and a parse, each linear.
+When a top-level block returned `Lines`, the writer parses the output once
+and compares its top-level blocks pairwise with the document's as "Round-trip
+stability" compares them (`normalized_blocks`). Each block that returned
+`Lines` and differs is written canonically instead: what it reads back as is
+then the canonical writer's, which the spec already allows to differ. When
+the top-level counts differ, the document is written at batch 1's grain.
+The pure rendering path, a document without a source or with nothing
+reused, still never parses its output. The cost is one parse of the output
+and at most one more write, each linear.
 
 ### Options
 
@@ -184,15 +187,13 @@ override applies to lists written whole.
   seeded generators: for every node at every depth, change one own field,
   change one child, delete it, and insert a new sibling; check that the
   written text reads back to the edited tree, and that a node the rules keep
-  is kept byte for byte. A read-back failure the check had to catch is
-  reported by the test, so that it is fixed in a rule, not left to the
-  fallback.
+  is kept byte for byte. A block the check rewrote canonically, where its
+  canonical output reads back as the edited tree, is reported by the test,
+  so that a rule is fixed, not left to the fallback.
 - The same edits on a document whose leaves are all rebuilt from text.
 - Cases for a multi-line item under a wider marker, a list under a marker
   option, a renumbered and a ticked item with nested blocks, and edits at
   the deepest nesting the parser allows.
-- meowdown's graded round-trip and blank-line inputs, as inputs only: their
-  expected outputs are meowdown's canonical form, not this writer's.
 - Cost: writing with edits at depth in `tests/linear_growth.rs`; deep
   nesting in `tests/pathological_inputs.rs`.
 

@@ -19,11 +19,16 @@ edited in files that agents, git, and other editors also change.
 
 - `serialization` › Unchanged source is kept: modified — per node, per own
   syntax, down to inlines and leaves with their own source
+- `serialization` › Rendering only: modified — the output is parsed once to
+  check what is written partly from the source
 
 Specs:
 - `serialization` (modified)
 
 ## Out of scope
+- meowdown's graded round-trip cases: neither this repo nor the project files
+  hold them; the read-back corpus and the seeded generators cover the same
+  shapes, and their expected outputs are meowdown's canonical form anyway.
 - Spelling fields for setext underlines, closing sequences, marker gaps,
   task-marker case, and thematic-break strings — the own syntax is copied
   (`editor-block-model` design › Decisions).
@@ -59,8 +64,8 @@ Group 2 needs 1; group 3 needs 2. Inner loop:
   written from the source taking its recorded marker; verified by
   `tests/serialize_source.rs` with `bullet: Some(..)`.
 - [ ] 2.5 Generalize the simulated edits to every node at every depth,
-  failing on any fallback they trigger, and add meowdown's graded round-trip
-  and blank-line inputs to the read-back corpus; verified by
+  failing on any fallback they trigger where the canonical output reads
+  back; verified by
   `tests/fixtures.rs` and `tests/serialize_roundtrip_fuzz.rs`.
   - Follows design › Test scope.
 - [ ] 2.6 Add writing with edits at depth to the linear-growth and
@@ -71,6 +76,8 @@ Group 2 needs 1; group 3 needs 2. Inner loop:
 - [ ] 3.1 Check a JS save that ticks one task item and keeps every other
   byte; update `docs/overview.md` and `CLAUDE.md` for per-node reuse; and
   record decision 0017, superseding 0016, with matching through the parent
-  in place of first claimant wins and the read-back check; verified by
+  in place of first claimant wins, a node with copied own syntax as not
+  rendered beside a kept gap, and the read-back check in place of "it never
+  parses its output"; verified by
   `node --test 'wasm/js/test/*.test.mjs'` and
   `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`.
