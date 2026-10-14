@@ -76,11 +76,15 @@ export interface HtmlTag {
 
 export interface Paragraph extends Node<"paragraph"> {
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  source?: string;
 }
 export interface Heading extends Node<"heading"> {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
   kind: "atx" | "setext";
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  source?: string;
 }
 export interface ThematicBreak extends Node<"thematicBreak"> {
   marker: "dash" | "asterisk" | "underscore";
@@ -139,6 +143,8 @@ export interface TableRow extends Node<"tableRow"> {
 }
 export interface TableCell extends Node<"tableCell"> {
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  source?: string;
 }
 export interface MathBlock extends Node<"mathBlock"> {
   value: string;
@@ -151,12 +157,16 @@ export interface LeafDirective extends Node<"leafDirective"> {
   name: string;
   label: Inline[];
   attributes: DirectiveAttribute[];
+  /** In a tree for `toMarkdown`: the text to build the label from, in place of `label`. */
+  source?: string;
 }
 export interface ContainerDirective extends Node<"containerDirective"> {
   name: string;
   label: Inline[];
   attributes: DirectiveAttribute[];
   children: Block[];
+  /** In a tree for `toMarkdown`: the text to build the label from, in place of `label`. */
+  source?: string;
 }
 /** A blank line beyond the one that separates two blocks. */
 export interface BlankLine extends Node<"blankLine"> {}
@@ -282,9 +292,14 @@ export class ParsedDocument {
   readonly source: string;
   readonly tree: Document;
   readonly diagnostics: Diagnostic[];
+  /** The path and inline source of every leaf, in document order. */
+  readonly leafSources: { path: number[]; source: InlineSource }[];
   /** The labels of the document's link reference definitions. */
   readonly definitions: string[];
-  /** The inline source of the paragraph or heading at `path`, or null. */
+  /**
+   * The inline source of the leaf at `path` (a paragraph, a heading, a table
+   * cell, or a directive's label), or null.
+   */
   inlineSource(path: number[]): InlineSource | null;
   /**
    * Writes `tree` with this document's source; `{ diagnostics }` when

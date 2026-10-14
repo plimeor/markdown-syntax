@@ -94,7 +94,9 @@ fn with_entry<T>(handle: u32, work: impl FnOnce(&mut Entry) -> T) -> Option<T> {
 }
 
 /// Parses the UTF-8 source at `pointer` and keeps the document; the result
-/// is its tree and diagnostics. Returns the document's handle.
+/// is its tree, its diagnostics, and its leaf sources, each a path (its
+/// length, then its indices) and an inline source as `inline_source` writes
+/// it. Returns the document's handle.
 ///
 /// # Safety
 /// `pointer` and `len` hold UTF-8 that JavaScript wrote.
@@ -106,6 +108,15 @@ pub unsafe extern "C" fn parse(pointer: *const u8, len: usize) -> u32 {
     let mut writer = Writer::new(&to_utf16);
     writer.document(&output.document);
     writer.diagnostics(&output.diagnostics);
+    let leaves = output.document.leaf_sources();
+    writer.word(leaves.len() as u32);
+    for (path, source) in &leaves {
+        writer.word(path.0.len() as u32);
+        for &index in &path.0 {
+            writer.word(index as u32);
+        }
+        write_inline_source(&mut writer, source, &to_utf16);
+    }
     set_result(writer.finish());
     let entry = Entry {
         document: output.document,
@@ -182,9 +193,8 @@ pub unsafe extern "C" fn parse_inline(
 }
 
 /// The inline source of the leaf at the path whose indices are the
-/// little-endian `u32`s in the `path_len` bytes at `path`: the result is its
-/// text and, for each UTF-16 offset of the text and its end, the UTF-16
-/// offset of the source it maps to as a span's start, then as a span's end. Returns 0 for none, 1 with a result, or 3
+/// little-endian `u32`s in the `path_len` bytes at `path`, as
+/// `write_inline_source` writes it. Returns 0 for none, 1 with a result, or 3
 /// for a handle that holds no document.
 ///
 /// # Safety
@@ -200,25 +210,47 @@ pub unsafe extern "C" fn inline_source(handle: u32, path: *const u8, path_len: u
             return 0;
         };
         let mut writer = Writer::new(&[]);
-        writer.str(&source.text);
-        let offsets = byte_offsets(&source.text);
-        // Where each offset maps as a span's start, then as its end.
-        for at_end in [false, true] {
-            for byte in &offsets {
-                let offset = if *byte == wire::NO_SPAN {
-                    wire::NO_SPAN
-                } else if at_end {
-                    entry.to_utf16[source.span_to_source(Span::new(0, *byte as usize)).end]
-                } else {
-                    entry.to_utf16[source.to_source(*byte as usize)]
-                };
-                writer.word(offset);
-            }
-        }
+        write_inline_source(&mut writer, &source, &entry.to_utf16);
         set_result(writer.finish());
         1
     })
     .unwrap_or(3)
+}
+
+/// Writes an inline source: its text, then where each UTF-16 offset of the
+/// text and its end maps in the source, in UTF-16 offsets, as a span's start
+/// and then as a span's end. Each table is its runs: a count, then for each
+/// run the offset it starts at and what that offset maps to, the offsets
+/// after it mapping one further each; an offset inside a surrogate pair is
+/// a run of its own that maps to `NO_SPAN`.
+fn write_inline_source(writer: &mut Writer, source: &InlineSource, to_utf16: &[u32]) {
+    writer.str(&source.text);
+    let offsets = byte_offsets(&source.text);
+    for at_end in [false, true] {
+        let mut runs = Vec::new();
+        let mut previous = None;
+        for (unit, byte) in offsets.iter().enumerate() {
+            let mapped = if *byte == wire::NO_SPAN {
+                wire::NO_SPAN
+            } else if at_end {
+                to_utf16[source.span_to_source(Span::new(0, *byte as usize)).end]
+            } else {
+                to_utf16[source.to_source(*byte as usize)]
+            };
+            let continues = matches!(previous, Some(previous) if previous != wire::NO_SPAN
+                && mapped != wire::NO_SPAN
+                && mapped == previous + 1);
+            if !continues {
+                runs.push((unit as u32, mapped));
+            }
+            previous = Some(mapped);
+        }
+        writer.word(runs.len() as u32);
+        for (unit, mapped) in runs {
+            writer.word(unit);
+            writer.word(mapped);
+        }
+    }
 }
 
 /// Writes the tree in the message at `tree` with the source of the document

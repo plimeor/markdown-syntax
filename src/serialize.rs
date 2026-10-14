@@ -14,7 +14,12 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::{ast::*, diagnostic::Diagnostic, validate::validate_document};
+use alloc::collections::BTreeMap;
+
+use crate::{
+    ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource,
+    validate::validate_document,
+};
 
 /// The newline style emitted by the serializer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -110,9 +115,27 @@ impl Document {
         if !diagnostics.is_empty() {
             return Err(SerializeError::InvalidDocument(diagnostics));
         }
+        // A leaf keeps its text only while its inlines are the ones the text
+        // reads as.
+        let current;
+        let blocks = if leaves::any_kept(&self.children) {
+            let definitions = Definitions::of(self);
+            let mut blocks = self.children.clone();
+            leaves::visit_mut(&mut blocks, &mut |leaf| {
+                if let Some(text) = leaf.source.as_deref() {
+                    if crate::parse_inline(text, &definitions).inlines != *leaf.inlines {
+                        *leaf.source = None;
+                    }
+                }
+            });
+            current = blocks;
+            &current
+        } else {
+            &self.children
+        };
         match self.source() {
-            Some(source) => write_reusing(&self.children, source, options),
-            None => write_canonical(&self.children, options),
+            Some(source) => write_reusing(blocks, source, options),
+            None => write_canonical(blocks, options),
         }
     }
 }
@@ -156,10 +179,12 @@ fn write_reusing(
     source: &str,
     options: &SerializeOptions,
 ) -> Result<String, SerializeError> {
-    let base = crate::parse(source).document.children;
-    if blocks == base.as_slice() {
-        return Ok(source.into());
-    }
+    let base_document = crate::parse(source).document;
+    let base = &base_document.children;
+    let mut correspondence = Correspondence {
+        base: &base_document,
+        sources: None,
+    };
     let span_of = |block: &Block| block.span().expect("a reused block has a span");
     let mut reused: Vec<Option<usize>> = blocks
         .iter()
@@ -170,9 +195,17 @@ fn write_reusing(
                     base.span().map_or(usize::MAX, |span| span.start)
                 })
                 .ok()?;
-            (base[index] == *block).then_some(index)
+            correspondence.holds(block, &base[index]).then_some(index)
         })
         .collect();
+    if blocks.len() == base.len()
+        && reused
+            .iter()
+            .enumerate()
+            .all(|(index, at)| *at == Some(index))
+    {
+        return Ok(source.into());
+    }
     // Backward, so that each block knows whether its successor stays reused.
     for index in (0..blocks.len().saturating_sub(1)).rev() {
         let Some(at) = reused[index] else { continue };
@@ -321,6 +354,49 @@ fn write_reusing(
         });
     }
     Ok(output)
+}
+
+/// Whether a block corresponds to a block of the document its source parses
+/// to: their spans and own fields are equal and their children correspond,
+/// where a leaf that keeps its text corresponds to the leaf at its span whose
+/// inline source is that text.
+struct Correspondence<'a> {
+    base: &'a Document,
+    /// The inline source of each leaf of `base`, by span, read once the
+    /// first leaf that keeps its text needs it.
+    sources: Option<BTreeMap<(usize, usize), InlineSource>>,
+}
+
+impl Correspondence<'_> {
+    fn holds(&mut self, block: &Block, base: &Block) -> bool {
+        if !leaves::any_kept(core::slice::from_ref(block)) {
+            return block == base;
+        }
+        let base_document = self.base;
+        let sources = self.sources.get_or_insert_with(|| {
+            let mut sources = BTreeMap::new();
+            base_document.each_leaf_source(|_, span, source| {
+                sources.insert((span.start, span.end), source);
+            });
+            sources
+        });
+        // Each leaf whose text is its base leaf's inline source takes the
+        // inlines that text reads as there.
+        let mut block = block.clone();
+        leaves::visit_mut(core::slice::from_mut(&mut block), &mut |leaf| {
+            let (Some(text), Some(span)) = (leaf.source.as_deref(), leaf.span) else {
+                return;
+            };
+            if let Some(source) = sources
+                .get(&(span.start, span.end))
+                .filter(|source| source.text == text)
+            {
+                crate::parse::inline_spans_to_source(source, leaf.inlines);
+                *leaf.source = None;
+            }
+        });
+        block == *base
+    }
 }
 
 /// For each block, whether the boundary before it holds the blank line that
@@ -507,7 +583,10 @@ fn write_blocks(
 fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
     match block {
         Block::BlankLine(_) => Ok(String::new()),
-        Block::Paragraph(node) => write_inlines(&node.children, Context::BLOCK),
+        Block::Paragraph(node) => match &node.source {
+            Some(text) => Ok(text.clone()),
+            None => write_inlines(&node.children, Context::BLOCK),
+        },
         Block::Heading(node) => write_heading(node),
         Block::ThematicBreak(node) => Ok(write_thematic_break(node, false, false)),
         Block::BlockQuote(node) => {
@@ -560,7 +639,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
         Block::LeafDirective(node) => Ok(format!(
             "::{}{}{}",
             node.name,
-            write_directive_label(&node.label)?,
+            write_directive_label(&node.label, node.label_source.as_deref())?,
             write_attributes(&node.attributes)
         )),
         Block::ContainerDirective(node) => {
@@ -575,7 +654,7 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             Ok(format!(
                 "{fence}{}{}{}\n{inner}{fence}",
                 node.name,
-                write_directive_label(&node.label)?,
+                write_directive_label(&node.label, node.label_source.as_deref())?,
                 write_attributes(&node.attributes)
             ))
         }
@@ -605,8 +684,12 @@ pub(crate) fn writes_setext(node: &Heading) -> bool {
 }
 
 fn write_heading(node: &Heading) -> Result<String, SerializeError> {
-    let content = write_inlines(&node.children, Context::HEADING)?;
-    if writes_setext(node) {
+    let setext = writes_setext(node);
+    let content = match one_line(node.source.as_deref(), !setext) {
+        Some(text) => text.into(),
+        None => write_inlines(&node.children, Context::HEADING)?,
+    };
+    if setext {
         let marker = if node.depth == 1 { "=" } else { "-" };
         return Ok(format!(
             "{content}\n{}",
@@ -1016,7 +1099,12 @@ fn write_table(node: &Table) -> Result<String, SerializeError> {
         let cells = row
             .cells
             .iter()
-            .map(|cell| Ok(encode_cell(&write_inlines(&cell.children, Context::BLOCK)?)))
+            .map(|cell| {
+                Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
+                    Some(text) => text.into(),
+                    None => write_inlines(&cell.children, Context::BLOCK)?,
+                }))
+            })
             .collect::<Result<Vec<_>, SerializeError>>()?;
         output.push_str(&format!("| {} |", cells.join(" | ")));
         if row_index == 0 {
@@ -1400,13 +1488,28 @@ pub(crate) fn write_inline_math(node: &MathInline) -> String {
     }
 }
 
-/// A directive's `[label]`, or nothing for an empty label.
-fn write_directive_label(label: &[Inline]) -> Result<String, SerializeError> {
+/// A directive's `[label]`, written as the text it keeps if any, or nothing
+/// for an empty label.
+fn write_directive_label(label: &[Inline], source: Option<&str>) -> Result<String, SerializeError> {
+    if let Some(text) = one_line(source, true) {
+        return Ok(if text.is_empty() {
+            String::new()
+        } else {
+            format!("[{text}]")
+        });
+    }
     if label.is_empty() {
         Ok(String::new())
     } else {
         Ok(format!("[{}]", write_inlines(label, Context::BLOCK)?))
     }
+}
+
+/// The text a leaf keeps, where it can be written in place of its inlines:
+/// on one line when `single` holds, as in a cell, a label, or an ATX heading,
+/// which a line ending would end.
+fn one_line(source: Option<&str>, single: bool) -> Option<&str> {
+    source.filter(|text| !single || !text.contains(['\n', '\r']))
 }
 
 fn write_attributes(attributes: &[DirectiveAttribute]) -> String {

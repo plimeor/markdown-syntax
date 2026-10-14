@@ -117,36 +117,36 @@ loop: `cargo test --profile ci --features html --test <name>`.
   item without a number, and the conformance bench.
 
 ### 4. Leaf sources
-- [ ] 4.1 Read `\|` in a cell as text; verified by the cell goldens and
+- [x] 4.1 Read `\|` in a cell as text; verified by the cell goldens and
   `parse_span_contract.rs`.
-- [ ] 4.2 Add `Document::leaf_sources` and extend `inline_source` to cells and
+- [x] 4.2 Add `Document::leaf_sources` and extend `inline_source` to cells and
   directive labels; verified by `tests/inline_source.rs` comparing
   `leaf_sources` with `inline_source` and with the parse for every corpus
   leaf.
-- [ ] 4.3 Add `with_source` constructors and their kept text; verified by
+- [x] 4.3 Add `with_source` constructors and their kept text; verified by
   `tests/inline_source.rs` building each kind from text.
-- [ ] 4.4 Add `leaf_sources` and `with_source` to the linear-growth suite;
+- [x] 4.4 Add `leaf_sources` and `with_source` to the linear-growth suite;
   verified by `tests/linear_growth.rs`, with a 2000-item list.
 
 ### 5. Writing leaves with their source
-- [ ] 5.1 Match a top-level block to its base by correspondence, and write a
-  leaf with its own source as that source; verified by
-  `tests/serialize_source.rs` rebuilding every corpus leaf with
-  `with_source` from `leaf_sources` and writing the document's source, and
-  by a case editing one inline of a leaf built from text.
+- [x] 5.1 Match a top-level block to its base by correspondence, and write a
+  leaf with its own source as that source; verified by `tests/fixtures.rs`
+  rebuilding every corpus leaf with `with_source` from `leaf_sources` and
+  writing the document's source, and by `tests/serialize_source.rs` cases
+  editing a leaf's text and one inline of a leaf built from text.
   - Follows design › Correspondence.
 
 ### 6. Binding
-- [ ] 6.1 Return leaf sources from `parse`, accept `source` leaves in
+- [x] 6.1 Return leaf sources from `parse`, accept `source` leaves in
   `toMarkdown`, and carry `blankLine` and item numbers on the wire; verified
   by `cargo test -p markdown-syntax-wasm` and
   `node --test 'wasm/js/test/*.test.mjs'` naming each changed requirement,
   with a save that sends every leaf as `source` and returns the source.
-- [ ] 6.2 Run `wasm/js/bench.mjs` with a load that reads every leaf source;
+- [x] 6.2 Run `wasm/js/bench.mjs` with a load that reads every leaf source;
   verified by its output, observed and not stored, showing a 124 KB load
   under 16 ms.
 
 ### 7. Integration
-- [ ] 7.1 Update `docs/overview.md`, `CLAUDE.md`, and `README.md` for the
+- [x] 7.1 Update `docs/overview.md`, `CLAUDE.md`, and `README.md` for the
   block model; verified by `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
   and the README doc-test.

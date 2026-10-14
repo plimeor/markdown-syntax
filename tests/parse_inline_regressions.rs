@@ -661,7 +661,10 @@ mod escapes_and_references {
     #[test]
     fn an_escaped_pipe_in_a_cell_reads_as_a_pipe() {
         assert_eq!(first_cell("| a\\|b |\n|-|"), ["\"a|b\""]);
-        assert_eq!(first_cell("| a\\\\\\|b |\n|-|"), ["\"a\"", "Escape(\\)", "\"|b\""]);
+        assert_eq!(
+            first_cell("| a\\\\\\|b |\n|-|"),
+            ["\"a\"", "Escape(\\)", "\"|b\""]
+        );
         assert_eq!(
             first_cell("| <a b=\"x\\|y\"> |\n|-|"),
             ["Html(<a b=\"x|y\">)"]

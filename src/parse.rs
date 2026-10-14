@@ -389,8 +389,16 @@ impl Document {
     /// order, each as [`Document::inline_source`] returns it, read in one
     /// pass over the source. Empty for a document without a source.
     pub fn leaf_sources(&self) -> Vec<(NodePath, InlineSource)> {
+        let mut found = Vec::new();
+        self.each_leaf_source(|path, _, source| found.push((NodePath(path.to_vec()), source)));
+        found
+    }
+
+    /// Calls `found` with the path, span, and inline source of every leaf of
+    /// the document, in document order, as `leaf_sources` returns them.
+    pub(crate) fn each_leaf_source(&self, mut found: impl FnMut(&[usize], Span, InlineSource)) {
         let Some(source) = self.source() else {
-            return Vec::new();
+            return;
         };
         let start = if source.starts_with('\u{feff}') {
             '\u{feff}'.len_utf8()
@@ -403,7 +411,6 @@ impl Document {
             .into_iter()
             .map(|(span, text)| (span, Some(text)))
             .collect();
-        let mut found = Vec::new();
         // The contents are in document order, so their starts never fall.
         let mut take = |path: &[usize], span: Option<Span>| {
             let Some(span) = span else { return };
@@ -414,58 +421,10 @@ impl Document {
                 .find(|(other, text)| *other == span && text.is_some());
             if let Some((_, text)) = entry {
                 let (text, map) = text.take().expect("found unused").into_parts();
-                found.push((NodePath(path.to_vec()), InlineSource { text, map }));
+                found(path, span, InlineSource { text, map });
             }
         };
-        visit_leaves(&self.children, &mut Vec::new(), &mut take);
-        found
-    }
-}
-
-/// Calls `visit` with the path and span of every leaf in `blocks`, in
-/// document order, where `path` is the path of their container.
-fn visit_leaves(
-    blocks: &[Block],
-    path: &mut Vec<usize>,
-    visit: &mut impl FnMut(&[usize], Option<Span>),
-) {
-    for (index, block) in blocks.iter().enumerate() {
-        path.push(index);
-        match block {
-            Block::Paragraph(node) => visit(path, node.meta.span),
-            Block::Heading(node) => visit(path, node.meta.span),
-            Block::LeafDirective(node) => visit(path, node.meta.span),
-            Block::ContainerDirective(node) => {
-                visit(path, node.meta.span);
-                visit_leaves(&node.children, path, visit);
-            }
-            Block::Table(node) => {
-                for (row, cells) in node.rows.iter().enumerate() {
-                    for (cell, node) in cells.cells.iter().enumerate() {
-                        path.extend([row, cell]);
-                        visit(path, node.meta.span);
-                        path.truncate(path.len() - 2);
-                    }
-                }
-            }
-            Block::BlockQuote(node) => visit_leaves(&node.children, path, visit),
-            Block::Alert(node) => visit_leaves(&node.children, path, visit),
-            Block::FootnoteDefinition(node) => visit_leaves(&node.children, path, visit),
-            Block::HtmlContainer(node) => {
-                if let HtmlContainerContent::Blocks(children) = &node.content {
-                    visit_leaves(children, path, visit);
-                }
-            }
-            Block::List(node) => {
-                for (item, node) in node.children.iter().enumerate() {
-                    path.push(item);
-                    visit_leaves(&node.children, path, visit);
-                    path.pop();
-                }
-            }
-            _ => {}
-        }
-        path.pop();
+        crate::leaves::visit(&self.children, &mut Vec::new(), &mut take);
     }
 }
 

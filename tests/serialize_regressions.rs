@@ -95,12 +95,9 @@ mod value_encodings {
 
     #[test]
     fn container_directive_fence_exceeds_serialized_code_colons() {
-        let document = document(vec![Block::ContainerDirective(ContainerDirective {
-            meta: NodeMeta::default(),
-            name: "note".into(),
-            label: Vec::new(),
-            attributes: Vec::new(),
-            children: vec![Block::CodeBlock(CodeBlock {
+        let document = document(vec![Block::ContainerDirective(ContainerDirective::new(
+            "note",
+            vec![Block::CodeBlock(CodeBlock {
                 meta: NodeMeta::default(),
                 kind: CodeBlockKind::Fenced {
                     marker: FenceMarker::Backtick,
@@ -109,7 +106,7 @@ mod value_encodings {
                 info: None,
                 value: "before\n:::\n::::\nafter".into(),
             })],
-        })]);
+        ))]);
 
         assert_eq!(
             rendered(&document),
@@ -118,10 +115,7 @@ mod value_encodings {
     }
 
     fn cell(children: Vec<Inline>) -> TableCell {
-        TableCell {
-            meta: NodeMeta::default(),
-            children,
-        }
+        TableCell::new(children)
     }
 
     fn table(header: Vec<&str>, row: Vec<Vec<Inline>>) -> Block {
@@ -559,14 +553,7 @@ mod recorded_spellings {
 
     #[test]
     fn a_trailing_hash_in_an_atx_heading_keeps_a_closing_sequence() {
-        let heading = |children| {
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth: 1,
-                kind: HeadingKind::Atx,
-                children,
-            })])
-        };
+        let heading = |children: Vec<Inline>| document(vec![Heading::new(1, children).into()]);
         assert_eq!(
             rendered(&heading(vec![text("foo "), escape('#')])),
             "# foo \\#\n"
@@ -748,12 +735,9 @@ mod recorded_spellings {
             })
         };
         let heading = |depth, kind| {
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth,
-                kind,
-                children: vec![text("foo"), soft_break(), text("bar")],
-            })])
+            let mut heading = Heading::new(depth, vec![text("foo"), soft_break(), text("bar")]);
+            heading.kind = kind;
+            document(vec![heading.into()])
         };
         assert_eq!(
             rendered(&heading(1, HeadingKind::Setext)),
@@ -762,15 +746,8 @@ mod recorded_spellings {
         assert_eq!(rendered(&heading(1, HeadingKind::Atx)), "# foo bar\n");
         // A setext underline writes depth 1 or 2 only.
         assert_eq!(
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth: 3,
-                kind: HeadingKind::Setext,
-                children: vec![text("foo")],
-            })])
-            .to_markdown()
-            .unwrap(),
-            "### foo\n"
+            heading(3, HeadingKind::Setext).to_markdown().unwrap(),
+            "### foo bar\n"
         );
     }
 }

@@ -13,13 +13,12 @@ mod validation {
 
     #[test]
     fn a_shortcode_name_outside_gemoji_is_invalid() {
-        let document = Document::new(vec![Block::Paragraph(Paragraph {
-            meta: NodeMeta::default(),
-            children: vec![Inline::Shortcode(Shortcode {
+        let document = Document::new(vec![Block::Paragraph(Paragraph::new(vec![
+            Inline::Shortcode(Shortcode {
                 meta: NodeMeta::default(),
                 name: "not_an_emoji_name".into(),
-            })],
-        })]);
+            }),
+        ]))]);
         assert!(!document.validate().is_empty());
         assert!(matches!(
             document.to_markdown(),
@@ -47,10 +46,7 @@ mod validation {
     #[test]
     fn empty_paragraph_is_invalid() {
         for children in [vec![], vec![Inline::Text(Text::from(""))]] {
-            let document = Document::new(vec![Block::Paragraph(Paragraph {
-                meta: NodeMeta::default(),
-                children,
-            })]);
+            let document = Document::new(vec![Block::Paragraph(Paragraph::new(children))]);
             let diagnostics = document.validate();
             assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
             assert_eq!(diagnostics[0].message, "paragraph cannot be empty");
@@ -111,15 +107,9 @@ mod validation {
     #[test]
     fn validation_and_serializer_reject_invalid_ast() {
         let mut document = Document::default();
-        document.children.push(Block::Heading(Heading {
-            meta: NodeMeta::default(),
-            depth: 9,
-            kind: HeadingKind::Atx,
-            children: vec![Inline::Text(Text {
-                meta: NodeMeta::default(),
-                value: "bad".into(),
-            })],
-        }));
+        document
+            .children
+            .push(Block::Heading(Heading::new(9, [Text::from("bad")])));
 
         let diagnostics = document.validate();
         assert_eq!(diagnostics.len(), 1);
@@ -140,10 +130,7 @@ mod review_validate {
     use markdown_syntax::*;
 
     fn paragraph(children: Vec<Inline>) -> Document {
-        Document::new(vec![Block::Paragraph(Paragraph {
-            meta: NodeMeta::default(),
-            children,
-        })])
+        Document::new(vec![Block::Paragraph(Paragraph::new(children))])
     }
 
     fn text(value: &str) -> Inline {
@@ -420,10 +407,7 @@ mod review_validate {
                 meta: NodeMeta::default(),
                 checked: None,
                 number: Some(1_000_000_000),
-                children: vec![Block::Paragraph(Paragraph {
-                    meta: NodeMeta::default(),
-                    children: vec![text("foo")],
-                })],
+                children: vec![Block::Paragraph(Paragraph::new(vec![text("foo")]))],
             }],
         })]);
         assert!(!bad.validate().is_empty());
@@ -442,10 +426,7 @@ mod review_validate {
                 meta: NodeMeta::default(),
                 checked: None,
                 number: Some(999_999_999),
-                children: vec![Block::Paragraph(Paragraph {
-                    meta: NodeMeta::default(),
-                    children: vec![text("foo")],
-                })],
+                children: vec![Block::Paragraph(Paragraph::new(vec![text("foo")]))],
             }],
         })]);
         assert!(good.validate().is_empty());
@@ -837,10 +818,7 @@ mod written_shapes {
     }
 
     fn paragraph(children: Vec<Inline>) -> Block {
-        Block::Paragraph(Paragraph {
-            meta: NodeMeta::default(),
-            children,
-        })
+        Block::Paragraph(Paragraph::new(children))
     }
 
     fn inlines(children: Vec<Inline>) -> Document {
@@ -1229,10 +1207,7 @@ mod written_shapes {
                 alignments: vec![TableAlignment::None],
                 rows: vec![TableRow {
                     meta: NodeMeta::default(),
-                    cells: vec![TableCell {
-                        meta: NodeMeta::default(),
-                        children,
-                    }],
+                    cells: vec![TableCell::new(children)],
                 }],
             })])
         };
@@ -1244,23 +1219,12 @@ mod written_shapes {
         assert!(valid(&cell(vec![text("a b")])));
 
         let label = vec![text("a"), soft_break(), text("b")];
-        assert!(invalid(&document(vec![Block::LeafDirective(
-            LeafDirective {
-                meta: NodeMeta::default(),
-                name: "x".into(),
-                label: label.clone(),
-                attributes: vec![],
-            }
-        )])));
-        assert!(invalid(&document(vec![Block::ContainerDirective(
-            ContainerDirective {
-                meta: NodeMeta::default(),
-                name: "x".into(),
-                label: label.clone(),
-                attributes: vec![],
-                children: vec![],
-            }
-        )])));
+        let mut leaf = LeafDirective::new("x");
+        leaf.label = label.clone();
+        assert!(invalid(&document(vec![leaf.into()])));
+        let mut container = ContainerDirective::new("x", vec![]);
+        container.label = label.clone();
+        assert!(invalid(&document(vec![container.into()])));
         let text_directive = |label| {
             inlines(vec![Inline::TextDirective(TextDirective {
                 meta: NodeMeta::default(),
@@ -1290,10 +1254,9 @@ mod written_shapes {
                 vec![item(None, vec![paragraph(vec![text("a")]), block])],
             )])
         };
-        let setext = Block::Heading(Heading {
-            kind: HeadingKind::Setext,
-            ..Heading::new(1, [Text::from("h")])
-        });
+        let mut setext = Heading::new(1, [Text::from("h")]);
+        setext.kind = HeadingKind::Setext;
+        let setext = Block::from(setext);
         let empty_item = list(true, vec![item(None, vec![])]);
         for bad in [
             paragraph(vec![text("b")]),

@@ -14,9 +14,10 @@ path, in time linear in the source.
 and the `with_source` constructors of `LeafDirective` and
 `ContainerDirective`, for their label, SHALL build the leaf whose inline
 content `parse_inline(text, definitions)` reads from `text`, return its
-diagnostics, and keep `text` as the leaf's source; the spans of its inlines
-SHALL be byte ranges into `text`. No other way to give a leaf a source SHALL
-exist.
+diagnostics, and keep `text` as the leaf's source, which `source()` (for a
+directive, `label_source()`) returns; the spans of its inlines SHALL be byte
+ranges into `text`. No other way to give a leaf a source SHALL exist, and a
+parsed or `new` leaf SHALL keep none.
 
 ## MODIFIED Requirements
 
@@ -24,8 +25,9 @@ exist.
 The AST SHALL provide `From` conversions into `Block` and `Inline` for every node
 type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
 `Document`, `Text`, `Paragraph`, `Heading`, `Link`, `Autolink`, `CodeInline`,
-`CharacterReference`, `Tag`, `List`, `ListItem`, and `BlankLine`, all defaulting
-`meta` to no span and a list item's number to `None`;
+`CharacterReference`, `Tag`, `List`, `ListItem`, `TableCell`, `LeafDirective`,
+`ContainerDirective`, and `BlankLine`, all defaulting `meta` to no span, a
+list item's number to `None`, and a directive's label and attributes to none;
 `markdown_syntax::prelude::*` SHALL import this surface.
 
 ### Requirement: Recorded syntax forms
@@ -50,8 +52,8 @@ and a map from offsets in that text to offsets in `source`, such that
 once their spans are mapped to the source. A cell's path is its table's, its
 row's index, and its own; a directive label's path is its directive's. A
 cell's text SHALL read each `\|` as `|`. It SHALL return `None` for a document
-without a source, and when `path` names no such leaf or a node without a
-span.
+without a source, and when `path` names no such leaf, a directive written
+without a label, or a node without a span.
 
 #### Scenario: Paragraph in a block quote
 - **WHEN** `inline_source(&NodePath::from([0, 0]))` runs on the document parsed from `source = "> a *b*\n> c"`

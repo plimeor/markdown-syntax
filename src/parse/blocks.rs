@@ -2484,6 +2484,7 @@ impl Finish<'_> {
                 Block::Paragraph(Paragraph {
                     meta: meta(span),
                     children: self.leaf_inlines(span, text, diagnostics),
+                    source: None,
                 })
             }
             Pending::Heading {
@@ -2496,6 +2497,7 @@ impl Finish<'_> {
                 depth,
                 kind,
                 children: self.leaf_inlines(span, text, &mut Vec::new()),
+                source: None,
             }),
             Pending::Table {
                 span,
@@ -2513,6 +2515,7 @@ impl Finish<'_> {
                             .map(|cell| TableCell {
                                 meta: meta(cell.span),
                                 children: self.leaf_inlines(cell.span, cell.text, diagnostics),
+                                source: None,
                             })
                             .collect(),
                     })
@@ -2611,6 +2614,7 @@ impl Finish<'_> {
                     .map(|label| self.leaf_inlines(span, label, diagnostics))
                     .unwrap_or_default(),
                 attributes,
+                label_source: None,
             }),
             Pending::ContainerDirective {
                 span,
@@ -2628,6 +2632,7 @@ impl Finish<'_> {
                     label,
                     attributes,
                     children: self.blocks(children, diagnostics),
+                    label_source: None,
                 })
             }
         }

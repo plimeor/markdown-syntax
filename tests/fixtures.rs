@@ -599,6 +599,25 @@ fn unedited_sources_are_written_as_they_are() {
     }
 }
 
+// serialization: Unchanged source is kept
+#[test]
+fn documents_with_leaves_given_as_text_are_written_as_their_source() {
+    let mut failures = Vec::new();
+    for source in read_back_corpus() {
+        let document = leaves::rebuilt_from_leaf_sources(&parse(&source.input).document);
+        let written = document.to_markdown();
+        if written.as_deref().ok() != Some(source.input.as_str()) {
+            failures.push(format!("{}: {written:?}", source.at()));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 /// Appends " edited" to the first `Text` of the block's first leaf, or a line
 /// to a code block's value; false for a block holding neither.
 fn edit_block(block: &mut Block) -> bool {

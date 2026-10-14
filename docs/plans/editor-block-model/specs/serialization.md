@@ -49,7 +49,9 @@ to a base node of its kind when their spans and their own fields are equal
 and their children correspond pairwise; a leaf with its own source
 (`with_source`) whose inlines are the ones it was built from corresponds when
 that source equals the base leaf's inline source, and is written as that
-source wherever it is written. A block SHALL be written as canonical output
+source wherever it is written, except that an ATX heading, a table cell, or
+a directive label whose source holds a line ending is written from its
+inlines. A block SHALL be written as canonical output
 even so where its source would read differently in its place; which
 placements make a block's source read differently is unspecified. Options
 SHALL apply only to the text written as canonical output. Parsing the output

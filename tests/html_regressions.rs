@@ -1,8 +1,7 @@
 #![cfg(feature = "html")]
 
 use markdown_syntax::{
-    parse, Block, Document, Heading, HeadingKind, HtmlError, HtmlOptions, NodeMeta,
-    SafeRawHtmlForm, TasklistAttrOrder,
+    parse, Document, Heading, HtmlError, HtmlOptions, Inline, SafeRawHtmlForm, TasklistAttrOrder,
 };
 
 fn parse_render(markdown: &str, html: &HtmlOptions) -> String {
@@ -235,12 +234,7 @@ fn html_options_and_validate_first_are_public_contract() {
         )
     );
 
-    let invalid = Document::new(vec![Block::Heading(Heading {
-        meta: NodeMeta::default(),
-        depth: 0,
-        kind: HeadingKind::Atx,
-        children: Vec::new(),
-    })]);
+    let invalid = Document::new(vec![Heading::new(0, Vec::<Inline>::new()).into()]);
     assert!(matches!(
         invalid.to_html(),
         Err(HtmlError::InvalidDocument(diagnostics))

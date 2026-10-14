@@ -5,6 +5,8 @@
 //! document holds once their spans are mapped through the inline source; and
 //! `leaf_sources` returns the same paths and sources in one pass.
 
+#![allow(dead_code)]
+
 use markdown_syntax::__private::inline_spans_to_source;
 use markdown_syntax::prelude::*;
 
@@ -105,4 +107,74 @@ pub(crate) fn leaves_reproduce(input: &str) -> Result<usize, String> {
         return Err(format!("{input:?}: leaf_sources also holds {extra:?}"));
     }
     Ok(read)
+}
+
+/// `document` with every leaf `leaf_sources` names built again with
+/// `with_source` from its inline source and the document's definitions,
+/// keeping its span and other fields.
+pub(crate) fn rebuilt_from_leaf_sources(document: &Document) -> Document {
+    let definitions = Definitions::of(document);
+    let mut rebuilt = document.clone();
+    for (path, source) in document.leaf_sources() {
+        rebuild_at(&mut rebuilt.children, &path.0, &source.text, &definitions);
+    }
+    rebuilt
+}
+
+/// Builds the leaf at `path` in `blocks` again from `text`.
+pub(crate) fn rebuild_at(
+    blocks: &mut [Block],
+    path: &[usize],
+    text: &str,
+    definitions: &Definitions,
+) {
+    let (first, rest) = path.split_first().expect("a leaf's path");
+    match (&mut blocks[*first], rest) {
+        (Block::Paragraph(node), []) => {
+            let meta = node.meta.clone();
+            *node = Paragraph::with_source(text, definitions).0;
+            node.meta = meta;
+        }
+        (Block::Heading(node), []) => {
+            let meta = node.meta.clone();
+            *node = Heading::with_source(node.depth, node.kind, text, definitions).0;
+            node.meta = meta;
+        }
+        (Block::LeafDirective(node), []) => {
+            let mut built = LeafDirective::with_source(node.name.clone(), text, definitions).0;
+            built.meta = node.meta.clone();
+            built.attributes = node.attributes.clone();
+            *node = built;
+        }
+        (Block::ContainerDirective(node), []) => {
+            let children = std::mem::take(&mut node.children);
+            let mut built =
+                ContainerDirective::with_source(node.name.clone(), text, children, definitions).0;
+            built.meta = node.meta.clone();
+            built.attributes = node.attributes.clone();
+            *node = built;
+        }
+        (Block::Table(node), [row, cell]) => {
+            let cell = &mut node.rows[*row].cells[*cell];
+            let meta = cell.meta.clone();
+            *cell = TableCell::with_source(text, definitions).0;
+            cell.meta = meta;
+        }
+        (Block::List(node), [item, rest @ ..]) => {
+            rebuild_at(&mut node.children[*item].children, rest, text, definitions)
+        }
+        (Block::ContainerDirective(node), rest) => {
+            rebuild_at(&mut node.children, rest, text, definitions)
+        }
+        (Block::BlockQuote(node), rest) => rebuild_at(&mut node.children, rest, text, definitions),
+        (Block::Alert(node), rest) => rebuild_at(&mut node.children, rest, text, definitions),
+        (Block::FootnoteDefinition(node), rest) => {
+            rebuild_at(&mut node.children, rest, text, definitions)
+        }
+        (Block::HtmlContainer(node), rest) => match &mut node.content {
+            HtmlContainerContent::Blocks(children) => rebuild_at(children, rest, text, definitions),
+            HtmlContainerContent::Inlines(_) => panic!("{path:?} names no leaf"),
+        },
+        _ => panic!("{path:?} names no leaf"),
+    }
 }

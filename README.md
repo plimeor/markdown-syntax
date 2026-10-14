@@ -123,7 +123,7 @@ assert_eq!(document.to_markdown()?, "|a|b|\n|-|-|\n\ny\n\n\n# T #");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 
-A block keeps its source when it equals, spans included, the block the source parses to at the same span. Where its source would read differently in its new place, as an unclosed fence before a new block would, it is written canonically too.
+A block keeps its source when it corresponds to the block the source parses to at the same span: it equals that block, spans included, except that a leaf built from text (below) counts when its text is that leaf's inline source. Where its source would read differently in its new place, as an unclosed fence before a new block would, it is written canonically too.
 
 ### Customize serialization
 
@@ -177,7 +177,29 @@ let inline = parse_inline(&leaf.text, &Definitions::of(&document));
 assert!(matches!(inline.inlines[1], Inline::LinkReference(_)));
 ```
 
-`parse_inline` spans are byte ranges into the text; `InlineSource::span_to_source` maps them to the document's source.
+`parse_inline` spans are byte ranges into the text; `InlineSource::span_to_source` maps them to the document's source. `Document::leaf_sources` returns the inline source of every leaf (paragraphs, headings, table cells, and directive labels) in one pass.
+
+### Build a leaf from its text
+
+```rust
+use markdown_syntax::prelude::*;
+
+let source = "- a  `` b ``\n";
+let mut document = parse(source).document;
+let definitions = Definitions::of(&document);
+
+// A leaf built from text keeps it and is written as it, so an editor that
+// holds each leaf as text writes back what the user typed.
+let Block::List(list) = &mut document.children[0] else { unreachable!() };
+let Block::Paragraph(paragraph) = &mut list.children[0].children[0] else { unreachable!() };
+let span = paragraph.meta.span;
+*paragraph = Paragraph::with_source("a  `` c ``", &definitions).0;
+paragraph.meta.span = span;
+assert_eq!(document.to_markdown()?, "- a  `` c ``\n");
+# Ok::<(), markdown_syntax::SerializeError>(())
+```
+
+The text counts while the leaf's inlines are the ones it reads as; a leaf whose inlines were edited afterwards is written from them.
 
 ### Source positions (optional)
 
@@ -253,7 +275,7 @@ See [`HtmlOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/html/
 
 ## WebAssembly and JavaScript
 
-The `markdown-syntax-wasm` crate in `wasm/` builds the parser for `wasm32-unknown-unknown` with a zero-dependency C ABI, and `wasm/js/index.js` (types in `index.d.ts`) wraps it with no npm dependency: `parse`, `parseInline`, `inlineSource`, and `toMarkdown`, with every span in UTF-16 code units. It is not published; build it with
+The `markdown-syntax-wasm` crate in `wasm/` builds the parser for `wasm32-unknown-unknown` with a zero-dependency C ABI, and `wasm/js/index.js` (types in `index.d.ts`) wraps it with no npm dependency: `parse` (with every leaf's inline source), `parseInline`, `inlineSource`, and `toMarkdown` (which takes a leaf as its `source` text), with every span in UTF-16 code units. It is not published; build it with
 
 ```console
 cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown --profile wasm

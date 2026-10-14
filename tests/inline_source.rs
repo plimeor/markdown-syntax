@@ -121,3 +121,62 @@ d
         }
     }
 }
+
+mod leaves_built_from_their_source {
+    use super::*;
+
+    // public-api: Leaves built from their source
+    #[test]
+    fn each_kind_keeps_its_text_and_reads_it_as_parse_inline_does() {
+        let definitions = Definitions::new(["r"]);
+        let text = "a *b* [c][r] [d]";
+        let expected = parse_inline(text, &definitions);
+        let (paragraph, diagnostics) = Paragraph::with_source(text, &definitions);
+        assert_eq!(
+            (paragraph.source(), &paragraph.children, diagnostics),
+            (Some(text), &expected.inlines, expected.diagnostics.clone())
+        );
+        let (heading, _) = Heading::with_source(2, HeadingKind::Setext, text, &definitions);
+        assert_eq!((heading.depth, heading.kind), (2, HeadingKind::Setext));
+        assert_eq!(
+            (heading.source(), &heading.children),
+            (Some(text), &expected.inlines)
+        );
+        let (cell, _) = TableCell::with_source(text, &definitions);
+        assert_eq!(
+            (cell.source(), &cell.children),
+            (Some(text), &expected.inlines)
+        );
+        let (leaf, _) = LeafDirective::with_source("x", text, &definitions);
+        assert_eq!(
+            (leaf.label_source(), &leaf.label),
+            (Some(text), &expected.inlines)
+        );
+        let (container, _) =
+            ContainerDirective::with_source("y", text, vec![BlankLine::new().into()], &definitions);
+        assert_eq!(
+            (
+                container.label_source(),
+                &container.label,
+                container.children.len()
+            ),
+            (Some(text), &expected.inlines, 1)
+        );
+        // Spans are offsets in the text.
+        assert_eq!(paragraph.children[1].meta().span, Some(Span::new(2, 5)));
+    }
+
+    #[test]
+    fn constructors_and_parses_keep_no_text() {
+        assert_eq!(Paragraph::new([Text::from("a")]).source(), None);
+        let document = parse("a\n\n| b |\n|-|\n\n::c[d]").document;
+        let [Block::Paragraph(paragraph), Block::Table(table), Block::LeafDirective(leaf)] =
+            document.children.as_slice()
+        else {
+            panic!("{:?}", document.children);
+        };
+        assert_eq!(paragraph.source(), None);
+        assert_eq!(table.rows[0].cells[0].source(), None);
+        assert_eq!(leaf.label_source(), None);
+    }
+}
