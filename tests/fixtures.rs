@@ -701,31 +701,11 @@ fn edited_blocks_keep_the_rest_of_the_source() {
 /// kind), with what the writer renders around it.
 #[rustfmt::skip]
 const NOT_KEPT_AROUND_A_LEAF_EDIT: &[(&str, &str)] = &[
-    ("core/blank_lines.md [Child(6)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
     ("extensions/gfm_task_list.md [Item(3, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/block_quote.cases#19 [Child(0)] 1 leaf", "a blank line at a quote's edge is written as its prefix"),
-    ("cases/commonmark/frontmatter.cases#7 [] 1 leaf", "a leading `---` break is written spaced"),
-    ("cases/commonmark/frontmatter.cases#8 [] 1 leaf", "a leading `---` break is written spaced"),
-    ("cases/commonmark/frontmatter.cases#15 [] 1 leaf", "a leading `---` break is written spaced"),
-    ("cases/commonmark/frontmatter.cases#19 [] 1 leaf", "a leading `---` break is written spaced"),
     ("cases/commonmark/fuzz.cases#18 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/gfm_table.cases#31 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
-    ("cases/commonmark/gfm_table.cases#53 [Child(8)] 1 leaf", "a table's delimiter row is copied without its indentation"),
-    ("cases/commonmark/gfm_table.cases#53 [Child(9)] 1 leaf", "a table's delimiter row is copied without its indentation"),
     ("cases/commonmark/gfm_task_list_item.cases#7 [Item(0, 0)] 0 leaf", "a task checkbox split across lines renders its item"),
-    ("cases/commonmark/list.cases#29 [Item(0, 0)] 0 leaf", "a marker line's trailing spaces are not copied"),
-    ("cases/commonmark/list.cases#49 [Item(0, 0)] 0 leaf", "the gap without a blank line after a list whose last line changed is canonical"),
     ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 0 leaf", "a marker followed by a tab renders its item"),
     ("cases/commonmark/misc_tabs.cases#44 [Item(0, 0)] 1 leaf", "a marker followed by a tab renders its item"),
-    ("cases/gfm/alerts.cases#2 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
-    ("cases/gfm/alerts.cases#4 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
-    ("cases/gfm/multiline_block_quotes.cases#8 [Child(0), Item(1, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
-    ("cases/gfm/multiline_block_quotes.cases#10 [Child(0), Child(0), Item(2, 0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
-    ("cases/gfm/sourcepos_chars.cases#5 [Child(0), Child(0), Child(0)] 0 leaf", "a `>>>` quote holding the edit is written with `>` prefixes"),
-    ("cases/gfm/table.cases#5 [Item(0, 0)] 1 leaf", "a table's delimiter row is copied without its indentation"),
-    ("cases/gfm/table.cases#9 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
-    ("cases/gfm/table.cases#11 [] 1 leaf", "a table's delimiter row is copied without its indentation"),
-    ("cases/gfm/table.cases#16 [] 0 leaf", "a table's delimiter row is copied without its indentation"),
 ];
 
 /// Each block at every depth of each corpus input, with its first leaf or
@@ -763,6 +743,124 @@ fn edited_nodes_at_every_depth_read_back() {
         }
     }
     assert!(edits > 20_000, "only {edits} edits");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The leaf appends of the corpus that change bytes outside the leaf, each
+/// named as `appending_to_a_leaf_changes_only_that_leaf` names it (input and
+/// leaf path), with what the writer does there.
+#[rustfmt::skip]
+const NOT_KEPT_AFTER_APPENDING: &[(&str, &str)] = &[
+    ("extensions/gfm_task_list.md [3, 0, 0]", "a task checkbox split across lines renders its item"),
+    ("extensions/gfm_task_list.md [8, 0, 0]", "a tab after a checkbox renders its item"),
+    ("cases/commonmark/fuzz.cases#18 [0, 0, 0]", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/gfm_task_list_item.cases#7 [0, 0, 0]", "a task checkbox split across lines renders its item"),
+    ("cases/commonmark/gfm_task_list_item.cases#7 [0, 2, 0]", "a tab after a checkbox renders its item"),
+    ("cases/commonmark/misc_tabs.cases#44 [0, 0, 0]", "a tab after a marker renders its item"),
+    ("cases/commonmark/misc_tabs.cases#44 [0, 0, 1]", "a tab after a marker renders its item"),
+    ("cases/gfm/fuzz.cases#19 [0, 0, 0]", "a tab after a marker renders its item"),
+    ("READ_BACK_INPUTS \">* \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a tab after a marker renders its item"),
+    ("READ_BACK_INPUTS \"-\\t(\\n  <v>\" [0, 0, 0]", "a tab after a marker renders its item"),
+];
+
+/// The block at `path`, through list items, table rows, and containers;
+/// `None` for a table cell's path, which goes through a table.
+fn block_at<'a>(blocks: &'a [Block], path: &[usize]) -> Option<&'a Block> {
+    let (first, rest) = path.split_first()?;
+    let block = blocks.get(*first)?;
+    match (block, rest) {
+        (_, []) => Some(block),
+        (Block::List(list), [item, rest @ ..]) => {
+            block_at(&list.children.get(*item)?.children, rest)
+        }
+        (Block::BlockQuote(node), rest) => block_at(&node.children, rest),
+        (Block::Alert(node), rest) => block_at(&node.children, rest),
+        (Block::FootnoteDefinition(node), rest) => block_at(&node.children, rest),
+        (Block::ContainerDirective(node), rest) => block_at(&node.children, rest),
+        (Block::HtmlContainer(node), rest) => match &node.content {
+            markdown_syntax::HtmlContainerContent::Blocks(children) => block_at(children, rest),
+            markdown_syntax::HtmlContainerContent::Inlines(_) => None,
+        },
+        (Block::Table(_), [_, _]) => Some(block),
+        _ => None,
+    }
+}
+
+/// Each paragraph, heading, and table cell of each corpus input, given as its
+/// inline source with one char appended, as an editor that holds leaves as
+/// their text saves an edit, is written as the input with that char inserted
+/// where the leaf's text ends, unless the leaf is empty or listed in
+/// `NOT_KEPT_AFTER_APPENDING`; and reads back as the edited tree wherever
+/// the edited tree's canonical output does.
+// serialization: Unchanged source is kept
+#[test]
+fn appending_to_a_leaf_changes_only_that_leaf() {
+    let mut moved = Vec::new();
+    let mut failures = Vec::new();
+    let mut appends = 0;
+    for source in read_back_corpus() {
+        let input = source.input.as_str();
+        let document = parse(input).document;
+        let definitions = markdown_syntax::Definitions::of(&document);
+        for (path, leaf) in document.leaf_sources() {
+            let editable = matches!(
+                block_at(&document.children, &path.0),
+                Some(Block::Paragraph(_) | Block::Heading(_) | Block::Table(_))
+            );
+            if !editable || leaf.text.is_empty() {
+                continue;
+            }
+            let mut edited = document.clone();
+            leaves::rebuild_at(
+                &mut edited.children,
+                &path.0,
+                &format!("{}X", leaf.text),
+                &definitions,
+            );
+            let Ok(markdown) = edited.to_markdown() else {
+                continue;
+            };
+            appends += 1;
+            let at = leaf.to_source(leaf.text.len());
+            let expected = format!("{}X{}", &input[..at], &input[at..]);
+            if markdown != expected {
+                let name = match source.case {
+                    None if source.file.ends_with("_INPUTS") => {
+                        format!("{} {input:?} {:?}", source.at(), path.0)
+                    }
+                    _ => format!("{} {:?}", source.at(), path.0),
+                };
+                if !reads_as(&markdown, &edited) {
+                    let canonical = edited.clone().without_source().to_markdown().unwrap();
+                    if reads_as(&canonical, &edited) {
+                        failures.push(format!("{name}: {markdown:?} does not read back"));
+                    }
+                }
+                moved.push((name, expected, markdown));
+            }
+        }
+    }
+    for (name, expected, markdown) in &moved {
+        if !NOT_KEPT_AFTER_APPENDING
+            .iter()
+            .any(|(listed, _)| listed == name)
+        {
+            failures.push(format!("{name}: expected {expected:?}, wrote {markdown:?}"));
+        }
+    }
+    for (listed, _) in NOT_KEPT_AFTER_APPENDING {
+        if !moved.iter().any(|(name, _, _)| name == listed) {
+            failures.push(format!(
+                "{listed}: listed in NOT_KEPT_AFTER_APPENDING, but the append keeps the source"
+            ));
+        }
+    }
+    assert!(appends > 3_000, "only {appends} appends");
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",

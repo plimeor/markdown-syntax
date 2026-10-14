@@ -409,7 +409,7 @@ mod source_reused_per_node {
         assert_eq!(edited("# h\n- b\n", &replace), "# h\n- x\n");
         assert_eq!(edited("# h\n- b\n", &clear), "# h\n-\n");
         assert_eq!(edited("|a|\n|-|\n- b\n", &replace), "|a|\n|-|\n- x\n");
-        assert_eq!(edited("|a|\n|-|\n- b\n", &clear), "|a|\n|-|\n\n-\n");
+        assert_eq!(edited("|a|\n|-|\n- b\n", &clear), "|a|\n|-|\n-\n");
         assert_eq!(edited("[a]: /u\n- b\n", &clear), "[a]: /u\n\n-\n");
         // A break first in the item goes below the bullet, which would
         // underline the paragraph.
@@ -720,7 +720,7 @@ mod source_reused_per_node {
         for (input, written) in [
             ("x\n\n   b\n", "x\n\n   bZ\n"),
             ("> x\n>\n>   b  \n", "> x\n>\n>   bZ  \n"),
-            ("x\n\n  b\n  ===\n", "x\n\n  bZ\n===\n"),
+            ("x\n\n  b\n  ===\n", "x\n\n  bZ\n  ===\n"),
         ] {
             let mut document = parse(input).document;
             let last = document.children.len() - 1;
@@ -791,5 +791,147 @@ mod source_reused_per_node {
         let markdown = document.to_markdown().unwrap();
         assert_eq!(markdown, "-    foo\n- new\n\nbar\n");
         assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+    }
+}
+
+mod lines_around_edits {
+    use super::*;
+    use crate::leaves;
+
+    /// `source` with the leaf at `path` given as `text`, written: it reads
+    /// back as the edited tree, and the check rewrites no block.
+    fn edited(source: &str, path: &[usize], text: &str) -> String {
+        let document = parse(source).document;
+        let definitions = Definitions::of(&document);
+        let mut edited = document.clone();
+        leaves::rebuild_at(&mut edited.children, path, text, &definitions);
+        let markdown = edited.to_markdown().unwrap();
+        assert_eq!(
+            normalized_blocks(&parse(&markdown).document.children),
+            normalized_blocks(&edited.children),
+            "{markdown:?} reads back"
+        );
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&edited), 0);
+        markdown
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn later_lines_of_an_edited_leaf_keep_their_source_prefix() {
+        for (source, path, text, written) in [
+            // Indentation, a lazy line in a quote and in a footnote
+            // definition, and the line ending.
+            ("a\n  b\n", &[0][..], "a\nbX", "a\n  bX\n"),
+            ("> a\nb\n", &[0, 0][..], "a\nbX", "> a\nbX\n"),
+            (
+                "[^1]: a\nb\n\nx[^1]\n",
+                &[0, 0][..],
+                "a\nbX",
+                "[^1]: a\nbX\n\nx[^1]\n",
+            ),
+            ("a\r\nb\r\n", &[0][..], "a\nbX", "a\r\nbX\r\n"),
+            // A line the base leaf lacks takes the canonical prefix.
+            ("> a\n  b\n", &[0, 0][..], "a\nb\ncX", "> a\n  b\n> cX\n"),
+            // A lazy line that would open a list there takes it too.
+            ("> a\nb\n", &[0, 0][..], "a\n3) b", "> a\n> 3) b\n"),
+            // Where no line opens a block, any line keeps the prefix.
+            ("> a\n    - b\n", &[0, 0][..], "a\n- bX", "> a\n    - bX\n"),
+        ] {
+            assert_eq!(edited(source, path, text), written, "{source:?}");
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn own_lines_of_an_edited_block_keep_their_source() {
+        for (source, path, text, written) in [
+            // Blank lines at a quote's edges.
+            ("> \n> a\n>  \n", &[0, 1][..], "aX", "> \n> aX\n>  \n"),
+            // A setext underline, later table rows, and a marker line.
+            ("x\n\n  b\n  ===\n", &[1][..], "bX", "x\n\n  bX\n  ===\n"),
+            (
+                "| a |\n   | - |\n",
+                &[0, 0, 0][..],
+                "aX",
+                "| aX |\n   | - |\n",
+            ),
+            (
+                "> | a |\n>| - |\n>| 1 |\n",
+                &[0, 0, 1, 0][..],
+                "1X",
+                "> | a |\n>| - |\n>| 1X |\n",
+            ),
+            ("-   \n  a\n", &[0, 0, 0][..], "aX", "-   \n  aX\n"),
+            // An alert's first paragraph on a lazy line.
+            (
+                ">>> [!note]\na\n",
+                &[0, 0, 0, 0][..],
+                "aX",
+                ">>> [!note]\naX\n",
+            ),
+        ] {
+            assert_eq!(edited(source, path, text), written, "{source:?}");
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn the_gap_after_an_edited_container_stays_where_nothing_takes_the_next_line() {
+        for (source, path, text, written) in [
+            ("- a\n* b\n", &[0, 0, 0][..], "aX", "- aX\n* b\n"),
+            ("- a\n* b\n", &[1, 0, 0][..], "bX", "- a\n* bX\n"),
+            ("> a\n---\n", &[0, 0][..], "aX", "> aX\n---\n"),
+            ("> - a\n- b\n", &[0, 0, 0, 0][..], "aX", "> - aX\n- b\n"),
+            ("> - a\n- b\n", &[1, 0, 0][..], "bX", "> - a\n- bX\n"),
+            ("-   a\n   - b\n", &[0, 0, 0][..], "aX", "-   aX\n   - b\n"),
+            // A fence its container closes takes no line.
+            ("> ```\na\n", &[1][..], "aX", "> ```\naX\n"),
+            // Lines a quote's paragraph takes on lazy lines.
+            ("> a\n<a>\n", &[0, 0][..], "aX", "> aX\n<a>\n"),
+            ("> a\n``\n", &[0, 0][..], "aX", "> aX\n``\n"),
+            // An alert's marker line takes a lazy line as its paragraph's,
+            // unless it opens like a fence.
+            ("1. >[!NOTE]\n~a\n", &[1][..], "~aX", "1. >[!NOTE]\n~aX\n"),
+            ("1. >[!NOTE]\n~a\n", &[1][..], "b", "1. >[!NOTE]\n\nb\n"),
+        ] {
+            assert_eq!(edited(source, path, text), written, "{source:?}");
+        }
+        // An open list's last item could take the indented line after it.
+        let mut document = parse("-\t(\n  <v>\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!();
+        };
+        list.children[0].children.clear();
+        assert_eq!(document.to_markdown().unwrap(), "- \n\n  <v>\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_break_opening_the_document_stays_while_no_line_closes_it() {
+        assert_eq!(edited("---\na\n", &[1], "aX"), "---\naX\n");
+        let mut document = parse("---\n\n```\nx\n```\n").document;
+        let Block::CodeBlock(code) = &mut document.children[1] else {
+            panic!();
+        };
+        code.value = "---\n".into();
+        assert_eq!(document.to_markdown().unwrap(), "- - -\n\n```\n---\n```\n");
+        // A directive written canonically after it misreads writes its
+        // `- - -` break as `---`.
+        let mut document = parse("---\n\n:::d\na\n===\n\n- - -\n:::\n").document;
+        let Block::ContainerDirective(directive) = &mut document.children[1] else {
+            panic!();
+        };
+        let Block::Heading(heading) = &mut directive.children[0] else {
+            panic!();
+        };
+        heading.children = vec![Text::from("- x").into()];
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "- - -\n\n:::d\n- x\n===\n\n---\n:::\n");
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 1);
+        assert!(matches!(
+            parse(&markdown).document.children[0],
+            Block::ThematicBreak(_)
+        ));
     }
 }
