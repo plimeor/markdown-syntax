@@ -129,12 +129,12 @@ ci --features html --test <name>`.
   `tests/linear_growth.rs`.
 
 ### 3. Inline parse
-- [ ] 3.1 Add `Definitions` (`Definitions::of(&Document)`,
+- [x] 3.1 Add `Definitions` (`Definitions::of(&Document)`,
   `Definitions::new(labels)`) and `parse_inline(text, &Definitions) ->
   InlineOutput`, exported from the root and the prelude; verified by
   `tests/parse_inline.rs` naming `Inline parse`.
   - Follows design › Inline parse.
-- [ ] 3.2 Add `parse_inline` to the linear-growth and pathological suites;
+- [x] 3.2 Add `parse_inline` to the linear-growth and pathological suites;
   verified by `tests/linear_growth.rs` and `tests/pathological_inputs.rs`.
 
 ### 4. Inline source

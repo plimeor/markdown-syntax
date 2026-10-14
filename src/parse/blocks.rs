@@ -38,7 +38,7 @@ pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnosti
     definitions.dedup();
     let mut found = parser.diagnostics;
     let finish = Finish {
-        definitions: Definitions { own: &definitions },
+        definitions: Labels { own: &definitions },
     };
     let blocks = document
         .children
@@ -2387,7 +2387,8 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
     };
     match block {
         Pending::Done(Block::Definition(definition)) => {
-            definitions.push(definition.identifier.clone());
+            // As the document holds it once U+0000 is replaced.
+            definitions.push(definition.identifier.replace('\0', "\u{FFFD}"));
         }
         Pending::BlockQuote {
             children: inner, ..
@@ -2411,7 +2412,7 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
-    definitions: Definitions<'o>,
+    definitions: Labels<'o>,
 }
 
 impl Finish<'_> {

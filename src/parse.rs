@@ -157,6 +157,117 @@ pub fn parse(input: &str) -> ParseOutput {
     }
 }
 
+/// The link reference definitions an inline parse resolves references
+/// against: they decide whether `[a][b]`, `[a][]`, and `[a]` are reference
+/// links or images.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Definitions {
+    /// Normalized identifiers, sorted and deduplicated.
+    identifiers: Vec<String>,
+}
+
+impl Definitions {
+    /// The definitions of `document`, at every depth, as `parse` reads them
+    /// for the document's own references.
+    pub fn of(document: &Document) -> Self {
+        fn walk(blocks: &[Block], identifiers: &mut Vec<String>) {
+            for block in blocks {
+                match block {
+                    Block::Definition(node) => identifiers.push(node.identifier.clone()),
+                    Block::BlockQuote(node) => walk(&node.children, identifiers),
+                    Block::Alert(node) => walk(&node.children, identifiers),
+                    Block::List(node) => {
+                        for item in &node.children {
+                            walk(&item.children, identifiers);
+                        }
+                    }
+                    Block::FootnoteDefinition(node) => walk(&node.children, identifiers),
+                    Block::HtmlContainer(node) => {
+                        if let HtmlContainerContent::Blocks(children) = &node.content {
+                            walk(children, identifiers);
+                        }
+                    }
+                    Block::ContainerDirective(node) => walk(&node.children, identifiers),
+                    _ => {}
+                }
+            }
+        }
+        let mut identifiers = Vec::new();
+        walk(&document.children, &mut identifiers);
+        Self::sorted(identifiers)
+    }
+
+    /// Definitions with the given labels, as they would be written between
+    /// the brackets of a definition.
+    pub fn new<I, S>(labels: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::sorted(
+            labels
+                .into_iter()
+                .map(|label| identifier(label.as_ref()))
+                .collect(),
+        )
+    }
+
+    fn sorted(mut identifiers: Vec<String>) -> Self {
+        identifiers.sort_unstable();
+        identifiers.dedup();
+        Self { identifiers }
+    }
+
+    fn labels(&self) -> Labels<'_> {
+        Labels {
+            own: &self.identifiers,
+        }
+    }
+}
+
+/// The result of an inline parse: the inlines plus any diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InlineOutput {
+    /// The inline nodes, with spans that are byte ranges into the text.
+    pub inlines: Vec<Inline>,
+    /// Diagnostics collected during parsing.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Parse `text` as the inline content of one leaf block, with the same
+/// syntax as [`parse`] and no block rule: `# a` and `- a` stay text. A
+/// reference forms only for a label `definitions` holds. Infallible, like
+/// [`parse`]; a leading U+FEFF is content.
+pub fn parse_inline(text: &str, definitions: &Definitions) -> InlineOutput {
+    let mut diagnostics = Vec::new();
+    // Line endings are read as `\n`, as a block's content is joined, while
+    // spans keep counting in `text`.
+    let (content, map) = if text.contains('\r') {
+        let mut content = String::with_capacity(text.len());
+        let mut map = SourceMap::default();
+        for line in collect_lines(text, &SourceMap::verbatim(text.len(), 0)) {
+            map.push(content.len(), line.text.len(), line.start, line.end);
+            content.push_str(line.text);
+            if !line.eol.is_empty() {
+                map.push(content.len(), 1, line.end, line.end_with_eol);
+                content.push('\n');
+            }
+        }
+        (Cow::Owned(content), map)
+    } else {
+        (Cow::Borrowed(text), SourceMap::verbatim(text.len(), 0))
+    };
+    let mut inlines = parse_inlines(&content, &map, Some(definitions.labels()), &mut diagnostics);
+    if text.contains('\0') {
+        nul_replacement::replace_in_inlines(&mut inlines);
+    }
+    diagnostics.sort_by_key(|diagnostic| diagnostic.span.map(|span| span.start));
+    InlineOutput {
+        inlines,
+        diagnostics,
+    }
+}
+
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
 /// between the two call this; node values are rewritten after parsing by
 /// `nul_replacement::replace_in_document`, so spans stay in source coordinates.
@@ -1065,7 +1176,7 @@ fn close_bracket(
     input: &str,
     base_offset: usize,
     close: usize,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
@@ -1780,7 +1891,7 @@ fn match_link_target(
     input: &str,
     label_start: usize,
     close: usize,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
 ) -> Option<(usize, LinkTarget)> {
     let label = &input[label_start..close];
     let after = close + 1;
@@ -2230,7 +2341,7 @@ impl<'a> InlineScan<'a> {
 fn parse_inlines(
     input: &str,
     map: &SourceMap,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     parse_inlines_in(input, map, InlineState::default(), definitions, diagnostics)
@@ -2243,7 +2354,7 @@ fn parse_cell_inlines(
     input: &str,
     map: &SourceMap,
     escaped_pipes: Vec<usize>,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     let state = InlineState {
@@ -2257,7 +2368,7 @@ fn parse_inlines_in(
     input: &str,
     map: &SourceMap,
     mut state: InlineState,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
@@ -2304,7 +2415,7 @@ struct InlinePass<'p, 'a> {
 fn parse_inlines_with_context(
     input: &str,
     base_offset: usize,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -2326,7 +2437,7 @@ fn parse_inlines_with_context(
 fn parse_inline_content(
     input: &str,
     base_offset: usize,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     state: &mut InlineState,
 ) -> Vec<Inline> {
@@ -3072,7 +3183,7 @@ fn parse_text_directive(
     input: &str,
     index: usize,
     base_offset: usize,
-    definitions: Option<Definitions<'_>>,
+    definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     pass: &mut InlinePass,
 ) -> Option<(usize, Inline)> {
@@ -4123,19 +4234,29 @@ pub(crate) fn normalize_label(label: &str) -> String {
 /// The identifiers a document's references can resolve to: those of its own
 /// definitions, sorted and deduplicated so that a lookup is a binary search.
 #[derive(Clone, Copy)]
-pub(crate) struct Definitions<'a> {
+pub(crate) struct Labels<'a> {
     pub(crate) own: &'a [String],
 }
 
-fn definition_exists(definitions: Option<Definitions<'_>>, label: &str) -> bool {
+fn definition_exists(definitions: Option<Labels<'_>>, label: &str) -> bool {
     if label.is_empty() || !reference_label_is_within_limit(label) {
         return false;
     }
     let Some(definitions) = definitions else {
         return false;
     };
+    definitions.own.binary_search(&identifier(label)).is_ok()
+}
+
+/// The identifier a reference with `label` resolves to: its normalized form,
+/// with U+0000 read as U+FFFD as in the definitions a document holds.
+fn identifier(label: &str) -> String {
     let identifier = normalize_label(label);
-    definitions.own.binary_search(&identifier).is_ok()
+    if identifier.contains('\0') {
+        identifier.replace('\0', "\u{FFFD}")
+    } else {
+        identifier
+    }
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {

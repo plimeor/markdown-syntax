@@ -114,7 +114,13 @@ impl SourceMap {
 
     /// Records that text `text_start..text_start + text_len` was read from
     /// `source_start..source_end`. Runs are pushed in text order.
-    fn push(&mut self, text_start: usize, text_len: usize, source_start: usize, source_end: usize) {
+    pub(super) fn push(
+        &mut self,
+        text_start: usize,
+        text_len: usize,
+        source_start: usize,
+        source_end: usize,
+    ) {
         if text_len == 0 {
             return;
         }

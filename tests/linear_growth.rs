@@ -1,10 +1,10 @@
-//! Parse and `to_markdown` time over inputs built from syntax fragments,
-//! written without their source and, with their top-level blocks reversed,
-//! with it, so that a cost growing faster than the input is found without
-//! anyone having foreseen its shape. Every pair and triple of fragments, as
-//! one unit, is repeated `n` and `2n` times, and every pair also after a
-//! paragraph's first word; doubling the input must at most roughly double the
-//! time.
+//! Parse, `parse_inline`, and `to_markdown` time over inputs built from
+//! syntax fragments, written without their source and, with their top-level
+//! blocks reversed, with it, so that a cost growing faster than the input is
+//! found without anyone having foreseen its shape. Every pair and triple of
+//! fragments, as one unit, is repeated `n` and `2n` times, and every pair
+//! also after a paragraph's first word; doubling the input must at most
+//! roughly double the time.
 //!
 //! Each unit is screened with quick measurements on all cores, and the
 //! suspects again at `n` and `4n`, where a quadratic cost stands further from
@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use markdown_syntax::parse;
+use markdown_syntax::{parse, parse_inline, Definitions};
 
 /// Openers, closers, and prefixes of the constructs the parser reads. The
 /// literal autolinks start with a space, after which they may begin.
@@ -113,6 +113,7 @@ fn units() -> Vec<Unit> {
 #[derive(Clone, Copy)]
 struct Times {
     parse: Duration,
+    inline: Duration,
     serialize: Duration,
     rewrite: Duration,
 }
@@ -121,6 +122,10 @@ fn time(input: &str) -> Times {
     let started = Instant::now();
     let document = parse(input).document;
     let parse = started.elapsed();
+    let definitions = Definitions::of(&document);
+    let started = Instant::now();
+    let _ = parse_inline(input, &definitions);
+    let inline = started.elapsed();
     let mut reversed = document.clone();
     reversed.children.reverse();
     let document = document.without_source();
@@ -132,6 +137,7 @@ fn time(input: &str) -> Times {
     let _ = reversed.to_markdown();
     Times {
         parse,
+        inline,
         serialize,
         rewrite: started.elapsed(),
     }
@@ -155,6 +161,7 @@ impl Growth {
         let large_input = String::from(*prefix) + &unit.repeat(factor * n);
         let slowest = Times {
             parse: Duration::MAX,
+            inline: Duration::MAX,
             serialize: Duration::MAX,
             rewrite: Duration::MAX,
         };
@@ -163,6 +170,7 @@ impl Growth {
             for (input, best) in [(&small_input, &mut small), (&large_input, &mut large)] {
                 let times = time(input);
                 best.parse = best.parse.min(times.parse);
+                best.inline = best.inline.min(times.inline);
                 best.serialize = best.serialize.min(times.serialize);
                 best.rewrite = best.rewrite.min(times.rewrite);
             }
@@ -179,6 +187,7 @@ impl Growth {
     fn within(&self, ratio: f64) -> bool {
         let linear = |small: Duration, large: Duration| large <= small.mul_f64(ratio) + NOISE_FLOOR;
         linear(self.small.parse, self.large.parse)
+            && linear(self.small.inline, self.large.inline)
             && linear(self.small.serialize, self.large.serialize)
             && linear(self.small.rewrite, self.large.rewrite)
     }
@@ -186,7 +195,7 @@ impl Growth {
     fn report(&self) -> String {
         let ratio = |small: Duration, large: Duration| large.as_secs_f64() / small.as_secs_f64();
         format!(
-            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
+            "{:?} + {:?} x{} -> x{}: parse {:?} -> {:?} ({:.1}x), parse_inline {:?} -> {:?} ({:.1}x), to_markdown {:?} -> {:?} ({:.1}x), with the source {:?} -> {:?} ({:.1}x)",
             self.unit.0,
             self.unit.1,
             self.n,
@@ -194,6 +203,9 @@ impl Growth {
             self.small.parse,
             self.large.parse,
             ratio(self.small.parse, self.large.parse),
+            self.small.inline,
+            self.large.inline,
+            ratio(self.small.inline, self.large.inline),
             self.small.serialize,
             self.large.serialize,
             ratio(self.small.serialize, self.large.serialize),

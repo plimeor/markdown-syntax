@@ -12,6 +12,10 @@ pub(super) fn replace_in_document(document: &mut Document) {
     blocks(&mut document.children);
 }
 
+pub(super) fn replace_in_inlines(nodes: &mut [Inline]) {
+    inlines(nodes);
+}
+
 fn string(value: &mut String) {
     if value.contains('\0') {
         *value = value.replace('\0', "\u{FFFD}");
