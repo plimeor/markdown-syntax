@@ -12,6 +12,7 @@ Document
     SoftBreak
     Text "y"
   BlockQuote
+    BlankLine
   Paragraph
     Text "b"
     SoftBreak

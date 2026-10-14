@@ -5,6 +5,9 @@
 //! The read-back corpus is edited block by block, and written unedited, in
 //! `fixtures.rs`.
 
+#[path = "support/leaves.rs"]
+mod leaves;
+
 use markdown_syntax::prelude::*;
 use markdown_syntax::{BulletMarker, LineEnding, SerializeOptions};
 
@@ -82,7 +85,7 @@ mod unchanged_source_is_kept {
         document.children[1] = paragraph("y");
         assert_eq!(
             document.to_markdown().unwrap(),
-            "|a|b|\n|-|-|\n\ny\n\n# T #"
+            "|a|b|\n|-|-|\n\ny\n\n\n# T #"
         );
     }
 
@@ -99,8 +102,9 @@ mod unchanged_source_is_kept {
     #[test]
     fn removed_blocks_leave_canonical_gaps() {
         let mut document = parse("a\n\n\nb\n\n\nc").document;
-        document.children.remove(1);
-        assert_eq!(document.to_markdown().unwrap(), "a\n\nc");
+        // `b` and the blank line after it.
+        document.children.drain(2..4);
+        assert_eq!(document.to_markdown().unwrap(), "a\n\n\nc");
     }
 
     #[test]
@@ -113,10 +117,12 @@ mod unchanged_source_is_kept {
     #[test]
     fn leading_bytes_are_kept_with_the_first_block() {
         let mut document = parse("\u{feff}\n\n# T\n\na").document;
-        document.children[1] = paragraph("b");
+        // Two blank lines open the document.
+        document.children[3] = paragraph("b");
         assert_eq!(document.to_markdown().unwrap(), "\u{feff}\n\n# T\n\nb\n");
 
         let mut document = parse("\u{feff}\n\n# T\n\na").document;
+        document.children.drain(..2);
         document.children[0] = paragraph("b");
         assert_eq!(document.to_markdown().unwrap(), "b\n\na");
     }
@@ -281,5 +287,73 @@ mod unchanged_source_is_kept {
         let mut document = parse("- a\n\np\n\n- b").document;
         document.children.remove(1);
         assert!(document.to_markdown().is_err());
+    }
+}
+
+mod leaves_given_as_text {
+    use super::*;
+    use crate::leaves;
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn leaves_given_as_text() {
+        let source = "- a  *b*\n\n  c\n";
+        let parsed = parse(source).document;
+        let rebuilt = leaves::rebuilt_from_leaf_sources(&parsed);
+        assert_ne!(rebuilt, parsed);
+        assert_eq!(rebuilt.to_markdown().unwrap(), source);
+    }
+
+    #[test]
+    fn an_edited_leaf_is_written_as_its_text_in_a_written_block() {
+        let source = "- a  *b*\n\n  c\n\n# T\n";
+        let document = parse(source).document;
+        let definitions = Definitions::of(&document);
+        let mut edited = document.clone();
+        leaves::rebuild_at(&mut edited.children, &[0, 0, 0], "a  _b_", &definitions);
+        // The list is written canonically, the edited leaf as its text, the
+        // unedited one from its inlines, and the heading kept.
+        assert_eq!(edited.to_markdown().unwrap(), "- a  _b_\n\n  c\n\n# T\n");
+    }
+
+    #[test]
+    fn a_leaf_whose_inlines_changed_is_written_from_them() {
+        let document = parse("a  *b*\n").document;
+        let definitions = Definitions::of(&document);
+        let mut edited = document.clone();
+        leaves::rebuild_at(&mut edited.children, &[0], "a  *b*", &definitions);
+        let Block::Paragraph(paragraph) = &mut edited.children[0] else {
+            unreachable!()
+        };
+        assert_eq!(paragraph.source(), Some("a  *b*"));
+        paragraph.children.push(Text::from("!").into());
+        assert_eq!(edited.to_markdown().unwrap(), "a  *b*!\n");
+    }
+
+    #[test]
+    fn cells_labels_and_headings_are_written_as_their_text() {
+        let definitions = Definitions::default();
+        let cell = |text| TableCell::with_source(text, &definitions).0;
+        let table = Block::Table(Table {
+            meta: NodeMeta::default(),
+            alignments: vec![TableAlignment::None],
+            rows: vec![
+                TableRow {
+                    meta: NodeMeta::default(),
+                    cells: vec![cell("h  *i*")],
+                },
+                TableRow {
+                    meta: NodeMeta::default(),
+                    cells: vec![cell("a|b")],
+                },
+            ],
+        });
+        let heading = Heading::with_source(2, HeadingKind::Atx, "T  *u*", &definitions).0;
+        let leaf = LeafDirective::with_source("x", "l  *m*", &definitions).0;
+        let document = Document::new(vec![table, heading.into(), leaf.into()]);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "| h  *i* |\n| --- |\n| a\\|b |\n\n## T  *u*\n\n::x[l  *m*]\n"
+        );
     }
 }

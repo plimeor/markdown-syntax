@@ -4,7 +4,7 @@ Paragraph line
 continued.
 
 > Quote
-> 
+>
 > - one
 > - two
 

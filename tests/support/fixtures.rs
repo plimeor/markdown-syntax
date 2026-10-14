@@ -233,12 +233,6 @@ pub(crate) fn trim_final_newline(input: &str) -> &str {
     input.trim_end_matches('\n')
 }
 
-pub(crate) fn normalize_expected_markdown(input: &str) -> String {
-    let mut output = input.trim_end_matches('\n').to_string();
-    output.push('\n');
-    output
-}
-
 pub(crate) fn snapshot_document(document: &Document) -> String {
     let mut lines = vec!["Document".to_string()];
     for block in &document.children {
@@ -269,6 +263,7 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
             snapshot_inlines(&node.children, indent + 1, lines);
         }
         Block::ThematicBreak(_) => push(lines, indent, "ThematicBreak"),
+        Block::BlankLine(_) => push(lines, indent, "BlankLine"),
         Block::BlockQuote(node) => {
             push(lines, indent, "BlockQuote");
             for child in &node.children {
@@ -306,10 +301,13 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
                     lines,
                     indent + 1,
                     format!(
-                        "ListItem checked={}",
+                        "ListItem checked={}{}",
                         item.checked
                             .map(|checked| checked.to_string())
-                            .unwrap_or_else(|| "none".into())
+                            .unwrap_or_else(|| "none".into()),
+                        item.number
+                            .map(|number| format!(" number={number}"))
+                            .unwrap_or_default()
                     ),
                 );
                 for child in &item.children {

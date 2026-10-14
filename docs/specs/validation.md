@@ -23,7 +23,7 @@ sits in a table cell or a directive label:
 - In a tight list item, a block right after a `Paragraph` that cannot
   interrupt it, by the parser's own checks: a `Paragraph`, a `Definition`, an
   indented `CodeBlock`, a `Frontmatter`, a `Heading` written as a setext
-  heading, an ordered `List` whose start is not 1, a `List` whose first item
+  heading, an ordered `List` whose first item's number is not 1, a `List` whose first item
   has no blocks or that the serializer starts on a line after its bullet (a
   thematic break of the bullet's char, or content opening with one to three
   spaces or a tab), or an
@@ -33,8 +33,11 @@ sits in a table cell or a directive label:
 - `Heading`: a depth outside 1–6.
 - `Table`: no rows; a header row with no cells; an alignment count other than
   the header row's width; a row whose width differs from the header row's.
-- `List`: no items; a loose list of one item holding at most one block; an
-  ordered list whose start is beyond the parser's 9-digit marker limit.
+- `List`: no items; a loose list of one item holding at most one block.
+- `ListItem`: a number beyond the parser's 9-digit marker limit; a number in
+  a bullet list.
+- `BlankLine`: first or last in a footnote definition; first in a list item,
+  or last in a list's last item; in a tight list.
 - `ListItem`: a task item (`checked` set) whose first block after its leading
   `Definition`s is not a `Paragraph` with children.
 - `Alert`: a title that is empty or starts or ends with a space or a tab.

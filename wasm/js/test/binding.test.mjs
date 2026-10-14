@@ -16,6 +16,13 @@ const wasmPath =
   );
 const binding = await MarkdownSyntax.load(readFile(wasmPath));
 
+/** The node of `tree` at `path`. */
+function nodeAt(tree, path) {
+  let node = tree;
+  for (const index of path) node = (node.rows ?? node.cells ?? node.children)[index];
+  return node;
+}
+
 /** Every node of `tree` with its path of indices. */
 function* nodes(node, path = []) {
   yield [node, path];
@@ -68,6 +75,7 @@ describe("Parse from JavaScript", () => {
       "[^f]: note",
       "| a |\n|:-:|\n| c |",
       "$$\nx\n$$",
+      "",
       "::leaf[l]{a=b c}",
       ":::box\nx\n:::",
       "[l](/u) <http://a> ![i](/j) [d][] ![d] a\\\nb $x$ [^f] ^[n] [[w]] :t[l]{k} #tag",
@@ -79,14 +87,14 @@ describe("Parse from JavaScript", () => {
       "htmlContainer", "definition", "footnoteDefinition", "table", "tableRow", "tableCell",
       "mathBlock", "leafDirective", "containerDirective", "link", "autolink", "image",
       "linkReference", "imageReference", "lineBreak", "math", "footnoteReference",
-      "inlineFootnote", "wikiLink", "textDirective", "tag",
+      "inlineFootnote", "wikiLink", "textDirective", "tag", "blankLine",
     ]) {
       assert.ok(types.has(type), type);
     }
     const list = binding.parse("2) a\n3) [x] b").tree.children[0];
     assert.deepEqual(
-      [list.ordered, list.start, list.delimiter, list.children[1].checked],
-      [true, 2, "paren", true],
+      [list.ordered, list.delimiter, list.children.map((item) => [item.number, item.checked])],
+      [true, "paren", [[2, null], [3, true]]],
     );
     const fence = binding.parse("~~~~ js\nx\n~~~~").tree.children[0];
     assert.deepEqual(fence.kind, { type: "fenced", marker: "tilde", length: 4 });
@@ -157,6 +165,28 @@ describe("Inline parse and inline source from JavaScript", () => {
       document.tree.children[0].children[0].children.map((inline) => inline.span),
     );
   });
+
+  // wasm-binding: Parse from JavaScript
+  test("leaf sources arrive with the parse, as inline sources", () => {
+    const source = "# 😀 *h*\n\n| a\\|b | c |\n|-|-|\n\n> - x\n>   y\n\n:::d[l *m*]\nz\n:::";
+    const document = binding.parse(source);
+    const paths = document.leafSources.map(({ path }) => path);
+    assert.deepEqual(paths, [[0], [1, 0, 0], [1, 0, 1], [2, 0, 0, 0], [3], [3, 0]]);
+    for (const { path, source: leaf } of document.leafSources) {
+      const single = document.inlineSource(path);
+      assert.equal(leaf.text, single.text, `${path}`);
+      for (let offset = 0; offset <= leaf.text.length; offset++) {
+        assert.equal(leaf.toSource(offset), single.toSource(offset), `${path} ${offset}`);
+        assert.deepEqual(leaf.spanToSource([0, offset]), single.spanToSource([0, offset]));
+      }
+    }
+    assert.deepEqual(
+      document.leafSources.map(({ source }) => source.text),
+      ["😀 *h*", "a|b", "c", "x\ny", "l *m*", "z"],
+    );
+    const [, cell] = document.leafSources;
+    assert.equal(source.slice(...cell.source.spanToSource([1, 2])), "\\|");
+  });
 });
 
 describe("Write from JavaScript", () => {
@@ -194,13 +224,38 @@ describe("Write from JavaScript", () => {
     const document = binding.parse(source);
     const tree = structuredClone(document.tree);
     tree.children[1] = { type: "paragraph", span: null, children: [{ type: "text", span: null, value: "y" }] };
-    assert.equal(document.toMarkdown(tree), "|a|b|\n|-|-|\n\ny\n\n# T #");
+    // The kept blank line stays between the edit and the heading.
+    assert.equal(document.toMarkdown(tree), "|a|b|\n|-|-|\n\ny\n\n\n# T #");
     tree.children[1].children[0].value = "z";
-    // The kept table keeps its own line ending.
+    // The kept table and blank line keep their own line endings.
     assert.equal(
       document.toMarkdown(tree, { lineEnding: "crlf", finalNewline: false }),
-      "|a|b|\n|-|-|\n\r\nz\r\n\r\n# T #",
+      "|a|b|\n|-|-|\n\r\nz\r\n\r\n\n# T #",
     );
+  });
+
+  // wasm-binding: Write from JavaScript
+  test("leaf given as text", () => {
+    const document = binding.parse("> a\n\nb\n");
+    const tree = structuredClone(document.tree);
+    tree.children[0].children[0] = { type: "paragraph", source: "x `` y ``", span: null };
+    assert.equal(document.toMarkdown(tree), "> x `` y ``\n\nb\n");
+  });
+
+  test("a save that sends every leaf as its source returns the source", () => {
+    const source = "# T  *u*\n\n- a  `` b ``\n\n  [c]( /d )\n\n| x  | y\\|z |\n|--|--|\n\n::e[f  *g*]\n\n[c]: /e\n";
+    const document = binding.parse(source);
+    const tree = structuredClone(document.tree);
+    for (const { path, source: leaf } of document.leafSources) {
+      const node = nodeAt(tree, path);
+      delete node.children;
+      if (node.type === "leafDirective" || node.type === "containerDirective") node.label = [];
+      node.source = leaf.text;
+    }
+    assert.equal(document.toMarkdown(tree), source);
+    // A leaf edited in its text is written as that text.
+    nodeAt(tree, [1, 0, 1]).source = "[c](  /d )";
+    assert.equal(document.toMarkdown(tree), source.replace("[c]( /d )", "[c](  /d )"));
   });
 
   test("the file's byte order mark is kept", () => {

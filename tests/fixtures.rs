@@ -36,8 +36,8 @@ use markdown_syntax::{
 
 use deviations::{excerpt, input_hash};
 use support::fixtures::{
-    derived_corpus_stats, files_with_extension, normalize_expected_markdown, read_derived_cases,
-    read_derived_metadata, read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
+    derived_corpus_stats, files_with_extension, read_derived_cases, read_derived_metadata,
+    read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
 };
 
 /// Each golden under the corpus root whose name ends in `suffix`, with the
@@ -248,7 +248,7 @@ fn canonical_goldens_match() {
     for (input, golden) in goldens(".canonical.md") {
         assert_eq!(
             written(&read_fixture(&input)),
-            normalize_expected_markdown(&read_fixture(&golden)),
+            read_fixture(&golden),
             "{}",
             input.display()
         );
@@ -340,7 +340,7 @@ fn crlf_output_keeps_a_values_crlf() {
 
 // Source read-back.
 
-/// What the AST does not record (decision 0013, Consequences), and so
+/// What the AST does not record (decision 0016, Consequences), and so
 /// what keeps a listed input from reading back.
 #[derive(Clone, Copy, Debug)]
 enum Unrecorded {
@@ -436,9 +436,6 @@ const NOT_READING_BACK: &[NotReadingBack] = &[
     listed("READ_BACK_INPUTS", 0xb753e4882c87cc65, "[o]:u\n\t<div>", BlankLines, "the paragraph continues the definition's lines; written after a blank line, its `<div>` opens an HTML block"),
     listed("READ_BACK_INPUTS", 0x250c10eb0427a2eb, "[o]:u\n<a>\n-", BlankLines, "the paragraph continues the definition's lines; written after a blank line, its `<a>` opens an HTML block"),
     listed("READ_BACK_INPUTS", 0x34a71648eeea0c0e, "[o]: u\n<a>", BlankLines, "the paragraph continues the definition's lines; written after a blank line, its `<a>` opens an HTML block"),
-    listed("READ_BACK_INPUTS", 0xc8b86f03918aab8a, "- > a\n  >\n  b\n  ---", BlankLines, "the quote's empty last line keeps `b` from continuing its paragraph"),
-    listed("READ_BACK_INPUTS", 0xa0ba0dbfcaf02234, "- > a\n  >\n  | b |\n  | - |", BlankLines, "the quote's empty last line keeps `| b |` from continuing its paragraph"),
-    listed("READ_BACK_INPUTS", 0x05e9c61b80925f3c, ">\n>[!NOTE]:>", BlankLines, "the quote's empty first line keeps `[!NOTE]` from opening an alert"),
     listed("READ_BACK_INPUTS", 0xe538aaa0c354f66d, "- a\n\n  <!--\n- b", BlankLines, "the blank line written between the items is taken by the HTML block that runs to its item's end"),
 ];
 
@@ -600,6 +597,25 @@ fn unedited_sources_are_written_as_they_are() {
             source.at()
         );
     }
+}
+
+// serialization: Unchanged source is kept
+#[test]
+fn documents_with_leaves_given_as_text_are_written_as_their_source() {
+    let mut failures = Vec::new();
+    for source in read_back_corpus() {
+        let document = leaves::rebuilt_from_leaf_sources(&parse(&source.input).document);
+        let written = document.to_markdown();
+        if written.as_deref().ok() != Some(source.input.as_str()) {
+            failures.push(format!("{}: {written:?}", source.at()));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// Appends " edited" to the first `Text` of the block's first leaf, or a line
@@ -792,8 +808,11 @@ fn moved_blocks_read_back() {
     );
 }
 
-/// Every paragraph and heading of the corpus reads again from its inline
-/// source as the document holds it (`inline_source.rs`).
+/// Every leaf of the corpus reads again from its inline source as the
+/// document holds it, and `leaf_sources` returns the same sources
+/// (`inline_source.rs`).
+// public-api: Inline source of a leaf block
+// public-api: Leaf sources
 #[test]
 fn leaves_read_again_from_their_inline_source() {
     let mut leaves_read = 0;
@@ -951,12 +970,16 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
         "Foo *bar baz*\n=============\n",
     ),
     ("- a\n  - ---", "- a\n  - - -\n"),
+    // A quote opening mid-line keeps its blank first line.
+    ("> >\n> > d", "> >\n> > d\n"),
+    ("- >\n  >\n  > b", "- >\n  >\n  > b\n"),
+    ("\u{feff}>\n> a", ">\n> a\n"),
     // Indented code opening a nested item stays on the marker line.
     ("- a\n  -     x", "- a\n  -     x\n"),
     ("1. a\n   1.     x\n          y", "1. a\n   1.     x\n          y\n"),
-    // Later item numbers stop at the largest a marker can hold.
-    ("999999999. a\n1. b", "999999999. a\n999999999. b\n"),
-    ("999999998) a\n1) b\n1) c", "999999998) a\n999999999) b\n999999999) c\n"),
+    // Item numbers are written as recorded.
+    ("999999999. a\n1. b", "999999999. a\n1. b\n"),
+    ("999999998) a\n1) b\n1) c", "999999998) a\n1) b\n1) c\n"),
     ("-\n   <v>", "-\n   <v>\n"),
     ("-\n  ---", "-\n  ---\n"),
     ("-\n  ---\n-\n  ---", "-\n  ---\n-\n  ---\n"),

@@ -136,6 +136,30 @@ const BLOCK_PIECES: &[&str] = &[
     "import x",
 ];
 
+/// Containers and blank-line runs, so that blank lines meet every edge the
+/// blank-line rule names.
+const BLANK_LINE_PIECES: &[&str] = &[
+    "a",
+    "\n",
+    "\n\n",
+    "\n\n\n",
+    "\n\n\n\n",
+    "- ",
+    "1. ",
+    "> ",
+    ">",
+    "  ",
+    "```",
+    ":::e",
+    ":::",
+    "<details>",
+    "</details>",
+    "[^1]: ",
+    "# ",
+    "---",
+    ">[!NOTE]",
+];
+
 const EMPHASIS_PIECES: &[&str] = &[
     "*", "_", "**", "__", "***", "___", "a", "b", " ", "(", ")", ".", "#", "&", "~", "$", "|",
 ];
@@ -146,6 +170,7 @@ const GENERATORS: &[(&str, &[&str], usize, u64)] = &[
     ("inline", INLINE_PIECES, 10, 0x1d1e_5eed),
     ("block", BLOCK_PIECES, 12, 0xb10c_5eed),
     ("emphasis", EMPHASIS_PIECES, 12, 0xe3fa_5eed),
+    ("blank lines", BLANK_LINE_PIECES, 12, 0xb1a2_5eed),
 ];
 
 const INPUTS_PER_GENERATOR: usize = 2_000;
@@ -154,17 +179,12 @@ const INPUTS_PER_GENERATOR: usize = 2_000;
 /// reason.
 ///
 /// Each difference is whitespace or a blank line that the AST does not
-/// record, as decision 0013 (Consequences) accepts.
+/// record, as decision 0016 (Consequences) accepts.
 const NOT_READING_BACK: &[(&str, &str)] = &[
     (
         "__$$++\t\\\t\n}$==",
         "the tab between a final backslash and the line ending, which keeps the \
          backslash from making a hard break, is not recorded",
-    ),
-    (
-        ">\n>[!NOTE]: }",
-        "the empty first line of the quote, which keeps `[!NOTE]` from opening an \
-         alert, is not recorded",
     ),
     (
         "-->\n\t$$[^1]: -->```:::- ",

@@ -209,12 +209,14 @@ mod review_block {
         assert_eq!(code.value, "aaa\n aaa\naaa\n");
     }
 
-    /// B5: leading/trailing blank lines are not part of an indented code block;
-    /// interior blanks and the final content line ending stay.
+    /// B5: leading/trailing blank lines are not part of an indented code block
+    /// but blank lines after it; interior blanks and the final content line
+    /// ending stay.
     #[test]
     fn indented_code_trims_trailing_blank_lines() {
         let output = parse("    foo\n    \n");
-        let [Block::CodeBlock(code)] = output.document.children.as_slice() else {
+        let [Block::CodeBlock(code), Block::BlankLine(_)] = output.document.children.as_slice()
+        else {
             panic!(
                 "expected one indented code block: {:?}",
                 output.document.children
@@ -795,14 +797,14 @@ mod parser {
             ["", ""]
         );
         assert_eq!(body_cells("| x | y |\n|---|---|\n||a|| | d |"), ["", "a"]);
-        // Escaped pipes stay literal text in their own cells.
+        // Escaped pipes read as `|` in their own cells.
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| a \\|\\| b | or, like c \\|\\| d |"),
-            ["a \\|\\| b", "or, like c \\|\\| d"]
+            ["a || b", "or, like c || d"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n|\\| a | b \\||"),
-            ["\\| a", "b \\|"]
+            ["| a", "b |"]
         );
         assert_eq!(
             body_cells("| x | y |\n|---|---|\n| \\`||a\\` | b|| |"),
@@ -863,7 +865,7 @@ mod lazy_lines_and_final_whitespace {
             panic!("expected a block quote and a list, got {blocks:?}");
         };
         assert!(list.ordered);
-        assert_eq!(list.start, Some(2));
+        assert_eq!(list.children[0].number, Some(2));
     }
 
     #[test]
@@ -2117,7 +2119,12 @@ mod one_pass_over_open_blocks {
     #[test]
     fn blank_lines_inside_open_leaf_blocks_loosen_no_list() {
         for source in ["- a\n  - ```\n\n    x\n\n- b", "\n\n- <!--\n\n- text"] {
-            assert!(list(&blocks_of(source)[0]).tight, "{source:?}");
+            let blocks = blocks_of(source);
+            let first = blocks
+                .iter()
+                .find(|block| !matches!(block, Block::BlankLine(_)))
+                .unwrap();
+            assert!(list(first).tight, "{source:?}");
         }
         assert!(list(&parse("- $$\n\n- b").document.children[0]).tight);
     }
@@ -2443,5 +2450,90 @@ mod serialized_spellings {
             panic!("{document:?}");
         };
         assert_eq!(html.value, "<!--\n");
+    }
+}
+
+mod blank_lines_and_numbers {
+    use markdown_syntax::*;
+
+    // block-syntax: Blank lines are nodes
+    #[test]
+    fn extra_blank_lines_between_paragraphs() {
+        let document = parse("a\n\n\n\nb").document;
+        let [Block::Paragraph(_), Block::BlankLine(first), Block::BlankLine(second), Block::Paragraph(_)] =
+            document.children.as_slice()
+        else {
+            panic!("{:?}", document.children);
+        };
+        assert_eq!(
+            [first.meta.span, second.meta.span],
+            [Some(Span::new(3, 4)), Some(Span::new(4, 5))]
+        );
+    }
+
+    // block-syntax: Blank lines are nodes
+    #[test]
+    fn two_blank_lines_between_items() {
+        let document = parse("- a\n\n\n- b").document;
+        let [Block::List(list)] = document.children.as_slice() else {
+            panic!("{:?}", document.children);
+        };
+        assert!(!list.tight);
+        assert!(matches!(
+            list.children[0].children.as_slice(),
+            [Block::Paragraph(_), Block::BlankLine(_)]
+        ));
+        assert_eq!(list.children[0].meta.span, Some(Span::new(0, 6)));
+        let empty = parse("-\n\n\n- b").document;
+        let [Block::List(list)] = empty.children.as_slice() else {
+            panic!("{:?}", empty.children);
+        };
+        assert!(list.children[0].children.is_empty());
+    }
+
+    // block-syntax: Blank lines are nodes
+    // public-api: Source spans
+    #[test]
+    fn a_quote_opening_mid_line_keeps_its_blank_first_line() {
+        for (input, first) in [
+            ("> >\n> > d", Span::new(2, 4)),
+            ("- >\n  >\n  > b", Span::new(2, 4)),
+            ("\u{feff}>\n> a", Span::new(3, 5)),
+        ] {
+            let document = parse(input).document;
+            let mut blocks = document.children.as_slice();
+            let quote = loop {
+                match blocks {
+                    [Block::BlockQuote(quote)]
+                        if !matches!(quote.children.as_slice(), [Block::BlockQuote(_)]) =>
+                    {
+                        break quote
+                    }
+                    [Block::BlockQuote(quote)] => blocks = &quote.children,
+                    [Block::List(list)] => blocks = &list.children[0].children,
+                    other => panic!("{input:?}: {other:?}"),
+                }
+            };
+            let Some(Block::BlankLine(blank)) = quote.children.first() else {
+                panic!("{input:?}: {:?}", quote.children);
+            };
+            assert_eq!(blank.meta.span, Some(first), "{input:?}");
+        }
+    }
+
+    // public-api: Recorded syntax forms
+    #[test]
+    fn repeated_numbers() {
+        let document = parse("1. a\n1. b").document;
+        let [Block::List(list)] = document.children.as_slice() else {
+            panic!("{:?}", document.children);
+        };
+        let numbers: Vec<_> = list.children.iter().map(|item| item.number).collect();
+        assert_eq!(numbers, [Some(1), Some(1)]);
+        let bullets = parse("- a").document;
+        let [Block::List(list)] = bullets.children.as_slice() else {
+            panic!();
+        };
+        assert_eq!(list.children[0].number, None);
     }
 }

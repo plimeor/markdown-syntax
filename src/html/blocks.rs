@@ -1,4 +1,4 @@
-//! All 16 `Block` arms plus the nested `ListItem` helpers they dispatch to.
+//! All 17 `Block` arms plus the nested `ListItem` helpers they dispatch to.
 
 use alloc::format;
 use alloc::string::String;
@@ -29,7 +29,7 @@ pub fn render_blocks_joined(blocks: &[Block], ctx: &Ctx) -> String {
     parts.join("\n")
 }
 
-/// Top-level `Block` dispatch — every one of the 16 arms is handled; there is
+/// Top-level `Block` dispatch — every one of the 17 arms is handled; there is
 /// no catch-all.
 pub fn render_block(block: &Block, ctx: &Ctx) -> String {
     match block {
@@ -81,6 +81,9 @@ pub fn render_block(block: &Block, ctx: &Ctx) -> String {
 
         // 16. ContainerDirective.
         Block::ContainerDirective(d) => render_container_directive(d, ctx),
+
+        // 17. BlankLine — no HTML.
+        Block::BlankLine(_) => String::new(),
     }
 }
 
@@ -167,9 +170,10 @@ fn render_alert(a: &Alert, ctx: &Ctx) -> String {
     )
 }
 
-/// Ordered-list `start` attr: emitted unless `start` is `Some(1)` or `None`.
+/// Ordered-list `start` attr: the first item's number, emitted unless it is
+/// `Some(1)` or `None`.
 fn ordered_start_attr(list: &List) -> String {
-    match list.start {
+    match list.children.first().and_then(|item| item.number) {
         Some(n) if n != 1 => format!(" start=\"{n}\""),
         _ => String::new(),
     }

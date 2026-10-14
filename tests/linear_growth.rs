@@ -1,4 +1,5 @@
-//! Parse, `parse_inline` and `inline_source`, and `to_markdown` time over
+//! Parse, `parse_inline`, `inline_source`, `leaf_sources`, and
+//! `Paragraph::with_source`, and `to_markdown` time over
 //! inputs built from syntax fragments, written without their source and,
 //! with their top-level blocks reversed, with it, so that a cost growing
 //! faster than the input is found without anyone having foreseen its shape.
@@ -16,7 +17,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use markdown_syntax::{parse, parse_inline, Definitions, NodePath};
+use markdown_syntax::{parse, parse_inline, Block, Definitions, NodePath, Paragraph};
 
 /// Openers, closers, and prefixes of the constructs the parser reads. The
 /// literal autolinks start with a space, after which they may begin.
@@ -127,6 +128,8 @@ fn time(input: &str) -> Times {
     let started = Instant::now();
     let _ = parse_inline(input, &definitions);
     let _ = document.inline_source(&NodePath::from([0]));
+    let _ = document.leaf_sources();
+    let _ = Paragraph::with_source(input, &definitions);
     let inline = started.elapsed();
     let mut reversed = document.clone();
     reversed.children.reverse();
@@ -267,6 +270,48 @@ fn confirm(suspects: Vec<Unit>) -> Vec<Growth> {
         .expect("spawn confirm thread")
         .join()
         .unwrap_or_else(|_| panic!("confirm thread panicked"))
+}
+
+/// The best of five timings of loading a list of `items` items, reading
+/// every leaf source, building each leaf again from it, and writing the
+/// document, as an editor's load and save do.
+fn load_and_save(items: usize) -> Duration {
+    let input: String = (0..items)
+        .map(|item| format!("- item *{item}*\n"))
+        .collect();
+    (0..5)
+        .map(|_| {
+            let started = Instant::now();
+            let mut document = parse(&input).document;
+            let definitions = Definitions::of(&document);
+            let sources = document.leaf_sources();
+            let Block::List(list) = &mut document.children[0] else {
+                panic!("a list");
+            };
+            for (item, (_, source)) in list.children.iter_mut().zip(&sources) {
+                let Block::Paragraph(paragraph) = &mut item.children[0] else {
+                    panic!("a paragraph");
+                };
+                let span = paragraph.meta.span;
+                *paragraph = Paragraph::with_source(&source.text, &definitions).0;
+                paragraph.meta.span = span;
+            }
+            assert_eq!(document.to_markdown().as_deref(), Ok(input.as_str()));
+            started.elapsed()
+        })
+        .min()
+        .expect("five timings")
+}
+
+// untrusted-input-cost: Linear time
+#[test]
+fn a_long_lists_leaves_load_and_save_linearly() {
+    let small = load_and_save(2_000);
+    let large = load_and_save(4_000);
+    assert!(
+        large.as_secs_f64() < 3.0 * small.as_secs_f64(),
+        "2000 items: {small:?}, 4000 items: {large:?}"
+    );
 }
 
 // untrusted-input-cost: Linear time

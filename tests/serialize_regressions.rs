@@ -95,12 +95,9 @@ mod value_encodings {
 
     #[test]
     fn container_directive_fence_exceeds_serialized_code_colons() {
-        let document = document(vec![Block::ContainerDirective(ContainerDirective {
-            meta: NodeMeta::default(),
-            name: "note".into(),
-            label: Vec::new(),
-            attributes: Vec::new(),
-            children: vec![Block::CodeBlock(CodeBlock {
+        let document = document(vec![Block::ContainerDirective(ContainerDirective::new(
+            "note",
+            vec![Block::CodeBlock(CodeBlock {
                 meta: NodeMeta::default(),
                 kind: CodeBlockKind::Fenced {
                     marker: FenceMarker::Backtick,
@@ -109,7 +106,7 @@ mod value_encodings {
                 info: None,
                 value: "before\n:::\n::::\nafter".into(),
             })],
-        })]);
+        ))]);
 
         assert_eq!(
             rendered(&document),
@@ -118,10 +115,7 @@ mod value_encodings {
     }
 
     fn cell(children: Vec<Inline>) -> TableCell {
-        TableCell {
-            meta: NodeMeta::default(),
-            children,
-        }
+        TableCell::new(children)
     }
 
     fn table(header: Vec<&str>, row: Vec<Vec<Inline>>) -> Block {
@@ -250,10 +244,18 @@ mod value_encodings {
     // serialization: Table cells encoded by one rule
     #[test]
     fn a_text_pipe_in_a_cell_is_written_escaped() {
-        // The cell reads `\|` as an escaped pipe, which compares as text.
-        let document = document(vec![table(vec!["Text"], vec![vec![text("a|b")]])]);
+        // The cell reads `\|` as the `|` written.
+        let document = document(vec![table(vec!["h"], vec![vec![text("a|b")]])]);
         let markdown = rendered(&document);
-        assert_eq!(markdown, "| Text |\n| --- |\n| a\\|b |\n");
+        assert_eq!(markdown, "| h |\n| --- |\n| a\\|b |\n");
+        let reread = parse(&markdown).document;
+        let Block::Table(table) = &reread.children[0] else {
+            panic!("{reread:?}");
+        };
+        assert!(
+            matches!(table.rows[1].cells[0].children.as_slice(), [Inline::Text(text)] if text.value == "a|b"),
+            "{table:?}"
+        );
     }
 
     #[test]
@@ -326,13 +328,13 @@ mod value_encodings {
         let item = |value: &str| ListItem {
             meta: NodeMeta::default(),
             checked: None,
+            number: None,
             children: vec![paragraph(vec![text(value)])],
         };
         let document = document(vec![
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: false,
-                start: None,
                 delimiter: ListDelimiter::Dash,
                 tight: true,
                 children: vec![item("bullet")],
@@ -340,10 +342,15 @@ mod value_encodings {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: true,
-                start: Some(999_999_998),
                 delimiter: ListDelimiter::Period,
                 tight: true,
-                children: vec![item("one"), item("two")],
+                children: vec![
+                    ListItem {
+                        number: Some(999_999_998),
+                        ..item("one")
+                    },
+                    item("two"),
+                ],
             }),
             Block::CodeBlock(CodeBlock {
                 meta: NodeMeta::default(),
@@ -554,14 +561,7 @@ mod recorded_spellings {
 
     #[test]
     fn a_trailing_hash_in_an_atx_heading_keeps_a_closing_sequence() {
-        let heading = |children| {
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth: 1,
-                kind: HeadingKind::Atx,
-                children,
-            })])
-        };
+        let heading = |children: Vec<Inline>| document(vec![Heading::new(1, children).into()]);
         assert_eq!(
             rendered(&heading(vec![text("foo "), escape('#')])),
             "# foo \\#\n"
@@ -687,12 +687,12 @@ mod recorded_spellings {
         let list = Block::List(List {
             meta: NodeMeta::default(),
             ordered: false,
-            start: None,
             delimiter: ListDelimiter::Asterisk,
             tight: true,
             children: vec![ListItem {
                 meta: NodeMeta::default(),
                 checked: None,
+                number: None,
                 children: vec![rule(ThematicBreakMarker::Asterisk)],
             }],
         });
@@ -705,12 +705,12 @@ mod recorded_spellings {
             Block::List(List {
                 meta: NodeMeta::default(),
                 ordered: false,
-                start: None,
                 delimiter: ListDelimiter::Asterisk,
                 tight: true,
                 children: vec![ListItem {
                     meta: NodeMeta::default(),
                     checked: None,
+                    number: None,
                     children,
                 }],
             })
@@ -743,12 +743,9 @@ mod recorded_spellings {
             })
         };
         let heading = |depth, kind| {
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth,
-                kind,
-                children: vec![text("foo"), soft_break(), text("bar")],
-            })])
+            let mut heading = Heading::new(depth, vec![text("foo"), soft_break(), text("bar")]);
+            heading.kind = kind;
+            document(vec![heading.into()])
         };
         assert_eq!(
             rendered(&heading(1, HeadingKind::Setext)),
@@ -757,15 +754,8 @@ mod recorded_spellings {
         assert_eq!(rendered(&heading(1, HeadingKind::Atx)), "# foo bar\n");
         // A setext underline writes depth 1 or 2 only.
         assert_eq!(
-            document(vec![Block::Heading(Heading {
-                meta: NodeMeta::default(),
-                depth: 3,
-                kind: HeadingKind::Setext,
-                children: vec![text("foo")],
-            })])
-            .to_markdown()
-            .unwrap(),
-            "### foo\n"
+            heading(3, HeadingKind::Setext).to_markdown().unwrap(),
+            "### foo bar\n"
         );
     }
 }
@@ -910,5 +900,77 @@ mod tags {
         let escaped = paragraph_document(vec![escape('#'), text("a")]);
         assert_eq!(rendered(&escaped), "\\#a\n");
         assert_eq!(normalized(&parse("\\#a").document), normalized(&escaped));
+    }
+}
+
+mod blank_lines_and_numbers {
+    use super::*;
+
+    fn blank() -> Block {
+        BlankLine::new().into()
+    }
+
+    fn item(value: &str) -> ListItem {
+        ListItem::new([paragraph(vec![text(value)])])
+    }
+
+    fn ordered(numbers: &[Option<u64>]) -> Document {
+        let mut list =
+            List::new(
+                numbers
+                    .iter()
+                    .zip(["a", "b", "c"])
+                    .map(|(&number, value)| ListItem {
+                        number,
+                        ..item(value)
+                    }),
+            );
+        list.ordered = true;
+        list.delimiter = ListDelimiter::Period;
+        document(vec![list.into()])
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn each_blank_line_is_one_line_beyond_the_separator() {
+        let between = document(vec![
+            paragraph(vec![text("a")]),
+            blank(),
+            blank(),
+            paragraph(vec![text("b")]),
+        ]);
+        assert_eq!(rendered(&between), "a\n\n\n\nb\n");
+        let trailing = document(vec![paragraph(vec![text("a")]), blank()]);
+        assert_eq!(rendered(&trailing), "a\n\n");
+        let leading = document(vec![blank(), paragraph(vec![text("a")])]);
+        assert_eq!(rendered(&leading), "\na\n");
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn a_blank_line_in_a_container_has_no_trailing_whitespace() {
+        let quote = document(vec![Block::BlockQuote(BlockQuote {
+            meta: NodeMeta::default(),
+            children: vec![
+                paragraph(vec![text("a")]),
+                blank(),
+                paragraph(vec![text("b")]),
+            ],
+        })]);
+        assert_eq!(rendered(&quote), "> a\n>\n>\n> b\n");
+        assert_eq!(written("- a\n\n  b"), "- a\n\n  b\n");
+        assert_eq!(written("- a\n\n\n  b"), "- a\n\n\n  b\n");
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn item_numbers_are_written_as_recorded() {
+        assert_eq!(
+            rendered(&ordered(&[Some(1), Some(1), Some(1)])),
+            "1. a\n1. b\n1. c\n"
+        );
+        assert_eq!(rendered(&ordered(&[Some(3), Some(7)])), "3. a\n7. b\n");
+        assert_eq!(rendered(&ordered(&[Some(3), None])), "3. a\n4. b\n");
+        assert_eq!(rendered(&ordered(&[None, None])), "1. a\n2. b\n");
     }
 }

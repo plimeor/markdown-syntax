@@ -43,10 +43,11 @@ pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
 /// list items, footnote definitions, HTML containers, and container
 /// directives.
 fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Vec<Diagnostic>) {
-    for (index, block) in blocks.iter().enumerate() {
-        if let (Some(Block::List(before)), Block::List(list)) =
-            (index.checked_sub(1).map(|before| &blocks[before]), block)
-        {
+    // Blank lines beyond the separator change how no block reads, so the
+    // block before each one is the last one before them.
+    let mut before: Option<&Block> = None;
+    for block in blocks {
+        if let (Some(Block::List(before)), Block::List(list)) = (before, block) {
             if written_marker(before) == written_marker(list) {
                 diagnostics.push(Diagnostic::invalid(
                     list.meta.span,
@@ -58,13 +59,16 @@ fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Vec<Diagnos
             // A line indented four columns or more continues a paragraph,
             // and starts one on the line after an alert's marker, which may
             // open containers first; neither starts a footnote definition.
-            let indented = match index.checked_sub(1) {
-                Some(before) => matches!(blocks[before], Block::Definition(_)),
+            let indented = match before {
+                Some(before) => matches!(before, Block::Definition(_)),
                 None => depth > 0,
             };
             validate_definition(definition, depth, indented, diagnostics);
         }
         validate_block(block, depth, diagnostics);
+        if !matches!(block, Block::BlankLine(_)) {
+            before = Some(block);
+        }
     }
 }
 
@@ -100,6 +104,19 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
                 &definition.identifier,
                 diagnostics,
             );
+            // Its first line holds its label, and a blank line after its last
+            // block belongs to the container around it.
+            let edges = [definition.children.first(), definition.children.last()];
+            if let Some(Block::BlankLine(blank)) = edges
+                .into_iter()
+                .flatten()
+                .find(|block| matches!(block, Block::BlankLine(_)))
+            {
+                diagnostics.push(Diagnostic::invalid(
+                    blank.meta.span,
+                    "a footnote definition cannot open or end with a blank line",
+                ));
+            }
             validate_blocks(&definition.children, depth + 1, diagnostics);
         }
         // Checked with its siblings in `validate_blocks`.
@@ -111,7 +128,10 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
         Block::HtmlContainer(container) => validate_html_container(container, depth, diagnostics),
         Block::CodeBlock(code) => validate_code_block(code, diagnostics),
         Block::Frontmatter(frontmatter) => validate_frontmatter(frontmatter, depth, diagnostics),
-        Block::ThematicBreak(_) | Block::HtmlBlock(_) | Block::MathBlock(_) => {}
+        Block::ThematicBreak(_)
+        | Block::HtmlBlock(_)
+        | Block::MathBlock(_)
+        | Block::BlankLine(_) => {}
     }
 }
 
@@ -192,14 +212,22 @@ fn validate_list(list: &List, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
     }
     // A list is loose when blank lines part its items or two blocks of one
     // item, so one item of at most one block is always tight.
-    if !list.tight && matches!(list.children.as_slice(), [item] if item.children.len() <= 1) {
+    if !list.tight
+        && matches!(list.children.as_slice(), [item] if item
+            .children
+            .iter()
+            .filter(|block| !matches!(block, Block::BlankLine(_)))
+            .count()
+            <= 1)
+    {
         diagnostics.push(Diagnostic::invalid(
             list.meta.span,
             "a loose list must hold two items or an item of two blocks",
         ));
     }
-    validate_list_start(list, diagnostics);
-    for item in &list.children {
+    for (index, item) in list.children.iter().enumerate() {
+        validate_item_number(list, item, diagnostics);
+        validate_item_blank_lines(list, index, item, diagnostics);
         validate_task_item(item, diagnostics);
         if list.tight {
             validate_tight_item(item, diagnostics);
@@ -854,18 +882,47 @@ fn validate_math_inline(math: &MathInline, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn validate_list_start(list: &List, diagnostics: &mut Vec<Diagnostic>) {
-    if !list.ordered {
-        return;
-    }
-    let Some(start) = list.start else {
+fn validate_item_number(list: &List, item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(number) = item.number else {
         return;
     };
-    if start > crate::parse::MAX_ORDERED_NUMBER {
+    if !list.ordered {
         diagnostics.push(Diagnostic::invalid(
-            list.meta.span,
-            "ordered list start must be representable in at most 9 digits",
+            item.meta.span,
+            "a bullet list item cannot hold a number",
         ));
+    } else if number > crate::parse::MAX_ORDERED_NUMBER {
+        diagnostics.push(Diagnostic::invalid(
+            item.meta.span,
+            "ordered list item number must be representable in at most 9 digits",
+        ));
+    }
+}
+
+/// A blank line in a list item is written below the item's first line and
+/// above a later item, so it cannot open an item, end the last item, or sit
+/// in a tight list.
+fn validate_item_blank_lines(
+    list: &List,
+    index: usize,
+    item: &ListItem,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let last_item = index + 1 == list.children.len();
+    for (at, block) in item.children.iter().enumerate() {
+        let Block::BlankLine(blank) = block else {
+            continue;
+        };
+        let message = if list.tight {
+            "a tight list cannot hold a blank line"
+        } else if at == 0 {
+            "a list item cannot open with a blank line"
+        } else if last_item && at + 1 == item.children.len() {
+            "the last item of a list cannot end with a blank line"
+        } else {
+            continue;
+        };
+        diagnostics.push(Diagnostic::invalid(blank.meta.span, message));
     }
 }
 

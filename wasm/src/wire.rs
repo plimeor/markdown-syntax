@@ -37,6 +37,7 @@ pub mod kind {
     pub const FRONTMATTER: u32 = 14;
     pub const LEAF_DIRECTIVE: u32 = 15;
     pub const CONTAINER_DIRECTIVE: u32 = 16;
+    pub const BLANK_LINE: u32 = 17;
     pub const LIST_ITEM: u32 = 30;
     pub const TABLE_ROW: u32 = 31;
     pub const TABLE_CELL: u32 = 32;
@@ -181,6 +182,13 @@ impl<'t> Writer<'t> {
         }
     }
 
+    /// A leaf's inline content: the source it was built from, if any, and
+    /// its inlines.
+    fn leaf(&mut self, source: Option<&str>, inlines: &[Inline]) {
+        self.opt_str(source);
+        self.inlines(inlines);
+    }
+
     fn title(&mut self, title: &Option<Title>) {
         match title {
             None => self.word(0),
@@ -209,20 +217,15 @@ impl<'t> Writer<'t> {
 
     fn block(&mut self, block: &Block) {
         match block {
-            Block::Paragraph(Paragraph { meta, children }) => {
-                self.head(kind::PARAGRAPH, meta);
-                self.inlines(children);
+            Block::Paragraph(node) => {
+                self.head(kind::PARAGRAPH, &node.meta);
+                self.leaf(node.source(), &node.children);
             }
-            Block::Heading(Heading {
-                meta,
-                depth,
-                kind,
-                children,
-            }) => {
-                self.head(kind::HEADING, meta);
-                self.word(u32::from(*depth));
-                self.word(*kind as u32);
-                self.inlines(children);
+            Block::Heading(node) => {
+                self.head(kind::HEADING, &node.meta);
+                self.word(u32::from(node.depth));
+                self.word(node.kind as u32);
+                self.leaf(node.source(), &node.children);
             }
             Block::ThematicBreak(ThematicBreak { meta, marker }) => {
                 self.head(kind::THEMATIC_BREAK, meta);
@@ -246,27 +249,19 @@ impl<'t> Writer<'t> {
             Block::List(List {
                 meta,
                 ordered,
-                start,
                 delimiter,
                 tight,
                 children,
             }) => {
                 self.head(kind::LIST, meta);
                 self.bool(*ordered);
-                match start {
-                    None => self.word(0),
-                    Some(start) => {
-                        self.word(1);
-                        self.word(*start as u32);
-                        self.word((*start >> 32) as u32);
-                    }
-                }
                 self.word(*delimiter as u32);
                 self.bool(*tight);
                 self.word(children.len() as u32);
                 for ListItem {
                     meta,
                     checked,
+                    number,
                     children,
                 } in children
                 {
@@ -276,6 +271,14 @@ impl<'t> Writer<'t> {
                         Some(false) => 1,
                         Some(true) => 2,
                     });
+                    match number {
+                        None => self.word(0),
+                        Some(number) => {
+                            self.word(1);
+                            self.word(*number as u32);
+                            self.word((*number >> 32) as u32);
+                        }
+                    }
                     self.blocks(children);
                 }
             }
@@ -361,9 +364,9 @@ impl<'t> Writer<'t> {
                 for TableRow { meta, cells } in rows {
                     self.head(kind::TABLE_ROW, meta);
                     self.word(cells.len() as u32);
-                    for TableCell { meta, children } in cells {
-                        self.head(kind::TABLE_CELL, meta);
-                        self.inlines(children);
+                    for cell in cells {
+                        self.head(kind::TABLE_CELL, &cell.meta);
+                        self.leaf(cell.source(), &cell.children);
                     }
                 }
             }
@@ -376,30 +379,20 @@ impl<'t> Writer<'t> {
                 self.word(*kind as u32);
                 self.str(value);
             }
-            Block::LeafDirective(LeafDirective {
-                meta,
-                name,
-                label,
-                attributes,
-            }) => {
-                self.head(kind::LEAF_DIRECTIVE, meta);
-                self.str(name);
-                self.inlines(label);
-                self.attributes(attributes);
+            Block::LeafDirective(node) => {
+                self.head(kind::LEAF_DIRECTIVE, &node.meta);
+                self.str(&node.name);
+                self.leaf(node.label_source(), &node.label);
+                self.attributes(&node.attributes);
             }
-            Block::ContainerDirective(ContainerDirective {
-                meta,
-                name,
-                label,
-                attributes,
-                children,
-            }) => {
-                self.head(kind::CONTAINER_DIRECTIVE, meta);
-                self.str(name);
-                self.inlines(label);
-                self.attributes(attributes);
-                self.blocks(children);
+            Block::ContainerDirective(node) => {
+                self.head(kind::CONTAINER_DIRECTIVE, &node.meta);
+                self.str(&node.name);
+                self.leaf(node.label_source(), &node.label);
+                self.attributes(&node.attributes);
+                self.blocks(&node.children);
             }
+            Block::BlankLine(BlankLine { meta }) => self.head(kind::BLANK_LINE, meta),
         }
     }
 
@@ -621,6 +614,14 @@ pub struct Reader<'m> {
     offsets: &'m [u32],
     /// How many lists of nodes enclose the one being read.
     depth: usize,
+    /// Whether a leaf was built from its source, with no definitions yet.
+    sourced: bool,
+}
+
+/// A leaf's inline content as the message gives it.
+enum Leaf {
+    Source(String),
+    Inlines(Vec<Inline>),
 }
 
 /// The deepest nesting of node lists a message may hold: far above what a
@@ -660,6 +661,7 @@ impl<'m> Reader<'m> {
             units: &message[strings_end..],
             offsets,
             depth: 0,
+            sourced: false,
         })
     }
 
@@ -705,6 +707,21 @@ impl<'m> Reader<'m> {
     /// A string, as a list of labels holds each.
     pub fn label(&mut self) -> Read<String> {
         self.str()
+    }
+
+    /// A leaf's inline content: the source it is built from, or else its
+    /// inlines.
+    fn leaf(&mut self) -> Read<Leaf> {
+        match self.opt_str()? {
+            Some(text) => {
+                if self.count()? != 0 {
+                    return malformed("a leaf with a source holds inlines");
+                }
+                self.sourced = true;
+                Ok(Leaf::Source(text))
+            }
+            None => self.inlines().map(Leaf::Inlines),
+        }
     }
 
     fn opt_str(&mut self) -> Read<Option<String>> {
@@ -771,6 +788,10 @@ impl<'m> Reader<'m> {
         document.meta = meta;
         if self.at != self.words.len() {
             return malformed("words follow the tree");
+        }
+        // A leaf's source reads with the definitions of the whole tree.
+        if self.sourced && Definitions::of(&document) != Definitions::default() {
+            document.reread_kept_sources();
         }
         Ok(document)
     }
@@ -871,19 +892,34 @@ impl<'m> Reader<'m> {
         let kind = self.word()?;
         let meta = self.meta()?;
         Ok(match kind {
-            kind::PARAGRAPH => Block::Paragraph(Paragraph {
-                meta,
-                children: self.inlines()?,
-            }),
-            kind::HEADING => Block::Heading(Heading {
-                meta,
-                depth: match self.word()? {
+            kind::PARAGRAPH => {
+                let mut node = match self.leaf()? {
+                    Leaf::Source(text) => Paragraph::with_source(&text, &Definitions::default()).0,
+                    Leaf::Inlines(children) => Paragraph::new(children),
+                };
+                node.meta = meta;
+                Block::Paragraph(node)
+            }
+            kind::HEADING => {
+                let depth = match self.word()? {
                     depth @ 1..=6 => depth as u8,
                     other => return malformed(format!("{other} is not a heading depth")),
-                },
-                kind: self.enumerated(&[HeadingKind::Atx, HeadingKind::Setext], "heading kind")?,
-                children: self.inlines()?,
-            }),
+                };
+                let kind =
+                    self.enumerated(&[HeadingKind::Atx, HeadingKind::Setext], "heading kind")?;
+                let mut node = match self.leaf()? {
+                    Leaf::Source(text) => {
+                        Heading::with_source(depth, kind, &text, &Definitions::default()).0
+                    }
+                    Leaf::Inlines(children) => {
+                        let mut node = Heading::new(depth, children);
+                        node.kind = kind;
+                        node
+                    }
+                };
+                node.meta = meta;
+                Block::Heading(node)
+            }
             kind::THEMATIC_BREAK => Block::ThematicBreak(ThematicBreak {
                 meta,
                 marker: self.enumerated(
@@ -916,15 +952,6 @@ impl<'m> Reader<'m> {
             }),
             kind::LIST => {
                 let ordered = self.bool()?;
-                let start = match self.word()? {
-                    0 => None,
-                    1 => {
-                        let low = u64::from(self.word()?);
-                        let high = u64::from(self.word()?);
-                        Some(high << 32 | low)
-                    }
-                    other => return malformed(format!("{other} is not a list start")),
-                };
                 let delimiter = self.enumerated(
                     &[
                         ListDelimiter::Dash,
@@ -948,6 +975,17 @@ impl<'m> Reader<'m> {
                                 2 => Some(true),
                                 other => return malformed(format!("{other} is not a task state")),
                             },
+                            number: match self.word()? {
+                                0 => None,
+                                1 => {
+                                    let low = u64::from(self.word()?);
+                                    let high = u64::from(self.word()?);
+                                    Some(high << 32 | low)
+                                }
+                                other => {
+                                    return malformed(format!("{other} is not an item number"))
+                                }
+                            },
                             children: self.blocks()?,
                         })
                     })
@@ -955,7 +993,6 @@ impl<'m> Reader<'m> {
                 Block::List(List {
                     meta,
                     ordered,
-                    start,
                     delimiter,
                     tight,
                     children,
@@ -1029,10 +1066,15 @@ impl<'m> Reader<'m> {
                         let cells = (0..count)
                             .map(|_| {
                                 self.expect_kind(kind::TABLE_CELL, "table cell")?;
-                                Ok(TableCell {
-                                    meta: self.meta()?,
-                                    children: self.inlines()?,
-                                })
+                                let meta = self.meta()?;
+                                let mut cell = match self.leaf()? {
+                                    Leaf::Source(text) => {
+                                        TableCell::with_source(&text, &Definitions::default()).0
+                                    }
+                                    Leaf::Inlines(children) => TableCell::new(children),
+                                };
+                                cell.meta = meta;
+                                Ok(cell)
                             })
                             .collect::<Read<_>>()?;
                         Ok(TableRow { meta, cells })
@@ -1056,19 +1098,48 @@ impl<'m> Reader<'m> {
                 )?,
                 value: self.str()?,
             }),
-            kind::LEAF_DIRECTIVE => Block::LeafDirective(LeafDirective {
-                meta,
-                name: self.str()?,
-                label: self.inlines()?,
-                attributes: self.attributes()?,
-            }),
-            kind::CONTAINER_DIRECTIVE => Block::ContainerDirective(ContainerDirective {
-                meta,
-                name: self.str()?,
-                label: self.inlines()?,
-                attributes: self.attributes()?,
-                children: self.blocks()?,
-            }),
+            kind::LEAF_DIRECTIVE => {
+                let name = self.str()?;
+                let mut node = match self.leaf()? {
+                    Leaf::Source(text) => {
+                        LeafDirective::with_source(name, &text, &Definitions::default()).0
+                    }
+                    Leaf::Inlines(label) => {
+                        let mut node = LeafDirective::new(name);
+                        node.label = label;
+                        node
+                    }
+                };
+                node.meta = meta;
+                node.attributes = self.attributes()?;
+                Block::LeafDirective(node)
+            }
+            kind::CONTAINER_DIRECTIVE => {
+                let name = self.str()?;
+                let label = self.leaf()?;
+                let attributes = self.attributes()?;
+                let children = self.blocks()?;
+                let mut node = match label {
+                    Leaf::Source(text) => {
+                        ContainerDirective::with_source(
+                            name,
+                            &text,
+                            children,
+                            &Definitions::default(),
+                        )
+                        .0
+                    }
+                    Leaf::Inlines(label) => {
+                        let mut node = ContainerDirective::new(name, children);
+                        node.label = label;
+                        node
+                    }
+                };
+                node.meta = meta;
+                node.attributes = attributes;
+                Block::ContainerDirective(node)
+            }
+            kind::BLANK_LINE => Block::BlankLine(BlankLine { meta }),
             other => return malformed(format!("kind {other} where a block belongs")),
         })
     }
@@ -1262,16 +1333,16 @@ mod tests {
         writer.document(&parse(source).document);
         let message = writer.finish();
         // Header, then document, its span, its block count, then the
-        // paragraph and its span, its inline count, the text and its span and
-        // string, and the emphasis and its span.
+        // paragraph and its span, its source (none), its inline count, the
+        // text and its span and string, and the emphasis and its span.
         let words: Vec<u32> = message[8..]
             .chunks_exact(4)
             .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
             .collect();
         assert_eq!(&words[..3], &[kind::DOCUMENT, 0, 6]);
-        assert_eq!(&words[4..7], &[kind::PARAGRAPH, 0, 6]);
-        assert_eq!(&words[8..11], &[kind::TEXT, 0, 3]);
-        assert_eq!(&words[12..15], &[kind::EMPHASIS, 3, 6]);
+        assert_eq!(&words[4..8], &[kind::PARAGRAPH, 0, 6, 0]);
+        assert_eq!(&words[9..12], &[kind::TEXT, 0, 3]);
+        assert_eq!(&words[13..16], &[kind::EMPHASIS, 3, 6]);
     }
 
     #[test]

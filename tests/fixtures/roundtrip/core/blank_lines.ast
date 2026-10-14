@@ -1,0 +1,49 @@
+Document
+  BlankLine
+  BlankLine
+  Paragraph
+    Text "Two blank lines open the document."
+  Paragraph
+    Text "One blank line separates."
+  BlankLine
+  Paragraph
+    Text "Two blank lines leave one node."
+  BlockQuote
+    BlankLine
+    Paragraph
+      Text "quote with blank edges"
+    BlankLine
+  Alert kind=note title=none
+    BlankLine
+    Paragraph
+      Text "alert"
+  HtmlContainer tag=details open="<details>" close="</details>"
+    BlankLine
+    BlankLine
+    Paragraph
+      Text "html container"
+    BlankLine
+  ContainerDirective name=box attrs=none
+    BlankLine
+    Paragraph
+      Text "container directive"
+    BlankLine
+  List ordered=false tight=false
+    ListItem checked=none
+      Paragraph
+        Text "a"
+      BlankLine
+    ListItem checked=none
+      Paragraph
+        Text "b"
+  BlankLine
+  Paragraph
+    Text "After the list."
+  FootnoteDefinition label=n
+    Paragraph
+      Text "note"
+  BlankLine
+  Paragraph
+    Text "After the footnote."
+  BlankLine
+  BlankLine

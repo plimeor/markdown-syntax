@@ -659,10 +659,11 @@ mod escapes_and_references {
 
     // inline-syntax: Escapes and character references are nodes
     #[test]
-    fn an_escaped_pipe_in_a_cell_is_an_escape_in_text_and_a_pipe_in_raw_text() {
+    fn an_escaped_pipe_in_a_cell_reads_as_a_pipe() {
+        assert_eq!(first_cell("| a\\|b |\n|-|"), ["\"a|b\""]);
         assert_eq!(
-            first_cell("| a\\|b |\n|-|"),
-            ["\"a\"", "Escape(|)", "\"b\""]
+            first_cell("| a\\\\\\|b |\n|-|"),
+            ["\"a\"", "Escape(\\)", "\"|b\""]
         );
         assert_eq!(
             first_cell("| <a b=\"x\\|y\"> |\n|-|"),

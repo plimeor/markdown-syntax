@@ -1,0 +1,6 @@
+Document
+  Frontmatter "a: b"
+  BlankLine
+  BlankLine
+  Paragraph
+    Text "After frontmatter."

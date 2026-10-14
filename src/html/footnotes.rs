@@ -228,11 +228,8 @@ impl RefBuilder {
 }
 
 fn block_wrap_inline(children: &[Inline]) -> Vec<Block> {
-    use crate::ast::{NodeMeta, Paragraph};
-    alloc::vec![Block::Paragraph(Paragraph {
-        meta: NodeMeta::default(),
-        children: children.to_vec(),
-    })]
+    use crate::ast::Paragraph;
+    alloc::vec![Block::Paragraph(Paragraph::new(children.iter().cloned()))]
 }
 
 /// Per-reference render hook: advance the running counter for `id` and return

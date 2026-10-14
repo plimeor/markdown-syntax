@@ -6,6 +6,8 @@
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
+use crate::diagnostic::Diagnostic;
+use crate::parse::Definitions;
 use crate::span::Span;
 
 /// Metadata attached to every AST node; currently just the source span.
@@ -139,6 +141,8 @@ pub enum Block {
     LeafDirective(LeafDirective),
     /// A container directive: `:::name … :::`.
     ContainerDirective(ContainerDirective),
+    /// A blank line beyond the one that separates two blocks.
+    BlankLine(BlankLine),
 }
 
 /// A paragraph: a run of inline content. Source: any plain text line(s).
@@ -148,6 +152,8 @@ pub struct Paragraph {
     pub meta: NodeMeta,
     /// The paragraph's inline content.
     pub children: Vec<Inline>,
+    /// The text the content was built from, by [`Paragraph::with_source`].
+    pub(crate) source: Option<String>,
 }
 
 /// A heading. Source: `# Title` (ATX) or `Title\n===` (setext).
@@ -161,6 +167,8 @@ pub struct Heading {
     pub kind: HeadingKind,
     /// The heading's inline content.
     pub children: Vec<Inline>,
+    /// The text the content was built from, by [`Heading::with_source`].
+    pub(crate) source: Option<String>,
 }
 
 /// Which heading syntax produced a [`Heading`].
@@ -170,6 +178,18 @@ pub enum HeadingKind {
     Atx,
     /// Setext heading: `Title` underlined with `===` (level 1) or `---` (level 2).
     Setext,
+}
+
+/// A blank line the source holds beyond the one that separates two blocks:
+/// K blank lines between two blocks are one separator and K − 1 of these.
+/// Before a document's first block, at the start or end of a block quote,
+/// alert, HTML container, or container directive, and after a document's
+/// last line, each blank line is one. Source: a line holding only
+/// whitespace and its containers' `>` markers.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BlankLine {
+    /// Node metadata (source span): the line with its line ending.
+    pub meta: NodeMeta,
 }
 
 /// A thematic break / horizontal rule. Source: `---`, `***`, or `___`.
@@ -236,8 +256,6 @@ pub struct List {
     pub meta: NodeMeta,
     /// `true` for an ordered list, `false` for a bullet list.
     pub ordered: bool,
-    /// The starting number of an ordered list (e.g. `3.` => `Some(3)`).
-    pub start: Option<u64>,
     /// The marker delimiter used by the list items.
     pub delimiter: ListDelimiter,
     /// `true` if the list is tight (no blank lines between items / no `<p>`).
@@ -268,6 +286,11 @@ pub struct ListItem {
     pub meta: NodeMeta,
     /// Task-list state: `Some(true)` for `[x]`, `Some(false)` for `[ ]`, `None` otherwise.
     pub checked: Option<bool>,
+    /// The number an ordered item is written with (`3.` => `Some(3)`), which
+    /// for the first item is the list's start. `None` is written as the
+    /// previous item's number plus one, or 1 for the first item; a bullet
+    /// item holds `None`.
+    pub number: Option<u64>,
     /// The item's block content.
     pub children: Vec<Block>,
 }
@@ -421,6 +444,8 @@ pub struct TableCell {
     pub meta: NodeMeta,
     /// The cell's inline content.
     pub children: Vec<Inline>,
+    /// The text the content was built from, by [`TableCell::with_source`].
+    pub(crate) source: Option<String>,
 }
 
 /// A display math block. Source: `$$ … $$`.
@@ -464,6 +489,8 @@ pub struct LeafDirective {
     pub label: Vec<Inline>,
     /// The optional `{attrs}` attributes.
     pub attributes: Vec<DirectiveAttribute>,
+    /// The text the label was built from, by [`LeafDirective::with_source`].
+    pub(crate) label_source: Option<String>,
 }
 
 /// A container directive. Source: `:::name[label]{attrs}` … `:::`.
@@ -479,6 +506,9 @@ pub struct ContainerDirective {
     pub attributes: Vec<DirectiveAttribute>,
     /// The directive's enclosed block content.
     pub children: Vec<Block>,
+    /// The text the label was built from, by
+    /// [`ContainerDirective::with_source`].
+    pub(crate) label_source: Option<String>,
 }
 
 /// An inline-level node: the leaf and span content inside blocks.
@@ -942,6 +972,7 @@ impl_meta_accessors!(Block {
     Frontmatter,
     LeafDirective,
     ContainerDirective,
+    BlankLine,
 });
 
 impl_from_variants!(Block {
@@ -951,6 +982,7 @@ impl_from_variants!(Block {
     HtmlContainer(HtmlContainer),
     FootnoteDefinition(FootnoteDefinition), Table(Table), MathBlock(MathBlock),
     Frontmatter(Frontmatter), LeafDirective(LeafDirective), ContainerDirective(ContainerDirective),
+    BlankLine(BlankLine),
 });
 
 impl_meta_accessors!(Inline {
@@ -1127,7 +1159,30 @@ impl Paragraph {
         Self {
             meta: NodeMeta::default(),
             children: children.into_iter().map(Into::into).collect(),
+            source: None,
         }
+    }
+
+    /// A paragraph whose content is `text`, read as
+    /// [`parse_inline`](crate::parse_inline) reads it with `definitions`, and
+    /// the diagnostics of that read. The paragraph keeps `text`, which the
+    /// writer writes in place of its inlines while they are the ones `text`
+    /// reads as; the spans of its inlines are offsets in `text`. Pass the
+    /// definitions of the document the paragraph will be written in
+    /// ([`Definitions::of`]); after they change, or for a leaf built with
+    /// others, [`Document::reread_kept_sources`] reads its text again.
+    pub fn with_source(text: &str, definitions: &Definitions) -> (Self, Vec<Diagnostic>) {
+        let (children, diagnostics) = read_source(text, definitions);
+        let paragraph = Self {
+            source: Some(text.into()),
+            ..Self::new(children)
+        };
+        (paragraph, diagnostics)
+    }
+
+    /// The text [`Paragraph::with_source`] built the paragraph from.
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
     }
 }
 
@@ -1143,8 +1198,140 @@ impl Heading {
             depth,
             kind: HeadingKind::Atx,
             children: children.into_iter().map(Into::into).collect(),
+            source: None,
         }
     }
+
+    /// A heading of the given depth and kind whose content is `text`, built
+    /// as [`Paragraph::with_source`] builds a paragraph.
+    pub fn with_source(
+        depth: u8,
+        kind: HeadingKind,
+        text: &str,
+        definitions: &Definitions,
+    ) -> (Self, Vec<Diagnostic>) {
+        let (children, diagnostics) = read_source(text, definitions);
+        let heading = Self {
+            kind,
+            source: Some(text.into()),
+            ..Self::new(depth, children)
+        };
+        (heading, diagnostics)
+    }
+
+    /// The text [`Heading::with_source`] built the heading from.
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+}
+
+impl TableCell {
+    /// A cell from any iterator of inline-convertible children.
+    pub fn new<I, T>(children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Inline>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            children: children.into_iter().map(Into::into).collect(),
+            source: None,
+        }
+    }
+
+    /// A cell whose content is `text`, built as [`Paragraph::with_source`]
+    /// builds a paragraph. A `|` in `text` is content: the writer escapes it.
+    pub fn with_source(text: &str, definitions: &Definitions) -> (Self, Vec<Diagnostic>) {
+        let (children, diagnostics) = read_source(text, definitions);
+        let cell = Self {
+            source: Some(text.into()),
+            ..Self::new(children)
+        };
+        (cell, diagnostics)
+    }
+
+    /// The text [`TableCell::with_source`] built the cell from.
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+}
+
+impl LeafDirective {
+    /// A leaf directive named `name`, with no label and no attributes.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            name: name.into(),
+            label: Vec::new(),
+            attributes: Vec::new(),
+            label_source: None,
+        }
+    }
+
+    /// A leaf directive named `name` whose label is `text`, built as
+    /// [`Paragraph::with_source`] builds a paragraph's content.
+    pub fn with_source(
+        name: impl Into<String>,
+        text: &str,
+        definitions: &Definitions,
+    ) -> (Self, Vec<Diagnostic>) {
+        let (label, diagnostics) = read_source(text, definitions);
+        let directive = Self {
+            label,
+            label_source: Some(text.into()),
+            ..Self::new(name)
+        };
+        (directive, diagnostics)
+    }
+
+    /// The text [`LeafDirective::with_source`] built the label from.
+    pub fn label_source(&self) -> Option<&str> {
+        self.label_source.as_deref()
+    }
+}
+
+impl ContainerDirective {
+    /// A container directive named `name` holding `children`, with no label
+    /// and no attributes.
+    pub fn new(name: impl Into<String>, children: Vec<Block>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            name: name.into(),
+            label: Vec::new(),
+            attributes: Vec::new(),
+            children,
+            label_source: None,
+        }
+    }
+
+    /// A container directive named `name` holding `children`, whose label
+    /// is `text`, built as [`Paragraph::with_source`] builds a paragraph's
+    /// content.
+    pub fn with_source(
+        name: impl Into<String>,
+        text: &str,
+        children: Vec<Block>,
+        definitions: &Definitions,
+    ) -> (Self, Vec<Diagnostic>) {
+        let (label, diagnostics) = read_source(text, definitions);
+        let directive = Self {
+            label,
+            label_source: Some(text.into()),
+            ..Self::new(name, children)
+        };
+        (directive, diagnostics)
+    }
+
+    /// The text [`ContainerDirective::with_source`] built the label from.
+    pub fn label_source(&self) -> Option<&str> {
+        self.label_source.as_deref()
+    }
+}
+
+/// The inlines `text` reads as, with the diagnostics of the read.
+fn read_source(text: &str, definitions: &Definitions) -> (Vec<Inline>, Vec<Diagnostic>) {
+    let output = crate::parse_inline(text, definitions);
+    (output.inlines, output.diagnostics)
 }
 
 impl Link {
@@ -1183,10 +1370,32 @@ impl List {
         Self {
             meta: NodeMeta::default(),
             ordered: false,
-            start: None,
             delimiter: ListDelimiter::Dash,
             tight: true,
             children: children.into_iter().collect(),
         }
+    }
+}
+
+impl ListItem {
+    /// An item holding `children`, with no task marker and no number.
+    pub fn new<I, T>(children: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Block>,
+    {
+        Self {
+            meta: NodeMeta::default(),
+            checked: None,
+            number: None,
+            children: children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl BlankLine {
+    /// A blank line.
+    pub fn new() -> Self {
+        Self::default()
     }
 }

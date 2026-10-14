@@ -8,6 +8,7 @@ mod compare;
 mod decode;
 mod entities;
 mod gemoji;
+mod leaves;
 mod memo;
 #[cfg(test)]
 mod test_support;

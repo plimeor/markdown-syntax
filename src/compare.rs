@@ -1,8 +1,8 @@
 //! The tree comparison round-trip checks use. Two trees are the same when
-//! they differ only in spans, in text one holds as an `Escape` or a
-//! `CharacterReference` and the other as plain text, in a heading's soft
-//! break that one holds where the other holds a space, and in where adjacent
-//! `Text` nodes split. The matches are exhaustive so a new node kind cannot
+//! they differ only in spans, in the text a leaf keeps, in text one holds as
+//! an `Escape` or a `CharacterReference` and the other as plain text, in a
+//! heading's soft break that one holds where the other holds a space, and in
+//! where adjacent `Text` nodes split. The matches are exhaustive so a new node kind cannot
 //! skip the normalization.
 
 use alloc::string::String;
@@ -38,10 +38,12 @@ fn normalize_blocks(blocks: &mut [Block]) {
         match block {
             Block::Paragraph(node) => {
                 clear(&mut node.meta);
+                node.source = None;
                 inlines(&mut node.children);
             }
             Block::Heading(node) => {
                 clear(&mut node.meta);
+                node.source = None;
                 normalize_inlines(&mut node.children, true);
             }
             Block::ThematicBreak(node) => clear(&mut node.meta),
@@ -82,18 +84,22 @@ fn normalize_blocks(blocks: &mut [Block]) {
                     clear(&mut row.meta);
                     for cell in &mut row.cells {
                         clear(&mut cell.meta);
+                        cell.source = None;
                         inlines(&mut cell.children);
                     }
                 }
             }
             Block::MathBlock(node) => clear(&mut node.meta),
             Block::Frontmatter(node) => clear(&mut node.meta),
+            Block::BlankLine(node) => clear(&mut node.meta),
             Block::LeafDirective(node) => {
                 clear(&mut node.meta);
+                node.label_source = None;
                 inlines(&mut node.label);
             }
             Block::ContainerDirective(node) => {
                 clear(&mut node.meta);
+                node.label_source = None;
                 inlines(&mut node.label);
                 normalize_blocks(&mut node.children);
             }

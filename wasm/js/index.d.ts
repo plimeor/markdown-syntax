@@ -29,7 +29,8 @@ export type Block =
   | MathBlock
   | Frontmatter
   | LeafDirective
-  | ContainerDirective;
+  | ContainerDirective
+  | BlankLine;
 
 export type Inline =
   | Text
@@ -75,11 +76,15 @@ export interface HtmlTag {
 
 export interface Paragraph extends Node<"paragraph"> {
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
+  source?: string;
 }
 export interface Heading extends Node<"heading"> {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
   kind: "atx" | "setext";
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
+  source?: string;
 }
 export interface ThematicBreak extends Node<"thematicBreak"> {
   marker: "dash" | "asterisk" | "underscore";
@@ -94,13 +99,14 @@ export interface Alert extends Node<"alert"> {
 }
 export interface List extends Node<"list"> {
   ordered: boolean;
-  start: number | null;
   delimiter: "dash" | "asterisk" | "plus" | "period" | "paren";
   tight: boolean;
   children: ListItem[];
 }
 export interface ListItem extends Node<"listItem"> {
   checked: boolean | null;
+  /** The item's number in an ordered list; null follows the previous item (1 for the first). */
+  number: number | null;
   children: Block[];
 }
 export interface CodeBlock extends Node<"codeBlock"> {
@@ -137,6 +143,8 @@ export interface TableRow extends Node<"tableRow"> {
 }
 export interface TableCell extends Node<"tableCell"> {
   children: Inline[];
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
+  source?: string;
 }
 export interface MathBlock extends Node<"mathBlock"> {
   value: string;
@@ -149,13 +157,19 @@ export interface LeafDirective extends Node<"leafDirective"> {
   name: string;
   label: Inline[];
   attributes: DirectiveAttribute[];
+  /** In a tree for `toMarkdown`: the text to build the label from; `label` is then ignored and may be `[]`. */
+  source?: string;
 }
 export interface ContainerDirective extends Node<"containerDirective"> {
   name: string;
   label: Inline[];
   attributes: DirectiveAttribute[];
   children: Block[];
+  /** In a tree for `toMarkdown`: the text to build the label from; `label` is then ignored and may be `[]`. */
+  source?: string;
 }
+/** A blank line beyond the one that separates two blocks. */
+export interface BlankLine extends Node<"blankLine"> {}
 
 export interface Text extends Node<"text"> {
   value: string;
@@ -278,9 +292,19 @@ export class ParsedDocument {
   readonly source: string;
   readonly tree: Document;
   readonly diagnostics: Diagnostic[];
+  /**
+   * The path and inline source of every leaf, in document order. A path is
+   * child indices from the document (a list item counts as its list's
+   * child); a table cell's is its table's, then its row's index and its own;
+   * a directive's label has its directive's path.
+   */
+  readonly leafSources: { path: number[]; source: InlineSource }[];
   /** The labels of the document's link reference definitions. */
   readonly definitions: string[];
-  /** The inline source of the paragraph or heading at `path`, or null. */
+  /**
+   * The inline source of the leaf at `path` (a paragraph, a heading, a table
+   * cell, or a directive's label), or null.
+   */
   inlineSource(path: number[]): InlineSource | null;
   /**
    * Writes `tree` with this document's source; `{ diagnostics }` when

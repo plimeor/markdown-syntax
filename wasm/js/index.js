@@ -26,8 +26,8 @@ const ENUMS = {
 // Each kind's wire number, name, and fields in the order of its Rust struct.
 const KINDS = [
   [0, "document", [["children", "blocks"]]],
-  [1, "paragraph", [["children", "inlines"]]],
-  [2, "heading", [["depth", "depth"], ["kind", "headingKind"], ["children", "inlines"]]],
+  [1, "paragraph", [["children", "leafInlines"]]],
+  [2, "heading", [["depth", "depth"], ["kind", "headingKind"], ["children", "leafInlines"]]],
   [3, "thematicBreak", [["marker", "thematicBreakMarker"]]],
   [4, "blockQuote", [["children", "blocks"]]],
   [5, "alert", [["kind", "alertKind"], ["title", "optionalString"], ["children", "blocks"]]],
@@ -36,7 +36,6 @@ const KINDS = [
     "list",
     [
       ["ordered", "boolean"],
-      ["start", "start"],
       ["delimiter", "listDelimiter"],
       ["tight", "boolean"],
       ["children", "items"],
@@ -60,15 +59,16 @@ const KINDS = [
   [12, "table", [["alignments", "alignments"], ["rows", "rows"]]],
   [13, "mathBlock", [["value", "string"]]],
   [14, "frontmatter", [["kind", "frontmatterKind"], ["value", "string"]]],
-  [15, "leafDirective", [["name", "string"], ["label", "inlines"], ["attributes", "attributes"]]],
+  [15, "leafDirective", [["name", "string"], ["label", "leafInlines"], ["attributes", "attributes"]]],
   [
     16,
     "containerDirective",
-    [["name", "string"], ["label", "inlines"], ["attributes", "attributes"], ["children", "blocks"]],
+    [["name", "string"], ["label", "leafInlines"], ["attributes", "attributes"], ["children", "blocks"]],
   ],
-  [30, "listItem", [["checked", "checked"], ["children", "blocks"]]],
+  [17, "blankLine", []],
+  [30, "listItem", [["checked", "checked"], ["number", "number"], ["children", "blocks"]]],
   [31, "tableRow", [["cells", "cells"]]],
-  [32, "tableCell", [["children", "inlines"]]],
+  [32, "tableCell", [["children", "leafInlines"]]],
   [40, "text", [["value", "string"]]],
   [41, "escape", [["value", "char"]]],
   [42, "characterReference", [["reference", "string"]]],
@@ -203,6 +203,10 @@ class Reader {
       case "rows":
       case "cells":
         return this.list(() => this.node());
+      case "leafInlines":
+        // A parsed leaf holds no source of its own.
+        this.optionalString();
+        return this.list(() => this.node());
       case "string":
         return this.string();
       case "optionalString":
@@ -217,7 +221,7 @@ class Reader {
         const state = this.word();
         return state === 0 ? null : state === 2;
       }
-      case "start": {
+      case "number": {
         if (this.word() === 0) return null;
         const low = this.word();
         return this.word() * 2 ** 32 + low;
@@ -243,6 +247,56 @@ class Reader {
       default:
         return ENUMS[type][this.word()];
     }
+  }
+
+  /**
+   * An inline source: its text, with `toSource(offset)` giving the source
+   * offset of a text offset and `spanToSource(span)` the source span of a
+   * text span, as the parser maps a leaf's spans.
+   */
+  inlineSource() {
+    const text = this.string();
+    const runs = () => {
+      const count = this.word();
+      const table = this.words.subarray(this.at, this.at + 2 * count);
+      this.at += 2 * count;
+      return table;
+    };
+    const starts = runs();
+    const ends = runs();
+    const check = (offset) => {
+      if (!Number.isInteger(offset) || offset < 0 || offset > text.length) {
+        throw new RangeError(`markdown-syntax: ${offset} is not an offset of the text`);
+      }
+    };
+    // The run holding `offset`, by binary search; an offset between the
+    // halves of a surrogate pair maps after the first.
+    const mapped = (table, offset) => {
+      let low = 0;
+      let high = table.length / 2 - 1;
+      while (low < high) {
+        const middle = (low + high + 1) >> 1;
+        if (table[2 * middle] <= offset) low = middle;
+        else high = middle - 1;
+      }
+      const [from, to] = [table[2 * low], table[2 * low + 1]];
+      return to === NO_SPAN ? mapped(table, offset - 1) + 1 : to + (offset - from);
+    };
+    return {
+      text,
+      toSource(offset) {
+        check(offset);
+        return mapped(starts, offset);
+      },
+      spanToSource(span) {
+        if (!Array.isArray(span) || span.length !== 2) {
+          throw new TypeError("markdown-syntax: a span is [from, to]");
+        }
+        span.forEach(check);
+        const from = mapped(starts, span[0]);
+        return [from, Math.max(from, mapped(ends, span[1]))];
+      },
+    };
   }
 
   diagnostics() {
@@ -353,6 +407,16 @@ function encodeField(writer, node, field, type, path) {
       return list(value, (child, index) =>
         encodeNode(writer, child, [...path, index], LISTS[type], `a ${field} entry`),
       );
+    case "leafInlines":
+      // A leaf may give its source in place of its inline content.
+      if (typeof node.source === "string") {
+        optionalString(node.source);
+        return writer.words.push(0);
+      }
+      optionalString(null);
+      return list(value, (child, index) =>
+        encodeNode(writer, child, [...path, index], LISTS.inlines, `a ${field} entry`),
+      );
     case "string":
       return string(value);
     case "optionalString":
@@ -372,7 +436,7 @@ function encodeField(writer, node, field, type, path) {
       if (value === null || value === undefined) return writer.words.push(0);
       if (typeof value !== "boolean") missing("a boolean or null");
       return writer.words.push(value ? 2 : 1);
-    case "start":
+    case "number":
       if (value === null || value === undefined) return writer.words.push(0);
       if (!Number.isSafeInteger(value) || value < 0) missing("a non-negative integer or null");
       return writer.words.push(1, value % 2 ** 32, Math.floor(value / 2 ** 32));
@@ -458,7 +522,7 @@ export class ParsedDocument {
   #handle;
   #definitions;
 
-  constructor(binding, handle, source, tree, diagnostics) {
+  constructor(binding, handle, source, tree, diagnostics, leafSources) {
     this.#binding = binding;
     this.#handle = handle;
     binding.track(this, handle);
@@ -468,6 +532,8 @@ export class ParsedDocument {
     this.tree = tree;
     /** The parser's diagnostics. */
     this.diagnostics = diagnostics;
+    /** The path and inline source of every leaf, in document order. */
+    this.leafSources = leafSources;
   }
 
   #live() {
@@ -483,10 +549,11 @@ export class ParsedDocument {
   }
 
   /**
-   * The inline content the parser read for the paragraph or heading at
-   * `path`, with `toSource(offset)` giving the source offset of a text
-   * offset and `spanToSource(span)` the source span of a text span, as the
-   * parser maps a leaf's spans; or null.
+   * The inline content the parser read for the leaf at `path` (a paragraph,
+   * a heading, a table cell, or a directive's label), with
+   * `toSource(offset)` giving the source offset of a text offset and
+   * `spanToSource(span)` the source span of a text span, as the parser maps
+   * a leaf's spans; or null.
    */
   inlineSource(path) {
     const handle = this.#live();
@@ -498,32 +565,7 @@ export class ParsedDocument {
       this.#binding.withBytes(bytes, (pointer, length) => exports.inline_source(handle, pointer, length)),
     );
     if (status === 0) return null;
-    const reader = new Reader(this.#binding.result());
-    const text = reader.string();
-    const starts = reader.words.slice(1, text.length + 2);
-    const ends = reader.words.slice(text.length + 2);
-    const check = (offset) => {
-      if (!Number.isInteger(offset) || offset < 0 || offset > text.length) {
-        throw new RangeError(`markdown-syntax: ${offset} is not an offset of the text`);
-      }
-    };
-    // An offset between the halves of a surrogate pair maps after the first.
-    const mapped = (table, offset) => (table[offset] === NO_SPAN ? table[offset - 1] + 1 : table[offset]);
-    return {
-      text,
-      toSource(offset) {
-        check(offset);
-        return mapped(starts, offset);
-      },
-      spanToSource(span) {
-        if (!Array.isArray(span) || span.length !== 2) {
-          throw new TypeError("markdown-syntax: a span is [from, to]");
-        }
-        span.forEach(check);
-        const from = mapped(starts, span[0]);
-        return [from, Math.max(from, mapped(ends, span[1]))];
-      },
-    };
+    return new Reader(this.#binding.result()).inlineSource();
   }
 
   /**
@@ -601,7 +643,11 @@ export class MarkdownSyntax {
     const reader = new Reader(this.result());
     const tree = reader.node();
     const diagnostics = reader.diagnostics();
-    return new ParsedDocument(this, handle, String(source), tree, diagnostics);
+    const leafSources = reader.list(() => ({
+      path: reader.list(() => reader.word()),
+      source: reader.inlineSource(),
+    }));
+    return new ParsedDocument(this, handle, String(source), tree, diagnostics, leafSources);
   }
 
   /**

@@ -58,11 +58,21 @@ function time(label, runs, work) {
 for (const [name, text] of await inputs()) {
   const runs = text.length > 10_000 ? 100 : 5_000;
   console.log(`${name}: ${new TextEncoder().encode(text).length} bytes, ${text.length} UTF-16 units`);
-  time("parse (tree and diagnostics)", runs, () => binding.parse(text).free());
+  time("parse (tree, diagnostics, leaves)", runs, () => binding.parse(text).free());
   time("parseInline", runs, () => binding.parseInline(text));
   const document = binding.parse(text);
   time("toMarkdown, untouched tree", runs, () => document.toMarkdown());
   const leaf = document.tree.children.findIndex((block) => block.type === "paragraph");
   if (leaf >= 0) time("inlineSource of a paragraph", runs, () => document.inlineSource([leaf]));
+  // A save that sends every leaf as its source text.
+  const saved = structuredClone(document.tree);
+  for (const { path, source } of document.leafSources) {
+    let node = saved;
+    for (const index of path) node = (node.rows ?? node.cells ?? node.children)[index];
+    if (node.type === "leafDirective" || node.type === "containerDirective") node.label = [];
+    else node.children = [];
+    node.source = source.text;
+  }
+  time("toMarkdown, every leaf as source", runs, () => document.toMarkdown(saved));
   document.free();
 }

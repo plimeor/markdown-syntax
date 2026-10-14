@@ -26,8 +26,10 @@ pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnosti
     read_document(lines, diagnostics, None)
 }
 
-/// The inline content the parser reads for each paragraph and heading of the
-/// document split into `lines`, with the span of its node, in document order.
+/// The inline content the parser reads for each leaf of the document split
+/// into `lines` (paragraphs, headings, table cells, and directive labels),
+/// with the span of its node (a label's is its directive's), in document
+/// order. The inlines themselves are not read.
 pub(super) fn leaf_contents(lines: &[Line<'_>]) -> Vec<(Span, DerivedText)> {
     let leaves = RefCell::new(Vec::new());
     read_document(lines, &mut Vec::new(), Some(&leaves));
@@ -328,7 +330,6 @@ enum Kind<'a> {
     },
     List {
         ordered: bool,
-        start: Option<u64>,
         delimiter: ListDelimiter,
     },
     Item {
@@ -336,6 +337,7 @@ enum Kind<'a> {
         /// a line continuing the item is indented.
         indent: usize,
         checked: Option<bool>,
+        number: Option<u64>,
     },
     ContainerDirective(Box<OpenDirective>),
     FootnoteDefinition {
@@ -449,7 +451,6 @@ enum Pending<'a> {
     List {
         span: Span,
         ordered: bool,
-        start: Option<u64>,
         delimiter: ListDelimiter,
         tight: bool,
         items: Vec<Child<'a>>,
@@ -457,6 +458,7 @@ enum Pending<'a> {
     Item {
         span: Span,
         checked: Option<bool>,
+        number: Option<u64>,
         children: Vec<Child<'a>>,
     },
     FootnoteDefinition {
@@ -826,7 +828,6 @@ impl<'a> BlockParser<'a> {
                 while cells.len() < table.alignments.len() {
                     cells.push(TableCellSource {
                         text: DerivedText::default(),
-                        escaped_pipes: Vec::new(),
                         span: Span::new(line.end, line.end),
                     });
                 }
@@ -1338,7 +1339,6 @@ impl<'a> BlockParser<'a> {
                     self.add_frame(
                         Kind::List {
                             ordered: marker.ordered,
-                            start: marker.start,
                             delimiter: marker.delimiter,
                         },
                         start,
@@ -1350,6 +1350,7 @@ impl<'a> BlockParser<'a> {
                     Kind::Item {
                         indent: marker.indent,
                         checked: None,
+                        number: marker.start,
                     },
                     start,
                     index,
@@ -1891,11 +1892,7 @@ impl<'a> BlockParser<'a> {
                     end: children_end,
                 }];
             }
-            Kind::List {
-                ordered,
-                start: number,
-                delimiter,
-            } => {
+            Kind::List { ordered, delimiter } => {
                 let tight = list_is_tight(&children);
                 let (first_line, last_line) = (
                     children.first().map_or(first_line, |item| item.first_line),
@@ -1912,7 +1909,6 @@ impl<'a> BlockParser<'a> {
                     block: Pending::List {
                         span: Span::new(span_start, children_end),
                         ordered,
-                        start: number,
                         delimiter,
                         tight,
                         items: children,
@@ -1922,11 +1918,14 @@ impl<'a> BlockParser<'a> {
                     end: children_end,
                 }];
             }
-            Kind::Item { checked, .. } => {
+            Kind::Item {
+                checked, number, ..
+            } => {
                 return alloc::vec![Child {
                     block: Pending::Item {
                         span: Span::new(start, children_end),
                         checked,
+                        number,
                         children,
                     },
                     first_line,
@@ -2157,7 +2156,12 @@ pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
         Block::Paragraph(_) | Block::Definition(_) | Block::Frontmatter(_) => false,
         Block::CodeBlock(node) => node.kind != CodeBlockKind::Indented,
         Block::List(list) => {
-            let number = list.ordered.then(|| list.start.unwrap_or(1));
+            let number = list.ordered.then(|| {
+                list.children
+                    .first()
+                    .and_then(|item| item.number)
+                    .unwrap_or(1)
+            });
             let blank = list
                 .children
                 .first()
@@ -2432,8 +2436,8 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 /// Parses the inline content of closed blocks.
 struct Finish<'o> {
     definitions: Labels<'o>,
-    /// Where each paragraph's and heading's inline content is kept, when
-    /// `leaf_contents` asks for it.
+    /// Where each leaf's inline content is kept, in place of its inlines,
+    /// when `leaf_contents` asks for it.
     leaves: Option<&'o RefCell<Vec<(Span, DerivedText)>>>,
 }
 
@@ -2442,18 +2446,21 @@ impl Finish<'_> {
         parse_inlines(&text.text, text.map(), Some(self.definitions), diagnostics)
     }
 
-    /// The inlines of the paragraph or heading at `span`, read from `text`.
+    /// The inlines of the leaf at `span` (a label's is its directive's), read
+    /// from `text`, or none when `text` is kept for `leaf_contents`.
     fn leaf_inlines(
         &self,
         span: Span,
         text: DerivedText,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Vec<Inline> {
-        let inlines = self.inlines(&text, diagnostics);
-        if let Some(leaves) = self.leaves {
-            leaves.borrow_mut().push((span, text));
+        match self.leaves {
+            Some(leaves) => {
+                leaves.borrow_mut().push((span, text));
+                Vec::new()
+            }
+            None => self.inlines(&text, diagnostics),
         }
-        inlines
     }
 
     fn blocks(&self, children: Vec<Child<'_>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
@@ -2477,6 +2484,7 @@ impl Finish<'_> {
                 Block::Paragraph(Paragraph {
                     meta: meta(span),
                     children: self.leaf_inlines(span, text, diagnostics),
+                    source: None,
                 })
             }
             Pending::Heading {
@@ -2489,6 +2497,7 @@ impl Finish<'_> {
                 depth,
                 kind,
                 children: self.leaf_inlines(span, text, &mut Vec::new()),
+                source: None,
             }),
             Pending::Table {
                 span,
@@ -2505,13 +2514,8 @@ impl Finish<'_> {
                             .into_iter()
                             .map(|cell| TableCell {
                                 meta: meta(cell.span),
-                                children: parse_cell_inlines(
-                                    &cell.text.text,
-                                    cell.text.map(),
-                                    cell.escaped_pipes,
-                                    Some(self.definitions),
-                                    diagnostics,
-                                ),
+                                children: self.leaf_inlines(cell.span, cell.text, diagnostics),
+                                source: None,
                             })
                             .collect(),
                     })
@@ -2539,14 +2543,12 @@ impl Finish<'_> {
             Pending::List {
                 span,
                 ordered,
-                start,
                 delimiter,
                 tight,
                 items,
             } => Block::List(List {
                 meta: meta(span),
                 ordered,
-                start,
                 delimiter,
                 tight,
                 children: items
@@ -2555,10 +2557,12 @@ impl Finish<'_> {
                         Pending::Item {
                             span,
                             checked,
+                            number,
                             children,
                         } => Some(ListItem {
                             meta: meta(span),
                             checked,
+                            number,
                             children: self.blocks(children, diagnostics),
                         }),
                         _ => None,
@@ -2607,9 +2611,10 @@ impl Finish<'_> {
                 meta: meta(span),
                 name,
                 label: label
-                    .map(|label| self.inlines(&label, diagnostics))
+                    .map(|label| self.leaf_inlines(span, label, diagnostics))
                     .unwrap_or_default(),
                 attributes,
+                label_source: None,
             }),
             Pending::ContainerDirective {
                 span,
@@ -2619,7 +2624,7 @@ impl Finish<'_> {
                 children,
             } => {
                 let label = label
-                    .map(|label| self.inlines(&label, diagnostics))
+                    .map(|label| self.leaf_inlines(span, label, diagnostics))
                     .unwrap_or_default();
                 Block::ContainerDirective(ContainerDirective {
                     meta: meta(span),
@@ -2627,6 +2632,7 @@ impl Finish<'_> {
                     label,
                     attributes,
                     children: self.blocks(children, diagnostics),
+                    label_source: None,
                 })
             }
         }

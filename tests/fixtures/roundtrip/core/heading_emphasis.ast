@@ -9,3 +9,4 @@ Document
     Strong delimiter=*
       Text "friends"
     Text "."
+  BlankLine
