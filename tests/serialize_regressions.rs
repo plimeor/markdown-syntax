@@ -244,10 +244,18 @@ mod value_encodings {
     // serialization: Table cells encoded by one rule
     #[test]
     fn a_text_pipe_in_a_cell_is_written_escaped() {
-        // The cell reads `\|` as an escaped pipe, which compares as text.
-        let document = document(vec![table(vec!["Text"], vec![vec![text("a|b")]])]);
+        // The cell reads `\|` as the `|` written.
+        let document = document(vec![table(vec!["h"], vec![vec![text("a|b")]])]);
         let markdown = rendered(&document);
-        assert_eq!(markdown, "| Text |\n| --- |\n| a\\|b |\n");
+        assert_eq!(markdown, "| h |\n| --- |\n| a\\|b |\n");
+        let reread = parse(&markdown).document;
+        let Block::Table(table) = &reread.children[0] else {
+            panic!("{reread:?}");
+        };
+        assert!(
+            matches!(table.rows[1].cells[0].children.as_slice(), [Inline::Text(text)] if text.value == "a|b"),
+            "{table:?}"
+        );
     }
 
     #[test]

@@ -43,6 +43,30 @@ built with a constructor SHALL take the default spelling: `*`, and no number.
 - **WHEN** `parse("1. a\n1. b")` runs
 - **THEN** both items record the number 1
 
+### Requirement: Source spans
+Every parsed node SHALL carry an absolute, half-open UTF-8 byte range into the
+original input; hand-built nodes SHALL carry `None`; `LineIndex` SHALL convert a
+span to 1-based line and column positions. A parsed node's span SHALL end
+after the source byte where its last character was read, and SHALL start at
+the source byte where its first character was read, or for a block, where its
+first line starts after the markers and indentation of the containers around
+it; a task item's checkbox and the space or tab after it count as part of the
+item's marker. A `BlankLine`'s span SHALL be its line with its line ending,
+from the line's start, or from where its container starts when that container
+opens on the same line. This SHALL hold wherever the parser removes indentation,
+container markers, or table-cell padding before reading a line, or joins lines
+whose source line ending is `\r\n`; a space the parser produces by splitting a
+tab SHALL map to that tab. The span of a parsed emphasis-like container
+(`Emphasis`, `Strong`, `Delete`, or `Mark`) SHALL run from the first character
+of the delimiters that open it to the last character of the delimiters that
+close it. Every parsed node's span SHALL lie on UTF-8 character boundaries
+within the input and within the span of the node that contains it, and the
+spans of a node's children SHALL be in source order and SHALL NOT overlap.
+
+#### Scenario: Blank line in a nested quote
+- **WHEN** `parse("> >\n> > d")` runs
+- **THEN** the inner block quote opens with a `BlankLine` spanning bytes 2..4
+
 ### Requirement: Inline source of a leaf block
 For a document with a source, `document.inline_source(path)` SHALL return, for
 the paragraph, heading, table cell, or leaf or container directive label at

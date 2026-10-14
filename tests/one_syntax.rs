@@ -154,6 +154,18 @@ fn build_layer_round_trips() {
     ]);
     // Hand-built nodes carry no span.
     assert_eq!(document.children[0].span(), None);
+    let item = ListItem::new([Paragraph::new([Text::from("a")])]);
+    assert_eq!(
+        (item.meta.span, item.checked, item.number),
+        (None, None, None)
+    );
+    assert_eq!(BlankLine::new().meta.span, None);
+    assert_eq!(TableCell::new([Text::from("c")]).children.len(), 1);
+    let leaf = LeafDirective::new("x");
+    assert!(leaf.label.is_empty() && leaf.attributes.is_empty());
+    let container = ContainerDirective::new("y", vec![BlankLine::new().into()]);
+    assert!(container.label.is_empty() && container.attributes.is_empty());
+    assert_eq!(container.children.len(), 1);
     assert_eq!(
         document.to_markdown().unwrap(),
         "# Title\n\nhello #ai/agents\n"

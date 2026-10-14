@@ -298,7 +298,8 @@ impl InlineSource {
 }
 
 /// Maps the spans of `inlines`, read from `source.text`, to the source, as
-/// the parser maps a leaf's inlines. For tests.
+/// the parser maps a leaf's inlines. The writer uses it; it is public for
+/// tests.
 #[doc(hidden)]
 pub fn inline_spans_to_source(source: &InlineSource, inlines: &mut [Inline]) {
     source_map::translate_inlines(&source.map, inlines, &mut []);

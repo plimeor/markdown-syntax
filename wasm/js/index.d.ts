@@ -76,14 +76,14 @@ export interface HtmlTag {
 
 export interface Paragraph extends Node<"paragraph"> {
   children: Inline[];
-  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
   source?: string;
 }
 export interface Heading extends Node<"heading"> {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
   kind: "atx" | "setext";
   children: Inline[];
-  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
   source?: string;
 }
 export interface ThematicBreak extends Node<"thematicBreak"> {
@@ -143,7 +143,7 @@ export interface TableRow extends Node<"tableRow"> {
 }
 export interface TableCell extends Node<"tableCell"> {
   children: Inline[];
-  /** In a tree for `toMarkdown`: the text to build the content from, in place of `children`. */
+  /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
   source?: string;
 }
 export interface MathBlock extends Node<"mathBlock"> {
@@ -157,7 +157,7 @@ export interface LeafDirective extends Node<"leafDirective"> {
   name: string;
   label: Inline[];
   attributes: DirectiveAttribute[];
-  /** In a tree for `toMarkdown`: the text to build the label from, in place of `label`. */
+  /** In a tree for `toMarkdown`: the text to build the label from; `label` is then ignored and may be `[]`. */
   source?: string;
 }
 export interface ContainerDirective extends Node<"containerDirective"> {
@@ -165,7 +165,7 @@ export interface ContainerDirective extends Node<"containerDirective"> {
   label: Inline[];
   attributes: DirectiveAttribute[];
   children: Block[];
-  /** In a tree for `toMarkdown`: the text to build the label from, in place of `label`. */
+  /** In a tree for `toMarkdown`: the text to build the label from; `label` is then ignored and may be `[]`. */
   source?: string;
 }
 /** A blank line beyond the one that separates two blocks. */

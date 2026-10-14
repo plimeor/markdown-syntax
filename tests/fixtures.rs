@@ -808,8 +808,11 @@ fn moved_blocks_read_back() {
     );
 }
 
-/// Every paragraph and heading of the corpus reads again from its inline
-/// source as the document holds it (`inline_source.rs`).
+/// Every leaf of the corpus reads again from its inline source as the
+/// document holds it, and `leaf_sources` returns the same sources
+/// (`inline_source.rs`).
+// public-api: Inline source of a leaf block
+// public-api: Leaf sources
 #[test]
 fn leaves_read_again_from_their_inline_source() {
     let mut leaves_read = 0;
@@ -967,6 +970,10 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
         "Foo *bar baz*\n=============\n",
     ),
     ("- a\n  - ---", "- a\n  - - -\n"),
+    // A quote opening mid-line keeps its blank first line.
+    ("> >\n> > d", "> >\n> > d\n"),
+    ("- >\n  >\n  > b", "- >\n  >\n  > b\n"),
+    ("\u{feff}>\n> a", ">\n> a\n"),
     // Indented code opening a nested item stays on the marker line.
     ("- a\n  -     x", "- a\n  -     x\n"),
     ("1. a\n   1.     x\n          y", "1. a\n   1.     x\n          y\n"),

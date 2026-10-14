@@ -47,7 +47,8 @@ after the last when that block is one of them; and SHALL write every other
 block as canonical output, with a blank line on each side. A node corresponds
 to a base node of its kind when their spans and their own fields are equal
 and their children correspond pairwise; a leaf with its own source
-(`with_source`) whose inlines are the ones it was built from corresponds when
+(`with_source`) whose inlines are the ones `parse_inline` reads from that
+source with the definitions of the document being written corresponds when
 that source equals the base leaf's inline source, and is written as that
 source wherever it is written, except that an ATX heading, a table cell, or
 a directive label whose source holds a line ending is written from its

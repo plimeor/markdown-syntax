@@ -27,8 +27,9 @@ a 2000-item list.
   number, which replaces `List::start`
 - `public-api` › Inline source of a leaf block: modified — answers for table
   cells and directive labels
-- `public-api` › Hand construction: modified — `ListItem::new` and
-  `BlankLine::new`
+- `public-api` › Hand construction: modified — `new` for `ListItem`,
+  `BlankLine`, `TableCell`, and the two directives, whose private source
+  fields rule out struct literals
 - `inline-syntax` › Escapes and character references are nodes: modified —
   `\|` in a table cell reads as text
 - `untrusted-input-cost` › Linear time: modified — covers `leaf_sources` and

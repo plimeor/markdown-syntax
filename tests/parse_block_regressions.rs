@@ -2484,6 +2484,41 @@ mod blank_lines_and_numbers {
             [Block::Paragraph(_), Block::BlankLine(_)]
         ));
         assert_eq!(list.children[0].meta.span, Some(Span::new(0, 6)));
+        let empty = parse("-\n\n\n- b").document;
+        let [Block::List(list)] = empty.children.as_slice() else {
+            panic!("{:?}", empty.children);
+        };
+        assert!(list.children[0].children.is_empty());
+    }
+
+    // block-syntax: Blank lines are nodes
+    // public-api: Source spans
+    #[test]
+    fn a_quote_opening_mid_line_keeps_its_blank_first_line() {
+        for (input, first) in [
+            ("> >\n> > d", Span::new(2, 4)),
+            ("- >\n  >\n  > b", Span::new(2, 4)),
+            ("\u{feff}>\n> a", Span::new(3, 5)),
+        ] {
+            let document = parse(input).document;
+            let mut blocks = document.children.as_slice();
+            let quote = loop {
+                match blocks {
+                    [Block::BlockQuote(quote)]
+                        if !matches!(quote.children.as_slice(), [Block::BlockQuote(_)]) =>
+                    {
+                        break quote
+                    }
+                    [Block::BlockQuote(quote)] => blocks = &quote.children,
+                    [Block::List(list)] => blocks = &list.children[0].children,
+                    other => panic!("{input:?}: {other:?}"),
+                }
+            };
+            let Some(Block::BlankLine(blank)) = quote.children.first() else {
+                panic!("{input:?}: {:?}", quote.children);
+            };
+            assert_eq!(blank.meta.span, Some(first), "{input:?}");
+        }
     }
 
     // public-api: Recorded syntax forms

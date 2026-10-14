@@ -109,6 +109,16 @@ impl<'a> Lines<'a> {
         blank
     }
 
+    /// The rest of the line `from` falls inside, from `from` with its line
+    /// ending, when it ends at or before `to`; `None` when `from` starts a
+    /// line.
+    fn rest_of_line(&self, from: usize, to: usize) -> Option<Span> {
+        let next = self.starts.partition_point(|&start| start <= from);
+        let end = *self.starts.get(next)?;
+        let starts_a_line = next > 0 && self.starts[next - 1] == from;
+        (!starts_a_line && end <= to && from < end).then(|| Span::new(from, end))
+    }
+
     /// Adds the blank lines of `blocks`, the children of a container whose
     /// content lies in `region`, and of every container they hold.
     fn fill(&self, blocks: &mut Vec<Block>, region: Span, edges: Edges) {
@@ -121,8 +131,20 @@ impl<'a> Lines<'a> {
         }
         let mut gaps: Vec<(usize, Vec<Span>)> = Vec::new();
         let mut from = region.start;
+        // A container that opens inside a line (a block quote after a list
+        // marker or another quote's `>`) holds the rest of that line as its
+        // first line.
+        let head = self
+            .rest_of_line(from, spans.first().map_or(region.end, |span| span.start))
+            .filter(|rest| is_blank(&self.input[rest.start..rest.end]));
+        if let Some(rest) = head {
+            from = rest.end;
+        }
         for (index, span) in spans.iter().enumerate() {
             let mut blank = self.blank_in(from, span.start);
+            if index == 0 {
+                blank.splice(0..0, head);
+            }
             let edge = if index == 0 {
                 edges.leading
             } else {
@@ -135,6 +157,9 @@ impl<'a> Lines<'a> {
             from = span.end;
         }
         let mut blank = self.blank_in(from, region.end);
+        if spans.is_empty() {
+            blank.splice(0..0, head);
+        }
         keep(
             &mut blank,
             if spans.is_empty() {

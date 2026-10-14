@@ -11,7 +11,9 @@ before a document's first block, at the start or end of a block quote, alert,
 HTML container, or container directive, and after a document's last line
 ending SHALL yield one node each, and after frontmatter K − 1. Blank lines
 after the last block of a list item or footnote definition SHALL belong to
-the container holding the list or definition. A blank line inside fenced code,
+the container holding the list or definition. Blank lines between an empty
+list item and the next item SHALL yield no node, since no blank line can be
+written in an empty item. A blank line inside fenced code,
 an HTML block, or a math block SHALL stay part of its value.
 
 #### Scenario: Extra blank lines between paragraphs

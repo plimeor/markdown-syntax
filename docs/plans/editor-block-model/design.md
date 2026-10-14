@@ -95,9 +95,12 @@ canonical round trips unstable.
 | At the start or end of a block quote, alert, HTML container, or container directive (`>` lines, or blank lines inside the tags or fences) | K |
 | Between two items of a list | K − 1, at the end of the earlier item's children |
 | After the last block of a list item or footnote definition | to the container that holds the list or definition |
+| After an empty list item, before the next item | none (an empty item can hold no blank line) |
 | A document of only blank lines | one node per line |
 
-- A `BlankLine`'s span is its line, with its line ending.
+- A `BlankLine`'s span is its line, with its line ending, from the line's
+  start, or from where its container starts when the container opens
+  mid-line (`> >` with nothing after it, a quote after a byte order mark).
 - A `BlankLine` is written as one line holding the container prefix with its
   trailing whitespace removed (`>` in a block quote, nothing in a list item).
 - Between items, one blank line still makes the list loose. `- a\n\n\n- b`

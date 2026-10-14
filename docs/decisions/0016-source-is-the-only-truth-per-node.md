@@ -108,7 +108,8 @@ must stay literal is built as `Escape` nodes.
 
 - Lazy continuation lines, indentation widths, and a code span's fence
   length and padding survive wherever source is reused; rendered nodes get
-  the standard rules. Blank-line counts survive everywhere.
+  the standard rules. Blank-line counts survive everywhere a blank line can
+  be written; the blank lines after an empty list item are not nodes.
 - An unedited parse writes its source byte for byte by construction, so a
   round trip through the source proves nothing; canonical round-trip tests
   write documents without their source.
