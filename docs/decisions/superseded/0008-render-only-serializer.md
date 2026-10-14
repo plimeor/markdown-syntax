@@ -1,6 +1,6 @@
 # 0008: A render-only serializer
 
-Status: Accepted
+Status: Superseded by 0013
 Date: 2026-10-07
 
 ## Context

@@ -8,10 +8,9 @@ use markdown_syntax::*;
 /// `document` normalized as [`normalized`] normalizes its blocks.
 #[allow(dead_code)]
 pub(crate) fn normalized_document(document: &Document) -> Document {
-    Document {
-        children: normalized(&document.children),
-        ..document.clone()
-    }
+    let mut normalized_document = Document::new(normalized(&document.children));
+    normalized_document.meta = document.meta.clone();
+    normalized_document
 }
 
 /// `blocks` with spans cleared, escapes and character references read as

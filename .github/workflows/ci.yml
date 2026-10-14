@@ -28,6 +28,22 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  wasm:
+    name: wasm binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The encoding's unit tests run on the host.
+      - run: cargo test -p markdown-syntax-wasm
+      - run: cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown --profile wasm
+      - run: node --test 'wasm/js/test/*.test.mjs'
+
 # Deferred — NOT gates yet:
 #  - `cargo clippy -- -D warnings`: the crate has pre-existing clippy warnings;
 #    clean them before adding this as a blocking gate.

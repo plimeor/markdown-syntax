@@ -6,6 +6,9 @@
 #[path = "support/normalize.rs"]
 mod normalize;
 
+#[path = "support/leaves.rs"]
+mod leaves;
+
 use markdown_syntax::parse;
 
 /// A small deterministic xorshift generator, so failures reproduce.
@@ -151,7 +154,7 @@ const INPUTS_PER_GENERATOR: usize = 2_000;
 /// reason.
 ///
 /// Each difference is whitespace or a blank line that the AST does not
-/// record, as decision 0008 (Consequences) accepts.
+/// record, as decision 0013 (Consequences) accepts.
 const NOT_READING_BACK: &[(&str, &str)] = &[
     (
         "__$$++\t\\\t\n}$==",
@@ -185,11 +188,11 @@ fn generated(pieces: &[&str], max_pieces: usize, seed: u64) -> Vec<String> {
 /// Whether `input` reads back: its Markdown parses as the same tree, and
 /// serializes to the same Markdown again. Panics if it does not serialize.
 fn reads_back(input: &str) -> Result<(), String> {
-    let document = parse(input).document;
+    let document = parse(input).document.without_source();
     let markdown = document
         .to_markdown()
         .unwrap_or_else(|error| panic!("{input:?}: {error:?}"));
-    let reparsed = parse(&markdown).document;
+    let reparsed = parse(&markdown).document.without_source();
     if normalize::normalized(&reparsed.children) != normalize::normalized(&document.children) {
         return Err(format!("{input:?} -> {markdown:?}"));
     }
@@ -219,6 +222,26 @@ fn generated_documents_round_trip() {
     for (listed, _) in NOT_READING_BACK {
         if !listed_seen.iter().any(|seen| seen == listed) {
             failures.push(format!("{listed:?}: listed, but not generated"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Every paragraph and heading of the generated documents reads again from
+/// its inline source as the document holds it (`inline_source.rs`).
+#[test]
+fn generated_leaves_read_again_from_their_inline_source() {
+    let mut failures = Vec::new();
+    for &(generator, pieces, max_pieces, seed) in GENERATORS {
+        for input in generated(pieces, max_pieces, seed) {
+            if let Err(failure) = leaves::leaves_reproduce(&input) {
+                failures.push(format!("{generator} {failure}"));
+            }
         }
     }
     assert!(

@@ -7,7 +7,7 @@
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use markdown_syntax::{parse, Block, Document, Inline};
+use markdown_syntax::{parse, parse_inline, Block, Definitions, Document, Inline};
 
 /// Generous for an unoptimized build; every input below parses in
 /// milliseconds when parsing is linear. It catches a hang; growth is checked
@@ -32,7 +32,8 @@ fn one_at_a_time() -> MutexGuard<'static, ()> {
 const STACK_BYTES: usize = 2 << 20;
 
 /// Parses `input` on a small-stack thread, serializes and validates the
-/// result there, and returns the document.
+/// result there, parses it again as one leaf block's inline content, and
+/// returns the document.
 fn parse_bounded(name: &str, input: String) -> Document {
     let thread_name = name.to_owned();
     let document = std::thread::Builder::new()
@@ -41,8 +42,9 @@ fn parse_bounded(name: &str, input: String) -> Document {
         .spawn(move || {
             let started = Instant::now();
             let document = parse(&input).document;
-            let _ = document.to_markdown();
+            let _ = document.clone().without_source().to_markdown();
             let _ = document.validate();
+            let _ = parse_inline(&input, &Definitions::of(&document));
             (document, started.elapsed())
         })
         .expect("spawn parse thread")
@@ -503,8 +505,10 @@ fn parse_input(input: &impl AsRef<str>) {
     let _ = parse(input.as_ref());
 }
 
+/// The document parsed from `input`, without its source, so that writing it
+/// runs the canonical writer.
 fn parse_document(input: String) -> Document {
-    parse(&input).document
+    parse(&input).document.without_source()
 }
 
 fn serialize(document: &Document) {
@@ -512,7 +516,11 @@ fn serialize(document: &Document) {
 }
 
 fn parse_and_serialize(input: &impl AsRef<str>) {
-    assert!(parse(input.as_ref()).document.to_markdown().is_ok());
+    assert!(parse(input.as_ref())
+        .document
+        .without_source()
+        .to_markdown()
+        .is_ok());
 }
 
 #[test]

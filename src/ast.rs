@@ -4,7 +4,7 @@
 //! enums; everything else is a concrete node struct or a small enum describing
 //! a node's variant.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::span::Span;
 
@@ -22,13 +22,86 @@ impl NodeMeta {
     }
 }
 
-/// The root of a parsed document: a sequence of top-level [`Block`]s.
+/// The root of a document: a sequence of top-level [`Block`]s, and for a
+/// parsed document the source it was parsed from.
+///
+/// The source is the only truth: writing a parsed document back with
+/// [`Document::to_markdown`] reuses the source of every top-level block that
+/// did not change. Only [`parse()`](crate::parse()) gives a document a
+/// source; [`Document::without_source`] drops it, and a document without one
+/// is written as canonical Markdown.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Document {
     /// Node metadata (source span).
     pub meta: NodeMeta,
     /// The document's top-level blocks, in source order.
     pub children: Vec<Block>,
+    /// The input `parse` read, shared by clones.
+    source: Option<Arc<str>>,
+}
+
+impl Document {
+    /// A document holding `children` and no source.
+    pub fn new(children: Vec<Block>) -> Self {
+        Self {
+            meta: NodeMeta::default(),
+            children,
+            source: None,
+        }
+    }
+
+    /// The document `parse` returns: `children` read from `source`.
+    pub(crate) fn parsed(meta: NodeMeta, children: Vec<Block>, source: &str) -> Self {
+        Self {
+            meta,
+            children,
+            source: Some(Arc::from(source)),
+        }
+    }
+
+    /// The input this document was parsed from, or `None` for a document
+    /// built by hand or returned by [`Document::without_source`].
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+
+    /// This document without its source; writing it gives canonical
+    /// Markdown.
+    #[must_use]
+    pub fn without_source(mut self) -> Self {
+        self.source = None;
+        self
+    }
+}
+
+impl From<Vec<Block>> for Document {
+    fn from(children: Vec<Block>) -> Self {
+        Self::new(children)
+    }
+}
+
+/// Child indices from a document down to one node. A list's children are its
+/// items, a table's are its rows, and a row's are its cells; every other
+/// container's are its blocks.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NodePath(pub Vec<usize>);
+
+impl From<Vec<usize>> for NodePath {
+    fn from(indices: Vec<usize>) -> Self {
+        Self(indices)
+    }
+}
+
+impl From<&[usize]> for NodePath {
+    fn from(indices: &[usize]) -> Self {
+        Self(indices.into())
+    }
+}
+
+impl<const N: usize> From<[usize; N]> for NodePath {
+    fn from(indices: [usize; N]) -> Self {
+        Self(indices.into())
+    }
 }
 
 /// A block-level node: the building blocks of a document's vertical structure.

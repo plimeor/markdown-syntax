@@ -1,6 +1,6 @@
 # 0007: One normative syntax
 
-Status: Accepted
+Status: Superseded by 0012
 Date: 2026-10-07
 Supersedes: 0005
 

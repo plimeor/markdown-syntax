@@ -2,13 +2,15 @@
 
 ## Purpose
 
-Turning a `Document`, parsed or hand-built, into canonical Markdown text. Owned
-by `src/serialize.rs`.
+Turning a `Document`, parsed or hand-built, into Markdown text: the source of
+what a parsed document left unchanged, and canonical Markdown for the rest.
+Owned by `src/serialize.rs`.
 
 ## Requirements
 
 ### Requirement: Canonical output
-`Document::to_markdown` SHALL emit canonical Markdown: for each construct, the
+`Document::to_markdown` SHALL emit canonical Markdown for every node it does
+not take from the source as "Unchanged source is kept" states: for each construct, the
 spelling the AST records for it, such as a list marker, a fence's char and
 length, a heading's style, a reference's kind, an emphasis or strong
 delimiter, an autolink's form, an escaped char, a character reference as written,
@@ -16,34 +18,35 @@ a wiki link's target and label as written, or a wiki link's embed mark, or else 
 details the AST does not record.
 
 #### Scenario: Paragraph and heading
-- **WHEN** `parse("# Title\n\nHello *world*.").document.to_markdown()` runs
+- **WHEN** `parse("# Title\n\nHello *world*.").document.without_source().to_markdown()` runs
 - **THEN** it returns `"# Title\n\nHello *world*.\n"`
 
 #### Scenario: Marker the AST records
-- **WHEN** `parse("+ a").document.to_markdown()` runs
+- **WHEN** `parse("+ a").document.without_source().to_markdown()` runs
 - **THEN** it returns `"+ a\n"`
 
 #### Scenario: Delimiters the AST records
-- **WHEN** `parse("_a_ __b__").document.to_markdown()` runs
+- **WHEN** `parse("_a_ __b__").document.without_source().to_markdown()` runs
 - **THEN** it returns `"_a_ __b__\n"`
 
 #### Scenario: Escape the author wrote
-- **WHEN** `parse("a\\.b \\#tag").document.to_markdown()` runs
+- **WHEN** `parse("a\\.b \\#tag").document.without_source().to_markdown()` runs
 - **THEN** it returns `"a\\.b \\#tag\n"`
 
 #### Scenario: Character reference the author wrote
-- **WHEN** `parse("&#35;tag &amp; x").document.to_markdown()` runs
+- **WHEN** `parse("&#35;tag &amp; x").document.without_source().to_markdown()` runs
 - **THEN** it returns `"&#35;tag &amp; x\n"`
 
 #### Scenario: Wiki embed
-- **WHEN** `parse("see ![[x.png]]").document.to_markdown()` runs
+- **WHEN** `parse("see ![[x.png]]").document.without_source().to_markdown()` runs
 - **THEN** it returns `"see ![[x.png]]\n"`
 
 ### Requirement: Round-trip stability
-For a parsed document, parsing the Markdown that `to_markdown` writes SHALL
+For a parsed document without its source, parsing the Markdown that
+`to_markdown` writes SHALL
 yield a document equal to the first as "Tree comparison" defines, and
 serializing that reparsed document SHALL yield the same text byte for byte,
-unless the source holds a detail the AST does not record (decision 0008): a
+unless the source holds a detail the AST does not record (decision 0013): a
 lazy continuation line, an indentation width, or a count of blank lines.
 
 The tests check serialization one flow at a time, each against one oracle:
@@ -68,11 +71,11 @@ the AST does not record that makes it read back as a different tree, and
 fails when a listed input reads back or no longer exists.
 
 #### Scenario: Source read-back corpus
-- **WHEN** each input of the read-back corpus is parsed, serialized, reparsed, and serialized again
+- **WHEN** each input of the read-back corpus is parsed, serialized without its source, reparsed, and serialized again
 - **THEN** the reparsed AST matches the first and the two serialized texts are identical, unless `NOT_READING_BACK` in `tests/fixtures.rs` lists the input
 
 #### Scenario: Lazy continuation line
-- **WHEN** the document parsed from `"> a\n==="` is serialized
+- **WHEN** the document parsed from `"> a\n==="`, without its source, is serialized
 - **THEN** `to_markdown()` returns `"> a\n> ===\n"`, which reads back as a heading inside the quote, and `NOT_READING_BACK` lists the input as a lazy line
 
 #### Scenario: Stale exception
@@ -96,23 +99,23 @@ ordered list. Options SHALL be constructed by mutating
 `SerializeOptions::default()`.
 
 #### Scenario: CRLF without final newline
-- **WHEN** `parse("# Title").document.to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
+- **WHEN** `parse("# Title").document.without_source().to_markdown_with(&options)` runs with `line_ending = LineEnding::CrLf` and `final_newline = false`
 - **THEN** it returns `"# Title"`
 
 #### Scenario: Bullet override
-- **WHEN** `parse("- a\n\n+ b\n\n* c").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Plus)`
+- **WHEN** `parse("- a\n\n+ b\n\n* c").document.without_source().to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Plus)`
 - **THEN** it returns `"+ a\n\n- b\n\n+ c\n"`
 
 #### Scenario: Normalizing to the dash
-- **WHEN** `parse("* a").document.to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Dash)`
+- **WHEN** `parse("* a").document.without_source().to_markdown_with(&options)` runs with `bullet = Some(BulletMarker::Dash)`
 - **THEN** it returns `"- a\n"`
 
 #### Scenario: Tilde fences
-- **WHEN** `parse("```\na\n```").document.to_markdown_with(&options)` runs with `fence_marker = Some(FenceMarker::Tilde)`
+- **WHEN** `parse("```\na\n```").document.without_source().to_markdown_with(&options)` runs with `fence_marker = Some(FenceMarker::Tilde)`
 - **THEN** it returns `"~~~\na\n~~~\n"`
 
 #### Scenario: Recorded markers by default
-- **WHEN** `parse("* a\n\n~~~\nb\n~~~").document.to_markdown()` runs
+- **WHEN** `parse("* a\n\n~~~\nb\n~~~").document.without_source().to_markdown()` runs
 - **THEN** it returns `"* a\n\n~~~\nb\n~~~\n"`
 
 ### Requirement: Invalid documents are rejected
@@ -132,10 +135,11 @@ document is written.
 ### Requirement: No HTML filtering or style preservation
 The serializer SHALL write raw HTML node values as they are, without safety
 filtering, and SHALL NOT recover source spelling that the AST does not
-record.
+record, except by taking unchanged source as "Unchanged source is kept"
+states.
 
 #### Scenario: Raw HTML passes through
-- **WHEN** `parse("<script>alert(1)</script>").document.to_markdown()` runs
+- **WHEN** `parse("<script>alert(1)</script>").document.without_source().to_markdown()` runs
 - **THEN** the output contains `<script>alert(1)</script>`
 
 ### Requirement: Tree comparison
@@ -154,12 +158,12 @@ nodes.
 - **THEN** `to_markdown()` returns `"ab\n"` and the reparsed `Text("ab")` compares equal to the original
 
 #### Scenario: Soft break in a heading
-- **WHEN** the document parsed from `"a\nb\n==="` is serialized and reparsed
+- **WHEN** the document parsed from `"a\nb\n==="`, without its source, is serialized and reparsed
 - **THEN** the reparsed heading holding `Text("a b")` compares equal to the parsed one
 
 ### Requirement: Rendering only
-`Document::to_markdown` SHALL produce its output from the document and the
-options alone, by fixed rules, without parsing the output; when the output
+`Document::to_markdown` SHALL produce its output from the document, its kept
+source, and the options alone, by fixed rules, without parsing the output; when the output
 would read back as a different tree, it SHALL still return it.
 
 #### Scenario: Text that reads as syntax
@@ -167,7 +171,7 @@ would read back as a different tree, it SHALL still return it.
 - **THEN** `to_markdown()` returns `"==a==\n"`, which reads back as a `Mark`
 
 #### Scenario: Recorded delimiters reproduce the source
-- **WHEN** the document parsed from `"__#$***~**b~**__|#"` is serialized
+- **WHEN** the document parsed from `"__#$***~**b~**__|#"`, without its source, is serialized
 - **THEN** `to_markdown()` returns `"__#$***~**b~**__|#\n"`
 
 ### Requirement: Text is written as recorded
@@ -181,11 +185,11 @@ encoding adds before pipes.
 - **THEN** `to_markdown()` returns `"*not emphasis*\n"`
 
 #### Scenario: Backticks
-- **WHEN** ``parse("Test \\`hello world` here.").document.to_markdown()`` runs
+- **WHEN** ``parse("Test \\`hello world` here.").document.without_source().to_markdown()`` runs
 - **THEN** it returns ``"Test \\`hello world` here.\n"``, the second backtick written raw
 
 #### Scenario: Unpaired delimiters
-- **WHEN** `parse("x_y_ a*b x^2 ~5").document.to_markdown()` runs
+- **WHEN** `parse("x_y_ a*b x^2 ~5").document.without_source().to_markdown()` runs
 - **THEN** it returns `"x_y_ a*b x^2 ~5\n"`
 
 ### Requirement: Table cells encoded by one rule
@@ -200,7 +204,7 @@ escaped `|`, which it also is outside a cell. The rule covers every inline
 alike: a `Text` holding `|` is written with `\|`.
 
 #### Scenario: Escaped pipe written once
-- **WHEN** `parse("| a\\|b |\n| - |").document.to_markdown()` runs
+- **WHEN** `parse("| a\\|b |\n| - |").document.without_source().to_markdown()` runs
 - **THEN** it returns `"| a\\|b |\n| --- |\n"`
 
 #### Scenario: Pipe in hand-built text
@@ -222,22 +226,22 @@ with the item's or definition's content indentation; it SHALL NOT write a lazy
 continuation line.
 
 #### Scenario: Lazy line in a quote
-- **WHEN** `parse("> a\nb").document.to_markdown()` runs
+- **WHEN** `parse("> a\nb").document.without_source().to_markdown()` runs
 - **THEN** it returns `"> a\n> b\n"`
 
 #### Scenario: Code span across a lazy delimiter-row line
-- **WHEN** the document parsed from ``"> `|a\n|-|-|\nb`"`` is serialized
+- **WHEN** the document parsed from ``"> `|a\n|-|-|\nb`"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"> `|a |-|-| b`\n"``, which reads back as the same tree
 
 #### Scenario: HTML block ending in an empty line inside a quote
-- **WHEN** `parse("> <!--\n>\n\nx").document.to_markdown()` runs
+- **WHEN** `parse("> <!--\n>\n\nx").document.without_source().to_markdown()` runs
 - **THEN** it returns `"> <!--\n>\n\nx\n"`: the HTML block's empty last line keeps its `>`
 
 ### Requirement: Heading soft breaks
 The serializer SHALL write a `SoftBreak` inside a heading as one space.
 
 #### Scenario: Setext heading on two lines
-- **WHEN** `parse("a\nb\n===").document.to_markdown()` runs
+- **WHEN** `parse("a\nb\n===").document.without_source().to_markdown()` runs
 - **THEN** it returns `"a b\n===\n"`
 
 #### Scenario: Hand-built ATX heading
@@ -250,7 +254,7 @@ of `#` that is all of the content or follows a space or a tab with a closing
 sequence ` #` after it, so the run reads back as content.
 
 #### Scenario: Heading ending in a hash
-- **WHEN** `parse("# C # #").document.to_markdown()` runs
+- **WHEN** `parse("# C # #").document.without_source().to_markdown()` runs
 - **THEN** it returns `"# C # #\n"`, which reads back as a heading holding `Text("C #")`
 
 #### Scenario: Heading of hashes
@@ -265,35 +269,35 @@ value, whitespace at the ends of an info string or in a bare destination as
 character references, and a value's own line endings as they are.
 
 #### Scenario: Empty fenced code block
-- **WHEN** ``parse("```\n```").document.to_markdown()`` runs
+- **WHEN** ``parse("```\n```").document.without_source().to_markdown()`` runs
 - **THEN** it returns ``"```\n```\n"``
 
 #### Scenario: Whitespace at the ends of an info string
-- **WHEN** the document parsed from ``"```&#x20;a&#9;\nb\n```"`` is serialized
+- **WHEN** the document parsed from ``"```&#x20;a&#9;\nb\n```"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"``` &#x20;a&#x9;\nb\n```\n"`` and reparsing it yields the info string `" a\t"`
 
 #### Scenario: Fence length
-- **WHEN** the document parsed from ``"```\n```*"`` is serialized
+- **WHEN** the document parsed from ``"```\n```*"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"```\n```*\n```\n"``, keeping the fence length 3
 
 #### Scenario: Code fence a content line would close
-- **WHEN** the document parsed from `" ~~~\n    ~~~"` is serialized
+- **WHEN** the document parsed from `" ~~~\n    ~~~"`, without its source, is serialized
 - **THEN** `to_markdown()` returns `" ~~~\n    ~~~\n ~~~\n"`, keeping the fence length 3
 
 #### Scenario: Indented code ending in a carriage return
-- **WHEN** the document parsed from `"\ta\r\tb"` is serialized
+- **WHEN** the document parsed from `"\ta\r\tb"`, without its source, is serialized
 - **THEN** `to_markdown()` returns `"    a\r    b\r"` and reparsing it yields the value `"a\rb\r"`
 
 #### Scenario: CRLF output keeps a value's CRLF
-- **WHEN** the document parsed from ``"```\r\na\r\n```\r\nb"`` is serialized with `LineEnding::CrLf`
+- **WHEN** the document parsed from ``"```\r\na\r\n```\r\nb"``, without its source, is serialized with `LineEnding::CrLf`
 - **THEN** the output is ``"```\r\na\r\n```\r\n\r\nb\r\n"``
 
 #### Scenario: Space in a bare destination
-- **WHEN** the document parsed from `"[o]:&#x20;"` is serialized
+- **WHEN** the document parsed from `"[o]:&#x20;"`, without its source, is serialized
 - **THEN** `to_markdown()` returns `"[o]: &#x20;\n"` and the reparsed definition keeps a `Bare` destination `" "`
 
 #### Scenario: HTML block value
-- **WHEN** the document parsed from `"<!--\n\n"` is serialized and reparsed
+- **WHEN** the document parsed from `"<!--\n\n"`, without its source, is serialized and reparsed
 - **THEN** the reparsed `HtmlBlock` value is `"<!--\n"`
 
 ### Requirement: Code spans written from their value
@@ -310,15 +314,15 @@ ends with a backtick, or starts and ends with a space and is not all spaces.
 - **THEN** `to_markdown()` returns ``"`a``b`\n"``
 
 #### Scenario: Padding
-- **WHEN** the document parsed from ``"`` `code` ``"`` is serialized
+- **WHEN** the document parsed from ``"`` `code` ``"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"`` `code` ``\n"``
 
 #### Scenario: Line endings in the source
-- **WHEN** the document parsed from ``"``\nfoo\nbar\n``"`` is serialized
+- **WHEN** the document parsed from ``"``\nfoo\nbar\n``"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"`foo bar`\n"``
 
 #### Scenario: Backtick run written before the span
-- **WHEN** the document parsed from ``"`foo``bar``"`` is serialized
+- **WHEN** the document parsed from ``"`foo``bar``"``, without its source, is serialized
 - **THEN** `to_markdown()` returns ``"`foo``bar``\n"``, whose first backtick stays text
 
 ### Requirement: Breaks and item content placed by rule
@@ -336,31 +340,31 @@ whose number would exceed 999999999, the largest a 9-digit marker holds, with
 999999999.
 
 #### Scenario: Indented code opening a nested item
-- **WHEN** `parse("- a\n  -     x").document.to_markdown()` runs
+- **WHEN** `parse("- a\n  -     x").document.without_source().to_markdown()` runs
 - **THEN** it returns `"- a\n  -     x\n"`, which reads back as the same tree
 
 #### Scenario: Footnote definition opening with indented code
-- **WHEN** `parse("[^1]:\n\n        code").document.to_markdown()` runs
+- **WHEN** `parse("[^1]:\n\n        code").document.without_source().to_markdown()` runs
 - **THEN** it returns `"[^1]:\n        code\n"`, which reads back as a `FootnoteDefinition` holding an indented `CodeBlock`
 
 #### Scenario: Item numbers at the marker limit
-- **WHEN** `parse("999999999. a\n1. b").document.to_markdown()` runs
+- **WHEN** `parse("999999999. a\n1. b").document.without_source().to_markdown()` runs
 - **THEN** it returns `"999999999. a\n999999999. b\n"`, which reads back as one list starting at 999999999
 
 #### Scenario: Dash break opening the document
-- **WHEN** `parse("---").document.to_markdown()` runs
+- **WHEN** `parse("---").document.without_source().to_markdown()` runs
 - **THEN** it returns `"- - -\n"`
 
 #### Scenario: Dash break after a paragraph line
-- **WHEN** `parse("- a\n  - - -").document.to_markdown()` runs
+- **WHEN** `parse("- a\n  - - -").document.without_source().to_markdown()` runs
 - **THEN** it returns `"- a\n  - - -\n"`
 
 #### Scenario: Break of the bullet's char
-- **WHEN** `parse("-\n  ---").document.to_markdown()` runs
+- **WHEN** `parse("-\n  ---").document.without_source().to_markdown()` runs
 - **THEN** it returns `"-\n  ---\n"`
 
 #### Scenario: Item content opening with spaces
-- **WHEN** `parse("-\n   <v>").document.to_markdown()` runs
+- **WHEN** `parse("-\n   <v>").document.without_source().to_markdown()` runs
 - **THEN** it returns `"-\n   <v>\n"`
 
 ### Requirement: Links and autolinks written in their recorded form
@@ -371,29 +375,61 @@ and then its label, and a shortcut or collapsed reference as its label as
 written, which is both its text and its key.
 
 #### Scenario: Shortcut reference holding a code span
-- **WHEN** ``parse("[`` a ``]\n\n[`` a ``]: /u").document.to_markdown()`` runs
+- **WHEN** ``parse("[`` a ``]\n\n[`` a ``]: /u").document.without_source().to_markdown()`` runs
 - **THEN** it returns ``"[`` a ``]\n\n[`` a ``]: /u\n"``, whose reference still names the definition
 
 #### Scenario: Literal URL
-- **WHEN** `parse("see http://a.b").document.to_markdown()` runs
+- **WHEN** `parse("see http://a.b").document.without_source().to_markdown()` runs
 - **THEN** it returns `"see http://a.b\n"`
 
 #### Scenario: `www` link
-- **WHEN** `parse("www.a.b").document.to_markdown()` runs
+- **WHEN** `parse("www.a.b").document.without_source().to_markdown()` runs
 - **THEN** it returns `"www.a.b\n"`
 
 #### Scenario: Literal email
-- **WHEN** `parse("a@b.c").document.to_markdown()` runs
+- **WHEN** `parse("a@b.c").document.without_source().to_markdown()` runs
 - **THEN** it returns `"a@b.c\n"`
 
 #### Scenario: Angle-bracket autolink
-- **WHEN** `parse("<a@b.c> <http://a.b>").document.to_markdown()` runs
+- **WHEN** `parse("<a@b.c> <http://a.b>").document.without_source().to_markdown()` runs
 - **THEN** it returns `"<a@b.c> <http://a.b>\n"`
 
 #### Scenario: Inline link whose text is its URL
-- **WHEN** `parse("[http://a.b](http://a.b)").document.to_markdown()` runs
+- **WHEN** `parse("[http://a.b](http://a.b)").document.without_source().to_markdown()` runs
 - **THEN** it returns `"[http://a.b](http://a.b)\n"`
 
 #### Scenario: Constructed link
 - **WHEN** a document holding a paragraph with `Link::new("u", [Text::from("a")])` is serialized
 - **THEN** `to_markdown()` returns `"[a](u)\n"`
+
+### Requirement: Unchanged source is kept
+For a document with a source, `to_markdown` and `to_markdown_with` SHALL write
+each top-level block that carries a span equal to that of a top-level block
+of the document `parse` returns for the source, and equals that block with
+spans at every depth included, as that span's source text; SHALL keep the
+source between two such blocks that are adjacent in the source, and the source
+before the first block and after the last when that block is one of them; and
+SHALL write every other block as canonical output, with a blank line on each
+side. A block SHALL be written as canonical output even so where its source
+would read differently in its place: one that a blank line and a paragraph
+after it would change, before a block other than its successor in the source;
+one whose source opens with indentation after a list or a footnote definition,
+one other than indented code whose source opens with four columns of
+indentation, or a list after a list written with its marker, after a block
+other than its predecessor in the source; and a thematic break that comes to
+open the document, or that opens it written as `---`. Options SHALL apply only to the text written as canonical output.
+Parsing the output SHALL yield a document equal to the written one as "Tree
+comparison" defines wherever parsing the canonical output of the same document
+does.
+
+#### Scenario: Unedited document
+- **WHEN** `parse(source).document.to_markdown()` runs with `source = "|a|b|\n|-|-|\n\n*  x\n\n\n# T #"`
+- **THEN** it returns `source` byte for byte
+
+#### Scenario: One edited block
+- **WHEN** the second block of that document is replaced by a hand-built paragraph `Text("y")` and the document is written
+- **THEN** it returns `"|a|b|\n|-|-|\n\ny\n\n# T #"`: the table, the heading, and the missing final newline are kept, and the gaps beside the new paragraph are canonical
+
+#### Scenario: Unclosed fence before a new block
+- **WHEN** a hand-built paragraph `Text("y")` is appended to the document parsed from `"```\na"` and the document is written
+- **THEN** it returns `"```\na\n```\n\ny\n"`: the fence is written closed, as its source would take in the paragraph

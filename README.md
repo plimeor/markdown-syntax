@@ -5,12 +5,13 @@
 [![CI](https://github.com/plimeor/markdown-syntax/actions/workflows/ci.yml/badge.svg)](https://github.com/plimeor/markdown-syntax/actions/workflows/ci.yml)
 [![license](https://img.shields.io/crates/l/markdown-syntax.svg)](#license)
 
-A `no_std + alloc` Rust crate that parses Markdown source into an owned AST and serializes the AST back to canonical Markdown — with opt-in, safe-by-default HTML rendering behind the `html` feature.
+A `no_std + alloc` Rust crate that parses Markdown source into an owned AST and writes the AST back as Markdown, keeping the source of every block you did not change — with opt-in, safe-by-default HTML rendering behind the `html` feature.
 
 ## At a glance
 
 - **AST-first** — `parse` returns an owned enum tree over `alloc`; the output verbs live on the `Document` you hold.
 - **Tolerant** — problems are collected as diagnostics, never thrown; `parse` is infallible.
+- **The source is the only truth** — a parsed `Document` keeps its source, and writing it back reuses the bytes of every unchanged block.
 - **One syntax** — CommonMark + GFM + footnotes + alerts + math + frontmatter + wikilinks + directives + `==` highlight + shortcodes, with nothing to configure.
 - **Lean core** — zero runtime dependencies, `no_std + alloc`, MSRV 1.82.
 
@@ -42,8 +43,11 @@ use markdown_syntax::parse;
 let output = parse("# Title\n\nHello *world*.");
 assert!(output.diagnostics.is_empty());
 
-// Serialize the AST back to canonical Markdown (this is the fallible step).
-let markdown = output.document.to_markdown()?;
+// Writing an unedited parse returns its source (this is the fallible step).
+assert_eq!(output.document.to_markdown()?, "# Title\n\nHello *world*.");
+
+// Without its source, the document is written as canonical Markdown.
+let markdown = output.document.without_source().to_markdown()?;
 assert_eq!(markdown, "# Title\n\nHello *world*.\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
@@ -52,11 +56,13 @@ assert_eq!(markdown, "# Title\n\nHello *world*.\n");
 
 ## Common tasks
 
-`parse` is the one way in. When you need to read diagnostics, walk the tree, or render HTML, each task is one small snippet below.
+`parse` reads a document and `parse_inline` one block's inline content, with the same syntax. When you need to read diagnostics, walk the tree, edit and write back, or render HTML, each task is one small snippet below.
 
 - [Walk the AST](#walk-the-ast)
 - [Handle diagnostics](#handle-diagnostics)
+- [Edit and write back](#edit-and-write-back)
 - [Customize serialization](#customize-serialization)
+- [Parse one block's inline content](#parse-one-blocks-inline-content)
 - [Source positions (optional)](#source-positions-optional)
 - [Build an AST by hand](#build-an-ast-by-hand)
 
@@ -98,6 +104,26 @@ for diagnostic in &output.diagnostics {
 
 `span` is `Option<Span>` because a hand-built node may lack a source location. Parser diagnostics, AST validation, and serializer/HTML pre-validation are three separate domains that share one [`Diagnostic`](https://docs.rs/markdown-syntax/latest/markdown_syntax/diagnostic/struct.Diagnostic.html) type.
 
+### Edit and write back
+
+```rust
+use markdown_syntax::prelude::*;
+
+let source = "|a|b|\n|-|-|\n\n*  x\n\n\n# T #";
+let mut document = parse(source).document;
+
+// An unchanged block is written as its source, with the bytes around it.
+assert_eq!(document.to_markdown()?, source);
+
+// An edited or new block, one without the spans of the block the source
+// parses to there, is written as canonical Markdown.
+document.children[1] = Paragraph::new([Text::from("y")]).into();
+assert_eq!(document.to_markdown()?, "|a|b|\n|-|-|\n\ny\n\n# T #");
+# Ok::<(), markdown_syntax::SerializeError>(())
+```
+
+A block keeps its source when it equals, spans included, the block the source parses to at the same span. Where its source would read differently in its new place, as an unclosed fence before a new block would, it is written canonically too.
+
 ### Customize serialization
 
 ```rust
@@ -109,25 +135,48 @@ let mut options = SerializeOptions::default();
 options.line_ending = LineEnding::CrLf;
 options.final_newline = false;
 
-let markdown = parse("# Title").document.to_markdown_with(&options)?;
+let markdown = parse("# Title").document.without_source().to_markdown_with(&options)?;
 assert_eq!(markdown, "# Title");
 
 // List-marker and fence options are `None` by default, keeping the marker
 // each node records; `Some` writes every list or fence with the one given.
 let mut options = SerializeOptions::default();
 options.bullet = Some(BulletMarker::Dash);
-assert_eq!(parse("* a").document.to_markdown_with(&options)?, "- a\n");
+assert_eq!(parse("* a").document.without_source().to_markdown_with(&options)?, "- a\n");
 
 // Each node is written in the spelling it records: `_` emphasis stays `_`,
 // an escape stays an escape, and a literal autolink stays bare.
-let document = parse("_a_ \\*b\\* https://example.com").document;
+let document = parse("_a_ \\*b\\* https://example.com").document.without_source();
 assert_eq!(document.to_markdown()?, "_a_ \\*b\\* https://example.com\n");
 # Ok::<(), markdown_syntax::SerializeError>(())
 ```
 
+Options apply to the Markdown the writer writes, not to reused source; the examples above drop the source to show them.
+
 Because `SerializeOptions` is `#[non_exhaustive]`, external code cannot struct-literal-construct it (even with `..Default::default()`, E0639) — mutate a `default()` instead.
 
 The serializer only renders: it writes text, escapes, and character references as the AST records them and never parses its own output. A hand-built `Text("*a*")` is written `*a*`, which reads back as emphasis; build literal punctuation with `Escape` nodes instead. A hand-built tree that no Markdown can express — a link inside a link, say — fails validation, and `to_markdown` returns `SerializeError::InvalidDocument` with the diagnostics.
+
+### Parse one block's inline content
+
+```rust
+use markdown_syntax::prelude::*;
+
+let document = parse("> a [*b*][r]\n> c\n\n[r]: /u").document;
+
+// The text the parser read for the paragraph in the block quote, and where
+// each of its offsets sits in the source.
+let leaf = document.inline_source(&NodePath::from([0, 0])).unwrap();
+assert_eq!(leaf.text, "a [*b*][r]\nc");
+assert_eq!(leaf.to_source(11), 15);
+
+// Parsing that text again, with the document's definitions, gives the
+// paragraph's inlines; no block rule applies, so `# c` would stay text.
+let inline = parse_inline(&leaf.text, &Definitions::of(&document));
+assert!(matches!(inline.inlines[1], Inline::LinkReference(_)));
+```
+
+`parse_inline` spans are byte ranges into the text; `InlineSource::span_to_source` maps them to the document's source.
 
 ### Source positions (optional)
 
@@ -159,23 +208,17 @@ The [`prelude`](https://docs.rs/markdown-syntax/latest/markdown_syntax/prelude/i
 ```rust
 use markdown_syntax::prelude::*;
 
-let document = Document {
-    meta: NodeMeta::default(),
-    children: vec![
-        Heading::new(1, [Text::from("Title")]).into(),
-        Paragraph::new([Text::from("hello")]).into(),
-    ],
-};
+let document = Document::new(vec![
+    Heading::new(1, [Text::from("Title")]).into(),
+    Paragraph::new([Text::from("hello")]).into(),
+]);
 // Hand-built nodes carry no span.
 assert_eq!(document.children[0].span(), None);
 assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");
 
 // Text is written as it is; `Escape` writes a literal punctuation char.
 let escape = |value| Inline::from(Escape { meta: NodeMeta::default(), value });
-let literal = Document {
-    meta: NodeMeta::default(),
-    children: vec![Paragraph::new([escape('*'), Text::from("a").into(), escape('*')]).into()],
-};
+let literal = Document::new(vec![Paragraph::new([escape('*'), Text::from("a").into(), escape('*')]).into()]);
 assert_eq!(literal.to_markdown().unwrap(), "\\*a\\*\n");
 ```
 
@@ -207,6 +250,14 @@ let _ = document.to_html_with(&options);
 
 See [`HtmlOptions`](https://docs.rs/markdown-syntax/latest/markdown_syntax/html/struct.HtmlOptions.html). docs.rs builds with the `html` feature enabled, so the renderer's API is fully documented there.
 
+## WebAssembly and JavaScript
+
+The `markdown-syntax-wasm` crate in `wasm/` builds the parser for `wasm32-unknown-unknown` with a zero-dependency C ABI, and `wasm/js/index.js` (types in `index.d.ts`) wraps it with no npm dependency: `parse`, `parseInline`, `inlineSource`, and `toMarkdown`, with every span in UTF-16 code units. It is not published; build it with
+
+```console
+cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown --profile wasm
+```
+
 ## Syntax reference
 
 `parse` recognizes one fixed syntax:
@@ -229,7 +280,7 @@ Cargo features:
 
 ## How it works
 
-- **AST-first public API** — `parse` produces an owned `Document`; parser event streams and internal block operations are private, not v1 compatibility surfaces.
+- **AST-first public API** — `parse` produces an owned `Document` holding its source; parser event streams and internal block operations are private, not v1 compatibility surfaces.
 - **Owned enum tree** over `alloc` types.
 - **Optional source spans** — half-open absolute byte ranges on every node, `None` for hand-built nodes; line/column derived via `LineIndex`.
 - **Tolerant by default** — diagnostics are collected, not thrown.
@@ -238,9 +289,9 @@ Cargo features:
 
 In scope — the one syntax in the [syntax reference](#syntax-reference). Subscript, superscript, insert, spoiler, underline, description lists, and MDX are not recognized: `__a__` is strong, and the rest stay text or raw HTML.
 
-Not in the default build: HTML rendering or sanitization, syntax highlighting, and byte-for-byte preservation of the source's authoring style. Directives (`:name` / `::name` / `:::name`) are their own family and are never MDX.
+Not in the default build: HTML rendering or sanitization, and syntax highlighting. A block you edit is written in canonical Markdown, so its authoring style is kept only as far as the AST records it. Directives (`:name` / `::name` / `:::name`) are their own family and are never MDX.
 
-Parsing, serialization, HTML rendering, and validation take linear time and bounded stack on any input; nesting past fixed limits stays literal text.
+Parsing, inline parsing, serialization, HTML rendering, and validation take linear time and bounded stack on any input; nesting past fixed limits stays literal text.
 
 The full behavior contract — syntax, serialization, validation, HTML rendering, and the cost limits — lives in [`docs/specs/`](docs/specs/).
 

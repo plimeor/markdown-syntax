@@ -1,4 +1,4 @@
-//! Locks the one syntax `parse` reads (decisions/0007): the constructs it
+//! Locks the one syntax `parse` reads (decisions/0012): the constructs it
 //! recognizes, the ones it reads as text, and the spellings it records.
 
 use markdown_syntax::prelude::*;
@@ -134,13 +134,10 @@ fn constructed_nodes_take_the_default_spelling() {
 
 #[test]
 fn build_layer_round_trips() {
-    let document = Document {
-        meta: NodeMeta::default(),
-        children: vec![
-            Heading::new(1, [Text::from("Title")]).into(),
-            Paragraph::new([Text::from("hello")]).into(),
-        ],
-    };
+    let document = Document::new(vec![
+        Heading::new(1, [Text::from("Title")]).into(),
+        Paragraph::new([Text::from("hello")]).into(),
+    ]);
     // Hand-built nodes carry no span.
     assert_eq!(document.children[0].span(), None);
     assert_eq!(document.to_markdown().unwrap(), "# Title\n\nhello\n");

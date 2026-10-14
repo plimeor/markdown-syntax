@@ -4,10 +4,17 @@ Read `docs/overview.md` before starting work.
 
 ## Identity
 
-- A single `no_std + alloc` Rust crate at the repo root. Parses one fixed
-  Markdown syntax → AST and serializes AST → canonical Markdown. Raw HTML is
-  represented only as Markdown syntax nodes; HTML rendering and sanitization
-  stay out of the default build.
+- A `no_std + alloc` Rust crate at the repo root. Parses one fixed Markdown
+  syntax → AST and writes AST → Markdown: a parsed document keeps its source,
+  unchanged top-level blocks are written as their source, and the rest as
+  canonical Markdown (decision 0013). Raw HTML is represented only as
+  Markdown syntax nodes; HTML rendering and sanitization stay out of the
+  default build.
+- The repository is a Cargo workspace whose default member is the root
+  crate; `wasm/` holds `markdown-syntax-wasm`, the unpublished WebAssembly
+  binding (zero-dependency C ABI) and its JS wrapper `wasm/js/` (no npm
+  dependency). The binding may use `std`; the core crate's invariants below
+  do not extend to it.
 - Hard invariants (do not break without an explicit decision): empty default
   features (`[features] default = []`), zero runtime dependencies, `#![no_std]`
   (+ `extern crate alloc`), MSRV 1.82. The default build surface stays
@@ -27,6 +34,10 @@ CI (`.github/workflows/ci.yml`) runs these in this order:
   `[profile.ci]` in `Cargo.toml` is release with debug assertions and overflow
   checks on.
 - Docs: `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
+- The `wasm` job: `cargo test -p markdown-syntax-wasm` (the encoding's unit
+  tests, on the host), `cargo build -p markdown-syntax-wasm --target
+  wasm32-unknown-unknown --profile wasm`, then
+  `node --test 'wasm/js/test/*.test.mjs'` (Node 22).
 
 Observed on 4 cores from an empty `target/`: about 1 min for the sequence,
 of which ~20 s compiles the ci profile and ~22 s runs the tests;
@@ -77,9 +88,12 @@ file also runs quickly as plain `cargo test --test <name>`.
   list, `tests/fixtures.rs`); generated read-back (seeded, with its own list,
   `tests/serialize_roundtrip_fuzz.rs`). Goldens stay together by topic under
   `tests/fixtures/roundtrip/`; each test finds the ones it reads.
-- No bless flag: any `.ast` / `.canonical.md` golden a fix legitimately moves
-  must be hand-regenerated in the same commit and verified to reflect correct
-  structure — never edit a test to pass a wrong parse.
+- No bless in CI (decision 0014): a golden a correct fix moves is regenerated
+  in the same commit, by hand or by a local command, and every changed golden
+  is read in review for correct structure, with the reason it moved — never
+  edit a test to pass a wrong parse.
+- Tests that check canonical output write the parsed document
+  `without_source()`; with its source, an unedited parse writes the source.
 - Correctness work uses paired parser+serializer fixes when the serializer can
   mask a stably-wrong parse.
 

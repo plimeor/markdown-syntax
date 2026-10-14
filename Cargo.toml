@@ -26,6 +26,12 @@ include = [
 name = "markdown_syntax"
 path = "src/lib.rs"
 
+# The WebAssembly binding is a member; the root package stays the default, so
+# `cargo build` and `cargo test` at the root build only the core crate.
+[workspace]
+members = ["wasm"]
+default-members = ["."]
+
 [features]
 default = []
 html = []
@@ -41,3 +47,12 @@ features = ["html"]
 inherits = "release"
 debug-assertions = true
 overflow-checks = true
+
+# The WebAssembly binding's build: small, and a panic aborts, which the core
+# crate's infallible entry points rule out for valid calls.
+[profile.wasm]
+inherits = "release"
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

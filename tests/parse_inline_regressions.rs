@@ -1167,7 +1167,11 @@ mod wikilinks_as_written {
         );
         for source in ["[[a\\$b]]", "[[a &amp; b|x\\]y]]", "d$![[\\$]]"] {
             assert_eq!(
-                parse(source).document.to_markdown().unwrap(),
+                parse(source)
+                    .document
+                    .without_source()
+                    .to_markdown()
+                    .unwrap(),
                 format!("{source}\n")
             );
         }

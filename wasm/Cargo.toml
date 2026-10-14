@@ -1,0 +1,16 @@
+[package]
+name = "markdown-syntax-wasm"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.82"
+description = "WebAssembly binding of markdown-syntax for JavaScript editors"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# `cdylib` is the WebAssembly module; `rlib` lets the encoding's unit tests run
+# on the host.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+markdown-syntax = { path = ".." }
