@@ -39,9 +39,9 @@ fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
     for (index, inline) in inlines.iter_mut().enumerate() {
         match inline {
             Inline::Text(text) => {
-                let pieces = split_text(input, text, before);
+                let (pieces, unheld) = split_text(input, text, before);
                 if !pieces.is_empty() {
-                    splits.push((index, pieces));
+                    splits.push((index, pieces, unheld));
                 }
             }
             Inline::SoftBreak(_) | Inline::LineBreak(_) => *before = Some('\n'),
@@ -73,13 +73,27 @@ fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
     let count = inlines.len()
         + splits
             .iter()
-            .map(|(_, pieces)| pieces.len() - 1)
+            .map(|(_, pieces, _)| pieces.len() - 1)
             .sum::<usize>();
     let nodes = core::mem::replace(inlines, Vec::with_capacity(count));
     let mut splits = splits.into_iter().peekable();
-    for (index, inline) in nodes.into_iter().enumerate() {
-        match splits.next_if(|(at, _)| *at == index) {
-            Some((_, pieces)) => inlines.extend(pieces),
+    // Where the stripped spaces and tabs a split left in no piece start; the
+    // soft break after them reads them, as it does when no text holds them.
+    let mut unheld = None;
+    for (index, mut inline) in nodes.into_iter().enumerate() {
+        if let Some(start) = unheld.take() {
+            match &mut inline {
+                Inline::SoftBreak(node) => {
+                    node.meta.span = node.meta.span.map(|span| Span::new(start, span.end));
+                }
+                _ => debug_assert!(false, "stripped spaces end at a soft break"),
+            }
+        }
+        match splits.next_if(|(at, _, _)| *at == index) {
+            Some((_, pieces, start)) => {
+                inlines.extend(pieces);
+                unheld = start;
+            }
             None => inlines.push(inline),
         }
     }
@@ -92,8 +106,10 @@ fn opaque_edges(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char
 }
 
 /// The text and tag nodes `text` splits into, or nothing when it holds no
-/// tag; `before` moves past its last character either way.
-fn split_text(input: &str, text: &Text, before: &mut Option<char>) -> Vec<Inline> {
+/// tag, and where the bytes after its last tag start when they are only the
+/// stripped spaces and tabs its span holds past its value; `before` moves
+/// past its last character either way.
+fn split_text(input: &str, text: &Text, before: &mut Option<char>) -> (Vec<Inline>, Option<usize>) {
     let value = text.value.as_str();
     let mut pieces = Vec::new();
     let mut offsets = None;
@@ -133,17 +149,24 @@ fn split_text(input: &str, text: &Text, before: &mut Option<char>) -> Vec<Inline
         piece_start = end;
         cursor = tag.map(|tag| tag.end);
     }
-    if !pieces.is_empty() && piece_start < value.len() {
-        pieces.push(Inline::Text(Text {
-            meta: NodeMeta::new(
-                cursor
-                    .zip(text.meta.span)
-                    .map(|(at, span)| Span::new(at, span.end)),
-            ),
-            value: String::from(&value[piece_start..]),
-        }));
+    if pieces.is_empty() {
+        return (pieces, None);
     }
-    pieces
+    if piece_start == value.len() {
+        let unheld = cursor
+            .zip(text.meta.span)
+            .and_then(|(at, span)| (at < span.end).then_some(at));
+        return (pieces, unheld);
+    }
+    pieces.push(Inline::Text(Text {
+        meta: NodeMeta::new(
+            cursor
+                .zip(text.meta.span)
+                .map(|(at, span)| Span::new(at, span.end)),
+        ),
+        value: String::from(&value[piece_start..]),
+    }));
+    (pieces, None)
 }
 
 /// Where the bytes of a text node's value sit in the input. A value is its

@@ -26,6 +26,7 @@ mod nul_replacement;
 mod scan_tests;
 mod source_map;
 mod tags;
+mod tokens;
 
 pub(crate) use blocks::interrupts_paragraph;
 use source_map::{DerivedText, Segment, SourceMap};
@@ -48,6 +49,15 @@ struct ParsedLinkResource {
     destination: String,
     destination_kind: LinkDestinationKind,
     title: Option<Title>,
+}
+
+/// Where a link's destination and title lie in the input the tail was read
+/// from: the destination without its angle brackets, empty where it is
+/// omitted, and the title without its delimiters.
+#[derive(Clone, Copy)]
+struct LinkTailRanges {
+    destination: (usize, usize),
+    title: Option<(usize, usize)>,
 }
 
 const REFERENCE_LABEL_MAX_CHARS: usize = 999;
@@ -228,13 +238,73 @@ impl Definitions {
     }
 }
 
-/// The result of an inline parse: the inlines plus any diagnostics.
+/// The result of an inline parse: the inlines, the tokens of the text, and
+/// any diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct InlineOutput {
     /// The inline nodes, with spans that are byte ranges into the text.
     pub inlines: Vec<Inline>,
+    /// Runs that tile the text in order, each naming the innermost inline
+    /// that holds it and the part of that inline it is.
+    pub tokens: Vec<InlineToken>,
     /// Diagnostics collected during parsing.
     pub diagnostics: Vec<Diagnostic>,
+}
+
+impl InlineOutput {
+    /// The inlines in pre-order through [`Inline::children`]: a link's text,
+    /// an image's alt, and a directive's label included. An
+    /// [`InlineToken`]'s `node` indexes this list.
+    pub fn nodes(&self) -> Vec<&Inline> {
+        let mut nodes = Vec::new();
+        let mut stack: Vec<&Inline> = self.inlines.iter().rev().collect();
+        while let Some(inline) = stack.pop() {
+            nodes.push(inline);
+            stack.extend(inline.children().iter().rev());
+        }
+        nodes
+    }
+}
+
+/// A run of the text of an inline parse: the innermost inline that holds it,
+/// as its index in [`InlineOutput::nodes`], and the part of that inline it
+/// is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InlineToken {
+    /// The run, a byte range into the text.
+    pub span: Span,
+    /// The innermost inline holding the run, as its index in
+    /// [`InlineOutput::nodes`].
+    pub node: usize,
+    /// The part of that inline the run is.
+    pub role: TokenRole,
+}
+
+/// The part of an inline a token is.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum TokenRole {
+    /// The inline's content: a text node, raw HTML, a soft break, a hard
+    /// break's line ending, an escaped character, a character reference
+    /// between `&` and `;`, and code or math inside its delimiters apart
+    /// from the padding its value drops, which is syntax.
+    Text,
+    /// A character of the inline's own syntax.
+    Syntax,
+    /// A link's, image's, or autolink's destination.
+    Destination,
+    /// A link's or image's title, inside its delimiters.
+    Title,
+    /// A full reference's second label, a footnote reference's label, or a
+    /// wiki link's text after its pipe.
+    Label,
+    /// A wiki link's target.
+    Target,
+    /// A directive's, shortcode's, or tag's name.
+    Name,
+    /// A directive's attributes, inside its braces.
+    Attributes,
 }
 
 /// Parse `text` as the inline content of one leaf block, with the same
@@ -242,6 +312,16 @@ pub struct InlineOutput {
 /// reference forms only for a label `definitions` holds. Infallible, like
 /// [`parse`]; a leading U+FEFF is content.
 pub fn parse_inline(text: &str, definitions: &Definitions) -> InlineOutput {
+    read_inline(text, definitions, true)
+}
+
+/// What `parse_inline` reads from `text`, without its tokens, for callers
+/// that read only the tree.
+pub(crate) fn parse_inline_tree(text: &str, definitions: &Definitions) -> InlineOutput {
+    read_inline(text, definitions, false)
+}
+
+fn read_inline(text: &str, definitions: &Definitions, with_tokens: bool) -> InlineOutput {
     let mut diagnostics = Vec::new();
     // Line endings are read as `\n`, as a block's content is joined, while
     // spans keep counting in `text`.
@@ -260,13 +340,21 @@ pub fn parse_inline(text: &str, definitions: &Definitions) -> InlineOutput {
     } else {
         (Cow::Borrowed(text), SourceMap::verbatim(text.len(), 0))
     };
-    let mut inlines = parse_inlines(&content, &map, Some(definitions.labels()), &mut diagnostics);
+    let mut tokens = Vec::new();
+    let mut inlines = parse_inlines(
+        &content,
+        &map,
+        Some(definitions.labels()),
+        &mut diagnostics,
+        with_tokens.then_some(&mut tokens),
+    );
     if text.contains('\0') {
         nul_replacement::replace_in_inlines(&mut inlines);
     }
     diagnostics.sort_by_key(|diagnostic| diagnostic.span.map(|span| span.start));
     InlineOutput {
         inlines,
+        tokens,
         diagnostics,
     }
 }
@@ -2058,7 +2146,7 @@ fn match_link_target(
     let after = close + 1;
     if input.as_bytes().get(after) == Some(&b'(') {
         match parse_link_resource(&mut scan.lookups, input, after) {
-            Some((end, resource)) => return Some((end, LinkTarget::Resource(resource))),
+            Some((end, resource, _)) => return Some((end, LinkTarget::Resource(resource))),
             // A present-but-invalid `(...)` resource is not an inline link or
             // image, but CommonMark still resolves `[label]` as a shortcut
             // reference and leaves the invalid `(...)` as literal text (links
@@ -2504,6 +2592,7 @@ fn parse_inlines(
     map: &SourceMap,
     definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
+    tokens: Option<&mut Vec<InlineToken>>,
 ) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
     if definitions.is_none() {
@@ -2518,6 +2607,10 @@ fn parse_inlines(
         &mut InlineState::default(),
     );
     tags::split_tags(input, &mut nodes);
+    if let Some(tokens) = tokens {
+        *tokens = tokens::tokens(input, &nodes);
+        source_map::translate_tokens(map, tokens);
+    }
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
     nodes
 }
@@ -2675,13 +2768,21 @@ fn parse_inline_content(
                 text_start = index;
                 continue;
             }
+            // Stripped spaces and tabs that no text holds, as after another
+            // inline, are read as part of the soft break.
+            let stripped_alone = trailing_spaces > 0 && text.len() == trailing_spaces;
             if trailing_spaces > 0 {
                 text.truncate(text.len() - trailing_spaces);
             }
             flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            let start = if stripped_alone {
+                index - trailing_spaces
+            } else {
+                index
+            };
             nodes.push(Inline::SoftBreak(SoftBreak {
                 meta: NodeMeta::new(Some(Span::new(
-                    base_offset + index,
+                    base_offset + start,
                     base_offset + index + 1,
                 ))),
             }));
@@ -3728,12 +3829,14 @@ fn find_code_span_close(input: &str, start: usize, marker_len: usize) -> Option<
 }
 
 fn normalize_code_span(input: &str) -> String {
+    let (before, after) = code_padding(input);
     let mut normalized = String::new();
+    let content = &input[before..input.len() - after];
     let mut cursor = 0;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
+    while cursor < content.len() {
+        let (next, char) = next_char(content, cursor).expect("valid UTF-8 byte index");
         if char == '\r' {
-            if input.as_bytes().get(next) == Some(&b'\n') {
+            if content.as_bytes().get(next) == Some(&b'\n') {
                 cursor = next + 1;
             } else {
                 cursor = next;
@@ -3749,14 +3852,38 @@ fn normalize_code_span(input: &str) -> String {
         normalized.push(char);
         cursor = next;
     }
+    normalized
+}
 
-    if normalized.starts_with(' ')
-        && normalized.ends_with(' ')
-        && normalized.chars().any(|char| char != ' ')
-    {
-        normalized[1..normalized.len() - 1].into()
-    } else {
-        normalized
+/// The bytes of padding a code span or `$` math drops from each end of
+/// `input`, its content: one space or line ending at each end, when both ends
+/// hold one and the content is not all spaces and line endings.
+pub(crate) fn code_padding(input: &str) -> (usize, usize) {
+    let space = |text: &str| -> Option<usize> {
+        match text.as_bytes().first()? {
+            b' ' | b'\n' => Some(1),
+            b'\r' if text.as_bytes().get(1) == Some(&b'\n') => Some(2),
+            b'\r' => Some(1),
+            _ => None,
+        }
+    };
+    let end_space = |text: &str| -> Option<usize> {
+        match text.as_bytes().last()? {
+            b' ' | b'\r' => Some(1),
+            b'\n' if text.len() >= 2 && text.as_bytes()[text.len() - 2] == b'\r' => Some(2),
+            b'\n' => Some(1),
+            _ => None,
+        }
+    };
+    match (space(input), end_space(input)) {
+        (Some(before), Some(after))
+            if input
+                .bytes()
+                .any(|byte| !matches!(byte, b' ' | b'\n' | b'\r')) =>
+        {
+            (before, after)
+        }
+        _ => (0, 0),
     }
 }
 
@@ -3887,13 +4014,21 @@ fn parse_math_inline(
     }
 
     let raw = &input[content_start..content_end];
-    let value = if open_dollars == 1 {
+    let dollars = u8::try_from(open_dollars).unwrap_or(u8::MAX);
+    let kind = MathInlineKind::Dollar { dollars };
+    let value = if math_is_padded(kind) {
         normalize_math_text(raw)
     } else {
         raw.into()
     };
-    let dollars = u8::try_from(open_dollars).unwrap_or(u8::MAX);
-    Some((close, value, MathInlineKind::Dollar { dollars }))
+    Some((close, value, kind))
+}
+
+/// Whether math of `kind` follows the code-span content rules: line endings
+/// read as spaces, and padding `code_padding` finds is dropped. Only
+/// single-dollar math does.
+pub(crate) fn math_is_padded(kind: MathInlineKind) -> bool {
+    matches!(kind, MathInlineKind::Dollar { dollars: 1 })
 }
 
 /// Whether `written`, read alone, is exactly one inline math holding `value`
@@ -3940,39 +4075,9 @@ fn is_math_space(byte: u8) -> bool {
 }
 
 /// Applies the code-span content rules to dollar-fenced math: line endings
-/// become single spaces, then if the content begins AND ends with U+0020 and is
-/// not entirely spaces, one space is stripped from each edge.
+/// become single spaces, and the padding `code_padding` finds is dropped.
 fn normalize_math_text(input: &str) -> String {
-    let mut normalized = String::new();
-    let mut cursor = 0;
-    while cursor < input.len() {
-        let (next, char) = next_char(input, cursor).expect("valid UTF-8 byte index");
-        if char == '\r' {
-            if input.as_bytes().get(next) == Some(&b'\n') {
-                cursor = next + 1;
-            } else {
-                cursor = next;
-            }
-            normalized.push(' ');
-            continue;
-        }
-        if char == '\n' {
-            normalized.push(' ');
-            cursor = next;
-            continue;
-        }
-        normalized.push(char);
-        cursor = next;
-    }
-
-    if normalized.starts_with(' ')
-        && normalized.ends_with(' ')
-        && normalized.chars().any(|char| char != ' ')
-    {
-        normalized[1..normalized.len() - 1].into()
-    } else {
-        normalized
-    }
+    normalize_code_span(input)
 }
 
 fn parse_math_code_inline(
@@ -3997,7 +4102,7 @@ fn parse_link_resource(
     lookups: &mut impl Lookups,
     input: &str,
     open: usize,
-) -> Option<(usize, ParsedLinkResource)> {
+) -> Option<(usize, ParsedLinkResource, LinkTailRanges)> {
     let bytes = input.as_bytes();
     if bytes.get(open) != Some(&b'(') {
         return None;
@@ -4011,10 +4116,16 @@ fn parse_link_resource(
                 destination_kind: LinkDestinationKind::Omitted,
                 title: None,
             },
+            LinkTailRanges {
+                destination: (cursor, cursor),
+                title: None,
+            },
         ));
     }
     if initial_space && matches!(bytes.get(cursor), Some(b'"' | b'\'' | b'(')) {
+        let omitted = cursor;
         let (title, next) = parse_link_title(input, cursor)?;
+        let title_range = (cursor + 1, next - 1);
         cursor = skip_link_resource_space(input, next)?;
         if bytes.get(cursor) == Some(&b')') {
             return Some((
@@ -4024,11 +4135,20 @@ fn parse_link_resource(
                     destination_kind: LinkDestinationKind::Omitted,
                     title: Some(title),
                 },
+                LinkTailRanges {
+                    destination: (omitted, omitted),
+                    title: Some(title_range),
+                },
             ));
         }
         return None;
     }
+    let destination_start = cursor;
     let (destination, destination_kind, next) = parse_link_destination(lookups, input, cursor)?;
+    let destination_range = match destination_kind {
+        LinkDestinationKind::Angle => (destination_start + 1, next - 1),
+        _ => (destination_start, next),
+    };
     let (after_destination, had_space) = skip_link_resource_space_with_info(input, next)?;
     cursor = after_destination;
     if bytes.get(cursor) == Some(&b')') {
@@ -4039,6 +4159,10 @@ fn parse_link_resource(
                 destination_kind,
                 title: None,
             },
+            LinkTailRanges {
+                destination: destination_range,
+                title: None,
+            },
         ));
     }
     if !had_space {
@@ -4046,6 +4170,7 @@ fn parse_link_resource(
     }
 
     let (title, next) = parse_link_title(input, cursor)?;
+    let title_range = (cursor + 1, next - 1);
     cursor = skip_link_resource_space(input, next)?;
     if bytes.get(cursor) == Some(&b')') {
         Some((
@@ -4054,6 +4179,10 @@ fn parse_link_resource(
                 destination,
                 destination_kind,
                 title: Some(title),
+            },
+            LinkTailRanges {
+                destination: destination_range,
+                title: Some(title_range),
             },
         ))
     } else {

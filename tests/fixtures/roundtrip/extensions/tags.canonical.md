@@ -13,3 +13,7 @@
 | tag | note |
 | --- | --- |
 | #cell | text |
+
+Spaces after a #tag
+and *#tab*
+end

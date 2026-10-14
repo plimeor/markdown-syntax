@@ -142,6 +142,25 @@ const OPTION_NUMBERS = {
   fenceMarker: { backtick: 1, tilde: 2 },
 };
 
+/**
+ * The inlines and every inline they hold, in pre-order: the order a token's
+ * `node` counts in.
+ */
+function preorder(inlines) {
+  const nodes = [];
+  const work = [...inlines].reverse();
+  while (work.length > 0) {
+    const node = work.pop();
+    nodes.push(node);
+    for (const [field, type] of BY_NAME.get(node.type).fields) {
+      if (type !== "inlines") continue;
+      const children = node[field];
+      for (let index = children.length - 1; index >= 0; index--) work.push(children[index]);
+    }
+  }
+  return nodes;
+}
+
 /** Reads one message of the wire encoding. */
 class Reader {
   constructor(bytes) {
@@ -297,6 +316,11 @@ class Reader {
         return [from, Math.max(from, mapped(ends, span[1]))];
       },
     };
+  }
+
+  /** The tokens of an inline parse, each with its role in camelCase. */
+  tokens() {
+    return this.list(() => ({ span: this.span(), node: this.word(), role: camel(this.string()) }));
   }
 
   diagnostics() {
@@ -674,7 +698,8 @@ export class MarkdownSyntax {
     if (status !== 0) throw new TypeError(`markdown-syntax: ${UTF8.decode(this.result())}`);
     const reader = new Reader(this.result());
     const inlines = reader.list(() => reader.node());
-    return { inlines, diagnostics: reader.diagnostics() };
+    const tokens = reader.tokens();
+    return { inlines, tokens, nodes: preorder(inlines), diagnostics: reader.diagnostics() };
   }
 
   /** @internal Frees `handle` once `document` is collected. */

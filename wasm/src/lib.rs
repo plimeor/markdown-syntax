@@ -159,7 +159,7 @@ pub extern "C" fn document_free(handle: u32) -> u32 {
 
 /// Parses the UTF-8 text at `pointer` as one leaf block's inline content,
 /// with the definitions whose labels the message at `labels` holds as its
-/// strings; the result is the inlines and diagnostics.
+/// strings; the result is the inlines, their tokens, and diagnostics.
 ///
 /// # Safety
 /// The pointers and lengths hold what JavaScript wrote.
@@ -187,6 +187,7 @@ pub unsafe extern "C" fn parse_inline(
     let to_utf16 = utf16_offsets(source);
     let mut writer = Writer::new(&to_utf16);
     writer.inlines(&output.inlines);
+    writer.tokens(&output.tokens);
     writer.diagnostics(&output.diagnostics);
     set_result(writer.finish());
     0

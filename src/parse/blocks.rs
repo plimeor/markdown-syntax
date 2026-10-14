@@ -2443,7 +2443,13 @@ struct Finish<'o> {
 
 impl Finish<'_> {
     fn inlines(&self, text: &DerivedText, diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
-        parse_inlines(&text.text, text.map(), Some(self.definitions), diagnostics)
+        parse_inlines(
+            &text.text,
+            text.map(),
+            Some(self.definitions),
+            diagnostics,
+            None,
+        )
     }
 
     /// The inlines of the leaf at `span` (a label's is its directive's), read

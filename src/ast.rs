@@ -1037,7 +1037,19 @@ impl Inline {
             Inline::ImageReference(n) => &n.alt,
             Inline::InlineFootnote(n) => &n.children,
             Inline::TextDirective(n) => &n.label,
-            _ => &[],
+            Inline::Text(_)
+            | Inline::Escape(_)
+            | Inline::CharacterReference(_)
+            | Inline::Shortcode(_)
+            | Inline::Code(_)
+            | Inline::Autolink(_)
+            | Inline::Html(_)
+            | Inline::SoftBreak(_)
+            | Inline::LineBreak(_)
+            | Inline::Math(_)
+            | Inline::FootnoteReference(_)
+            | Inline::WikiLink(_)
+            | Inline::Tag(_) => &[],
         }
     }
 }
@@ -1330,7 +1342,7 @@ impl ContainerDirective {
 
 /// The inlines `text` reads as, with the diagnostics of the read.
 fn read_source(text: &str, definitions: &Definitions) -> (Vec<Inline>, Vec<Diagnostic>) {
-    let output = crate::parse_inline(text, definitions);
+    let output = crate::parse::parse_inline_tree(text, definitions);
     (output.inlines, output.diagnostics)
 }
 

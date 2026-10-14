@@ -123,6 +123,8 @@ line ending, and, as a link label, holds no unescaped `[` or `]`.
 A line ending SHALL be a hard break when two or more spaces the source holds,
 and no tab, end the line; spaces or tabs a character reference writes are
 text, and only the source's spaces and tabs before a soft break are removed.
+The removed spaces and tabs SHALL lie in the span of the text before them, or
+in the soft break's span when no text holds them.
 
 ### Requirement: Escapes and character references are nodes
 The parser SHALL produce an `Escape` for every backslash escape and a

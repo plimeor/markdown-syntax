@@ -12,6 +12,9 @@ mod leaves;
 #[path = "support/edits.rs"]
 mod edits;
 
+#[path = "support/tokens.rs"]
+mod tokens;
+
 use markdown_syntax::parse;
 
 /// A small deterministic xorshift generator, so failures reproduce.
@@ -298,5 +301,32 @@ fn generated_documents_edited_at_every_depth_read_back() {
         "{} failures:\n{}",
         failures.len(),
         failures.join("\n")
+    );
+}
+
+/// The tokens of each generated input read as one leaf's inline content tile
+/// the text, lie in their nodes, and read back as the fields they name.
+// public-api: Inline syntax tokens
+#[test]
+fn generated_inline_tokens_tile_their_text() {
+    let mut failures = Vec::new();
+    let definitions = markdown_syntax::Definitions::new(["a", "1"]);
+    for &(generator, pieces, max_pieces, seed) in GENERATORS {
+        for input in generated(pieces, max_pieces, seed) {
+            for problem in tokens::token_problems(&input, &definitions) {
+                failures.push(format!("{generator} {input:?}: {problem}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(40)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

@@ -28,7 +28,10 @@ pub use ast::*;
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 #[cfg(feature = "html")]
 pub use html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
-pub use parse::{parse, parse_inline, Definitions, InlineOutput, InlineSource, ParseOutput};
+pub use parse::{
+    parse, parse_inline, Definitions, InlineOutput, InlineSource, InlineToken, ParseOutput,
+    TokenRole,
+};
 pub use serialize::{BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions};
 pub use span::{LineIndex, LinePosition, Span};
 
@@ -59,7 +62,8 @@ pub mod prelude {
     #[cfg(feature = "html")]
     pub use crate::html::{HtmlError, HtmlOptions, SafeRawHtmlForm, TasklistAttrOrder};
     pub use crate::parse::{
-        parse, parse_inline, Definitions, InlineOutput, InlineSource, ParseOutput,
+        parse, parse_inline, Definitions, InlineOutput, InlineSource, InlineToken, ParseOutput,
+        TokenRole,
     };
     pub use crate::serialize::{
         BulletMarker, LineEnding, OrderedDelimiter, SerializeError, SerializeOptions,
