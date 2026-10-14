@@ -33,7 +33,7 @@ from commonmark/gfm_task_list_item.cases #1; verified: micromark (cmark-gfm writ
 </ul>
 --- end
 --- case 3 options allow_dangerous_html,allow_dangerous_protocol label-bytes 91 input-bytes 30 expected-bytes 384
-from gfm/inline_footnotes.cases #10; decision 0007: inline footnotes are part of the syntax
+from gfm/inline_footnotes.cases #10; decision 0012: inline footnotes are part of the syntax
 --- input
 Text^[note] should not parse.
 
