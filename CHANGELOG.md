@@ -6,6 +6,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.4.0...markdown-syntax-v0.5.0) - 2026-10-14
+
+### Added
+
+- [**breaking**] mark the syntax of an inline parse with tokens ([#24](https://github.com/plimeor/markdown-syntax/pull/24))
+- write each node from its source, down to own syntax and inlines ([#23](https://github.com/plimeor/markdown-syntax/pull/23))
+- [**breaking**] blank lines as nodes, item numbers, and leaves kept as their text ([#22](https://github.com/plimeor/markdown-syntax/pull/22))
+- [**breaking**] read `#` tags as Tag nodes ([#21](https://github.com/plimeor/markdown-syntax/pull/21))
+- [**breaking**] keep the parsed source, parse one leaf's inlines, and add a wasm binding ([#18](https://github.com/plimeor/markdown-syntax/pull/18))
+
+### Fixed
+
+- *(serialize)* keep list item markers with tabs or over lines ([#27](https://github.com/plimeor/markdown-syntax/pull/27))
+- *(serialize)* keep the lines around an edited leaf ([#26](https://github.com/plimeor/markdown-syntax/pull/26))
+- *(serialize)* keep the boundary before an edited container after a leaf ([#25](https://github.com/plimeor/markdown-syntax/pull/25))
+
+### Other
+
+- tidy the specs and plan batch 2 ([#20](https://github.com/plimeor/markdown-syntax/pull/20))
+
 ## [0.4.0](https://github.com/plimeor/markdown-syntax/compare/v0.3.0...v0.4.0) - 2026-10-08
 
 ### Added
