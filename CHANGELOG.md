@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.0...markdown-syntax-v0.7.1) - 2026-10-18
+
+### Fixed
+
+- *(validate)* refuse a block the block before it takes when written ([#32](https://github.com/plimeor/markdown-syntax/pull/32))
+
 ## [0.7.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.6.0...markdown-syntax-v0.7.0) - 2026-10-18
 
 ### Added
