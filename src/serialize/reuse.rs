@@ -1704,8 +1704,18 @@ impl Reuse<'_, '_> {
             Children::Render => return Ok((Out::Render, false)),
         };
         let indent = " ".repeat(column);
-        // A break's own `-` or `*` after the marker would open a list.
-        let out = if matches!(first_block(&item.children), Some(Block::ThematicBreak(_))) {
+        // A break's own `-` or `*` after the marker would open a list, and a
+        // first line of only the bullet's char after it would read as a
+        // break with the bullet.
+        let bullet = marker.trim_start().chars().next().unwrap_or_default();
+        let out = if matches!(first_block(&item.children), Some(Block::ThematicBreak(_)))
+            || (same_line
+                && !list.ordered
+                && item.checked.is_none()
+                && lines
+                    .first()
+                    .is_some_and(|first| super::reads_as_thematic_break(bullet, &first.body)))
+        {
             Out::Render
         } else if same_line {
             self.marked(&marker, lines, &indent)

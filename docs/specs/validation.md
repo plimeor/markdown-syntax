@@ -42,8 +42,10 @@ label:
     `Frontmatter`, a `Heading` written as a setext heading, an ordered
     `List` whose first item's number is not 1, a `List` whose first item has
     no blocks or that the serializer starts on a line after its bullet (a
-    thematic break of the bullet's char, or content opening with one to
-    three spaces or a tab), or an `HtmlBlock` whose first line opens no HTML
+    first line that with a `-` or `*` bullet reads as a thematic break, such
+    as a thematic break of the bullet's char, a paragraph `--`, or a nested
+    empty item two levels down, or content opening with one to three spaces
+    or a tab), or an `HtmlBlock` whose first line opens no HTML
     block or opens one that only a blank line ends (a lone tag such as
     `<span>`);
   - after a `Definition`, those blocks other than a `Paragraph`, a
