@@ -13,10 +13,14 @@ use crate::{
     },
     diagnostic::Diagnostic,
     parse::{
-        alert_title, frontmatter_fence_kind, is_blank, is_footnote_label, is_reference_label,
+        alert_title, frontmatter_fence_kind, html_block_ends_at_blank_line, html_block_left_open,
+        html_block_opens, is_blank, is_footnote_label, is_reference_label,
         is_written_footnote_label, normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
     },
-    serialize::{write_inline_math, written_after_paragraph_interrupts, written_marker},
+    serialize::{
+        write_inline_math, writes_setext, written_after_paragraph_interrupts, written_marker,
+        written_opens_fence_like,
+    },
     span::Span,
 };
 
@@ -30,7 +34,7 @@ impl Document {
 
 pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
     let mut report = Report::default();
-    validate_blocks(&document.children, 0, &mut report);
+    validate_blocks(&document.children, 0, false, &mut report);
     report.diagnostics
 }
 
@@ -61,7 +65,7 @@ impl Report {
 /// blocks as the parser's nesting limit counts them: block quotes and alerts,
 /// list items, footnote definitions, HTML containers, and container
 /// directives.
-fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Report) {
+fn validate_blocks(blocks: &[Block], depth: usize, tight: bool, diagnostics: &mut Report) {
     // Blank lines beyond the separator change how no block reads, so the
     // block before each one is the last one before them.
     let mut before: Option<&Block> = None;
@@ -74,6 +78,9 @@ fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Report) {
                         "adjacent lists cannot use the same marker",
                     ));
                 }
+            }
+            if let Some(before) = before {
+                validate_taken_block(before, block, tight, diagnostics);
             }
             if let Block::Definition(definition) = block {
                 // A line indented four columns or more continues a paragraph,
@@ -107,7 +114,7 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Report) {
         }
         Block::Heading(heading) => validate_heading(heading, diagnostics),
         Block::BlockQuote(block_quote) => {
-            validate_blocks(&block_quote.children, depth + 1, diagnostics);
+            validate_blocks(&block_quote.children, depth + 1, false, diagnostics);
         }
         Block::Alert(alert) => validate_alert(alert, depth, diagnostics),
         Block::List(list) => validate_list(list, depth, diagnostics),
@@ -140,7 +147,7 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Report) {
                     ))
                 });
             }
-            validate_blocks(&definition.children, depth + 1, diagnostics);
+            validate_blocks(&definition.children, depth + 1, false, diagnostics);
         }
         // Checked with its siblings in `validate_blocks`.
         Block::Definition(_) => {}
@@ -192,7 +199,7 @@ fn validate_html_container(container: &HtmlContainer, depth: usize, diagnostics:
 
     match &container.content {
         HtmlContainerContent::Blocks(children) => {
-            validate_blocks(children, depth + 1, diagnostics);
+            validate_blocks(children, depth + 1, false, diagnostics);
         }
         HtmlContainerContent::Inlines(children) => validate_inlines(children, diagnostics),
     }
@@ -219,7 +226,7 @@ fn validate_alert(alert: &Alert, depth: usize, diagnostics: &mut Report) {
             ));
         }
     }
-    validate_blocks(&alert.children, depth + 1, diagnostics);
+    validate_blocks(&alert.children, depth + 1, false, diagnostics);
 }
 
 fn validate_list(list: &List, depth: usize, diagnostics: &mut Report) {
@@ -249,10 +256,7 @@ fn validate_list(list: &List, depth: usize, diagnostics: &mut Report) {
             validate_item_number(list, item, diagnostics);
             validate_item_blank_lines(list, index, item, diagnostics);
             validate_task_item(item, diagnostics);
-            if list.tight {
-                validate_tight_item(item, diagnostics);
-            }
-            validate_blocks(&item.children, depth + 1, diagnostics);
+            validate_blocks(&item.children, depth + 1, list.tight, diagnostics);
         });
     }
 }
@@ -275,21 +279,120 @@ fn validate_task_item(item: &ListItem, diagnostics: &mut Report) {
     }
 }
 
-/// A tight item writes each block on the line after the one before; after a
-/// paragraph's line, a block that cannot interrupt the paragraph continues it.
-fn validate_tight_item(item: &ListItem, diagnostics: &mut Report) {
-    for (at, pair) in item.children.windows(2).enumerate() {
-        let [Block::Paragraph(_), block] = pair else {
-            continue;
-        };
-        if !written_after_paragraph_interrupts(block) {
-            diagnostics.at(at + 1, |diagnostics| {
-                diagnostics.push(Diagnostic::invalid(
-                    block.span(),
-                    "in a tight list item, a block after a paragraph must be able to interrupt it",
-                ))
-            });
+/// Refuses `right` where `left`, the block before it, takes its first line:
+/// an HTML block its value leaves open takes every line to its container's
+/// end, an indented code block is written four columns in, which some blocks take
+/// across a blank line (see [`takes_indented_code`]), and a tight item writes
+/// each block on the line after the one before (see [`takes_next_line`]).
+fn validate_taken_block(left: &Block, right: &Block, tight: bool, diagnostics: &mut Report) {
+    let message = if matches!(left, Block::HtmlBlock(node) if html_block_left_open(node)) {
+        "a block must not follow an HTML block that its value leaves open"
+    } else if matches!(right, Block::CodeBlock(code) if code.kind == CodeBlockKind::Indented)
+        && takes_indented_code(left)
+    {
+        "an indented code block must not be read as part of the block before it"
+    } else if tight && matches!(left, Block::Paragraph(_)) && takes_next_line(left, right) {
+        "in a tight list item, a block after a paragraph must be able to interrupt it"
+    } else if tight && takes_next_line(left, right) {
+        "in a tight list item, a block must not be read as part of the block before it"
+    } else {
+        return;
+    };
+    diagnostics.push(Diagnostic::invalid(right.span(), message));
+}
+
+/// Whether `left` takes the lines of an indented code block written after
+/// it, on the next line or after blank lines: an indented code block's, which
+/// they continue, and a footnote definition's, whose content is indented four
+/// columns. A list's last item takes them only where its content starts at
+/// most four columns in, which the source's marker sets, so a parsed list
+/// before indented code is written as it reads only from the source.
+fn takes_indented_code(left: &Block) -> bool {
+    match left {
+        Block::CodeBlock(code) => code.kind == CodeBlockKind::Indented,
+        Block::FootnoteDefinition(_) => true,
+        _ => false,
+    }
+}
+
+/// Whether `left`, written on the line before `right` in the same
+/// container, takes `right`'s first line, by the parser's own checks: a
+/// paragraph takes a line that does not interrupt it; a table, and a
+/// container whose last line, through its last block and last item, is a
+/// paragraph's (which takes it lazily), take a line that starts no block
+/// where no paragraph is the line's container; an HTML block that a blank
+/// line ends takes every line; and a quote's `>` lines continue a quote
+/// before it. Every other block ends where its own syntax or line does.
+fn takes_next_line(left: &Block, right: &Block) -> bool {
+    match left {
+        Block::Paragraph(_) => !written_after_paragraph_interrupts(right),
+        // A definition's lines are a paragraph's until it is read, so a
+        // line that cannot interrupt one continues them; only a paragraph,
+        // a definition, and a setext heading read the same after it.
+        Block::Definition(_) => {
+            !written_after_paragraph_interrupts(right)
+                && !matches!(right, Block::Paragraph(_) | Block::Definition(_))
+                && !matches!(right, Block::Heading(heading) if writes_setext(heading))
         }
+        Block::Table(_) => !starts_outside_paragraph(right, false),
+        Block::HtmlBlock(node) => html_block_ends_at_blank_line(node),
+        Block::BlockQuote(_) | Block::Alert(_)
+            if matches!(right, Block::BlockQuote(_) | Block::Alert(_)) =>
+        {
+            true
+        }
+        _ => match ends_in_open_paragraph(left) {
+            // A line opening like a fence ends a quote's paragraph instead of
+            // continuing it.
+            Some(through_quote) => {
+                !starts_outside_paragraph(right, true)
+                    && !(through_quote && written_opens_fence_like(right))
+            }
+            None => false,
+        },
+    }
+}
+
+/// Whether `block`'s first line, written where the line's container is not
+/// a paragraph, starts a block: a paragraph's, a definition's, a setext
+/// heading's, and a table's first line are text, and an HTML block's starts
+/// one only where it opens one. With `lazy`, a paragraph (or an alert's
+/// marker line) is still the last open block, where no indented code
+/// starts.
+fn starts_outside_paragraph(block: &Block, lazy: bool) -> bool {
+    match block {
+        Block::Paragraph(_) | Block::Definition(_) | Block::Table(_) => false,
+        Block::Heading(heading) => !writes_setext(heading),
+        Block::HtmlBlock(node) => html_block_opens(node),
+        Block::CodeBlock(code) => !(lazy && code.kind == CodeBlockKind::Indented),
+        _ => true,
+    }
+}
+
+/// Whether `block` is a container whose last line, through the last block
+/// of each container and the last item of each list, is a paragraph's or a
+/// definition's, or is the marker line of an alert holding no blocks: a
+/// line after it that starts no block continues that paragraph lazily. When
+/// it is, whether a block quote or an alert is passed on the way. Only last
+/// children are visited, which no other pair of a container starts from, so
+/// the walks over a tree stay linear.
+fn ends_in_open_paragraph(block: &Block) -> Option<bool> {
+    let mut block = block;
+    let mut nested = false;
+    let mut through_quote = false;
+    loop {
+        let children = match block {
+            Block::Paragraph(_) | Block::Definition(_) => return nested.then_some(through_quote),
+            Block::Alert(alert) if alert.children.is_empty() => return Some(true),
+            Block::BlockQuote(quote) => &quote.children,
+            Block::Alert(alert) => &alert.children,
+            Block::FootnoteDefinition(footnote) => &footnote.children,
+            Block::List(list) => &list.children.last()?.children,
+            _ => return None,
+        };
+        through_quote |= matches!(block, Block::BlockQuote(_) | Block::Alert(_));
+        block = children.last()?;
+        nested = true;
     }
 }
 
@@ -416,7 +519,7 @@ fn validate_container_directive(
         "a container directive label cannot hold a line break",
         diagnostics,
     );
-    validate_blocks(&directive.children, depth + 1, diagnostics);
+    validate_blocks(&directive.children, depth + 1, false, diagnostics);
 }
 
 /// A definition's label is written as a reference label, and its identifier
