@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.1...markdown-syntax-v0.7.2) - 2026-10-18
+
+### Fixed
+
+- *(serialize)* start an item below its bullet where its first line would read as a break with it ([#34](https://github.com/plimeor/markdown-syntax/pull/34))
+
 ## [0.7.1](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.0...markdown-syntax-v0.7.1) - 2026-10-18
 
 ### Fixed
