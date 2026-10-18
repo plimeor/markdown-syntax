@@ -2178,6 +2178,27 @@ pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
     }
 }
 
+/// The kind of HTML block the first line of `node`'s value opens, if any.
+fn written_html_block_kind(node: &HtmlBlock) -> Option<HtmlBlockKind> {
+    let first_line = node.value.split(['\n', '\r']).next().unwrap_or_default();
+    html_block_start(trim_ascii_start(first_line))
+}
+
+/// Whether the first line of `node`'s value opens an HTML block.
+pub(crate) fn html_block_opens(node: &HtmlBlock) -> bool {
+    written_html_block_kind(node).is_some()
+}
+
+/// Whether an HTML block, written as `node`'s value, takes every line after
+/// it up to a blank line: one its first line opens with a block-level tag or
+/// a lone tag.
+pub(crate) fn html_block_ends_at_blank_line(node: &HtmlBlock) -> bool {
+    matches!(
+        written_html_block_kind(node),
+        Some(HtmlBlockKind::BlockTag | HtmlBlockKind::UntilBlank)
+    )
+}
+
 /// The delimiter and width of the list item marker `rest` opens with, when
 /// a space, a tab, or the line's end follows it.
 pub(super) fn list_marker_head(rest: &str) -> Option<(ListDelimiter, usize)> {

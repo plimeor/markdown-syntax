@@ -28,7 +28,7 @@ mod source_map;
 mod tags;
 mod tokens;
 
-pub(crate) use blocks::interrupts_paragraph;
+pub(crate) use blocks::{html_block_ends_at_blank_line, html_block_opens, interrupts_paragraph};
 use source_map::{DerivedText, Segment, SourceMap};
 
 /// The largest ordered-list item number: a marker holds at most 9 digits.

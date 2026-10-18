@@ -1169,6 +1169,16 @@ fn item_number(item: &ListItem, previous: &mut Option<u64>) -> u64 {
     number
 }
 
+/// Whether `block`, as the serializer writes it with default options, opens
+/// with a backtick or a tilde after fewer than four spaces: a line the
+/// parser does not take as a quote's paragraph's lazy line.
+pub(crate) fn written_opens_fence_like(block: &Block) -> bool {
+    write_block(block, &SerializeOptions::default()).is_ok_and(|written| {
+        let content = written.trim_start_matches(' ');
+        written.len() - content.len() < 4 && content.starts_with(['`', '~'])
+    })
+}
+
 /// One item of `list`, written with `marker_char`; `previous` is the number
 /// the item before it was written with.
 fn write_item(

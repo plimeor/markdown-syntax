@@ -1311,6 +1311,174 @@ mod written_shapes {
         assert!(valid(&parsed("- a\n  # h\n  1. b\n  <div>")));
     }
 
+    /// The first block `source` parses as, without its span.
+    fn block(source: &str) -> Block {
+        parse(source).document.without_source().children.remove(0)
+    }
+
+    /// A tight or loose item holding `blocks`.
+    fn holding(tight: bool, blocks: Vec<Block>) -> Document {
+        document(vec![list(tight, vec![item(None, blocks)])])
+    }
+
+    /// Whether `document` writes Markdown that reads back as it.
+    fn reads_back(document: &Document) -> bool {
+        let written = document.to_markdown().expect("document serializes");
+        super::normalize::normalized(&parse(&written).document.children)
+            == super::normalize::normalized(&document.children)
+    }
+
+    /// A tight item writes each block on the line after the one before,
+    /// which a table, an HTML block a blank line ends, a quote before a
+    /// quote, a definition, and a container ending in a paragraph (lazily)
+    /// can take. Each refused pair is written loose instead and reads back.
+    // validation: Shapes that cannot be written
+    #[test]
+    fn a_block_in_a_tight_item_is_not_taken_by_the_block_before_it() {
+        let mut setext = Heading::new(1, [Text::from("h")]);
+        setext.kind = HeadingKind::Setext;
+        let setext = Block::from(setext);
+        let lazy_lefts = [
+            "- b",
+            "1. b",
+            "- b\n\n  c",
+            "> b",
+            "> [!NOTE]",
+            "> [!NOTE]\n> b",
+            "[^1]: b",
+            "> [x]: /u",
+            "- > - [^1]: > b",
+        ];
+        let mut refused: Vec<(&str, Block)> = Vec::new();
+        for left in lazy_lefts {
+            for right in [
+                paragraph(vec![text("c")]),
+                definition("y", "y"),
+                block("| x |\n| - |"),
+                setext.clone(),
+                html_block("x"),
+                indented_code("z\n"),
+            ] {
+                refused.push((left, right));
+            }
+        }
+        for right in [
+            paragraph(vec![text("c")]),
+            definition("y", "y"),
+            block("| x |\n| - |"),
+            setext.clone(),
+        ] {
+            refused.push(("| a |\n| - |", right));
+        }
+        for right in [
+            paragraph(vec![text("c")]),
+            block("# h"),
+            block("> q"),
+            block("```\nz\n```"),
+        ] {
+            refused.push(("<div>", right.clone()));
+            refused.push(("<span>", right));
+        }
+        for left in ["> b", "> [!NOTE]\n> b", "> - b"] {
+            refused.push((left, block("> q")));
+            refused.push((left, block("> [!TIP]\n> q")));
+        }
+        for right in [
+            html_block("<a>"),
+            indented_code("z\n"),
+            ordered(2, vec![item(None, vec![paragraph(vec![text("x")])])]),
+            list(true, vec![item(None, vec![])]),
+        ] {
+            refused.push(("[x]: /u", right));
+        }
+        for (left, right) in refused {
+            let blocks = vec![paragraph(vec![text("a")]), block(left), right];
+            assert!(
+                invalid(&holding(true, blocks.clone())),
+                "{left:?} {:?}",
+                blocks[2]
+            );
+            // Indented code reaches some blocks across a blank line too
+            // (see the next test, and lists, which validation does not
+            // judge), and an HTML block that opens none reads as a
+            // paragraph anywhere.
+            match &blocks[2] {
+                Block::CodeBlock(code) if code.kind == CodeBlockKind::Indented => continue,
+                _ => {}
+            }
+            let loose_differs = matches!(&blocks[2], Block::HtmlBlock(_));
+            let loose = holding(false, blocks);
+            assert!(
+                valid(&loose) && (loose_differs || reads_back(&loose)),
+                "{left:?} {:?} {:?}",
+                loose.validate(),
+                loose.to_markdown()
+            );
+        }
+        // Blocks that start their own line after each of those.
+        for (left, right) in [
+            ("- b", block("2. x")),
+            ("- b", block("* x")),
+            ("- b", html_block("<a>")),
+            ("- b", block("# h")),
+            ("- b", block("***")),
+            ("- b", block("```\nz\n```")),
+            ("> b", block("- x")),
+            ("> b", block("[^2]: c")),
+            ("> [!NOTE]", block("$$\nm\n$$")),
+            ("| a |\n| - |", indented_code("z\n")),
+            ("| a |\n| - |", html_block("<a>")),
+            ("| a |\n| - |", list(true, vec![item(None, vec![])])),
+            ("<!-- x -->", paragraph(vec![text("c")])),
+            ("[x]: /u", paragraph(vec![text("c")])),
+            ("[x]: /u", setext.clone()),
+            ("[^1]: b", block("[^2]: c")),
+            ("- ```\n  b\n  ```", paragraph(vec![text("c")])),
+            ("> b\n>", paragraph(vec![text("c")])),
+            ("> b", paragraph(vec![text("``` a`b")])),
+            ("> b", paragraph(vec![Inline::Code(CodeInline::new("c"))])),
+            (":::d\nb\n:::", paragraph(vec![text("c")])),
+        ] {
+            let document = holding(true, vec![block(left), right]);
+            assert!(valid(&document) && reads_back(&document), "{left:?}");
+        }
+        // Parsed tight items holding those shapes.
+        for source in [
+            "- a\n  - b\n  2. c\n",
+            "- a\n  - b\n  <span>\n",
+            "- a\n  > b\n  -\n",
+            "- a\n  | x |\n  | - |\n      code\n",
+            "- a\n  > b\n  ``` a`b\n",
+            "- a\n  - > b\n  `c`\n",
+            "- a\n  > b\n  >\n  c\n",
+            "- [x]: /u\n  c\n",
+        ] {
+            assert!(valid(&parsed(source)), "{source:?}");
+        }
+    }
+
+    /// An indented code block continues one before it, and is a footnote
+    /// definition's content, across blank lines too.
+    // validation: Shapes that cannot be written
+    #[test]
+    fn indented_code_is_not_taken_by_the_block_before_it() {
+        for left in [indented_code("a\n"), block("[^1]: b"), block("[^1]:")] {
+            for blocks in [
+                vec![left.clone(), indented_code("z\n")],
+                vec![
+                    left.clone(),
+                    Block::BlankLine(BlankLine::new()),
+                    indented_code("z\n"),
+                ],
+            ] {
+                assert!(invalid(&document(blocks.clone())), "{blocks:?}");
+                assert!(invalid(&document(vec![quoted(blocks)])));
+            }
+        }
+        assert!(valid(&parsed("    a\n\n```\nz\n```")));
+        assert!(valid(&parsed("[^1]: b\n\n        z")));
+    }
+
     #[test]
     fn a_list_holds_an_item() {
         assert!(invalid(&document(vec![list(true, vec![])])));
@@ -1625,6 +1793,18 @@ mod node_paths {
         ])])
         .into()]);
         assert_eq!(paths(&document), [Some(NodePath::from([0, 0, 1]))]);
+    }
+
+    // validation: Shapes that cannot be written
+    #[test]
+    fn a_paragraph_after_a_nested_list_in_a_tight_item_names_the_paragraph() {
+        let document = Document::new(vec![List::new([ListItem::new([
+            Block::from(paragraph("a")),
+            List::new([ListItem::new([paragraph("b")])]).into(),
+            paragraph("c").into(),
+        ])])
+        .into()]);
+        assert_eq!(paths(&document), [Some(NodePath::from([0, 0, 2]))]);
     }
 
     // validation: Validate reports invalid shapes
