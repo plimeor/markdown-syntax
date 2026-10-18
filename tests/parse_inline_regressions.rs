@@ -1010,7 +1010,7 @@ mod gemoji_shortcodes {
         );
     }
 
-    // public-api: Shortcode glyph
+    // public-api: Each written fact is stored once
     #[test]
     fn a_shortcode_gives_its_glyph() {
         let inlines = inlines(":tada:");

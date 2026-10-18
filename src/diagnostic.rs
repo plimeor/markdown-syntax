@@ -3,7 +3,7 @@
 
 use alloc::string::String;
 
-use crate::span::Span;
+use crate::{ast::NodePath, span::Span};
 
 /// How serious a [`Diagnostic`] is.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,6 +41,9 @@ pub struct Diagnostic {
     pub code: DiagnosticCode,
     /// The source location, if known.
     pub span: Option<Span>,
+    /// The path of the node a validation diagnostic is about, in the document
+    /// validated; `None` for a parser diagnostic.
+    pub path: Option<NodePath>,
     /// A human-readable description.
     pub message: String,
 }
@@ -57,6 +60,7 @@ impl Diagnostic {
             severity,
             code,
             span: Some(span),
+            path: None,
             message: message.into(),
         }
     }
@@ -68,6 +72,7 @@ impl Diagnostic {
             severity: DiagnosticSeverity::Error,
             code: DiagnosticCode::InvalidDocument,
             span,
+            path: None,
             message: message.into(),
         }
     }

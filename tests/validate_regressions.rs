@@ -1604,3 +1604,125 @@ mod blank_lines_and_numbers {
         assert!(!document.validate().is_empty());
     }
 }
+
+mod node_paths {
+    use markdown_syntax::*;
+
+    fn paragraph(text: &str) -> Paragraph {
+        Paragraph::new([Text::from(text)])
+    }
+
+    fn paths(document: &Document) -> Vec<Option<NodePath>> {
+        document.validate().into_iter().map(|d| d.path).collect()
+    }
+
+    // validation: Validate reports invalid shapes
+    #[test]
+    fn a_block_a_tight_item_cannot_hold_names_that_block() {
+        let document = Document::new(vec![List::new([ListItem::new([
+            paragraph("a"),
+            paragraph("b"),
+        ])])
+        .into()]);
+        assert_eq!(paths(&document), [Some(NodePath::from([0, 0, 1]))]);
+    }
+
+    // validation: Validate reports invalid shapes
+    #[test]
+    fn adjacent_lists_with_one_marker_name_the_later_list() {
+        let list = || Block::from(List::new([ListItem::new([paragraph("a")])]));
+        let document = Document::new(vec![
+            paragraph("x").into(),
+            list(),
+            BlankLine::new().into(),
+            list(),
+        ]);
+        assert_eq!(paths(&document), [Some(NodePath::from([3]))]);
+    }
+
+    // validation: Validate reports invalid shapes
+    #[test]
+    fn table_shapes_name_their_row_or_cell() {
+        let cell = |children: Vec<Inline>| TableCell::new(children);
+        let document = Document::new(vec![BlockQuote {
+            meta: NodeMeta::default(),
+            children: vec![Table {
+                meta: NodeMeta::default(),
+                alignments: vec![TableAlignment::None, TableAlignment::None],
+                rows: vec![
+                    TableRow {
+                        meta: NodeMeta::default(),
+                        cells: vec![
+                            cell(vec![Text::from("a").into()]),
+                            cell(vec![
+                                Text::from("b").into(),
+                                LineBreak {
+                                    meta: NodeMeta::default(),
+                                    kind: LineBreakKind::Backslash,
+                                }
+                                .into(),
+                                Text::from("c").into(),
+                            ]),
+                        ],
+                    },
+                    TableRow {
+                        meta: NodeMeta::default(),
+                        cells: vec![cell(vec![Text::from("d").into()])],
+                    },
+                ],
+            }
+            .into()],
+        }
+        .into()]);
+        assert_eq!(
+            paths(&document),
+            [
+                Some(NodePath::from([0, 0, 0, 1])),
+                Some(NodePath::from([0, 0, 1])),
+            ]
+        );
+    }
+
+    // validation: Validate reports invalid shapes
+    #[test]
+    fn inline_shapes_name_their_leaf_and_a_label_its_directive() {
+        let line_break = || {
+            Inline::from(LineBreak {
+                meta: NodeMeta::default(),
+                kind: LineBreakKind::Backslash,
+            })
+        };
+        let mut directive = LeafDirective::new("note");
+        directive.label = vec![Text::from("a").into(), line_break(), Text::from("b").into()];
+        let document = Document::new(vec![
+            BlockQuote {
+                meta: NodeMeta::default(),
+                children: vec![Paragraph::new([Text::from("a").into(), line_break()]).into()],
+            }
+            .into(),
+            directive.into(),
+        ]);
+        assert_eq!(
+            paths(&document),
+            [Some(NodePath::from([0, 0])), Some(NodePath::from([1]))]
+        );
+    }
+
+    // public-api: One diagnostic type
+    #[test]
+    fn a_refused_write_carries_the_paths_and_parser_diagnostics_none() {
+        let document = Document::new(vec![List::new([ListItem::new([
+            paragraph("a"),
+            paragraph("b"),
+        ])])
+        .into()]);
+        let Err(SerializeError::InvalidDocument(diagnostics)) = document.to_markdown() else {
+            panic!("the tree is invalid");
+        };
+        assert_eq!(diagnostics[0].path, Some(NodePath::from([0, 0, 1])));
+
+        let parsed = parse(":::Bad name\n");
+        assert!(!parsed.diagnostics.is_empty());
+        assert!(parsed.diagnostics.iter().all(|d| d.path.is_none()));
+    }
+}

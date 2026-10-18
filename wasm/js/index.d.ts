@@ -286,6 +286,8 @@ export interface Diagnostic {
   /** The Rust `DiagnosticCode` in camelCase, such as `invalidDocument`. */
   code: string;
   span: Span;
+  /** The path of the node a validation diagnostic is about; `null` for a parser diagnostic. */
+  path: number[] | null;
   message: string;
 }
 

@@ -49,11 +49,11 @@ of the document's definitions.
 ### Requirement: Write from JavaScript
 `parsedDocument.toMarkdown(tree, options)` SHALL return the text the core
 crate's `to_markdown_with` writes for `tree` given this document's source, or
-SHALL return the validation diagnostics when it refuses the tree. A
-paragraph, heading, table cell, or directive in `tree` MAY carry `source: string`
-in place of its inline content (for a directive, its label's); the binding
-SHALL build it with the core crate's `with_source` and the definitions of
-`tree`.
+SHALL return the validation diagnostics when it refuses the tree, each with
+its `path` as an array of indices. A paragraph, heading, table cell, or
+directive in `tree` MAY carry `source: string` in place of its inline
+content (for a directive, its label's); the binding SHALL build it with the
+core crate's `with_source` and the definitions of `tree`.
 
 #### Scenario: Untouched tree
 - **WHEN** `doc.toMarkdown(doc.tree)` runs

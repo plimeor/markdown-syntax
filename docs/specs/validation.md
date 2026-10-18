@@ -11,6 +11,15 @@ and renderer can write faithfully. Owned by the validator.
 ### Requirement: Validate reports invalid shapes
 `Document::validate` SHALL return one error-severity `InvalidDocument`
 diagnostic per invalid shape it finds, and an empty list for a valid document.
+Each diagnostic's `path` SHALL be the `NodePath`, in the document validated,
+of the node the shape belongs to: the block, list item, table row, or table
+cell; for a shape among sibling blocks, the later block; for a shape in
+inline content, the leaf holding it, a directive label's being its
+directive's.
+
+#### Scenario: A block a tight item cannot hold
+- **WHEN** a hand-built document holds a tight list whose first item holds two paragraphs, and `validate()` runs
+- **THEN** it returns one diagnostic whose `path` is `[0, 0, 1]`, the second paragraph
 
 ### Requirement: Shapes that cannot be written
 Validation SHALL reject exactly these shapes, each visible from the node, its

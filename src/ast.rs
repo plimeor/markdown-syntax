@@ -1021,6 +1021,38 @@ impl_from_variants!(Inline {
     TextDirective(TextDirective), Tag(Tag),
 });
 
+impl Block {
+    /// The blocks directly inside this block: a block quote's, an alert's, a
+    /// footnote definition's, a container directive's, or an HTML container's
+    /// that holds blocks; an empty slice for every other block. A list's
+    /// blocks are in its items ([`ListItem::children`]), as [`NodePath`]
+    /// counts them, so a walker over blocks steps into a list's items itself.
+    pub fn children(&self) -> &[Block] {
+        match self {
+            Block::BlockQuote(n) => &n.children,
+            Block::Alert(n) => &n.children,
+            Block::FootnoteDefinition(n) => &n.children,
+            Block::ContainerDirective(n) => &n.children,
+            Block::HtmlContainer(n) => match &n.content {
+                HtmlContainerContent::Blocks(blocks) => blocks,
+                HtmlContainerContent::Inlines(_) => &[],
+            },
+            Block::Paragraph(_)
+            | Block::Heading(_)
+            | Block::ThematicBreak(_)
+            | Block::List(_)
+            | Block::CodeBlock(_)
+            | Block::HtmlBlock(_)
+            | Block::Definition(_)
+            | Block::Table(_)
+            | Block::MathBlock(_)
+            | Block::Frontmatter(_)
+            | Block::LeafDirective(_)
+            | Block::BlankLine(_) => &[],
+        }
+    }
+}
+
 impl Inline {
     /// The inline subtree of this node, or an empty slice for a leaf. Covers the
     /// `alt`/`label` fields uniformly, so a generic walker never silently skips

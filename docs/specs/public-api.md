@@ -39,7 +39,8 @@ prelude.
 
 ### Requirement: One diagnostic type
 Parser diagnostics, AST validation, and serializer and HTML pre-validation SHALL
-all report a single `Diagnostic { severity, code, span: Option<Span>, message }`.
+all report a single `Diagnostic { severity, code, span: Option<Span>, path:
+Option<NodePath>, message }`; `path` SHALL be `None` on parser diagnostics.
 
 ### Requirement: Source spans
 Every parsed node SHALL carry an absolute, half-open UTF-8 byte range into the
@@ -87,6 +88,15 @@ type, `From<&str>` and `From<String>` for `Text`, and `new` constructors for
 list item's number to `None`, and a directive's label and attributes to none;
 `markdown_syntax::prelude::*` SHALL import this surface.
 
+### Requirement: Children of a node
+`Inline::children()` SHALL return the inlines directly inside an inline (an
+emphasis-like container's, a link's or reference's text, an image's alt, an
+inline footnote's, a text directive's label) and an empty slice for every
+other inline. `Block::children()` SHALL return the blocks directly inside a
+block quote, an alert, a footnote definition, a container directive, or an
+HTML container holding blocks, and an empty slice for every other block; a
+list's blocks are its items' `children`.
+
 ### Requirement: Byte order mark and NUL
 The parser SHALL ignore one leading U+FEFF and SHALL treat every U+0000 as
 U+FFFD, both when recognizing structure and in every node value, while all spans
@@ -111,15 +121,13 @@ not exactly one autolink of its form.
 A `Link`, an `Image`, and a `Definition` SHALL hold a title, when they have
 one, as one `Title` holding its value and the quotes it is written in, so a
 title without quotes or quotes without a title cannot be built.
+A `Shortcode` SHALL hold only its name, and `Shortcode::glyph()` SHALL return
+the emoji that the crate's pinned gemoji table gives that name, and `None`
+for a name the table does not hold.
 
 #### Scenario: Text the parser would trim
 - **WHEN** `destination()` is called on a hand-built literal `Autolink` holding `"http://a.b."`
 - **THEN** it returns `None`
-
-### Requirement: Shortcode glyph
-`Shortcode::glyph()` SHALL return the emoji that the crate's pinned gemoji
-table gives the shortcode's name, and `None` for a name the table does not
-hold.
 
 ### Requirement: Wiki link decoding
 `WikiLink::decoded_target()` and `WikiLink::decoded_label()` SHALL return the
