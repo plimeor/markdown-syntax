@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.6.0...markdown-syntax-v0.7.0) - 2026-10-18
+
+### Added
+
+- [**breaking**] flank emphasis by the CJK-friendly amendments ([#30](https://github.com/plimeor/markdown-syntax/pull/30))
+
 ## [0.6.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.5.0...markdown-syntax-v0.6.0) - 2026-10-18
 
 ### Added
