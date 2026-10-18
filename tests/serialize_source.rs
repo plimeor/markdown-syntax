@@ -100,6 +100,30 @@ mod unchanged_source_is_kept {
         assert_eq!(document.to_markdown().unwrap(), "* x\n\n# T #");
     }
 
+    /// An edited item whose kept bullet and new first line would read as one
+    /// thematic break starts its content on the line after the bullet.
+    // serialization: Unchanged source is kept
+    #[test]
+    fn an_edited_item_that_would_read_as_a_break_starts_below_its_bullet() {
+        let mut document = parse("-   a\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        list.children[0].children[0] = paragraph("--");
+        assert_eq!(document.to_markdown().unwrap(), "-\n  --\n");
+
+        let mut document = parse("- - a\n").document;
+        let Block::List(list) = &mut document.children[0] else {
+            panic!("{:?}", document.children);
+        };
+        let Block::List(inner) = &mut list.children[0].children[0] else {
+            panic!("{list:?}");
+        };
+        inner.children[0].children =
+            vec![Block::List(List::new([ListItem::new(Vec::<Block>::new())]))];
+        assert_eq!(document.to_markdown().unwrap(), "-\n  - - \n");
+    }
+
     #[test]
     fn removed_blocks_leave_canonical_gaps() {
         let mut document = parse("a\n\n\nb\n\n\nc").document;

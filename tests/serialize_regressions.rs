@@ -699,6 +699,68 @@ mod recorded_spellings {
         assert_eq!(rendered(&document(vec![list])), "*\n  ***\n");
     }
 
+    /// A first line of only the bullet's char after the bullet reads as one
+    /// thematic break with it, so the item starts on the line after its
+    /// marker: a paragraph `--`, or three nested empty items.
+    #[test]
+    fn an_item_whose_first_line_reads_as_a_break_with_its_bullet_starts_below_it() {
+        let list = |delimiter, children: Vec<Block>| {
+            Block::List(List {
+                meta: NodeMeta::default(),
+                ordered: false,
+                delimiter,
+                tight: true,
+                children: vec![ListItem {
+                    meta: NodeMeta::default(),
+                    checked: None,
+                    number: None,
+                    children,
+                }],
+            })
+        };
+        let dash = |children| list(ListDelimiter::Dash, children);
+        assert_eq!(
+            rendered(&document(vec![dash(vec![paragraph(vec![text("--")])])])),
+            "-\n  --\n"
+        );
+        assert_eq!(
+            rendered(&document(vec![list(
+                ListDelimiter::Asterisk,
+                vec![paragraph(vec![text("* *")])]
+            )])),
+            "*\n  * *\n"
+        );
+        let empty_items = dash(vec![dash(vec![dash(vec![])])]);
+        assert_eq!(rendered(&document(vec![empty_items])), "-\n  - - \n");
+        // Two nested empty items and a `+` bullet read as items.
+        assert_eq!(
+            rendered(&document(vec![dash(vec![dash(vec![])])])),
+            "- - \n"
+        );
+        assert_eq!(
+            rendered(&document(vec![list(
+                ListDelimiter::Plus,
+                vec![paragraph(vec![text("++")])]
+            )])),
+            "+ ++\n"
+        );
+        // A first line ending in a carriage return reads the same.
+        let crlf_code = Block::CodeBlock(CodeBlock {
+            meta: NodeMeta::default(),
+            kind: CodeBlockKind::Indented,
+            info: None,
+            value: "--\r\nx\r\n".into(),
+        });
+        assert_eq!(
+            rendered(&document(vec![dash(vec![crlf_code])])),
+            "-\n      --\r\n      x\r\n"
+        );
+        for written in ["-\n  --\n", "-\n  - - \n"] {
+            let reparsed = parse(written).document.without_source();
+            assert_eq!(rendered(&reparsed), written);
+        }
+    }
+
     #[test]
     fn a_nested_bullet_is_written_as_a_list() {
         let list = |children| {

@@ -1194,40 +1194,94 @@ fn write_item(
         format!("{marker_char} ")
     };
     let inner = write_item_blocks(&item.children, options, list.tight, item.checked)?;
-    let break_after_bullet = breaks_after_bullet(list, item, marker_char);
-    let opens_with_whitespace = opens_with_padding(&inner);
-    Ok(if break_after_bullet || opens_with_whitespace {
-        format!(
-            "{}\n{}",
-            marker.trim_end(),
-            prefix_container_lines(&inner, &" ".repeat(marker.len()))
-        )
-    } else {
-        format!("{marker}{}", indent_after_first_line(&inner, marker.len()))
-    })
+    Ok(
+        if starts_below_bullet(list, item, marker_char, first_line(&inner)) {
+            format!(
+                "{}\n{}",
+                marker.trim_end(),
+                prefix_container_lines(&inner, &" ".repeat(marker.len()))
+            )
+        } else {
+            format!("{marker}{}", indent_after_first_line(&inner, marker.len()))
+        },
+    )
 }
 
-fn thematic_break_char(marker: ThematicBreakMarker) -> char {
-    match marker {
-        ThematicBreakMarker::Dash => '-',
-        ThematicBreakMarker::Asterisk => '*',
-        ThematicBreakMarker::Underscore => '_',
+/// Whether `item` of `list`, written with `marker_char`, starts its content
+/// on the line after its marker, `first_line` being the first line its
+/// blocks are written as: where that line would read as padding after the
+/// marker, or, after a bullet, as one thematic break with it (`- --`, or
+/// the `- - -` of three nested empty items).
+fn starts_below_bullet(list: &List, item: &ListItem, marker_char: char, first_line: &str) -> bool {
+    opens_with_padding(first_line)
+        || (!list.ordered
+            && item.checked.is_none()
+            && reads_as_thematic_break(marker_char, first_line))
+}
+
+/// Whether `marker_char`, a space, and `rest` read as a thematic break of
+/// that char: three or more `-` or `*`, with only spaces and tabs between.
+pub(super) fn reads_as_thematic_break(marker_char: char, rest: &str) -> bool {
+    matches!(marker_char, '-' | '*')
+        && rest
+            .chars()
+            .all(|char| matches!(char, ' ' | '\t') || char == marker_char)
+        && rest.chars().filter(|char| *char == marker_char).count() >= 2
+}
+
+/// The first line the serializer writes `item` of `list` with, its marker
+/// `marker_char` and `options`' text included.
+fn item_first_line(
+    list: &List,
+    item: &ListItem,
+    marker_char: char,
+    options: &SerializeOptions,
+) -> String {
+    let marker = if list.ordered {
+        format!("{}{marker_char}", item.number.unwrap_or(1))
+    } else {
+        String::from(marker_char)
+    };
+    let content = item_content_first_line(item, options);
+    if starts_below_bullet(list, item, marker_char, &content) {
+        marker
+    } else {
+        format!("{marker} {content}")
     }
 }
 
-/// An item's blocks; a task item's, `task` holding whether it is checked,
-/// open with its checkbox: at the start of the first paragraph after the
-/// definitions the item starts with, or else of the item.
-/// A thematic break of the bullet's own char right after the bullet would
-/// read as one longer break, so it starts on the next line.
-fn breaks_after_bullet(list: &List, item: &ListItem, marker_char: char) -> bool {
-    !list.ordered
-        && item.checked.is_none()
-        && matches!(
-            item.children.first(),
-            Some(Block::ThematicBreak(ThematicBreak { marker, .. }))
-                if thematic_break_char(*marker) == marker_char
-        )
+/// The first line of `item`'s blocks as the serializer writes them with
+/// `options`: a nested list's first item is followed into, and a leaf block
+/// is written to tell.
+fn item_content_first_line(item: &ListItem, options: &SerializeOptions) -> String {
+    if item.checked.is_some() {
+        return String::from("[");
+    }
+    match item.children.first() {
+        None => String::new(),
+        Some(Block::List(nested)) => match nested.children.first() {
+            Some(first) => {
+                item_first_line(nested, first, list_marker(nested, options, None), options)
+            }
+            None => String::new(),
+        },
+        Some(
+            block @ (Block::Paragraph(_)
+            | Block::Heading(_)
+            | Block::HtmlBlock(_)
+            | Block::CodeBlock(_)
+            | Block::ThematicBreak(_)),
+        ) => write_block(block, options)
+            .map(|written| String::from(first_line(&written)))
+            .unwrap_or_default(),
+        // Every other block opens with syntax of its own.
+        Some(_) => String::from(">"),
+    }
+}
+
+/// `text` up to its first line ending.
+fn first_line(text: &str) -> &str {
+    text.split(['\n', '\r']).next().unwrap_or_default()
 }
 
 /// Spaces or a tab opening an item's written content would read as padding
@@ -1255,30 +1309,20 @@ pub(crate) fn written_after_paragraph_interrupts(block: &Block) -> bool {
 
 /// Whether, with default options, the serializer starts `list`'s first item
 /// on a line after its bullet, so that the list, written after a paragraph's
-/// line, cannot interrupt the paragraph. Only a leaf block can open with
-/// whitespace, so only a leading leaf block is written to tell.
+/// line, cannot interrupt the paragraph. Only the item's first line is
+/// written to tell.
 pub(crate) fn first_item_starts_below_its_bullet(list: &List) -> bool {
     let Some(item) = list.children.first() else {
         return false;
     };
     let options = SerializeOptions::default();
-    if breaks_after_bullet(list, item, list_marker(list, &options, None)) {
-        return true;
-    }
-    if item.checked.is_some() {
-        return false;
-    }
-    match item.children.first() {
-        Some(
-            block @ (Block::Paragraph(_)
-            | Block::Heading(_)
-            | Block::HtmlBlock(_)
-            | Block::CodeBlock(_)),
-        ) => write_block(block, &options).is_ok_and(|written| opens_with_padding(&written)),
-        _ => false,
-    }
+    let content = item_content_first_line(item, &options);
+    starts_below_bullet(list, item, list_marker(list, &options, None), &content)
 }
 
+/// An item's blocks; a task item's, `task` holding whether it is checked,
+/// open with its checkbox: at the start of the first paragraph after the
+/// definitions the item starts with, or else of the item.
 fn write_item_blocks(
     blocks: &[Block],
     options: &SerializeOptions,

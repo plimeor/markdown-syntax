@@ -1281,6 +1281,8 @@ mod written_shapes {
                 )],
             ),
             list(true, vec![item(None, vec![html_block(" <v>")])]),
+            // A first line that reads as a break with the bullet: `- --`.
+            list(true, vec![item(None, vec![paragraph(vec![text("--")])])]),
         ] {
             assert!(invalid(&after(true, bad.clone())), "{bad:?}");
             assert!(valid(&after(false, bad)));
