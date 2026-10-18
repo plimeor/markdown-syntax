@@ -546,14 +546,61 @@ mod review_unicode {
         }
     }
 
-    /// `a*。*b` — CJK full stop U+3002 is Unicode punctuation; same rule, no emphasis.
+    /// `a*。*b` — CJK full stop U+3002 is CJK punctuation, which does not
+    /// block flanking (inline-syntax: CJK-friendly emphasis flanking).
     #[test]
-    fn emphasis_does_not_open_before_cjk_punctuation() {
+    fn emphasis_opens_before_cjk_punctuation() {
         let nodes = paragraph_inlines("a*\u{3002}*b\n");
         assert!(
-            !nodes.iter().any(|node| matches!(node, Inline::Emphasis(_))),
-            "no emphasis should form around CJK punctuation: {nodes:?}"
+            nodes.iter().any(|node| matches!(node, Inline::Emphasis(_))),
+            "emphasis forms around CJK punctuation: {nodes:?}"
         );
+    }
+
+    fn text(inline: &Inline) -> &str {
+        match inline {
+            Inline::Text(text) => &text.value,
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    // inline-syntax: CJK-friendly emphasis flanking
+    #[test]
+    fn strong_ends_in_cjk_punctuation_before_a_cjk_char() {
+        let nodes = paragraph_inlines("这是**重点。**然后\n");
+        assert_eq!(nodes.len(), 3, "{nodes:?}");
+        assert_eq!(text(&nodes[0]), "这是");
+        match &nodes[1] {
+            Inline::Strong(strong) => {
+                assert_eq!(strong.children.len(), 1);
+                assert_eq!(text(&strong.children[0]), "重点。");
+            }
+            other => panic!("expected strong, got {other:?}"),
+        }
+        assert_eq!(text(&nodes[2]), "然后");
+    }
+
+    // inline-syntax: CJK-friendly emphasis flanking
+    #[test]
+    fn every_emphasis_like_mark_flanks_beside_cjk() {
+        for (input, is_mark) in [
+            (
+                "这是~~重点。~~然后\n",
+                (|node: &Inline| matches!(node, Inline::Delete(_))) as fn(&Inline) -> bool,
+            ),
+            ("这是==重点。==然后\n", |node| {
+                matches!(node, Inline::Mark(_))
+            }),
+            ("这是*重点。*然后\n", |node| {
+                matches!(node, Inline::Emphasis(_))
+            }),
+        ] {
+            let nodes = paragraph_inlines(input);
+            assert!(
+                nodes.len() == 3 && is_mark(&nodes[1]),
+                "{input:?}: {nodes:?}"
+            );
+        }
     }
 
     /// Control: a `*` between ASCII letters still opens/closes emphasis — the

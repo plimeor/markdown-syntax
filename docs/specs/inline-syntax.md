@@ -13,7 +13,8 @@ HTML, and inline directives. Owned by the inline parser.
 The parser SHALL recognize CommonMark inline constructs as the CommonMark
 specification 0.31.2 defines them, including its precedence of code spans,
 links, and emphasis, with commonmark.js as the reference where the
-specification leaves a case open, except that link text holds no link: an
+specification leaves a case open, except that delimiter runs flank as
+CJK-friendly emphasis flanking states, and that link text holds no link: an
 autolink inside link text, image alt included, reads as its text, an
 angle-bracket one without its brackets, and a wikilink, alone or in a text
 directive's label, keeps the brackets around it from forming a link.
@@ -25,6 +26,21 @@ directive's label, keeps the brackets around it from forming a link.
 #### Scenario: Wikilink inside a link label
 - **WHEN** `"[a [[b]] c](u)"` and `"[x :d[[[w]]] y](u)"` are parsed
 - **THEN** neither paragraph holds a `Link`: a wikilink, alone or in a text directive's label, keeps the brackets around it from forming a link, and the first paragraph holds `Text("[a ")`, a `WikiLink` with target `b`, and `Text(" c](u)")`
+
+### Requirement: CJK-friendly emphasis flanking
+The parser SHALL decide whether a `*`, `_`, `~~`, or `==` delimiter run is
+left-flanking or right-flanking, and whether a `_` or `__` run can open, by
+the CommonMark CJK-friendly amendments
+(<https://github.com/tats-u/markdown-cjk-friendly>, specification at commit
+`5b17173`, with its Unicode 18 ranges) in place of CommonMark's definitions,
+except that `‘`, `’`, `“`, or `”` followed by U+FE01 before a run SHALL read as
+CJK punctuation, as `micromark-extension-cjk-friendly` reads it. A run after a
+variation selector that follows whitespace, an ideographic variation
+selector, or the start of the content flanks in an unspecified way.
+
+#### Scenario: Strong ending in CJK punctuation
+- **WHEN** `"这是**重点。**然后"` is parsed
+- **THEN** the paragraph holds `Text("这是")`, a `Strong` containing `重点。`, and `Text("然后")`
 
 ### Requirement: Extension marks
 The parser SHALL read `==x==` as `Mark`, parsing its content as inline content,

@@ -1,6 +1,6 @@
 # 0015: Parse entry points and one normative syntax, with tags
 
-Status: Accepted
+Status: Superseded by 0018
 Date: 2026-10-14
 Supersedes: 0012
 

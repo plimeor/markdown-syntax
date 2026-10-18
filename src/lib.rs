@@ -12,6 +12,7 @@ mod leaves;
 mod memo;
 #[cfg(test)]
 mod test_support;
+mod unicode_cjk;
 mod unicode_letters;
 mod unicode_punctuation;
 
