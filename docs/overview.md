@@ -1,5 +1,5 @@
 # Project overview
-Updated 2026-10-14
+Updated 2026-10-18
 
 ## What this is
 
@@ -31,12 +31,12 @@ Shipped features are described in `docs/specs/`.
 
 ## Current focus
 
-The second batch for the editor. Blank lines are nodes, ordered items keep
-their numbers, every leaf's inline source comes in one pass, a leaf built
-from its text is written as that text, the source is reused per node and
-per node's own syntax down to inlines, and an inline parse marks each run
-of its text with the node holding it and the part of that node it is, for
-the editor's marks. Lists stay nested; the editor flattens them.
+Serving Settle's editor and index. The second batch for the editor has
+shipped: blank lines as nodes, item numbers, leaves written as their text,
+source reuse per node down to inlines, and inline syntax tokens for the
+editor's marks. Validation diagnostics name the node they are about, so an
+editor can fix a refused tree without guessing, and `Block::children()`
+walks block containers. Lists stay nested; the editor flattens them.
 
 ## Non-goals
 

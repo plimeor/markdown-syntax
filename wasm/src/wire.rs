@@ -574,13 +574,21 @@ impl<'t> Writer<'t> {
         }
     }
 
-    /// Diagnostics, with their severity and code as their Rust names.
+    /// Diagnostics, with their severity and code as their Rust names, and
+    /// whether a path follows, then its indices.
     pub fn diagnostics(&mut self, diagnostics: &[Diagnostic]) {
         self.word(diagnostics.len() as u32);
         for diagnostic in diagnostics {
             self.str(&format!("{:?}", diagnostic.severity));
             self.str(&format!("{:?}", diagnostic.code));
             self.span(diagnostic.span);
+            self.bool(diagnostic.path.is_some());
+            if let Some(path) = &diagnostic.path {
+                self.word(path.0.len() as u32);
+                for &index in &path.0 {
+                    self.word(index as u32);
+                }
+            }
             self.str(&diagnostic.message);
         }
     }

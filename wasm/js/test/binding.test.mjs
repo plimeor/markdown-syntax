@@ -331,6 +331,7 @@ describe("Write from JavaScript", () => {
     assert.equal(document.toMarkdown(tree), "\ufeff# a\n\nc\n");
   });
 
+  // wasm-binding: Write from JavaScript
   test("a refused tree returns the diagnostics", () => {
     const document = binding.parse("- a\n\np\n\n- b");
     const tree = structuredClone(document.tree);
@@ -339,6 +340,14 @@ describe("Write from JavaScript", () => {
     assert.equal(typeof result, "object");
     assert.equal(result.diagnostics[0].code, "invalidDocument");
     assert.equal(result.diagnostics[0].severity, "error");
+    // The later of the two adjacent lists.
+    assert.deepEqual(result.diagnostics[0].path, [1]);
+  });
+
+  test("a parser diagnostic has no path", () => {
+    const { diagnostics } = binding.parse(":::Bad name\n");
+    assert.ok(diagnostics.length > 0);
+    assert.ok(diagnostics.every((diagnostic) => diagnostic.path === null));
   });
 
   test("every value survives the round trip", () => {

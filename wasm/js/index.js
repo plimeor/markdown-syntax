@@ -328,6 +328,7 @@ class Reader {
       severity: camel(this.string()),
       code: camel(this.string()),
       span: this.span(),
+      path: this.word() === 1 ? this.list(() => this.word()) : null,
       message: this.string(),
     }));
   }

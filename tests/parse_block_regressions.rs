@@ -2537,3 +2537,50 @@ mod blank_lines_and_numbers {
         assert_eq!(list.children[0].number, None);
     }
 }
+
+mod children {
+    use markdown_syntax::*;
+
+    fn kinds(blocks: &[Block]) -> Vec<&'static str> {
+        blocks
+            .iter()
+            .map(|block| match block {
+                Block::Paragraph(_) => "paragraph",
+                Block::List(_) => "list",
+                Block::BlankLine(_) => "blank",
+                _ => "other",
+            })
+            .collect()
+    }
+
+    // public-api: Children of a node
+    #[test]
+    fn a_container_gives_its_blocks_and_others_none() {
+        let source = "> a\n\n> [!NOTE]\n> b\n\n[^f]: c\n\n:::note\nd\n:::\n\n<details>\n\ne\n\n</details>\n\n- f\n\ng\n";
+        let document = parse(source).document;
+        let children: Vec<Vec<&str>> = document
+            .children
+            .iter()
+            .filter(|block| !matches!(block, Block::BlankLine(_)))
+            .map(|block| kinds(block.children()))
+            .collect();
+        assert_eq!(
+            children,
+            [
+                vec!["paragraph"],
+                vec!["paragraph"],
+                vec!["paragraph"],
+                vec!["paragraph"],
+                vec!["blank", "paragraph"],
+                vec![],
+                vec![],
+            ],
+            "{:#?}",
+            document.children
+        );
+        let Block::List(list) = &document.children[document.children.len() - 2] else {
+            panic!("{:#?}", document.children);
+        };
+        assert_eq!(kinds(&list.children[0].children), ["paragraph"]);
+    }
+}

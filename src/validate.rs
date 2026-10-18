@@ -9,7 +9,7 @@ use crate::{
         Alert, Block, CodeBlock, CodeBlockKind, CodeInline, ContainerDirective, Definition,
         DirectiveAttribute, Document, Escape, Frontmatter, Heading, HtmlContainer,
         HtmlContainerContent, Inline, LeafDirective, LineBreakKind, LinkDestinationKind, List,
-        ListItem, MathInline, MathInlineKind, ReferenceKind, Table, TextDirective,
+        ListItem, MathInline, MathInlineKind, NodePath, ReferenceKind, Table, TextDirective,
     },
     diagnostic::Diagnostic,
     parse::{
@@ -29,9 +29,31 @@ impl Document {
 }
 
 pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    validate_blocks(&document.children, 0, &mut diagnostics);
-    diagnostics
+    let mut report = Report::default();
+    validate_blocks(&document.children, 0, &mut report);
+    report.diagnostics
+}
+
+/// The diagnostics found so far, and the path of the node being checked,
+/// which each diagnostic pushed carries.
+#[derive(Default)]
+struct Report {
+    diagnostics: Vec<Diagnostic>,
+    path: Vec<usize>,
+}
+
+impl Report {
+    fn push(&mut self, mut diagnostic: Diagnostic) {
+        diagnostic.path = Some(NodePath(self.path.clone()));
+        self.diagnostics.push(diagnostic);
+    }
+
+    /// Runs `check` with the path at the child `index` of the current node.
+    fn at(&mut self, index: usize, check: impl FnOnce(&mut Self)) {
+        self.path.push(index);
+        check(self);
+        self.path.pop();
+    }
 }
 
 /// A sequence of sibling blocks: each block, and two adjacent lists that one
@@ -39,37 +61,39 @@ pub(crate) fn validate_document(document: &Document) -> Vec<Diagnostic> {
 /// blocks as the parser's nesting limit counts them: block quotes and alerts,
 /// list items, footnote definitions, HTML containers, and container
 /// directives.
-fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_blocks(blocks: &[Block], depth: usize, diagnostics: &mut Report) {
     // Blank lines beyond the separator change how no block reads, so the
     // block before each one is the last one before them.
     let mut before: Option<&Block> = None;
-    for block in blocks {
-        if let (Some(Block::List(before)), Block::List(list)) = (before, block) {
-            if written_marker(before) == written_marker(list) {
-                diagnostics.push(Diagnostic::invalid(
-                    list.meta.span,
-                    "adjacent lists cannot use the same marker",
-                ));
+    for (index, block) in blocks.iter().enumerate() {
+        diagnostics.at(index, |diagnostics| {
+            if let (Some(Block::List(before)), Block::List(list)) = (before, block) {
+                if written_marker(before) == written_marker(list) {
+                    diagnostics.push(Diagnostic::invalid(
+                        list.meta.span,
+                        "adjacent lists cannot use the same marker",
+                    ));
+                }
             }
-        }
-        if let Block::Definition(definition) = block {
-            // A line indented four columns or more continues a paragraph,
-            // and starts one on the line after an alert's marker, which may
-            // open containers first; neither starts a footnote definition.
-            let indented = match before {
-                Some(before) => matches!(before, Block::Definition(_)),
-                None => depth > 0,
-            };
-            validate_definition(definition, depth, indented, diagnostics);
-        }
-        validate_block(block, depth, diagnostics);
+            if let Block::Definition(definition) = block {
+                // A line indented four columns or more continues a paragraph,
+                // and starts one on the line after an alert's marker, which may
+                // open containers first; neither starts a footnote definition.
+                let indented = match before {
+                    Some(before) => matches!(before, Block::Definition(_)),
+                    None => depth > 0,
+                };
+                validate_definition(definition, depth, indented, diagnostics);
+            }
+            validate_block(block, depth, diagnostics);
+        });
         if !matches!(block, Block::BlankLine(_)) {
             before = Some(block);
         }
     }
 }
 
-fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_block(block: &Block, depth: usize, diagnostics: &mut Report) {
     match block {
         Block::Paragraph(paragraph) => {
             // An empty paragraph writes nothing and reads back as no block.
@@ -103,16 +127,18 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
             );
             // Its first line holds its label, and a blank line after its last
             // block belongs to the container around it.
-            let edges = [definition.children.first(), definition.children.last()];
-            if let Some(Block::BlankLine(blank)) = edges
+            let last = definition.children.len().saturating_sub(1);
+            if let Some((at, Block::BlankLine(blank))) = [0, last]
                 .into_iter()
-                .flatten()
-                .find(|block| matches!(block, Block::BlankLine(_)))
+                .filter_map(|at| definition.children.get(at).map(|block| (at, block)))
+                .find(|(_, block)| matches!(block, Block::BlankLine(_)))
             {
-                diagnostics.push(Diagnostic::invalid(
-                    blank.meta.span,
-                    "a footnote definition cannot open or end with a blank line",
-                ));
+                diagnostics.at(at, |diagnostics| {
+                    diagnostics.push(Diagnostic::invalid(
+                        blank.meta.span,
+                        "a footnote definition cannot open or end with a blank line",
+                    ))
+                });
             }
             validate_blocks(&definition.children, depth + 1, diagnostics);
         }
@@ -132,11 +158,7 @@ fn validate_block(block: &Block, depth: usize, diagnostics: &mut Vec<Diagnostic>
     }
 }
 
-fn validate_html_container(
-    container: &HtmlContainer,
-    depth: usize,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn validate_html_container(container: &HtmlContainer, depth: usize, diagnostics: &mut Report) {
     if container.opening.name.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             container.opening.meta.span,
@@ -176,7 +198,7 @@ fn validate_html_container(
     }
 }
 
-fn validate_heading(heading: &Heading, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_heading(heading: &Heading, diagnostics: &mut Report) {
     if heading.depth == 0 || heading.depth > 6 {
         diagnostics.push(Diagnostic::invalid(
             heading.meta.span,
@@ -188,7 +210,7 @@ fn validate_heading(heading: &Heading, diagnostics: &mut Vec<Diagnostic>) {
 
 /// An alert's title is what the parser reads from its marker line: never
 /// empty, and without spaces or tabs around it.
-fn validate_alert(alert: &Alert, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_alert(alert: &Alert, depth: usize, diagnostics: &mut Report) {
     if let Some(title) = &alert.title {
         if alert_title(title).as_deref() != Some(title.as_str()) {
             diagnostics.push(Diagnostic::invalid(
@@ -200,7 +222,7 @@ fn validate_alert(alert: &Alert, depth: usize, diagnostics: &mut Vec<Diagnostic>
     validate_blocks(&alert.children, depth + 1, diagnostics);
 }
 
-fn validate_list(list: &List, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_list(list: &List, depth: usize, diagnostics: &mut Report) {
     if list.children.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             list.meta.span,
@@ -223,19 +245,21 @@ fn validate_list(list: &List, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
         ));
     }
     for (index, item) in list.children.iter().enumerate() {
-        validate_item_number(list, item, diagnostics);
-        validate_item_blank_lines(list, index, item, diagnostics);
-        validate_task_item(item, diagnostics);
-        if list.tight {
-            validate_tight_item(item, diagnostics);
-        }
-        validate_blocks(&item.children, depth + 1, diagnostics);
+        diagnostics.at(index, |diagnostics| {
+            validate_item_number(list, item, diagnostics);
+            validate_item_blank_lines(list, index, item, diagnostics);
+            validate_task_item(item, diagnostics);
+            if list.tight {
+                validate_tight_item(item, diagnostics);
+            }
+            validate_blocks(&item.children, depth + 1, diagnostics);
+        });
     }
 }
 
 /// A task item's checkbox opens its first paragraph after the definitions it
 /// starts with; without one, `[ ]` or `[x]` reads as text.
-fn validate_task_item(item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_task_item(item: &ListItem, diagnostics: &mut Report) {
     if item.checked.is_none() {
         return;
     }
@@ -253,21 +277,23 @@ fn validate_task_item(item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
 
 /// A tight item writes each block on the line after the one before; after a
 /// paragraph's line, a block that cannot interrupt the paragraph continues it.
-fn validate_tight_item(item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
-    for pair in item.children.windows(2) {
+fn validate_tight_item(item: &ListItem, diagnostics: &mut Report) {
+    for (at, pair) in item.children.windows(2).enumerate() {
         let [Block::Paragraph(_), block] = pair else {
             continue;
         };
         if !written_after_paragraph_interrupts(block) {
-            diagnostics.push(Diagnostic::invalid(
-                block.span(),
-                "in a tight list item, a block after a paragraph must be able to interrupt it",
-            ));
+            diagnostics.at(at + 1, |diagnostics| {
+                diagnostics.push(Diagnostic::invalid(
+                    block.span(),
+                    "in a tight list item, a block after a paragraph must be able to interrupt it",
+                ))
+            });
         }
     }
 }
 
-fn validate_table(table: &Table, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_table(table: &Table, diagnostics: &mut Report) {
     if table.rows.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             table.meta.span,
@@ -291,22 +317,26 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<Diagnostic>) {
         ));
     }
 
-    for row in &table.rows {
-        if row.cells.len() != width {
-            diagnostics.push(Diagnostic::invalid(
-                row.meta.span,
-                "table row width must match header width",
-            ));
-        }
-        for cell in &row.cells {
-            validate_inlines(&cell.children, diagnostics);
-            validate_cell_values(&cell.children, diagnostics);
-            validate_one_line(
-                &cell.children,
-                "a table cell cannot hold a line break",
-                diagnostics,
-            );
-        }
+    for (index, row) in table.rows.iter().enumerate() {
+        diagnostics.at(index, |diagnostics| {
+            if row.cells.len() != width {
+                diagnostics.push(Diagnostic::invalid(
+                    row.meta.span,
+                    "table row width must match header width",
+                ));
+            }
+            for (index, cell) in row.cells.iter().enumerate() {
+                diagnostics.at(index, |diagnostics| {
+                    validate_inlines(&cell.children, diagnostics);
+                    validate_cell_values(&cell.children, diagnostics);
+                    validate_one_line(
+                        &cell.children,
+                        "a table cell cannot hold a line break",
+                        diagnostics,
+                    );
+                });
+            }
+        });
     }
 }
 
@@ -314,7 +344,7 @@ fn validate_table(table: &Table, diagnostics: &mut Vec<Diagnostic>) {
 /// after no backslash or an even run of them, and the cell's inline input
 /// reads an odd run before a `|` with one backslash less, so no cell source
 /// gives a value that holds a `|` after an odd backslash run.
-fn validate_cell_values(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+fn validate_cell_values(inlines: &[Inline], diagnostics: &mut Report) {
     for inline in inlines {
         let unwritable = match inline {
             Inline::Code(node) => has_odd_escaped_pipe(&node.value),
@@ -353,7 +383,7 @@ fn has_odd_escaped_pipe(value: &str) -> bool {
 
 /// Inline content written on one line, at any depth: a table cell, or a leaf
 /// or container directive's label on its opening line.
-fn validate_one_line(inlines: &[Inline], message: &'static str, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_one_line(inlines: &[Inline], message: &'static str, diagnostics: &mut Report) {
     for inline in inlines {
         if matches!(inline, Inline::SoftBreak(_) | Inline::LineBreak(_)) {
             diagnostics.push(Diagnostic::invalid(inline.span(), message));
@@ -362,7 +392,7 @@ fn validate_one_line(inlines: &[Inline], message: &'static str, diagnostics: &mu
     }
 }
 
-fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Report) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inlines(&directive.label, diagnostics);
@@ -376,7 +406,7 @@ fn validate_leaf_directive(directive: &LeafDirective, diagnostics: &mut Vec<Diag
 fn validate_container_directive(
     directive: &ContainerDirective,
     depth: usize,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Report,
 ) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
@@ -398,7 +428,7 @@ fn validate_definition(
     definition: &Definition,
     depth: usize,
     indented: bool,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Report,
 ) {
     if definition
         .identifier
@@ -443,7 +473,7 @@ fn validate_reference_label(
     label: &str,
     identifier: &str,
     written: bool,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Report,
 ) {
     if normalize_label(label) != identifier {
         diagnostics.push(Diagnostic::invalid(
@@ -465,7 +495,7 @@ fn validate_footnote_label(
     span: Option<Span>,
     label: &str,
     identifier: &str,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Report,
 ) {
     if normalize_label(label) != identifier {
         diagnostics.push(Diagnostic::invalid(
@@ -487,7 +517,7 @@ fn validate_destination(
     span: Option<Span>,
     destination: &str,
     kind: LinkDestinationKind,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Report,
 ) {
     if kind == LinkDestinationKind::Bare && destination.is_empty() {
         diagnostics.push(Diagnostic::invalid(
@@ -500,7 +530,7 @@ fn validate_destination(
 /// A code block's info string is never empty, and an indented code block's
 /// value, which no fence bounds, starts and ends with a line that is not
 /// blank.
-fn validate_code_block(code: &CodeBlock, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_code_block(code: &CodeBlock, diagnostics: &mut Report) {
     if code.info.as_deref() == Some("") {
         diagnostics.push(Diagnostic::invalid(
             code.meta.span,
@@ -526,11 +556,7 @@ fn validate_code_block(code: &CodeBlock, diagnostics: &mut Vec<Diagnostic>) {
 
 /// Frontmatter opens only the document, and ends at the first line that is
 /// its fence.
-fn validate_frontmatter(
-    frontmatter: &Frontmatter,
-    depth: usize,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn validate_frontmatter(frontmatter: &Frontmatter, depth: usize, diagnostics: &mut Report) {
     if depth > 0 {
         diagnostics.push(Diagnostic::invalid(
             frontmatter.meta.span,
@@ -553,7 +579,7 @@ fn validate_frontmatter(
 /// Inline content whose container ends where its line does, or with a closing
 /// delimiter that a line break before it keeps from closing: a final hard line
 /// break would not survive serialization.
-fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+fn validate_inlines(inlines: &[Inline], diagnostics: &mut Report) {
     if let Some(Inline::LineBreak(node)) = inlines.last() {
         diagnostics.push(Diagnostic::invalid(
             node.meta.span,
@@ -565,7 +591,7 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
 
 /// Inline content closed by a `]`, which closes after a line break as well, so
 /// it may end with a hard line break.
-fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Report) {
     for (index, inline) in inlines.iter().enumerate() {
         if let Some(before) = index.checked_sub(1).map(|before| &inlines[before]) {
             validate_siblings(before, inline, diagnostics);
@@ -709,7 +735,7 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) 
 /// on the chars around their joined run (`**:* ~**a**` parses as two
 /// emphasis spans), and two marks join into `====`, which reads as two marks
 /// again; neither is rejected.
-fn validate_siblings(before: &Inline, inline: &Inline, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_siblings(before: &Inline, inline: &Inline, diagnostics: &mut Report) {
     let after_break = matches!(before, Inline::SoftBreak(_) | Inline::LineBreak(_));
     let blank_line = match inline {
         Inline::SoftBreak(_) => true,
@@ -737,7 +763,7 @@ fn validate_siblings(before: &Inline, inline: &Inline, diagnostics: &mut Vec<Dia
 /// `~~a~~` writes `~~~~a~~~~`, which strikes nothing; and `==` around `==a==`
 /// writes `====a====`, one mark between two `==`. `**` around `**a**` reads
 /// back as written.
-fn validate_emphasis_container(node: &Inline, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_emphasis_container(node: &Inline, diagnostics: &mut Report) {
     let children = node.children();
     let span = node.span();
     if children.iter().all(is_empty_text) {
@@ -794,7 +820,7 @@ fn is_empty_text(inline: &Inline) -> bool {
 }
 
 /// Link text holds no link, at any depth.
-fn validate_link_text(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
+fn validate_link_text(inlines: &[Inline], diagnostics: &mut Report) {
     for inline in inlines {
         match inline {
             Inline::Link(_)
@@ -811,7 +837,7 @@ fn validate_link_text(inlines: &[Inline], diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_escape(escape: &Escape, diagnostics: &mut Report) {
     if !escape.value.is_ascii_punctuation() {
         diagnostics.push(Diagnostic::invalid(
             escape.meta.span,
@@ -822,7 +848,7 @@ fn validate_escape(escape: &Escape, diagnostics: &mut Vec<Diagnostic>) {
 
 /// A code span's value is what the parser reads from one: never empty, and
 /// with its line endings read as spaces.
-fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_code_inline(code: &CodeInline, diagnostics: &mut Report) {
     if code.value.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             code.meta.span,
@@ -840,7 +866,7 @@ fn validate_code_inline(code: &CodeInline, diagnostics: &mut Vec<Diagnostic>) {
 /// Inline math that its fence closes around: math needs a value (both `$$`
 /// and `` $`` `$ `` read back as other text), and code-form math ends at the
 /// first `` `$ ``, so its value cannot hold one.
-fn validate_math_inline(math: &MathInline, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_math_inline(math: &MathInline, diagnostics: &mut Report) {
     if math.value.is_empty() {
         diagnostics.push(Diagnostic::invalid(
             math.meta.span,
@@ -872,7 +898,7 @@ fn validate_math_inline(math: &MathInline, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn validate_item_number(list: &List, item: &ListItem, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_item_number(list: &List, item: &ListItem, diagnostics: &mut Report) {
     let Some(number) = item.number else {
         return;
     };
@@ -892,12 +918,7 @@ fn validate_item_number(list: &List, item: &ListItem, diagnostics: &mut Vec<Diag
 /// A blank line in a list item is written below the item's first line and
 /// above a later item, so it cannot open an item, end the last item, or sit
 /// in a tight list.
-fn validate_item_blank_lines(
-    list: &List,
-    index: usize,
-    item: &ListItem,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn validate_item_blank_lines(list: &List, index: usize, item: &ListItem, diagnostics: &mut Report) {
     let last_item = index + 1 == list.children.len();
     for (at, block) in item.children.iter().enumerate() {
         let Block::BlankLine(blank) = block else {
@@ -912,17 +933,19 @@ fn validate_item_blank_lines(
         } else {
             continue;
         };
-        diagnostics.push(Diagnostic::invalid(blank.meta.span, message));
+        diagnostics.at(at, |diagnostics| {
+            diagnostics.push(Diagnostic::invalid(blank.meta.span, message))
+        });
     }
 }
 
-fn validate_text_directive(directive: &TextDirective, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_text_directive(directive: &TextDirective, diagnostics: &mut Report) {
     validate_directive_name(directive.meta.span, &directive.name, diagnostics);
     validate_directive_attributes(&directive.attributes, diagnostics);
     validate_inline_nodes(&directive.label, diagnostics);
 }
 
-fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Report) {
     if !is_directive_name(name) {
         diagnostics.push(Diagnostic::invalid(
             span,
@@ -931,10 +954,7 @@ fn validate_directive_name(span: Option<Span>, name: &str, diagnostics: &mut Vec
     }
 }
 
-fn validate_directive_attributes(
-    attributes: &[DirectiveAttribute],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn validate_directive_attributes(attributes: &[DirectiveAttribute], diagnostics: &mut Report) {
     for attribute in attributes {
         if !is_attribute_name(&attribute.name) {
             diagnostics.push(Diagnostic::invalid(
