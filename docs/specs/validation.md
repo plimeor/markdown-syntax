@@ -23,21 +23,45 @@ directive's.
 
 ### Requirement: Shapes that cannot be written
 Validation SHALL reject exactly these shapes, each visible from the node, its
-children, its sibling blocks, how many containers enclose it, or whether it
-sits in a table cell or a directive label:
+children, its sibling blocks and the last blocks they end in, how many
+containers enclose it, or whether it sits in a table cell or a directive
+label:
 
 - Block sequences: two adjacent `List`s in the same container written with
   the same marker char; a list recording a delimiter of the other list kind is
-  written with `-` when unordered and `.` when ordered.
-- In a tight list item, a block right after a `Paragraph` that cannot
-  interrupt it, by the parser's own checks: a `Paragraph`, a `Definition`, an
-  indented `CodeBlock`, a `Frontmatter`, a `Heading` written as a setext
-  heading, an ordered `List` whose first item's number is not 1, a `List` whose first item
-  has no blocks or that the serializer starts on a line after its bullet (a
-  thematic break of the bullet's char, or content opening with one to three
-  spaces or a tab), or an
-  `HtmlBlock` whose first line opens no HTML block or opens one that only a
-  blank line ends (a lone tag such as `<span>`).
+  written with `-` when unordered and `.` when ordered. An indented
+  `CodeBlock` after an indented `CodeBlock` or a `FootnoteDefinition` in the
+  same container, blank lines between them or not; any block after an
+  `HtmlBlock` whose first line opens one that an end marker closes (a
+  comment, a raw tag such as `<script>`, a processing instruction, a
+  declaration, or CDATA) and whose value holds no line that closes it.
+- In a tight list item, which writes each block on the line after the one
+  before, a block that the block before it takes as that line:
+  - after a `Paragraph`, a block that cannot interrupt it, by the parser's
+    own checks: a `Paragraph`, a `Definition`, an indented `CodeBlock`, a
+    `Frontmatter`, a `Heading` written as a setext heading, an ordered
+    `List` whose first item's number is not 1, a `List` whose first item has
+    no blocks or that the serializer starts on a line after its bullet (a
+    thematic break of the bullet's char, or content opening with one to
+    three spaces or a tab), or an `HtmlBlock` whose first line opens no HTML
+    block or opens one that only a blank line ends (a lone tag such as
+    `<span>`);
+  - after a `Definition`, those blocks other than a `Paragraph`, a
+    `Definition`, and a setext `Heading`;
+  - after a `Table`, a block whose first line starts no block where no
+    paragraph is open: a `Paragraph`, a `Definition`, a `Table`, a `Heading`
+    written as a setext heading, or an `HtmlBlock` whose first line opens no
+    HTML block;
+  - after an `HtmlBlock` whose first line opens one that a blank line ends
+    (a block-level tag such as `<div>`, or a lone tag), any block;
+  - after a `BlockQuote` or an `Alert`, a `BlockQuote` or an `Alert`;
+  - after a `BlockQuote`, an `Alert`, a `FootnoteDefinition`, or a `List`
+    whose last line, through the last block of each and the last item of
+    each list, is a `Paragraph`'s or a `Definition`'s, or is an `Alert`
+    holding no blocks: the blocks after a `Table` and an indented
+    `CodeBlock`, which that paragraph takes as a lazy line, except, where a
+    `BlockQuote` or an `Alert` is passed on the way, a block written opening
+    with a backtick or a tilde, which ends the quote's paragraph.
 - `Paragraph`: no children other than empty `Text`.
 - `Heading`: a depth outside 1–6.
 - `Table`: no rows; a header row with no cells; an alignment count other than
@@ -120,6 +144,14 @@ sits in a table cell or a directive label:
 
 Any other shape is not checked, including one whose spelling depends on the
 characters around it or that only the builder can know is meant literally
-(punctuation meant literally is built as `Escape` nodes): the builder answers
+(punctuation meant literally is built as `Escape` nodes), and a block after a
+`List` whose last line is not a paragraph's or a definition's, where the
+block's first line, written four columns in or opening with spaces, reaches
+the content column of the list's last item, which in a parsed document the
+source's markers set: the builder answers
 for it, and the serializer writes it as it is even when the output reads back
 differently.
+
+#### Scenario: A paragraph after a nested list in a tight item
+- **WHEN** a hand-built document holds a tight list whose item holds a paragraph `a`, a tight list of one item holding a paragraph `b`, and a paragraph `c`, and `validate()` runs
+- **THEN** it returns one diagnostic whose `path` is `[0, 0, 2]`, the paragraph `c`, which `"- a\n  - b\n  c\n"` would read as `b`'s lazy line

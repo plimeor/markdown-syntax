@@ -13,9 +13,9 @@ use crate::{
     },
     diagnostic::Diagnostic,
     parse::{
-        alert_title, frontmatter_fence_kind, html_block_ends_at_blank_line, html_block_opens,
-        is_blank, is_footnote_label, is_reference_label, is_written_footnote_label,
-        normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
+        alert_title, frontmatter_fence_kind, html_block_ends_at_blank_line, html_block_left_open,
+        html_block_opens, is_blank, is_footnote_label, is_reference_label,
+        is_written_footnote_label, normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
     },
     serialize::{
         write_inline_math, writes_setext, written_after_paragraph_interrupts, written_marker,
@@ -280,11 +280,14 @@ fn validate_task_item(item: &ListItem, diagnostics: &mut Report) {
 }
 
 /// Refuses `right` where `left`, the block before it, takes its first line:
-/// an indented code block is written four columns in, which some blocks take
+/// an HTML block its value leaves open takes every line to its container's
+/// end, an indented code block is written four columns in, which some blocks take
 /// across a blank line (see [`takes_indented_code`]), and a tight item writes
 /// each block on the line after the one before (see [`takes_next_line`]).
 fn validate_taken_block(left: &Block, right: &Block, tight: bool, diagnostics: &mut Report) {
-    let message = if matches!(right, Block::CodeBlock(code) if code.kind == CodeBlockKind::Indented)
+    let message = if matches!(left, Block::HtmlBlock(node) if html_block_left_open(node)) {
+        "a block must not follow an HTML block that its value leaves open"
+    } else if matches!(right, Block::CodeBlock(code) if code.kind == CodeBlockKind::Indented)
         && takes_indented_code(left)
     {
         "an indented code block must not be read as part of the block before it"

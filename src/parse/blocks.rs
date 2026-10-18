@@ -2189,6 +2189,21 @@ pub(crate) fn html_block_opens(node: &HtmlBlock) -> bool {
     written_html_block_kind(node).is_some()
 }
 
+/// Whether an HTML block, written as `node`'s value, opens a kind that an
+/// end marker closes and holds no line that closes it: it takes every line
+/// after it to its container's end.
+pub(crate) fn html_block_left_open(node: &HtmlBlock) -> bool {
+    match written_html_block_kind(node) {
+        Some(HtmlBlockKind::RawTag) => !node.value.split(['\n', '\r']).any(|line| {
+            ["script", "pre", "style", "textarea"]
+                .iter()
+                .any(|tag| line_contains_raw_closing_tag(line, tag))
+        }),
+        Some(HtmlBlockKind::Until(end)) => !node.value.contains(end),
+        _ => false,
+    }
+}
+
 /// Whether an HTML block, written as `node`'s value, takes every line after
 /// it up to a blank line: one its first line opens with a block-level tag or
 /// a lone tag.

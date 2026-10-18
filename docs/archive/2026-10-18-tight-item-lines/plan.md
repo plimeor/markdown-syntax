@@ -14,8 +14,9 @@ should write the list loose.
   an item `b`, and a paragraph `c` is written `"- a\n  - b\n  c\n"`, where
   `c` reads back as `b`'s lazy line.
 - Scope: every pair of adjacent blocks in a tight item that the line join
-  merges, and indented code after indented code or a footnote definition in
-  any container, which no source spells either. Validation refuses them; the
+  merges, and, in any container, indented code after indented code or a
+  footnote definition and any block after an HTML block its value leaves
+  open, which no source spells either. Validation refuses them; the
   writer is unchanged.
 
 ## What changes
@@ -24,7 +25,8 @@ should write the list loose.
 - `validation` › Shapes that cannot be written: modified — in a tight list
   item, a block is refused after any block that takes the line written
   after it, not only after a paragraph; in any container, an indented code
-  block is refused after an indented code block or a footnote definition
+  block is refused after an indented code block or a footnote definition,
+  and any block after an HTML block its value leaves open
 
 ### Outside the specs
 - Settle (another repository), once this ships in a published release: bump
@@ -52,29 +54,24 @@ Specs:
 
 ### The rule
 
-For each pair of adjacent blocks `left`, `right` in a container (blank
-lines skipped, as for adjacent lists), `right` is refused when `left` takes
-its first line. Which lines a block takes is read from its kind and its last
-descendants, by the parser's own checks. In any container:
+The shapes are `validation` › Shapes that cannot be written, as the spec
+change states them: for each pair of adjacent blocks `left`, `right` in a
+container (blank lines skipped, as for adjacent lists), `right` is refused
+when `left` takes its first line, read from `left`'s kind and its last
+descendants by the parser's own checks. Three of those checks are not the
+obvious ones:
 
-- an indented code block after an indented code block (which it continues)
-  or a footnote definition (whose content is indented four columns).
-
-In a tight item, which joins blocks by one line ending:
-
-| `left` | `right` refused when |
-|---|---|
-| `Paragraph` | it does not interrupt a paragraph as written (the current rule) |
-| `Definition` | the same, except a paragraph, a definition, and a setext heading, which read the same after a definition's lines |
-| `Table` | its first line starts no block where no paragraph is open: a paragraph, a definition, a table, a setext heading, an HTML block opening none; the line is read as a row |
-| `HtmlBlock` that a blank line ends (block-level or lone tag) | always |
-| `BlockQuote` or `Alert` | `right` is a `BlockQuote` or `Alert`: the `>` lines continue it |
-| a container whose last line, through the last child of each container and the last item of each list, is a paragraph's or a definition's, or is an alert without blocks | the table's set, and indented code, which cannot start while the paragraph is open: the line is the paragraph's lazy line; except after a quote or alert on the way, a block opening with a backtick or a tilde, which ends the quote's paragraph (GH-19) |
-
-The parser checks block starts on a line after a nested container against
-the matched container (the outer item), not the open paragraph, so an
-ordered list from 2, an empty item, and a lone-tag HTML block start there:
-the lazy and table rows use that check, not "interrupts a paragraph".
+- On a line after a nested container, the parser checks block starts
+  against the matched container (the outer item), not the open paragraph,
+  so an ordered list from 2, an empty item, and a lone-tag HTML block start
+  there: after a table and after a container ending in a paragraph, the
+  test is "starts no block where no paragraph is open", not "interrupts a
+  paragraph".
+- A line opening with a backtick or a tilde ends a quote's paragraph
+  instead of continuing it lazily (GH-19), so the descent records whether it
+  passed a quote or an alert.
+- An HTML block of an end-marker kind left open by its value runs to its
+  container's end, so in a parse it is always the last sibling.
 
 Every other left block ends where its own syntax or line does. The descent
 stops at a last `BlankLine` (a closed paragraph), at a nested empty item
@@ -96,7 +93,7 @@ children, and a block reached on one left block's descent is a last child
 and so is never another left block, so the walks stay linear in the tree.
 
 Parser helpers give the HTML kinds (`html_block_opens`,
-`html_block_ends_at_blank_line`); the serializer gives
+`html_block_ends_at_blank_line`, `html_block_left_open`); the serializer gives
 `written_opens_fence_like`, which writes the right block once.
 
 ### Decisions
@@ -129,7 +126,7 @@ Release: the change ships as `fix` (a hand-built tree written wrongly is
 now refused). The Settle bump follows once a published release holds it.
 
 ### 1. Validation
-- [x] 1.1 Each pair of the rule is refused and the nearby shapes accepted; verified by `tests/validate_regressions.rs` › `written_shapes` › `a_block_in_a_tight_item_is_not_taken_by_the_block_before_it` and `indented_code_is_not_taken_by_the_block_before_it`, naming `validation: Shapes that cannot be written`.
+- [x] 1.1 Each pair of the rule is refused and the nearby shapes accepted; verified by `tests/validate_regressions.rs` › `written_shapes` › `a_block_in_a_tight_item_is_not_taken_by_the_block_before_it`, `indented_code_is_not_taken_by_the_block_before_it`, and `no_block_follows_an_html_block_left_open`, naming `validation: Shapes that cannot be written`.
   - Follows Design › The rule.
 - [x] 1.2 The reported tree is refused with the path of its last paragraph; verified by `node_paths` › `a_paragraph_after_a_nested_list_in_a_tight_item_names_the_paragraph`, the spec change's scenario.
 

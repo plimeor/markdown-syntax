@@ -1479,6 +1479,42 @@ mod written_shapes {
         assert!(valid(&parsed("[^1]: b\n\n        z")));
     }
 
+    /// An HTML block that an end marker closes runs to its container's end
+    /// while its value does not close it.
+    // validation: Shapes that cannot be written
+    #[test]
+    fn no_block_follows_an_html_block_left_open() {
+        for open in [
+            "<!-- c",
+            "<script>",
+            "<pre>\nx",
+            "<?x",
+            "<![CDATA[ x",
+            "<!X",
+        ] {
+            for blocks in [
+                vec![html_block(open), paragraph(vec![text("a")])],
+                vec![
+                    html_block(open),
+                    Block::BlankLine(BlankLine::new()),
+                    paragraph(vec![text("a")]),
+                ],
+            ] {
+                assert!(invalid(&document(blocks.clone())), "{open:?}");
+                assert!(invalid(&document(vec![quoted(blocks)])));
+            }
+            assert!(valid(&document(vec![
+                paragraph(vec![text("a")]),
+                html_block(open)
+            ])));
+        }
+        for closed in ["<!-- c -->", "<script>\nx\n</script>", "<?x ?>", "<!X>"] {
+            let document = document(vec![html_block(closed), paragraph(vec![text("a")])]);
+            assert!(valid(&document) && reads_back(&document), "{closed:?}");
+        }
+        assert!(valid(&parsed("- a\n\n  <!-- c\n\n  b")));
+    }
+
     #[test]
     fn a_list_holds_an_item() {
         assert!(invalid(&document(vec![list(true, vec![])])));
