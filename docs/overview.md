@@ -36,7 +36,8 @@ shipped: blank lines as nodes, item numbers, leaves written as their text,
 source reuse per node down to inlines, and inline syntax tokens for the
 editor's marks. Validation diagnostics name the node they are about, so an
 editor can fix a refused tree without guessing, and `Block::children()`
-walks block containers. Lists stay nested; the editor flattens them.
+walks block containers. Lists stay nested; the editor flattens them. Emphasis flanks by the CJK-friendly
+amendments, so bold that ends in CJK punctuation forms without a space.
 
 ## Non-goals
 

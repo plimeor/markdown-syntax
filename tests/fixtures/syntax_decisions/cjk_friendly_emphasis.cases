@@ -1,0 +1,866 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: cjk_friendly_emphasis
+decision: Delimiter runs flank by the CommonMark CJK-friendly amendments (decision 0018).
+count: 123
+
+--- case 1 options - label-bytes 106 input-bytes 67 expected-bytes 87
+from markdown-cjk-friendly 5b17173 testcases/strong.md:1; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+これは**私のやりたかったこと。**だからするの。
+--- expected
+<p>これは<strong>私のやりたかったこと。</strong>だからするの。</p>
+--- end
+--- case 2 options - label-bytes 106 input-bytes 93 expected-bytes 148
+from markdown-cjk-friendly 5b17173 testcases/strong.md:3; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**[製品ほげ](./product-foo)**と**[製品ふが](./product-bar)**をお試しください
+--- expected
+<p><strong><a href="./product-foo">製品ほげ</a></strong>と<strong><a href="./product-bar">製品ふが</a></strong>をお試しください</p>
+--- end
+--- case 3 options - label-bytes 106 input-bytes 40 expected-bytes 71
+from markdown-cjk-friendly 5b17173 testcases/strong.md:5; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+単語と**[単語と](word-and)**単語
+--- expected
+<p>単語と<strong><a href="word-and">単語と</a></strong>単語</p>
+--- end
+--- case 4 options - label-bytes 106 input-bytes 64 expected-bytes 84
+from markdown-cjk-friendly 5b17173 testcases/strong.md:7; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**これは太字になりません。**ご注意ください。
+--- expected
+<p><strong>これは太字になりません。</strong>ご注意ください。</p>
+--- end
+--- case 5 options - label-bytes 106 input-bytes 82 expected-bytes 102
+from markdown-cjk-friendly 5b17173 testcases/strong.md:9; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+カッコに注意**（太字にならない）**文が続く場合に要警戒。
+--- expected
+<p>カッコに注意<strong>（太字にならない）</strong>文が続く場合に要警戒。</p>
+--- end
+--- case 6 options - label-bytes 107 input-bytes 69 expected-bytes 100
+from markdown-cjk-friendly 5b17173 testcases/strong.md:11; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**[リンク](https://example.com)**も注意。（画像も同様）
+--- expected
+<p><strong><a href="https://example.com">リンク</a></strong>も注意。（画像も同様）</p>
+--- end
+--- case 7 options - label-bytes 107 input-bytes 38 expected-bytes 56
+from markdown-cjk-friendly 5b17173 testcases/strong.md:13; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+先頭の**\`コード\`も注意。**
+--- expected
+<p>先頭の<strong>`コード`も注意。</strong></p>
+--- end
+--- case 8 options - label-bytes 107 input-bytes 38 expected-bytes 56
+from markdown-cjk-friendly 5b17173 testcases/strong.md:15; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**末尾の\`コード\`**も注意。
+--- expected
+<p><strong>末尾の`コード`</strong>も注意。</p>
+--- end
+--- case 9 options - label-bytes 107 input-bytes 42 expected-bytes 62
+from markdown-cjk-friendly 5b17173 testcases/strong.md:17; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+税込**¥10,000**で入手できます。
+--- expected
+<p>税込<strong>¥10,000</strong>で入手できます。</p>
+--- end
+--- case 10 options - label-bytes 107 input-bytes 25 expected-bytes 45
+from markdown-cjk-friendly 5b17173 testcases/strong.md:19; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+正解は**④**です。
+--- expected
+<p>正解は<strong>④</strong>です。</p>
+--- end
+--- case 11 options - label-bytes 107 input-bytes 46 expected-bytes 66
+from markdown-cjk-friendly 5b17173 testcases/strong.md:21; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**「こんにちわ」**といった
+--- expected
+<p>太郎は<strong>「こんにちわ」</strong>といった</p>
+--- end
+--- case 12 options - label-bytes 107 input-bytes 42 expected-bytes 72
+from markdown-cjk-friendly 5b17173 testcases/strong.md:23; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**"こんにちわ"**といった
+--- expected
+<p>太郎は<strong>&quot;こんにちわ&quot;</strong>といった</p>
+--- end
+--- case 13 options - label-bytes 107 input-bytes 40 expected-bytes 60
+from markdown-cjk-friendly 5b17173 testcases/strong.md:25; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**こんにちわ**といった
+--- expected
+<p>太郎は<strong>こんにちわ</strong>といった</p>
+--- end
+--- case 14 options - label-bytes 107 input-bytes 36 expected-bytes 56
+from markdown-cjk-friendly 5b17173 testcases/strong.md:27; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**「Hello」**といった
+--- expected
+<p>太郎は<strong>「Hello」</strong>といった</p>
+--- end
+--- case 15 options - label-bytes 107 input-bytes 32 expected-bytes 62
+from markdown-cjk-friendly 5b17173 testcases/strong.md:29; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**"Hello"**といった
+--- expected
+<p>太郎は<strong>&quot;Hello&quot;</strong>といった</p>
+--- end
+--- case 16 options - label-bytes 107 input-bytes 30 expected-bytes 50
+from markdown-cjk-friendly 5b17173 testcases/strong.md:31; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**Hello**といった
+--- expected
+<p>太郎は<strong>Hello</strong>といった</p>
+--- end
+--- case 17 options - label-bytes 107 input-bytes 40 expected-bytes 60
+from markdown-cjk-friendly 5b17173 testcases/strong.md:33; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**「Oh my god」**といった
+--- expected
+<p>太郎は<strong>「Oh my god」</strong>といった</p>
+--- end
+--- case 18 options - label-bytes 107 input-bytes 36 expected-bytes 66
+from markdown-cjk-friendly 5b17173 testcases/strong.md:35; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**"Oh my god"**といった
+--- expected
+<p>太郎は<strong>&quot;Oh my god&quot;</strong>といった</p>
+--- end
+--- case 19 options - label-bytes 107 input-bytes 34 expected-bytes 54
+from markdown-cjk-friendly 5b17173 testcases/strong.md:37; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**Oh my god**といった
+--- expected
+<p>太郎は<strong>Oh my god</strong>といった</p>
+--- end
+--- case 20 options - label-bytes 107 input-bytes 89 expected-bytes 135
+from markdown-cjk-friendly 5b17173 testcases/strong.md:39; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**C#**や**F#**は**「.NET」**というプラットフォーム上で動作します。
+--- expected
+<p><strong>C#</strong>や<strong>F#</strong>は<strong>「.NET」</strong>というプラットフォーム上で動作します。</p>
+--- end
+--- case 21 options - label-bytes 107 input-bytes 33 expected-bytes 53
+from markdown-cjk-friendly 5b17173 testcases/strong.md:41; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+IDが**001号**になります。
+--- expected
+<p>IDが<strong>001号</strong>になります。</p>
+--- end
+--- case 22 options - label-bytes 107 input-bytes 39 expected-bytes 59
+from markdown-cjk-friendly 5b17173 testcases/strong.md:43; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+IDが**００１号**になります。
+--- expected
+<p>IDが<strong>００１号</strong>になります。</p>
+--- end
+--- case 23 options - label-bytes 107 input-bytes 54 expected-bytes 74
+from markdown-cjk-friendly 5b17173 testcases/strong.md:45; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+Go**「初心者」**を対象とした記事です。
+--- expected
+<p>Go<strong>「初心者」</strong>を対象とした記事です。</p>
+--- end
+--- case 24 options - label-bytes 107 input-bytes 48 expected-bytes 79
+from markdown-cjk-friendly 5b17173 testcases/strong.md:47; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**[リンク](https://example.com)**も注意。
+--- expected
+<p><strong><a href="https://example.com">リンク</a></strong>も注意。</p>
+--- end
+--- case 25 options - label-bytes 107 input-bytes 31 expected-bytes 51
+from markdown-cjk-friendly 5b17173 testcases/strong.md:49; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**⻲田太郎**と申します
+--- expected
+<p><strong>⻲田太郎</strong>と申します</p>
+--- end
+--- case 26 options - label-bytes 107 input-bytes 29 expected-bytes 49
+from markdown-cjk-friendly 5b17173 testcases/strong.md:51; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+・**㋐**:選択肢１つ目
+--- expected
+<p>・<strong>㋐</strong>:選択肢１つ目</p>
+--- end
+--- case 27 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:53; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真，**她
+--- expected
+<p><strong>真，</strong>她</p>
+--- end
+--- case 28 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:55; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真。**她
+--- expected
+<p><strong>真。</strong>她</p>
+--- end
+--- case 29 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:57; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真、**她
+--- expected
+<p><strong>真、</strong>她</p>
+--- end
+--- case 30 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:59; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真；**她
+--- expected
+<p><strong>真；</strong>她</p>
+--- end
+--- case 31 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:61; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真：**她
+--- expected
+<p><strong>真：</strong>她</p>
+--- end
+--- case 32 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:63; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真？**她
+--- expected
+<p><strong>真？</strong>她</p>
+--- end
+--- case 33 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:65; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真！**她
+--- expected
+<p><strong>真！</strong>她</p>
+--- end
+--- case 34 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:67; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真“**她
+--- expected
+<p><strong>真“</strong>她</p>
+--- end
+--- case 35 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:69; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真”**她
+--- expected
+<p><strong>真”</strong>她</p>
+--- end
+--- case 36 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:71; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真‘**她
+--- expected
+<p><strong>真‘</strong>她</p>
+--- end
+--- case 37 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:73; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真’**她
+--- expected
+<p><strong>真’</strong>她</p>
+--- end
+--- case 38 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:75; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真（**她
+--- expected
+<p><strong>真（</strong>她</p>
+--- end
+--- case 39 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:77; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+真**（她**
+--- expected
+<p>真<strong>（她</strong></p>
+--- end
+--- case 40 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:79; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真）**她
+--- expected
+<p><strong>真）</strong>她</p>
+--- end
+--- case 41 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:81; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真【**她
+--- expected
+<p><strong>真【</strong>她</p>
+--- end
+--- case 42 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:83; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+真**【她**
+--- expected
+<p>真<strong>【她</strong></p>
+--- end
+--- case 43 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:85; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真】**她
+--- expected
+<p><strong>真】</strong>她</p>
+--- end
+--- case 44 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:87; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真《**她
+--- expected
+<p><strong>真《</strong>她</p>
+--- end
+--- case 45 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:89; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+真**《她**
+--- expected
+<p>真<strong>《她</strong></p>
+--- end
+--- case 46 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:91; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真》**她
+--- expected
+<p><strong>真》</strong>她</p>
+--- end
+--- case 47 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:93; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真—**她
+--- expected
+<p><strong>真—</strong>她</p>
+--- end
+--- case 48 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:95; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真～**她
+--- expected
+<p><strong>真～</strong>她</p>
+--- end
+--- case 49 options - label-bytes 107 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:97; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真…**她
+--- expected
+<p><strong>真…</strong>她</p>
+--- end
+--- case 50 options - label-bytes 107 input-bytes 12 expected-bytes 32
+from markdown-cjk-friendly 5b17173 testcases/strong.md:99; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真·**她
+--- expected
+<p><strong>真·</strong>她</p>
+--- end
+--- case 51 options - label-bytes 108 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:101; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真〃**她
+--- expected
+<p><strong>真〃</strong>她</p>
+--- end
+--- case 52 options - label-bytes 108 input-bytes 11 expected-bytes 31
+from markdown-cjk-friendly 5b17173 testcases/strong.md:103; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真-**她
+--- expected
+<p><strong>真-</strong>她</p>
+--- end
+--- case 53 options - label-bytes 108 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:105; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真々**她
+--- expected
+<p><strong>真々</strong>她</p>
+--- end
+--- case 54 options - label-bytes 108 input-bytes 10 expected-bytes 30
+from markdown-cjk-friendly 5b17173 testcases/strong.md:107; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真**她
+--- expected
+<p><strong>真</strong>她</p>
+--- end
+--- case 55 options - label-bytes 108 input-bytes 14 expected-bytes 34
+from markdown-cjk-friendly 5b17173 testcases/strong.md:109; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真，** 她
+--- expected
+<p><strong>真，</strong> 她</p>
+--- end
+--- case 56 options - label-bytes 108 input-bytes 13 expected-bytes 33
+from markdown-cjk-friendly 5b17173 testcases/strong.md:111; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真**，她
+--- expected
+<p><strong>真</strong>，她</p>
+--- end
+--- case 57 options - label-bytes 108 input-bytes 29 expected-bytes 36
+from markdown-cjk-friendly 5b17173 testcases/strong.md:113; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**真，**&ZeroWidthSpace;她
+--- expected
+<p><strong>真，</strong>​她</p>
+--- end
+--- case 58 options - label-bytes 108 input-bytes 37 expected-bytes 57
+from markdown-cjk-friendly 5b17173 testcases/strong.md:115; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+私は**⻲田太郎**と申します
+--- expected
+<p>私は<strong>⻲田太郎</strong>と申します</p>
+--- end
+--- case 59 options - label-bytes 108 input-bytes 37 expected-bytes 57
+from markdown-cjk-friendly 5b17173 testcases/strong.md:117; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+選択肢**㋐**: 1つ目の選択肢
+--- expected
+<p>選択肢<strong>㋐</strong>: 1つ目の選択肢</p>
+--- end
+--- case 60 options - label-bytes 108 input-bytes 46 expected-bytes 66
+from markdown-cjk-friendly 5b17173 testcases/strong.md:119; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**さようなら︙**と太郎はいった。
+--- expected
+<p><strong>さようなら︙</strong>と太郎はいった。</p>
+--- end
+--- case 61 options - label-bytes 108 input-bytes 46 expected-bytes 66
+from markdown-cjk-friendly 5b17173 testcases/strong.md:121; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+.NET**（.NET Frameworkは不可）**では、
+--- expected
+<p>.NET<strong>（.NET Frameworkは不可）</strong>では、</p>
+--- end
+--- case 62 options - label-bytes 108 input-bytes 53 expected-bytes 73
+from markdown-cjk-friendly 5b17173 testcases/strong.md:123; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+「禰󠄀」の偏は示ではなく**礻**です。
+--- expected
+<p>「禰󠄀」の偏は示ではなく<strong>礻</strong>です。</p>
+--- end
+--- case 63 options - label-bytes 108 input-bytes 31 expected-bytes 51
+from markdown-cjk-friendly 5b17173 testcases/strong.md:125; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+Git**（注：不是GitHub）**
+--- expected
+<p>Git<strong>（注：不是GitHub）</strong></p>
+--- end
+--- case 64 options - label-bytes 108 input-bytes 49 expected-bytes 69
+from markdown-cjk-friendly 5b17173 testcases/strong.md:127; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+太郎は**「こんにちわ」**といった。
+--- expected
+<p>太郎は<strong>「こんにちわ」</strong>といった。</p>
+--- end
+--- case 65 options - label-bytes 108 input-bytes 39 expected-bytes 59
+from markdown-cjk-friendly 5b17173 testcases/strong.md:129; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𰻞𰻞**（ビャンビャン）**麺
+--- expected
+<p>𰻞𰻞<strong>（ビャンビャン）</strong>麺</p>
+--- end
+--- case 66 options - label-bytes 108 input-bytes 35 expected-bytes 55
+from markdown-cjk-friendly 5b17173 testcases/strong.md:131; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𰻞𰻞**(ビャンビャン)**麺
+--- expected
+<p>𰻞𰻞<strong>(ビャンビャン)</strong>麺</p>
+--- end
+--- case 67 options - label-bytes 108 input-bytes 78 expected-bytes 98
+from markdown-cjk-friendly 5b17173 testcases/strong.md:133; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+ハイパーテキストコーヒーポット制御プロトコル**(HTCPCP)**
+--- expected
+<p>ハイパーテキストコーヒーポット制御プロトコル<strong>(HTCPCP)</strong></p>
+--- end
+--- case 68 options - label-bytes 108 input-bytes 12 expected-bytes 32
+from markdown-cjk-friendly 5b17173 testcases/strong.md:135; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+﨑**(崎)**
+--- expected
+<p>﨑<strong>(崎)</strong></p>
+--- end
+--- case 69 options - label-bytes 108 input-bytes 52 expected-bytes 83
+from markdown-cjk-friendly 5b17173 testcases/strong.md:137; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+国際規格**[ECMA-262](https://tc39.es/ecma262/)**
+--- expected
+<p>国際規格<strong><a href="https://tc39.es/ecma262/">ECMA-262</a></strong></p>
+--- end
+--- case 70 options - label-bytes 108 input-bytes 21 expected-bytes 41
+from markdown-cjk-friendly 5b17173 testcases/strong.md:139; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+㐧**(第の俗字)**
+--- expected
+<p>㐧<strong>(第の俗字)</strong></p>
+--- end
+--- case 71 options - label-bytes 108 input-bytes 34 expected-bytes 54
+from markdown-cjk-friendly 5b17173 testcases/strong.md:141; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𠮟**(こちらが正式表記)**
+--- expected
+<p>𠮟<strong>(こちらが正式表記)</strong></p>
+--- end
+--- case 72 options - label-bytes 108 input-bytes 31 expected-bytes 51
+from markdown-cjk-friendly 5b17173 testcases/strong.md:143; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𪜈**(トモの合略仮名)**
+--- expected
+<p>𪜈<strong>(トモの合略仮名)</strong></p>
+--- end
+--- case 73 options - label-bytes 108 input-bytes 22 expected-bytes 42
+from markdown-cjk-friendly 5b17173 testcases/strong.md:145; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𫠉**(馬の俗字)**
+--- expected
+<p>𫠉<strong>(馬の俗字)</strong></p>
+--- end
+--- case 74 options - label-bytes 108 input-bytes 31 expected-bytes 51
+from markdown-cjk-friendly 5b17173 testcases/strong.md:147; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+谺𬤲**(こだま)**石神社
+--- expected
+<p>谺𬤲<strong>(こだま)</strong>石神社</p>
+--- end
+--- case 75 options - label-bytes 108 input-bytes 28 expected-bytes 48
+from markdown-cjk-friendly 5b17173 testcases/strong.md:149; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+石𮧟**(いしただら)**
+--- expected
+<p>石𮧟<strong>(いしただら)</strong></p>
+--- end
+--- case 76 options - label-bytes 108 input-bytes 54 expected-bytes 74
+from markdown-cjk-friendly 5b17173 testcases/strong.md:151; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**推荐几个框架：**React、Vue等前端框架。
+--- expected
+<p><strong>推荐几个框架：</strong>React、Vue等前端框架。</p>
+--- end
+--- case 77 options - label-bytes 108 input-bytes 43 expected-bytes 63
+from markdown-cjk-friendly 5b17173 testcases/strong.md:153; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+葛󠄀**(こちらが正式表記)**城市
+--- expected
+<p>葛󠄀<strong>(こちらが正式表記)</strong>城市</p>
+--- end
+--- case 78 options - label-bytes 108 input-bytes 43 expected-bytes 63
+from markdown-cjk-friendly 5b17173 testcases/strong.md:155; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+禰󠄀**(こちらが正式表記)**豆子
+--- expected
+<p>禰󠄀<strong>(こちらが正式表記)</strong>豆子</p>
+--- end
+--- case 79 options - label-bytes 108 input-bytes 17 expected-bytes 37
+from markdown-cjk-friendly 5b17173 testcases/strong.md:157; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𱟛**(U+317DB)**
+--- expected
+<p>𱟛<strong>(U+317DB)</strong></p>
+--- end
+--- case 80 options - label-bytes 108 input-bytes 69 expected-bytes 89
+from markdown-cjk-friendly 5b17173 testcases/strong.md:159; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+阿寒湖アイヌシアターイコㇿ**(Akanko Ainu Theater Ikor)**
+--- expected
+<p>阿寒湖アイヌシアターイコㇿ<strong>(Akanko Ainu Theater Ikor)</strong></p>
+--- end
+--- case 81 options - label-bytes 108 input-bytes 25 expected-bytes 45
+from markdown-cjk-friendly 5b17173 testcases/strong.md:161; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+あ𛀙**(か)**よろし
+--- expected
+<p>あ𛀙<strong>(か)</strong>よろし</p>
+--- end
+--- case 82 options - label-bytes 108 input-bytes 41 expected-bytes 61
+from markdown-cjk-friendly 5b17173 testcases/strong.md:163; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𮹝**(simplified form of 龘 in China)**
+--- expected
+<p>𮹝<strong>(simplified form of 龘 in China)</strong></p>
+--- end
+--- case 83 options - label-bytes 108 input-bytes 47 expected-bytes 80
+from markdown-cjk-friendly 5b17173 testcases/strong.md:165; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+大塚︀**(U+585A U+FE00)** 大塚**(U+FA10)**
+--- expected
+<p>大塚︀<strong>(U+585A U+FE00)</strong> 大塚<strong>(U+FA10)</strong></p>
+--- end
+--- case 84 options - label-bytes 108 input-bytes 24 expected-bytes 44
+from markdown-cjk-friendly 5b17173 testcases/strong.md:167; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+〽︎**(庵点)**は、
+--- expected
+<p>〽︎<strong>(庵点)</strong>は、</p>
+--- end
+--- case 85 options - label-bytes 108 input-bytes 22 expected-bytes 42
+from markdown-cjk-friendly 5b17173 testcases/strong.md:169; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**“︁Git”︁**Hub
+--- expected
+<p><strong>“︁Git”︁</strong>Hub</p>
+--- end
+--- case 86 options - label-bytes 106 input-bytes 64 expected-bytes 95
+from markdown-cjk-friendly 5b17173 testcases/korean.md:1; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**이 [링크](https://example.kr/)**만을 강조하고 싶다.
+--- expected
+<p><strong>이 <a href="https://example.kr/">링크</a></strong>만을 강조하고 싶다.</p>
+--- end
+--- case 87 options - label-bytes 106 input-bytes 30 expected-bytes 50
+from markdown-cjk-friendly 5b17173 testcases/korean.md:3; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**스크립트(script)**라고
+--- expected
+<p><strong>스크립트(script)</strong>라고</p>
+--- end
+--- case 88 options - label-bytes 106 input-bytes 69 expected-bytes 100
+from markdown-cjk-friendly 5b17173 testcases/korean.md:5; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+패키지를 발행하려면 **`npm publish`**를 실행하십시오.
+--- expected
+<p>패키지를 발행하려면 <strong><code>npm publish</code></strong>를 실행하십시오.</p>
+--- end
+--- case 89 options - label-bytes 106 input-bytes 27 expected-bytes 47
+from markdown-cjk-friendly 5b17173 testcases/korean.md:7; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**안녕(hello)**하세요.
+--- expected
+<p><strong>안녕(hello)</strong>하세요.</p>
+--- end
+--- case 90 options - label-bytes 106 input-bytes 10 expected-bytes 30
+from markdown-cjk-friendly 5b17173 testcases/korean.md:9; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+ᅡ**(a)**
+--- expected
+<p>ᅡ<strong>(a)</strong></p>
+--- end
+--- case 91 options - label-bytes 107 input-bytes 10 expected-bytes 30
+from markdown-cjk-friendly 5b17173 testcases/korean.md:11; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+**(k)**ᄏ
+--- expected
+<p><strong>(k)</strong>ᄏ</p>
+--- end
+--- case 92 options - label-bytes 112 input-bytes 9 expected-bytes 29
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:1; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**〰**a
+--- expected
+<p>a<strong>〰</strong>a</p>
+--- end
+--- case 93 options - label-bytes 112 input-bytes 9 expected-bytes 29
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:3; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**〽**a
+--- expected
+<p>a<strong>〽</strong>a</p>
+--- end
+--- case 94 options - label-bytes 112 input-bytes 10 expected-bytes 30
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:5; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**🈂**a
+--- expected
+<p>a<strong>🈂</strong>a</p>
+--- end
+--- case 95 options - label-bytes 112 input-bytes 10 expected-bytes 30
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:7; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**🈷**a
+--- expected
+<p>a<strong>🈷</strong>a</p>
+--- end
+--- case 96 options - label-bytes 112 input-bytes 9 expected-bytes 29
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:9; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**㊗**a
+--- expected
+<p>a<strong>㊗</strong>a</p>
+--- end
+--- case 97 options - label-bytes 113 input-bytes 9 expected-bytes 29
+from markdown-cjk-friendly 5b17173 testcases/pseudo-emoji.md:11; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**㊙**a
+--- expected
+<p>a<strong>㊙</strong>a</p>
+--- end
+--- case 98 options - label-bytes 107 input-bytes 9 expected-bytes 16
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:2; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**a«**a
+--- expected
+<p>a**a«**a</p>
+--- end
+--- case 99 options - label-bytes 107 input-bytes 9 expected-bytes 16
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:4; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**»a**a
+--- expected
+<p>a**»a**a</p>
+--- end
+--- case 100 options - label-bytes 107 input-bytes 10 expected-bytes 17
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:6; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**a∇**a
+--- expected
+<p>a**a∇**a</p>
+--- end
+--- case 101 options - label-bytes 107 input-bytes 10 expected-bytes 17
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:8; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**∇a**a
+--- expected
+<p>a**∇a**a</p>
+--- end
+--- case 102 options - label-bytes 108 input-bytes 11 expected-bytes 18
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:10; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**a𝜵**a
+--- expected
+<p>a**a𝜵**a</p>
+--- end
+--- case 103 options - label-bytes 108 input-bytes 11 expected-bytes 18
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:12; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**𝜵a**a
+--- expected
+<p>a**𝜵a**a</p>
+--- end
+--- case 104 options - label-bytes 108 input-bytes 11 expected-bytes 18
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:14; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**𐬻a**a
+--- expected
+<p>a**𐬻a**a</p>
+--- end
+--- case 105 options - label-bytes 108 input-bytes 11 expected-bytes 18
+from markdown-cjk-friendly 5b17173 testcases/non-bmp.md:16; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a**a𐬻**a
+--- expected
+<p>a**a𐬻**a</p>
+--- end
+--- case 106 options - label-bytes 120 input-bytes 25 expected-bytes 45
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:1; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+__注意__：注意事項
+--- expected
+<p><strong>注意</strong>：注意事項</p>
+--- end
+--- case 107 options - label-bytes 120 input-bytes 25 expected-bytes 45
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:3; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+注意：__注意事項__
+--- expected
+<p>注意：<strong>注意事項</strong></p>
+--- end
+--- case 108 options - label-bytes 120 input-bytes 29 expected-bytes 43
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:5; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+正體字。︁_Traditional._
+--- expected
+<p>正體字。︁<em>Traditional.</em></p>
+--- end
+--- case 109 options - label-bytes 120 input-bytes 40 expected-bytes 60
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:7; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+正體字。︁__Hong Kong and Taiwan.__
+--- expected
+<p>正體字。︁<strong>Hong Kong and Taiwan.</strong></p>
+--- end
+--- case 110 options - label-bytes 120 input-bytes 40 expected-bytes 54
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:9; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+简体字 / 新字体。︀_Simplified._
+--- expected
+<p>简体字 / 新字体。︀<em>Simplified.</em></p>
+--- end
+--- case 111 options - label-bytes 121 input-bytes 55 expected-bytes 75
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:11; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+简体字 / 新字体。︀__Mainland China or Japan.__
+--- expected
+<p>简体字 / 新字体。︀<strong>Mainland China or Japan.</strong></p>
+--- end
+--- case 112 options - label-bytes 121 input-bytes 22 expected-bytes 42
+from markdown-cjk-friendly 5b17173 testcases/underscore-cjk-punct.md:13; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+“︁Git”︁__Hub__
+--- expected
+<p>“︁Git”︁<strong>Hub</strong></p>
+--- end
+--- case 113 options - label-bytes 117 input-bytes 11 expected-bytes 25
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:1; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a~~a()~~あ
+--- expected
+<p>a<del>a()</del>あ</p>
+--- end
+--- case 114 options - label-bytes 117 input-bytes 11 expected-bytes 25
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:3; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+あ~~()a~~a
+--- expected
+<p>あ<del>()a</del>a</p>
+--- end
+--- case 115 options - label-bytes 117 input-bytes 12 expected-bytes 26
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:5; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+𩸽~~()a~~a
+--- expected
+<p>𩸽<del>()a</del>a</p>
+--- end
+--- case 116 options - label-bytes 117 input-bytes 12 expected-bytes 26
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:7; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a~~a()~~𩸽
+--- expected
+<p>a<del>a()</del>𩸽</p>
+--- end
+--- case 117 options - label-bytes 117 input-bytes 15 expected-bytes 29
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:9; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+葛󠄀~~()a~~a
+--- expected
+<p>葛󠄀<del>()a</del>a</p>
+--- end
+--- case 118 options - label-bytes 118 input-bytes 14 expected-bytes 28
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:11; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+羽︀~~()a~~a
+--- expected
+<p>羽︀<del>()a</del>a</p>
+--- end
+--- case 119 options - label-bytes 118 input-bytes 12 expected-bytes 26
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:13; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+a~~「a~~」
+--- expected
+<p>a<del>「a</del>」</p>
+--- end
+--- case 120 options - label-bytes 118 input-bytes 12 expected-bytes 26
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:15; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+「~~a」~~a
+--- expected
+<p>「<del>a」</del>a</p>
+--- end
+--- case 121 options - label-bytes 118 input-bytes 13 expected-bytes 34
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:17; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+~~a~~：~~a~~
+--- expected
+<p><del>a</del>：<del>a</del></p>
+--- end
+--- case 122 options - label-bytes 118 input-bytes 27 expected-bytes 41
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:19; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+~~日本語。︀~~English.
+--- expected
+<p><del>日本語。︀</del>English.</p>
+--- end
+--- case 123 options - label-bytes 118 input-bytes 18 expected-bytes 32
+from markdown-cjk-friendly 5b17173 testcases/gfm-strikethrough.md:21; verified: micromark-extension-cjk-friendly 2.0.2
+--- input
+~~“︁a”︁~~a
+--- expected
+<p><del>“︁a”︁</del>a</p>
+--- end

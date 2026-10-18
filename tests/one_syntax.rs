@@ -1,4 +1,4 @@
-//! Locks the one syntax `parse` reads (decisions/0015): the constructs it
+//! Locks the one syntax `parse` reads (decisions/0018): the constructs it
 //! recognizes, the ones it reads as text, and the spellings it records.
 
 use markdown_syntax::prelude::*;

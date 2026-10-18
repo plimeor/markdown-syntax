@@ -4,8 +4,9 @@
 //!
 //! Each case in `tests/fixtures/syntax_decisions/` names the upstream case it
 //! came from, numbered as in its file under `tests/fixtures/conformance/` at
-//! commit 8ba83e2, before it left the bench, and what verified its expected
-//! HTML: the reference renderers that
+//! commit 8ba83e2, before it left the bench, or, for an amendment the syntax
+//! adopts, the file and line of the amendment's own test input, and what
+//! verified its expected HTML: the reference renderers that
 //! produce the same HTML (cmark-gfm, commonmark.js, micromark with GFM, math,
 //! and frontmatter extensions and single-tilde strikethrough off), or the
 //! decision that sets the reading where no reference shares it. The HTML must
@@ -95,6 +96,7 @@ fn options(case: &Case) -> HtmlOptions {
 }
 
 // inline-syntax: CommonMark inlines
+// inline-syntax: CJK-friendly emphasis flanking
 #[test]
 fn decision_cases_render_as_verified() {
     let mut paths: Vec<_> = fs::read_dir(ROOT)
@@ -127,5 +129,5 @@ fn decision_cases_render_as_verified() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 97, "syntax decision cases drifted");
+    assert_eq!(checked, 220, "syntax decision cases drifted");
 }

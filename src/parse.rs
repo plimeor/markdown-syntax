@@ -1568,7 +1568,8 @@ fn push_delimiter(
     });
 }
 
-/// The CommonMark roles of a `*`/`_`/`~~` run.
+/// The CommonMark roles of a `*`/`_`/`~~` run, with flanking as the
+/// CJK-friendly amendments define it (see `delimiter_flanking_within`).
 ///
 /// Flanking is computed on the whole run (CommonMark treats left/right-flanking
 /// as a property of the run, not of an individual delimiter), including the
@@ -1592,10 +1593,8 @@ fn emphasis_roles(
     let flanking = delimiter_flanking_within(input, index, length, bounded_before, bounded_after);
     let (mut can_open, mut can_close) = if marker == b'_' {
         (
-            flanking.left
-                && (!flanking.right || flanking.previous.is_some_and(is_flanking_punctuation)),
-            flanking.right
-                && (!flanking.left || flanking.next.is_some_and(is_flanking_punctuation)),
+            flanking.left && (!flanking.right || flanking.previous_punctuation),
+            flanking.right && (!flanking.left || flanking.next_punctuation),
         )
     } else {
         (flanking.left, flanking.right)
@@ -3917,6 +3916,68 @@ struct DelimiterFlanking {
     right: bool,
     previous: Option<char>,
     next: Option<char>,
+    /// The char before the run, read past a variation selector, is
+    /// punctuation (a "Unicode punctuation sequence").
+    previous_punctuation: bool,
+    next_punctuation: bool,
+}
+
+/// How one side of a delimiter run reads for flanking.
+#[derive(Clone, Copy, Default)]
+struct FlankingSide {
+    whitespace: bool,
+    punctuation: bool,
+    cjk: bool,
+    ideographic_variation_selector: bool,
+}
+
+impl FlankingSide {
+    fn of(value: Option<char>) -> Self {
+        let Some(value) = value else {
+            return Self {
+                whitespace: true,
+                ..Self::default()
+            };
+        };
+        Self {
+            whitespace: value.is_whitespace(),
+            punctuation: is_flanking_punctuation(value),
+            cjk: crate::unicode_cjk::is_cjk(value),
+            ideographic_variation_selector: crate::unicode_cjk::is_ideographic_variation_selector(
+                value,
+            ),
+        }
+    }
+
+    /// The side before a run whose previous char is `previous` and, before
+    /// that, `before_previous`: a general-use variation selector reads as the
+    /// char it follows, unless that is whitespace or absent, where it reads as
+    /// a plain character (unspecified by the amendments), and `‘’“”` with
+    /// U+FE01 read as CJK punctuation, as micromark-extension-cjk-friendly
+    /// reads them.
+    fn before(previous: Option<char>, before_previous: impl FnOnce() -> Option<char>) -> Self {
+        match previous {
+            Some(selector) if crate::unicode_cjk::is_general_use_variation_selector(selector) => {
+                match before_previous() {
+                    Some(base) if !base.is_whitespace() => {
+                        if selector == '\u{FE01}' && matches!(base, '‘' | '’' | '“' | '”') {
+                            return Self {
+                                punctuation: true,
+                                cjk: true,
+                                ..Self::default()
+                            };
+                        }
+                        Self {
+                            ideographic_variation_selector: false,
+                            ..Self::of(Some(base))
+                        }
+                    }
+                    _ => Self::default(),
+                }
+            }
+            _ => Self::of(previous),
+        }
+    }
 }
 
 fn delimiter_flanking(input: &str, index: usize, marker_len: usize) -> DelimiterFlanking {
@@ -3926,6 +3987,14 @@ fn delimiter_flanking(input: &str, index: usize, marker_len: usize) -> Delimiter
 /// `delimiter_flanking` for a run that may sit right inside a mark span: a
 /// bounded side flanks as if the input ended there, the way the span's content
 /// reads on its own.
+///
+/// Left- and right-flanking follow the CommonMark CJK-friendly amendments
+/// (<https://github.com/tats-u/markdown-cjk-friendly/blob/5b17173/specification.md>,
+/// section 6.2), in the reduced form of the amendments' implementers' tips:
+/// a run is left-flanking when not followed by whitespace and either not
+/// followed by punctuation, or preceded by whitespace or punctuation, or with
+/// a CJK char on either side or an ideographic variation selector before it;
+/// right-flanking is the mirror, without the selector.
 fn delimiter_flanking_within(
     input: &str,
     index: usize,
@@ -3944,23 +4013,34 @@ fn delimiter_flanking_within(
         input[index + marker_len..].chars().next().map(source_char)
     };
 
-    let previous_whitespace = previous.is_none_or(char::is_whitespace);
-    let next_whitespace = next.is_none_or(char::is_whitespace);
-    let previous_punctuation = previous.is_some_and(is_flanking_punctuation);
-    let next_punctuation = next.is_some_and(is_flanking_punctuation);
+    let before = FlankingSide::before(previous, || {
+        let mut chars = input[..index].chars();
+        chars.next_back();
+        chars.next_back().map(source_char)
+    });
+    let after = FlankingSide::of(next);
 
-    let left = next.is_some()
-        && !next_whitespace
-        && !(next_punctuation && !previous_whitespace && !previous_punctuation);
-    let right = previous.is_some()
-        && !previous_whitespace
-        && !(previous_punctuation && !next_whitespace && !next_punctuation);
+    let left = !after.whitespace
+        && (!after.punctuation
+            || before.whitespace
+            || before.punctuation
+            || after.cjk
+            || before.cjk
+            || before.ideographic_variation_selector);
+    let right = !before.whitespace
+        && (!before.punctuation
+            || after.whitespace
+            || after.punctuation
+            || before.cjk
+            || after.cjk);
 
     DelimiterFlanking {
         left,
         right,
         previous,
         next,
+        previous_punctuation: before.punctuation,
+        next_punctuation: after.punctuation,
     }
 }
 
