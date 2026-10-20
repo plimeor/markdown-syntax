@@ -287,10 +287,12 @@ cargo build -p markdown-syntax-wasm --target wasm32-unknown-unknown --profile wa
 
 | Family | Constructs |
 | --- | --- |
-| CommonMark | everything, including raw HTML and indented code |
+| CommonMark | everything but setext headings, including raw HTML and indented code; a block marker (`#`, `-`, `*`, `+`, `1.`, `1)`, and the `>` that opens a quote) opens its block only before a space or a tab |
 | GFM | tables, task list items, `~~` strikethrough, literal autolinks (`http://`, `https://`, `www.`, emails, `mailto:`, `xmpp:`), alerts |
 | Footnotes | `[^id]` references and definitions, inline `^[note]` |
 | Extensions | frontmatter (`---` / `+++`), inline and block math, wikilinks (`[[target\|title]]`, embeds `![[x]]`), `==` highlight, gemoji shortcodes (`:tada:`), `#` tags (`#ai/agents`), `:name` / `::name` / `:::name` directives, `<details>` HTML containers |
+
+Two block rules differ from CommonMark ([decision 0019](docs/decisions/0019-one-syntax-with-block-markers-that-take-a-space.md)), so that a paragraph a user types never reads as another block. A line of `=` or `-` under a paragraph makes no heading: it is the paragraph's text, and `---` is a thematic break. A lone `#`, `-`, `1.`, or `>` is paragraph text, and an empty block is its marker and a space (`# `, `- `, `> `), which is also how the serializer writes one; no list item starts with a blank line. Inside an open block quote, a bare `>` (a blank line) or `>text` still continues the quote.
 
 Where one node has more than one spelling, the parse records it: `Emphasis` and `Strong` record `*` or `_`, and `Autolink` records an angle-bracket or a literal autolink; `Link` is the inline `[text](destination)` form. A node stores each written fact once: an `Autolink` derives its `destination()` from its text, a `CharacterReference` decodes its `value()` from the reference, and a `CodeInline` holds only its value, its fence chosen when written.
 

@@ -18,7 +18,14 @@ independent of source details the AST does not record. An ordered item
 without a number SHALL be written with the previous item's number plus one,
 or 1 when it is the first. A `BlankLine` SHALL be written as one line holding
 the container prefix without its trailing whitespace, and so SHALL any blank
-line the serializer writes inside a container.
+line the serializer writes inside a container, except a blank line that
+opens a block quote, which SHALL be written `> `. An empty heading, list
+item, or block quote SHALL be written as its marker followed by one space:
+`# `, `- `, `1. `, `> ` (decision 0019).
+
+#### Scenario: Empty blocks
+- **WHEN** a hand-built document holding a `Heading` of depth 1 with no children, a list of one item with no blocks, or a `BlockQuote` holding a `BlankLine` and a paragraph `a` is serialized
+- **THEN** `to_markdown()` returns `"# \n"`, `"- \n"`, or `"> \n> a\n"`, each of which reads back as the document
 
 ### Requirement: Round-trip stability
 For a parsed document without its source, parsing the Markdown that
@@ -92,14 +99,14 @@ equal and their children correspond pairwise; a leaf with its own source
 (`with_source`) whose inlines are the ones `parse_inline` reads from that
 source with the definitions of the document being written corresponds when
 that source equals the base leaf's inline source, and is written as that
-source wherever it is written, except that an ATX heading, a table cell, or
+source wherever it is written, except that a heading, a table cell, or
 a directive label whose source holds a line ending is written from its
 inlines. The writer SHALL write:
 
 - a node that corresponds to its match, under containers that all keep their
   source prefixes, as its span's source text;
 - any other matched node with the source text of its own syntax (markers,
-  fences, delimiters, underlines, the table's delimiter row, and everything
+  fences, delimiters, the table's delimiter row, and everything
   else written once per node that is not a child), when its own fields are
   equal, and its children by these rules; a list item whose number or
   checkbox changed renders them in its marker's place, keeping its content
@@ -108,8 +115,8 @@ inlines. The writer SHALL write:
 
 A line written where the base node has a source line keeps that line's
 source prefix (container markers and indentation) and the line ending before
-it: a setext underline, a table's delimiter row, and a blank line matched to
-the base's whole, unless it opens its container, whose own syntax opens it;
+it: a table's delimiter row, and a blank line matched to the base's whole,
+unless it opens its container, whose own syntax opens it;
 an item's marker, for an item whose own fields are equal and whose
 whitespace before its content is spaces or one tab, as its source text up
 to its first child, tabs and line endings included, the line its
@@ -156,7 +163,7 @@ of the same document does.
 
 #### Scenario: Edited items
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
-- **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n-\n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which would underline the paragraph, is written canonically
+- **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n- \n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which cannot interrupt the paragraph, is written after a blank line with the space that opens it
 
 #### Scenario: One edited link
 - **WHEN** the target of the `WikiLink` in the document parsed from ``"see  [[A]] and `` b ``"`` is changed to `B` and the document is written

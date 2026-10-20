@@ -39,11 +39,11 @@ mod inline_source_of_a_leaf_block {
     }
 
     #[test]
-    fn setext_heading_and_later_blocks() {
-        let input = "\u{feff}a\n\nT\r\n==\n\n> - x\n>   y";
+    fn heading_and_later_blocks() {
+        let input = "\u{feff}a\n\n# T\r\n\n> - x\n>   y";
         let source = inline_source(input, &[1]).unwrap();
         assert_eq!(source.text, "T");
-        assert_eq!(source.to_source(0), 6);
+        assert_eq!(source.to_source(0), 8);
         let source = inline_source(input, &[2, 0, 0, 0]).unwrap();
         assert_eq!(source.text, "x\ny");
         assert_eq!(source.to_source(2), input.len() - 1);
@@ -136,8 +136,8 @@ mod leaves_built_from_their_source {
             (paragraph.source(), &paragraph.children, diagnostics),
             (Some(text), &expected.inlines, expected.diagnostics.clone())
         );
-        let (heading, _) = Heading::with_source(2, HeadingKind::Setext, text, &definitions);
-        assert_eq!((heading.depth, heading.kind), (2, HeadingKind::Setext));
+        let (heading, _) = Heading::with_source(2, text, &definitions);
+        assert_eq!(heading.depth, 2);
         assert_eq!(
             (heading.source(), &heading.children),
             (Some(text), &expected.inlines)

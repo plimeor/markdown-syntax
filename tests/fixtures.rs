@@ -411,8 +411,6 @@ const NOT_READING_BACK: &[NotReadingBack] = &[
     listed("cases/commonmark/block_quote.cases", 0x940fa4c97ec4f379, "> a\n    - b", LazyLine, "the lazy `- b` continues the quote's paragraph; written inside the quote it opens a list"),
     listed("cases/commonmark/gfm_table.cases", 0x0515751d02032a6b, "> | a |\n| - |", LazyLine, "the lazy `| - |` continues the quote's paragraph; written inside the quote it makes a table"),
     listed("cases/commonmark/gfm_table.cases", 0x07b885ea9e1e56da, "> | a |\n| - |\n> | c |", LazyLine, "the lazy `| - |` continues the quote's paragraph; written inside the quote it makes a table"),
-    listed("cases/commonmark/heading_setext.cases", 0x184c3d69ad4e8889, "> foo\nbar\n===", LazyLine, "the lazy `===` continues the quote's paragraph; written inside the quote it underlines a heading"),
-    listed("cases/commonmark/heading_setext.cases", 0xd6c16b68b6febf6d, "> a\n===", LazyLine, "the lazy `===` continues the quote's paragraph; written inside the quote it underlines a heading"),
     // Lines whose indentation keeps them from opening a block, or sets an
     // item's content column. Written at the column the serializer picks,
     // they open that block or move in or out of the item.
@@ -421,16 +419,13 @@ const NOT_READING_BACK: &[NotReadingBack] = &[
     listed("cases/commonmark/gfm_table.cases", 0xcfaf038193c872fd, "| a |\n    | - |", Indentation, "the delimiter row indented four columns continues the paragraph; written unindented it makes a table"),
     listed("cases/commonmark/gfm_table.cases", 0xb81d7773080ebe4e, "# Code\n\n## Indented delimiter row\n\na\n   ", Indentation, "delimiter and body rows indented four columns continue a paragraph or end a table; written unindented they make or extend one"),
     listed("cases/commonmark/heading_atx.cases", 0x1d35761f8902ad51, "foo\n    # bar", Indentation, "`# bar`, indented four columns, continues the paragraph; written unindented it opens a heading"),
-    listed("cases/commonmark/heading_setext.cases", 0x175cadb2bf7304be, "Foo\n    =", Indentation, "`=`, indented four columns, continues the paragraph; written unindented it underlines a heading"),
-    listed("cases/commonmark/heading_setext.cases", 0xc74cbb8694b5a735, "Foo\n\t=", Indentation, "`=`, indented by a tab, continues the paragraph; written unindented it underlines a heading"),
     listed("cases/commonmark/list.cases", 0xc8221aa548233394, " -    one\n\n     two", Indentation, "the spaces after the bullet set a content column that `two` falls short of, so it is indented code after the list; written with one space, the item takes it in"),
     listed("cases/commonmark/list.cases", 0x619786df51da9079, "- a\n - b\n  - c\n   - d\n    - e", Indentation, "`- e`, indented four columns, continues the last item's paragraph; written at the item's content column it opens a nested list"),
     listed("cases/commonmark/list.cases", 0x310035aa719c8c63, "1. a\n\n  2. b\n\n    3. c", Indentation, "`2.`, indented two columns, sets a content column that `3. c` falls short of, so it is indented code after the list; written unindented, the item takes it in"),
     listed("cases/commonmark/thematic_break.cases", 0xce75af4a0dc1af07, "Foo\n    ***", Indentation, "`***`, indented four columns, continues the paragraph; written unindented it is a thematic break"),
-    listed("cases/gfm/fuzz.cases", 0xc3010735277f77a1, "\u{2}\n\\\n\t-", Indentation, "`-`, indented by a tab, continues the paragraph; written unindented it underlines a heading"),
     listed("cases/gfm/phoenix_heex.cases", 0x05f78ce45050122f, "<%= foo\n    # |> bar()\n    |> baz() %>\n", Indentation, "`# |> bar()`, indented four columns, continues the paragraph; written unindented it opens a heading"),
     listed("READ_BACK_INPUTS", 0x07a02e5549946319, "~ \n\n>  > \t<!--[x] 2) *   :::e", Indentation, "the tab after the nested quote marker keeps `<!--` from opening an HTML block"),
-    listed("READ_BACK_INPUTS", 0xe1010ac996a33d36, ">* \t[x] : # <div>a\n> |-|", Indentation, "the tab between the bullet and `[x]` keeps the item from being a task"),
+    listed("READ_BACK_INPUTS", 0x521c8d6f0d2edc4e, ">  * \t[x] : # <div>a\n> |-|", Indentation, "the tab between the bullet and `[x]` keeps the item from being a task"),
     listed("READ_BACK_INPUTS", 0x9bf7e5b37f795c2e, "-$$\n    $$", Indentation, "the indentation of the continuation line keeps `$$` from closing math"),
     listed("READ_BACK_INPUTS", 0x60c48ac0b10b1e7f, "-\t(\n  <v>", Indentation, "the tab after the bullet sets the item's content column"),
     listed("READ_BACK_INPUTS", 0x22cd1088c282d619, "*\t<a>\n  <v>", Indentation, "the tab after the bullet sets the item's content column"),
@@ -731,7 +726,7 @@ fn edited_nodes_at_every_depth_read_back() {
 /// leaf path), with what the writer does there.
 #[rustfmt::skip]
 const NOT_KEPT_AFTER_APPENDING: &[(&str, &str)] = &[
-    ("READ_BACK_INPUTS \">* \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a space and a tab after a marker, which could open indented code at another column, render its item"),
+    ("READ_BACK_INPUTS \">  * \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a space and a tab after a marker, which could open indented code at another column, render its item"),
 ];
 
 /// The block at `path`, through list items, table rows, and containers;
@@ -1041,30 +1036,43 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
         "**See [docs] and `cfg`** then use \\` quote\n\n[docs]: /u",
         "**See [docs] and `cfg`** then use \\` quote\n\n[docs]: /u\n",
     ),
-    // Blocks and their lines.
-    ("a |\n-", "a |\n---\n"),
-    ("a\nb\n===", "a b\n===\n"),
-    (
-        "Foo *bar\nbaz*\n====",
-        "Foo *bar baz*\n=============\n",
-    ),
-    ("- a\n  - ---", "- a\n  - - -\n"),
+    // Blocks and their lines. An `=` or `-` line after a paragraph is its
+    // text, or from three `-` on a thematic break.
+    ("a |\n-", "a |\n-\n"),
+    ("a\nb\n===", "a\nb\n===\n"),
+    ("Foo *bar\nbaz*\n====", "Foo *bar\nbaz*\n====\n"),
+    ("a\n---", "a\n\n---\n"),
+    ("- a\n  - ---", "- a\n  ---\n"),
+    // A block marker opens its block before a space or a tab, and an empty
+    // block is written with the space.
+    ("#", "#\n"),
+    ("# ", "# \n"),
+    ("#\t", "# \n"),
+    (">", ">\n"),
+    (">a", ">a\n"),
+    ("> ", "> \n"),
+    ("-", "-\n"),
+    ("- ", "- \n"),
+    ("1.", "1.\n"),
+    ("1) ", "1) \n"),
+    ("- \n  foo", "- \n\nfoo\n"),
+    // A quote's later lines continue it with a bare `>` or `>text`.
+    ("> a\n>\n>b", "> a\n>\n> b\n"),
+    ("> a\n>b", "> a\n> b\n"),
     // A quote opening mid-line keeps its blank first line.
-    ("> >\n> > d", "> >\n> > d\n"),
-    ("- >\n  >\n  > b", "- >\n  >\n  > b\n"),
-    ("\u{feff}>\n> a", ">\n> a\n"),
+    ("> > \n> > d", "> > \n> > d\n"),
+    ("- > \n  >\n  > b", "- > \n  >\n  > b\n"),
+    ("\u{feff}> \n> a", "> \n> a\n"),
     // Indented code opening a nested item stays on the marker line.
     ("- a\n  -     x", "- a\n  -     x\n"),
     ("1. a\n   1.     x\n          y", "1. a\n   1.     x\n          y\n"),
     // Item numbers are written as recorded.
     ("999999999. a\n1. b", "999999999. a\n1. b\n"),
     ("999999998) a\n1) b\n1) c", "999999998) a\n1) b\n1) c\n"),
-    ("-\n   <v>", "-\n   <v>\n"),
-    ("-\n  ---", "-\n  ---\n"),
-    ("-\n  ---\n-\n  ---", "-\n  ---\n-\n  ---\n"),
-    ("- a\n\n-\n  ---", "- a\n\n-\n  ---\n"),
-    ("> - a\n> -\n>   ---", "> - a\n> -\n>   ---\n"),
-    ("- - a\n  -\n    ---", "- - a\n  -\n    ---\n"),
+    // An empty item takes no line after it.
+    ("- \n   <v>", "- \n\n   <v>\n"),
+    ("- \n  ---", "- \n\n---\n"),
+    ("- a\n- \n  ---", "- a\n- \n\n---\n"),
     ("[o]:u\n\t$$\na$$", "[o]: u\n\n$$\na$$\n"),
     ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
     // Values encoded by rule.
@@ -1213,7 +1221,7 @@ const READ_BACK_INPUTS: &[&str] = &[
     ":e!://www.x.com# [[~[x] >> !^~~  ",
     // Containers, items, and blocks.
     "~ \n\n>  > \t<!--[x] 2) *   :::e",
-    ">* \t[x] : # <div>a\n> |-|",
+    ">  * \t[x] : # <div>a\n> |-|",
     "-$$\n    $$",
     "-\t(\n  <v>",
     "*\t<a>",

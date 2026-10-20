@@ -1,6 +1,6 @@
 # 0018: One normative syntax, with CJK-friendly emphasis
 
-Status: Accepted
+Status: Superseded by 0019
 Date: 2026-10-18
 Supersedes: 0015
 

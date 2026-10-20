@@ -39,21 +39,15 @@ label:
   before, a block that the block before it takes as that line:
   - after a `Paragraph`, a block that cannot interrupt it, by the parser's
     own checks: a `Paragraph`, a `Definition`, an indented `CodeBlock`, a
-    `Frontmatter`, a `Heading` written as a setext heading, an ordered
-    `List` whose first item's number is not 1, a `List` whose first item has
-    no blocks or that the serializer starts on a line after its bullet (a
-    first line that with a `-` or `*` bullet reads as a thematic break, such
-    as a thematic break of the bullet's char, a paragraph `--`, or a nested
-    empty item two levels down, or content opening with one to three spaces
-    or a tab), or an `HtmlBlock` whose first line opens no HTML
-    block or opens one that only a blank line ends (a lone tag such as
-    `<span>`);
-  - after a `Definition`, those blocks other than a `Paragraph`, a
-    `Definition`, and a setext `Heading`;
+    `Frontmatter`, an ordered `List` whose first item's number is not 1, a
+    `List` whose first item has no blocks, or an `HtmlBlock` whose first
+    line opens no HTML block or opens one that only a blank line ends (a
+    lone tag such as `<span>`);
+  - after a `Definition`, those blocks other than a `Paragraph` and a
+    `Definition`;
   - after a `Table`, a block whose first line starts no block where no
-    paragraph is open: a `Paragraph`, a `Definition`, a `Table`, a `Heading`
-    written as a setext heading, or an `HtmlBlock` whose first line opens no
-    HTML block;
+    paragraph is open: a `Paragraph`, a `Definition`, a `Table`, or an
+    `HtmlBlock` whose first line opens no HTML block;
   - after an `HtmlBlock` whose first line opens one that a blank line ends
     (a block-level tag such as `<div>`, or a lone tag), any block;
   - after a `BlockQuote` or an `Alert`, a `BlockQuote` or an `Alert`;
@@ -70,7 +64,13 @@ label:
   the header row's width; a row whose width differs from the header row's.
 - `List`: no items; a loose list of one item holding at most one block.
 - `ListItem`: a number beyond the parser's 9-digit marker limit; a number in
-  a bullet list.
+  a bullet list; a first line that, written on the marker's line after one
+  space, would read otherwise, since an item's content cannot start below
+  its marker (decision 0019): content opening with one to three spaces or a
+  tab, or, with a `-` or `*` bullet and no checkbox, a first line of only
+  that char, spaces, and tabs holding two or more of the char, which reads
+  as one thematic break with the bullet (a thematic break of the bullet's
+  char, a paragraph `--`, or a nested empty item two levels down).
 - `BlankLine`: first or last in a footnote definition; first in a list item,
   or last in a list's last item; in a tight list.
 - `ListItem`: a task item (`checked` set) whose first block after its leading

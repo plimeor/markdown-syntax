@@ -682,8 +682,8 @@ mod recorded_spellings {
             rendered(&document(vec![rule(ThematicBreakMarker::Dash)])),
             "- - -\n"
         );
-        // `* ***` would read as one longer break, so the item starts on the
-        // line after its marker.
+        // `* ***` would read as one longer break, and the item's content
+        // cannot start below its marker, so validation refuses it.
         let list = Block::List(List {
             meta: NodeMeta::default(),
             ordered: false,
@@ -696,14 +696,19 @@ mod recorded_spellings {
                 children: vec![rule(ThematicBreakMarker::Asterisk)],
             }],
         });
-        assert_eq!(rendered(&document(vec![list])), "*\n  ***\n");
+        assert!(matches!(
+            document(vec![list]).to_markdown(),
+            Err(SerializeError::InvalidDocument(_))
+        ));
     }
 
     /// A first line of only the bullet's char after the bullet reads as one
-    /// thematic break with it, so the item starts on the line after its
-    /// marker: a paragraph `--`, or three nested empty items.
+    /// thematic break with it, and an item's content cannot start below its
+    /// marker, where a marker alone on its line is an empty item: a
+    /// paragraph `--`, three nested empty items, or indented code `--` are
+    /// refused, while two nested empty items and a `+` bullet are written.
     #[test]
-    fn an_item_whose_first_line_reads_as_a_break_with_its_bullet_starts_below_it() {
+    fn an_item_whose_first_line_reads_as_a_break_with_its_bullet_is_refused() {
         let list = |delimiter, children: Vec<Block>| {
             Block::List(List {
                 meta: NodeMeta::default(),
@@ -719,19 +724,26 @@ mod recorded_spellings {
             })
         };
         let dash = |children| list(ListDelimiter::Dash, children);
-        assert_eq!(
-            rendered(&document(vec![dash(vec![paragraph(vec![text("--")])])])),
-            "-\n  --\n"
-        );
-        assert_eq!(
-            rendered(&document(vec![list(
-                ListDelimiter::Asterisk,
-                vec![paragraph(vec![text("* *")])]
-            )])),
-            "*\n  * *\n"
-        );
-        let empty_items = dash(vec![dash(vec![dash(vec![])])]);
-        assert_eq!(rendered(&document(vec![empty_items])), "-\n  - - \n");
+        let crlf_code = Block::CodeBlock(CodeBlock {
+            meta: NodeMeta::default(),
+            kind: CodeBlockKind::Indented,
+            info: None,
+            value: "--\r\nx\r\n".into(),
+        });
+        for refused in [
+            dash(vec![paragraph(vec![text("--")])]),
+            list(ListDelimiter::Asterisk, vec![paragraph(vec![text("* *")])]),
+            dash(vec![dash(vec![dash(vec![])])]),
+            dash(vec![crlf_code]),
+        ] {
+            assert!(
+                matches!(
+                    document(vec![refused.clone()]).to_markdown(),
+                    Err(SerializeError::InvalidDocument(_))
+                ),
+                "{refused:?}"
+            );
+        }
         // Two nested empty items and a `+` bullet read as items.
         assert_eq!(
             rendered(&document(vec![dash(vec![dash(vec![])])])),
@@ -744,21 +756,6 @@ mod recorded_spellings {
             )])),
             "+ ++\n"
         );
-        // A first line ending in a carriage return reads the same.
-        let crlf_code = Block::CodeBlock(CodeBlock {
-            meta: NodeMeta::default(),
-            kind: CodeBlockKind::Indented,
-            info: None,
-            value: "--\r\nx\r\n".into(),
-        });
-        assert_eq!(
-            rendered(&document(vec![dash(vec![crlf_code])])),
-            "-\n      --\r\n      x\r\n"
-        );
-        for written in ["-\n  --\n", "-\n  - - \n"] {
-            let reparsed = parse(written).document.without_source();
-            assert_eq!(rendered(&reparsed), written);
-        }
     }
 
     #[test]
@@ -804,21 +801,12 @@ mod recorded_spellings {
                 meta: NodeMeta::default(),
             })
         };
-        let heading = |depth, kind| {
-            let mut heading = Heading::new(depth, vec![text("foo"), soft_break(), text("bar")]);
-            heading.kind = kind;
+        let heading = |depth| {
+            let heading = Heading::new(depth, vec![text("foo"), soft_break(), text("bar")]);
             document(vec![heading.into()])
         };
-        assert_eq!(
-            rendered(&heading(1, HeadingKind::Setext)),
-            "foo bar\n=======\n"
-        );
-        assert_eq!(rendered(&heading(1, HeadingKind::Atx)), "# foo bar\n");
-        // A setext underline writes depth 1 or 2 only.
-        assert_eq!(
-            heading(3, HeadingKind::Setext).to_markdown().unwrap(),
-            "### foo bar\n"
-        );
+        assert_eq!(rendered(&heading(1)), "# foo bar\n");
+        assert_eq!(rendered(&heading(3)), "### foo bar\n");
     }
 }
 
@@ -1034,5 +1022,75 @@ mod blank_lines_and_numbers {
         assert_eq!(rendered(&ordered(&[Some(3), Some(7)])), "3. a\n7. b\n");
         assert_eq!(rendered(&ordered(&[Some(3), None])), "3. a\n4. b\n");
         assert_eq!(rendered(&ordered(&[None, None])), "1. a\n2. b\n");
+    }
+}
+
+mod empty_blocks {
+    //! An empty block is written with the space after its marker, which
+    //! opens it (decision 0019).
+    use super::*;
+
+    fn blank_line() -> Block {
+        BlankLine::new().into()
+    }
+
+    /// The written Markdown of `block` alone, checked to read back as it.
+    fn written(block: Block) -> String {
+        let document = document(vec![block]);
+        let markdown = rendered(&document);
+        assert_eq!(
+            normalize::normalized(&parse(&markdown).document.children),
+            normalize::normalized(&document.children),
+            "{markdown:?}"
+        );
+        markdown
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn an_empty_heading_is_written_with_a_space() {
+        assert_eq!(
+            written(Heading::new(1, Vec::<Inline>::new()).into()),
+            "# \n"
+        );
+        assert_eq!(
+            written(Heading::new(3, Vec::<Inline>::new()).into()),
+            "### \n"
+        );
+    }
+
+    // serialization: Canonical output
+    #[test]
+    fn an_empty_quote_and_item_are_written_with_a_space() {
+        let quote = |children| {
+            Block::BlockQuote(BlockQuote {
+                meta: NodeMeta::default(),
+                children,
+            })
+        };
+        // A quote holding nothing reads back holding one blank line.
+        assert_eq!(rendered(&document(vec![quote(vec![])])), "> \n");
+        assert_eq!(written(quote(vec![blank_line()])), "> \n");
+        // A blank first line opens the quote with the space; a later blank
+        // line is a bare `>`.
+        assert_eq!(
+            written(quote(vec![
+                blank_line(),
+                paragraph(vec![text("a")]),
+                blank_line()
+            ])),
+            "> \n> a\n>\n"
+        );
+        assert_eq!(
+            written(quote(vec![quote(vec![
+                blank_line(),
+                paragraph(vec![text("a")])
+            ])])),
+            "> > \n> > a\n"
+        );
+        assert_eq!(
+            written(List::new([ListItem::new(Vec::<Block>::new())]).into()),
+            "- \n"
+        );
     }
 }

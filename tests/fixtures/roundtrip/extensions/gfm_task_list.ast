@@ -24,20 +24,23 @@ Document
           Paragraph
             Text "child todo"
   List ordered=false tight=true
-    ListItem checked=none
-      Heading depth=1 kind=setext
-        Text "[ ] In a setext heading"
-  List ordered=false tight=false
+    ListItem checked=false
+      Paragraph
+        Text "In a setext heading"
+        SoftBreak
+        Text "======================="
+  List ordered=false tight=true
     ListItem checked=false
       Paragraph
         Text "In a lazy line"
-    ListItem checked=none
   Paragraph
+    Text "*"
+    SoftBreak
     Text "[x]"
-  List ordered=false tight=true
-    ListItem checked=none
-      Paragraph
-        Text "[x]"
+  Paragraph
+    Text "*"
+    SoftBreak
+    Text "[x]"
   List ordered=false tight=true
     ListItem checked=none
       Paragraph

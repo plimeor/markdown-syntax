@@ -1,5 +1,5 @@
 Document
-  Heading depth=1 kind=atx
+  Heading depth=1
     Text "Title"
   Paragraph
     Text "Paragraph line"

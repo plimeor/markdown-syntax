@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: heading_atx
-count: 33
+count: 29
 
 --- case 1 options - label-bytes 34 input-bytes 5 expected-bytes 12
 should support a heading w/ rank 1
@@ -215,48 +215,4 @@ Bar foo
 <p>Foo bar</p>
 <h1>baz</h1>
 <p>Bar foo</p>
---- end
---- case 30 options - label-bytes 37 input-bytes 13 expected-bytes 29
-should support empty atx headings (1)
---- input
-## 
-#
-### ###
---- expected
-<h2></h2>
-<h1></h1>
-<h3></h3>
---- end
---- case 31 options - label-bytes 37 input-bytes 7 expected-bytes 29
-should support empty atx headings (2)
---- input
-#
-a
-# b
---- expected
-<h1></h1>
-<p>a</p>
-<h1>b</h1>
---- end
---- case 32 options - label-bytes 31 input-bytes 5 expected-bytes 45
-should not support lazyness (1)
---- input
-> #
-a
---- expected
-<blockquote>
-<h1></h1>
-</blockquote>
-<p>a</p>
---- end
---- case 33 options - label-bytes 31 input-bytes 5 expected-bytes 45
-should not support lazyness (2)
---- input
-> a
-#
---- expected
-<blockquote>
-<p>a</p>
-</blockquote>
-<h1></h1>
 --- end

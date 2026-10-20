@@ -248,18 +248,7 @@ fn snapshot_block(block: &Block, indent: usize, lines: &mut Vec<String>) {
             snapshot_inlines(&node.children, indent + 1, lines);
         }
         Block::Heading(node) => {
-            push(
-                lines,
-                indent,
-                format!(
-                    "Heading depth={} kind={}",
-                    node.depth,
-                    match node.kind {
-                        markdown_syntax::HeadingKind::Atx => "atx",
-                        markdown_syntax::HeadingKind::Setext => "setext",
-                    }
-                ),
-            );
+            push(lines, indent, format!("Heading depth={}", node.depth));
             snapshot_inlines(&node.children, indent + 1, lines);
         }
         Block::ThematicBreak(_) => push(lines, indent, "ThematicBreak"),

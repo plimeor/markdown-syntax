@@ -212,9 +212,17 @@ mod tests {
 
     #[test]
     fn heading_soft_breaks_read_as_spaces() {
-        let parsed = crate::parse("a\nb\n===").document.children;
-        let mut heading = Heading::new(1, [Text::from("a b")]);
-        heading.kind = HeadingKind::Setext;
+        let parsed = crate::parse("# a b").document.children;
+        let heading = Heading::new(
+            1,
+            [
+                Inline::from(Text::from("a")),
+                Inline::SoftBreak(SoftBreak {
+                    meta: NodeMeta::default(),
+                }),
+                Inline::from(Text::from("b")),
+            ],
+        );
         assert_eq!(
             normalized_blocks(&parsed),
             normalized_blocks(&[heading.into()])

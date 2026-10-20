@@ -8,7 +8,6 @@ const UTF16 = new TextDecoder("utf-16le", { ignoreBOM: true });
 const UTF8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 const ENUMS = {
-  headingKind: ["atx", "setext"],
   thematicBreakMarker: ["dash", "asterisk", "underscore"],
   alertKind: ["note", "tip", "important", "warning", "caution"],
   listDelimiter: ["dash", "asterisk", "plus", "period", "paren"],
@@ -27,7 +26,7 @@ const ENUMS = {
 const KINDS = [
   [0, "document", [["children", "blocks"]]],
   [1, "paragraph", [["children", "leafInlines"]]],
-  [2, "heading", [["depth", "depth"], ["kind", "headingKind"], ["children", "leafInlines"]]],
+  [2, "heading", [["depth", "depth"], ["children", "leafInlines"]]],
   [3, "thematicBreak", [["marker", "thematicBreakMarker"]]],
   [4, "blockQuote", [["children", "blocks"]]],
   [5, "alert", [["kind", "alertKind"], ["title", "optionalString"], ["children", "blocks"]]],

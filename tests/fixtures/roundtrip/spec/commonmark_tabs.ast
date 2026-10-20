@@ -1,7 +1,7 @@
 Document
   CodeBlock kind=indented info=none
     Value "foo\nbar\n# x\n> x\n- x\n---\n```\n<div>\n	x"
-  Heading depth=1 kind=atx
+  Heading depth=1
     Text "Foo"
   CodeBlock kind=indented info=none
     Value "> x"

@@ -245,10 +245,12 @@ fn many_definitions_parse_in_bounded_time() {
 #[test]
 fn block_nesting_stops_at_the_limit() {
     let _serial = one_at_a_time();
-    let document = parse_bounded("nested quotes", ">".repeat(100_000) + " x");
+    let document = parse_bounded("nested quotes", "> ".repeat(100_000) + "x");
     assert_eq!(block_quote_depth(&document), 32);
 
     for (name, input) in [
+        // A `>` opens a quote only before a space or a tab: a paragraph.
+        ("unspaced quote markers", ">".repeat(100_000) + " x"),
         ("nested list markers", "- ".repeat(100_000) + "x"),
         ("nested ordered markers", "1. ".repeat(100_000) + "x"),
         ("quote then list markers", "> - ".repeat(50_000) + "x"),

@@ -43,9 +43,11 @@ mod report;
 mod deviations;
 
 /// Snapshot-integrity check: our CommonMark-spec source fixture must carry
-/// exactly 643 cases: the 652 of the upstream CommonMark spec corpus, less the
+/// exactly 612 cases: the 652 of the upstream CommonMark spec corpus, less the
 /// 9 whose input reads as a construct the CommonMark oracle lacks (literal
-/// autolinks, wiki links, frontmatter), which cannot be compared.
+/// autolinks, wiki links, frontmatter), which cannot be compared, and the 31
+/// that decision 0019 reads differently (setext headings, block markers
+/// without a space), which `tests/syntax_decisions.rs` checks.
 #[test]
 fn corpus_counts_match() {
     let tuples = extractor::load_all();
@@ -54,8 +56,8 @@ fn corpus_counts_match() {
         .filter(|t| t.source_file.ends_with("commonmark/commonmark.cases"))
         .count();
     assert_eq!(
-        commonmark, 643,
-        "commonmark/commonmark.cases must carry exactly 643 cases, got {commonmark}"
+        commonmark, 612,
+        "commonmark/commonmark.cases must carry exactly 612 cases, got {commonmark}"
     );
 }
 

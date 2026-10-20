@@ -822,8 +822,6 @@ fn write_blocks(
         }
         output.extend(core::iter::repeat_n('\n', blank_lines));
         blank_lines = 0;
-        let after_paragraph_line =
-            join == Join::Line && index > 0 && matches!(blocks[index - 1], Block::Paragraph(_));
         let written = match block {
             Block::List(list) => {
                 let marker = list_marker(list, options, previous_list);
@@ -832,7 +830,7 @@ fn write_blocks(
             }
             Block::ThematicBreak(node) => {
                 previous_list = None;
-                write_thematic_break(node, document_start && index == 0, after_paragraph_line)
+                write_thematic_break(node, document_start && index == 0)
             }
             _ => {
                 previous_list = None;
@@ -864,14 +862,19 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
             None => write_inlines(&node.children, Context::BLOCK),
         },
         Block::Heading(node) => write_heading(node),
-        Block::ThematicBreak(node) => Ok(write_thematic_break(node, false, false)),
+        Block::ThematicBreak(node) => Ok(write_thematic_break(node, false)),
         Block::BlockQuote(node) => {
             let inner = write_blocks(&node.children, options, Join::Gap, false, None)?;
-            // No content, or one blank line, is one `>` line.
+            // No content, or one blank line, is one `> ` line, the space
+            // opening the quote, as it does before a first blank line.
             Ok(if inner.is_empty() {
-                ">".into()
+                "> ".into()
             } else {
-                quote_lines(&inner)
+                let mut written = quote_lines(&inner);
+                if written.starts_with(">\n") || written.starts_with(">\r") {
+                    written.insert(1, ' ');
+                }
+                written
             })
         }
         Block::Alert(node) => write_alert(node, options),
@@ -937,44 +940,26 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
     }
 }
 
-/// A thematic break. A dash break is written spaced where a contiguous `---`
-/// would read otherwise: at the document start, where it opens frontmatter,
-/// and on the line after a paragraph's, where it underlines a setext heading.
-fn write_thematic_break(
-    node: &ThematicBreak,
-    at_document_start: bool,
-    after_paragraph_line: bool,
-) -> String {
+/// A thematic break. A dash break is written spaced at the document start,
+/// where a contiguous `---` would open frontmatter.
+fn write_thematic_break(node: &ThematicBreak, at_document_start: bool) -> String {
     match node.marker {
-        ThematicBreakMarker::Dash if at_document_start || after_paragraph_line => "- - -".into(),
+        ThematicBreakMarker::Dash if at_document_start => "- - -".into(),
         ThematicBreakMarker::Dash => "---".into(),
         ThematicBreakMarker::Asterisk => "***".into(),
         ThematicBreakMarker::Underscore => "___".into(),
     }
 }
 
-/// Whether `node` is written as a setext heading: a setext underline can only
-/// express depth 1 (`=`) or 2 (`-`), and it underlines content.
-pub(crate) fn writes_setext(node: &Heading) -> bool {
-    node.kind == HeadingKind::Setext && matches!(node.depth, 1 | 2) && !node.children.is_empty()
-}
-
+/// An ATX heading. An empty one is its `#` run and a space, which opens it.
 fn write_heading(node: &Heading) -> Result<String, SerializeError> {
-    let setext = writes_setext(node);
-    let content = match one_line(node.source.as_deref(), !setext) {
+    let content = match one_line(node.source.as_deref(), true) {
         Some(text) => text.into(),
         None => write_inlines(&node.children, Context::HEADING)?,
     };
-    if setext {
-        let marker = if node.depth == 1 { "=" } else { "-" };
-        return Ok(format!(
-            "{content}\n{}",
-            marker.repeat(content.len().max(3))
-        ));
-    }
     let hashes = "#".repeat(usize::from(node.depth));
     Ok(if content.is_empty() {
-        hashes
+        format!("{hashes} ")
     } else if reads_as_closing_sequence(&content) {
         // Content ending in what would read as the closing sequence keeps it
         // by a closing sequence of its own.
@@ -1180,7 +1165,9 @@ pub(crate) fn written_opens_fence_like(block: &Block) -> bool {
 }
 
 /// One item of `list`, written with `marker_char`; `previous` is the number
-/// the item before it was written with.
+/// the item before it was written with. Its content starts on its marker's
+/// line, after one space: an item with no content is its marker and the
+/// space, which opens it.
 fn write_item(
     list: &List,
     item: &ListItem,
@@ -1194,25 +1181,24 @@ fn write_item(
         format!("{marker_char} ")
     };
     let inner = write_item_blocks(&item.children, options, list.tight, item.checked)?;
-    Ok(
-        if starts_below_bullet(list, item, marker_char, first_line(&inner)) {
-            format!(
-                "{}\n{}",
-                marker.trim_end(),
-                prefix_container_lines(&inner, &" ".repeat(marker.len()))
-            )
-        } else {
-            format!("{marker}{}", indent_after_first_line(&inner, marker.len()))
-        },
-    )
+    Ok(format!(
+        "{marker}{}",
+        indent_after_first_line(&inner, marker.len())
+    ))
 }
 
-/// Whether `item` of `list`, written with `marker_char`, starts its content
-/// on the line after its marker, `first_line` being the first line its
-/// blocks are written as: where that line would read as padding after the
-/// marker, or, after a bullet, as one thematic break with it (`- --`, or
-/// the `- - -` of three nested empty items).
-fn starts_below_bullet(list: &List, item: &ListItem, marker_char: char, first_line: &str) -> bool {
+/// Whether `item` of `list`, written with `marker_char`, reads back as
+/// something else, `first_line` being the first line its blocks are written
+/// as: where that line would read as padding after the marker, or, after a
+/// bullet, as one thematic break with it (`- --`, or the `- - -` of three
+/// nested empty items). An item's content cannot start below its marker,
+/// since a marker with nothing after it on its line opens an empty item.
+fn misreads_after_marker(
+    list: &List,
+    item: &ListItem,
+    marker_char: char,
+    first_line: &str,
+) -> bool {
     opens_with_padding(first_line)
         || (!list.ordered
             && item.checked.is_none()
@@ -1242,12 +1228,7 @@ fn item_first_line(
     } else {
         String::from(marker_char)
     };
-    let content = item_content_first_line(item, options);
-    if starts_below_bullet(list, item, marker_char, &content) {
-        marker
-    } else {
-        format!("{marker} {content}")
-    }
+    format!("{marker} {}", item_content_first_line(item, options))
 }
 
 /// The first line of `item`'s blocks as the serializer writes them with
@@ -1285,39 +1266,20 @@ fn first_line(text: &str) -> &str {
 }
 
 /// Spaces or a tab opening an item's written content would read as padding
-/// after the marker, so that content starts on the next line. Four spaces or
-/// more open indented code, which the marker line holds after one space: an
-/// item that starts empty cannot interrupt a paragraph.
+/// after the marker. Four spaces or more open indented code, which the
+/// marker line holds after one space.
 fn opens_with_padding(inner: &str) -> bool {
     !inner.starts_with("    ") && inner.starts_with([' ', '\t'])
 }
 
-/// Whether `block`, written with default options on the line after a
-/// paragraph's, starts there instead of continuing the paragraph: the
-/// parser's rule (`interrupts_paragraph`) for the block as the serializer
-/// writes it, a setext heading and a list whose first item starts below its
-/// bullet continuing the paragraph.
-pub(crate) fn written_after_paragraph_interrupts(block: &Block) -> bool {
-    match block {
-        Block::Heading(heading) => !writes_setext(heading),
-        Block::List(list) => {
-            crate::parse::interrupts_paragraph(block) && !first_item_starts_below_its_bullet(list)
-        }
-        _ => crate::parse::interrupts_paragraph(block),
-    }
-}
-
-/// Whether, with default options, the serializer starts `list`'s first item
-/// on a line after its bullet, so that the list, written after a paragraph's
-/// line, cannot interrupt the paragraph. Only the item's first line is
-/// written to tell.
-pub(crate) fn first_item_starts_below_its_bullet(list: &List) -> bool {
-    let Some(item) = list.children.first() else {
-        return false;
-    };
+/// Whether, with default options, the serializer writes `item` of `list`
+/// so that it reads back as something else (see
+/// [`misreads_after_marker`]). Only the item's first line is written to
+/// tell.
+pub(crate) fn item_misreads_after_marker(list: &List, item: &ListItem) -> bool {
     let options = SerializeOptions::default();
     let content = item_content_first_line(item, &options);
-    starts_below_bullet(list, item, list_marker(list, &options, None), &content)
+    misreads_after_marker(list, item, written_marker(list), &content)
 }
 
 /// An item's blocks; a task item's, `task` holding whether it is checked,

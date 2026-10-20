@@ -11,9 +11,9 @@
 use markdown_syntax::prelude::*;
 use markdown_syntax::{
     AlertKind, AutolinkForm, CodeBlockKind, DirectiveAttribute, EmphasisDelimiter, FenceMarker,
-    FrontmatterKind, HeadingKind, HtmlContainerContent, HtmlTag, LineBreakKind,
-    LinkDestinationKind, LinkTitleKind, ListDelimiter, MathInlineKind, ReferenceKind,
-    TableAlignment, ThematicBreakMarker, Title,
+    FrontmatterKind, HtmlContainerContent, HtmlTag, LineBreakKind, LinkDestinationKind,
+    LinkTitleKind, ListDelimiter, MathInlineKind, ReferenceKind, TableAlignment,
+    ThematicBreakMarker, Title,
 };
 
 /// The start word of a node without a span.
@@ -224,7 +224,6 @@ impl<'t> Writer<'t> {
             Block::Heading(node) => {
                 self.head(kind::HEADING, &node.meta);
                 self.word(u32::from(node.depth));
-                self.word(node.kind as u32);
                 self.leaf(node.source(), &node.children);
             }
             Block::ThematicBreak(ThematicBreak { meta, marker }) => {
@@ -924,17 +923,11 @@ impl<'m> Reader<'m> {
                     depth @ 1..=6 => depth as u8,
                     other => return malformed(format!("{other} is not a heading depth")),
                 };
-                let kind =
-                    self.enumerated(&[HeadingKind::Atx, HeadingKind::Setext], "heading kind")?;
                 let mut node = match self.leaf()? {
                     Leaf::Source(text) => {
-                        Heading::with_source(depth, kind, &text, &Definitions::default()).0
+                        Heading::with_source(depth, &text, &Definitions::default()).0
                     }
-                    Leaf::Inlines(children) => {
-                        let mut node = Heading::new(depth, children);
-                        node.kind = kind;
-                        node
-                    }
+                    Leaf::Inlines(children) => Heading::new(depth, children),
                 };
                 node.meta = meta;
                 Block::Heading(node)
@@ -1323,7 +1316,7 @@ mod tests {
         round_trip(concat!(
             "---\na: b\n---\n\n",
             "# H *e* **s** __u__ ~~d~~ ==m== :smile: `c` \\* &amp; <b>\n\n",
-            "Setext\n===\n\n",
+            "#  \n\n",
             "***\n\n",
             "> [!NOTE] title\n> a\n\n",
             "> q\n\n",

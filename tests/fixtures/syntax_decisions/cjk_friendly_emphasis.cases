@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1: syntax decisions
 source: cjk_friendly_emphasis
-decision: Delimiter runs flank by the CommonMark CJK-friendly amendments (decision 0018).
+decision: Delimiter runs flank by the CommonMark CJK-friendly amendments (decision 0019).
 count: 123
 
 --- case 1 options - label-bytes 106 input-bytes 67 expected-bytes 87

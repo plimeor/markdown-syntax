@@ -1,6 +1,6 @@
 Document
   BlockQuote
-    Heading depth=1 kind=atx
+    Heading depth=1
       Text "a"
     Paragraph
       Text "b"
@@ -14,8 +14,9 @@ Document
       SoftBreak
       Text "c"
   BlockQuote
-    Heading depth=2 kind=setext
+    Paragraph
       Text "a"
+    ThematicBreak
   BlockQuote
     Paragraph
       Text "a"

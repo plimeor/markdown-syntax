@@ -14,12 +14,11 @@ use crate::{
     diagnostic::Diagnostic,
     parse::{
         alert_title, frontmatter_fence_kind, html_block_ends_at_blank_line, html_block_left_open,
-        html_block_opens, is_blank, is_footnote_label, is_reference_label,
+        html_block_opens, interrupts_paragraph, is_blank, is_footnote_label, is_reference_label,
         is_written_footnote_label, normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
     },
     serialize::{
-        write_inline_math, writes_setext, written_after_paragraph_interrupts, written_marker,
-        written_opens_fence_like,
+        item_misreads_after_marker, write_inline_math, written_marker, written_opens_fence_like,
     },
     span::Span,
 };
@@ -254,6 +253,7 @@ fn validate_list(list: &List, depth: usize, diagnostics: &mut Report) {
     for (index, item) in list.children.iter().enumerate() {
         diagnostics.at(index, |diagnostics| {
             validate_item_number(list, item, diagnostics);
+            validate_item_first_line(list, item, diagnostics);
             validate_item_blank_lines(list, index, item, diagnostics);
             validate_task_item(item, diagnostics);
             validate_blocks(&item.children, depth + 1, list.tight, diagnostics);
@@ -325,14 +325,13 @@ fn takes_indented_code(left: &Block) -> bool {
 /// before it. Every other block ends where its own syntax or line does.
 fn takes_next_line(left: &Block, right: &Block) -> bool {
     match left {
-        Block::Paragraph(_) => !written_after_paragraph_interrupts(right),
+        Block::Paragraph(_) => !interrupts_paragraph(right),
         // A definition's lines are a paragraph's until it is read, so a
-        // line that cannot interrupt one continues them; only a paragraph,
-        // a definition, and a setext heading read the same after it.
+        // line that cannot interrupt one continues them; only a paragraph
+        // and a definition read the same after it.
         Block::Definition(_) => {
-            !written_after_paragraph_interrupts(right)
+            !interrupts_paragraph(right)
                 && !matches!(right, Block::Paragraph(_) | Block::Definition(_))
-                && !matches!(right, Block::Heading(heading) if writes_setext(heading))
         }
         Block::Table(_) => !starts_outside_paragraph(right, false),
         Block::HtmlBlock(node) => html_block_ends_at_blank_line(node),
@@ -354,15 +353,14 @@ fn takes_next_line(left: &Block, right: &Block) -> bool {
 }
 
 /// Whether `block`'s first line, written where the line's container is not
-/// a paragraph, starts a block: a paragraph's, a definition's, a setext
-/// heading's, and a table's first line are text, and an HTML block's starts
+/// a paragraph, starts a block: a paragraph's, a definition's, and a
+/// table's first line are text, and an HTML block's starts
 /// one only where it opens one. With `lazy`, a paragraph (or an alert's
 /// marker line) is still the last open block, where no indented code
 /// starts.
 fn starts_outside_paragraph(block: &Block, lazy: bool) -> bool {
     match block {
         Block::Paragraph(_) | Block::Definition(_) | Block::Table(_) => false,
-        Block::Heading(heading) => !writes_setext(heading),
         Block::HtmlBlock(node) => html_block_opens(node),
         Block::CodeBlock(code) => !(lazy && code.kind == CodeBlockKind::Indented),
         _ => true,
@@ -1014,6 +1012,18 @@ fn validate_item_number(list: &List, item: &ListItem, diagnostics: &mut Report) 
         diagnostics.push(Diagnostic::invalid(
             item.meta.span,
             "ordered list item number must be representable in at most 9 digits",
+        ));
+    }
+}
+
+/// An item's content is written on its marker's line, after one space, so
+/// it cannot open with what reads as more space after the marker, or, after
+/// a `-` or `*` bullet, read as one thematic break with it.
+fn validate_item_first_line(list: &List, item: &ListItem, diagnostics: &mut Report) {
+    if item_misreads_after_marker(list, item) {
+        diagnostics.push(Diagnostic::invalid(
+            item.meta.span,
+            "a list item's first line must not read as padding after its marker or as a thematic break with it",
         ));
     }
 }

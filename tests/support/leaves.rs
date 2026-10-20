@@ -137,7 +137,7 @@ pub(crate) fn rebuild_at(
         }
         (Block::Heading(node), []) => {
             let meta = node.meta.clone();
-            *node = Heading::with_source(node.depth, node.kind, text, definitions).0;
+            *node = Heading::with_source(node.depth, text, definitions).0;
             node.meta = meta;
         }
         (Block::LeafDirective(node), []) => {

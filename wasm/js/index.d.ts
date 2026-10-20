@@ -101,7 +101,6 @@ export interface Paragraph extends Node<"paragraph"> {
 }
 export interface Heading extends Node<"heading"> {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
-  kind: "atx" | "setext";
   children: Inline[];
   /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
   source?: string;
