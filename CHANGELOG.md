@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.2...markdown-syntax-v0.7.3) - 2026-10-20
+
+### Other
+
+- configure CodeGraph for Codex and Claude Code
+
 ## [0.7.2](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.1...markdown-syntax-v0.7.2) - 2026-10-18
 
 ### Fixed
