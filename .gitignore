@@ -1,3 +1,6 @@
 /target/
 /Cargo.lock
 /tools/gemoji/target/
+
+# Local code index and daemon state
+.codegraph/

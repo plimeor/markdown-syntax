@@ -50,6 +50,10 @@ nearly all in `linear_growth.rs` (~4.5 min) and `pathological_inputs.rs`
 Inner loop: `cargo test --profile ci --features html --test <name>`; a fast
 file also runs quickly as plain `cargo test --test <name>`.
 
+Code navigation: CodeGraph, as `codegraph explore "<file, symbol, or
+question>"` or the MCP tool `codegraph_explore`. Installation, setup, index
+scope, and call-graph limits are in [docs/codegraph.md](docs/codegraph.md).
+
 ## Release
 
 <!-- 2026-07-05: release-plz is configured and non-Conventional commits were observed landing in CHANGELOG.md under `Other`. -->
