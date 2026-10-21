@@ -5,7 +5,7 @@
 //! with a [`SerializeError`].
 //!
 //! A document with its source is written partly from it (`reuse`, decision
-//! 0017): each node that corresponds to the node its source parses to is
+//! 0020): each node that corresponds to the node its source parses to is
 //! written as its source, an edited one with its own syntax copied around
 //! what changed, and the rest is rendered. Rendering only renders: each node
 //! is written in the spelling the AST records for it, or else by one fixed
@@ -231,8 +231,9 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
 /// differently in its new place: one a blank line and a paragraph after it
 /// would change, as they extend an unclosed fence, when it comes before a
 /// block other than its successor in the source; one the block before it
-/// would take in (`moves_into_previous`); and a thematic break that comes to
-/// open the document, where it would open frontmatter.
+/// would take in (`moves_into_previous`); and a `---` break that opens the
+/// document where a later line closes it as frontmatter, which `whole`
+/// marks.
 fn write_reusing(
     blocks: &[Block],
     base_document: &Document,
@@ -405,15 +406,15 @@ fn write_reusing(
             }
         }
         let mut at = reused[index];
-        if let Some(position) = at {
+        if at.is_some() {
             let start = span_of(block).start;
-            // A break that comes to open the document could open
-            // frontmatter; one that opened it there stays a break while no
+            // A `---` break that opens the document stays a break while no
             // later line closes it as frontmatter (`Document::write`), which
-            // `whole` marks.
+            // `whole` marks, wherever it stood in the source.
             let rewritten = matches!(block, Block::ThematicBreak(_))
                 && index == 0
-                && (position != 0 || whole[0] && source[start..].starts_with("---"))
+                && whole[0]
+                && source[start..].starts_with("---")
                 || taken_in(&source[start..]);
             if rewritten {
                 at = None;
@@ -659,7 +660,8 @@ fn separated_boundaries(blocks: &[Block]) -> Vec<bool> {
 /// Whether a block written from the source, whose text opens with `text`,
 /// reads differently where it does not follow its predecessor in the
 /// source, after `last`, the last block written before it other than a blank
-/// line, and `previous_list`, the marker of a list written just before it:
+/// line (`None` for one written first), and `previous_list`, the marker of a
+/// list written just before it:
 /// indentation after a list or a footnote definition, which blank lines do
 /// not end, continues them; four columns of it on a block other than
 /// indented code read as indented code, as a paragraph opened by definitions

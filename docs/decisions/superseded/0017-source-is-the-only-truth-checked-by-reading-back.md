@@ -1,6 +1,6 @@
 # 0017: The source is the only truth, per node, checked by reading back
 
-Status: Accepted
+Status: Superseded by 0020
 Date: 2026-10-14
 Supersedes: 0016
 

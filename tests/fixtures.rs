@@ -41,7 +41,7 @@ use markdown_syntax::{
 };
 
 use deviations::{excerpt, input_hash};
-use edits::{edit_block, reads_as, rewritten_after_an_edit};
+use edits::{closed_by_a_blank_line, edit_block, reads_as, rewritten_after_an_edit};
 use support::fixtures::{
     derived_corpus_stats, files_with_extension, read_derived_cases, read_derived_metadata,
     read_fixture, snapshot_document, trim_final_newline, ROUNDTRIP_ROOT,
@@ -837,6 +837,8 @@ fn appending_to_a_leaf_changes_only_that_leaf() {
 #[test]
 fn moved_blocks_read_back() {
     let mut failures = Vec::new();
+    let mut fronted_failures = Vec::new();
+    let mut fronted_blocks = Vec::new();
     let mut moves = 0;
     let appended = Block::ThematicBreak(ThematicBreak {
         meta: NodeMeta::default(),
@@ -872,7 +874,51 @@ fn moved_blocks_read_back() {
         let mut followed = document.clone();
         followed.children.push(appended.clone());
         check(format!("{} append ---", source.at()), followed);
+        for index in 1..count {
+            if matches!(document.children[index], Block::BlankLine(_)) {
+                continue;
+            }
+            let mut fronted = document.clone();
+            let block = fronted.children.remove(index);
+            fronted.children.insert(0, block);
+            fronted_blocks.push((format!("{} front {index}", source.at()), index));
+            check(format!("{} front {index}", source.at()), fronted.clone());
+            let input = source.input.as_str();
+            let span = document.children[index].span().expect("parsed");
+            let text = &input[span.start..span.end];
+            let body = text
+                .strip_suffix("\r\n")
+                .or_else(|| text.strip_suffix(['\n', '\r']))
+                .unwrap_or(text);
+            let Ok(markdown) = fronted.to_markdown() else {
+                continue;
+            };
+            // A block opening the document keeps its source there, unless
+            // a blank line and a paragraph after it would extend it, as
+            // they extend an unclosed fence, or it is a `---` break that a
+            // later line closes as frontmatter.
+            let fence = |line: &str| line.trim_end_matches([' ', '\t']) == "---";
+            let closed_as_frontmatter = matches!(document.children[index], Block::ThematicBreak(_))
+                && body.starts_with("---")
+                && markdown.split(['\n', '\r']).skip(1).any(fence);
+            if !markdown.starts_with(body)
+                && closed_by_a_blank_line(text)
+                && !rewritten_after_an_edit(input, &fronted.children, 0)
+                && !closed_as_frontmatter
+            {
+                fronted_failures.push(format!(
+                    "{} front {index}: {markdown:?} rewrites the block that opens it",
+                    source.at()
+                ));
+            }
+        }
     }
+    failures.extend(fronted_failures);
+    assert!(
+        fronted_blocks.len() > 1_000,
+        "only {} blocks moved to the front",
+        fronted_blocks.len()
+    );
     assert!(moves > 5_000, "only {moves} moves");
     assert!(
         failures.is_empty(),

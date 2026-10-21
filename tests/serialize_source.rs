@@ -262,8 +262,28 @@ mod unchanged_source_is_kept {
         assert_eq!(parse(&markdown).document.children.len(), 2);
     }
 
+    // serialization: Unchanged source is kept
     #[test]
-    fn a_kept_thematic_break_that_comes_to_open_the_document_is_rewritten() {
+    fn a_break_that_comes_to_open_the_document_keeps_its_source() {
+        for (source, written) in [
+            ("para\n\n---\n", "---\n\npara\n"),
+            ("para\n\n***\n", "***\n\npara\n"),
+            ("para\n\n- - -\n", "- - -\n\npara\n"),
+            ("para\n\n---  \n", "---  \n\npara\n"),
+        ] {
+            let mut document = parse(source).document;
+            document.children.swap(0, 1);
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            assert!(matches!(
+                parse(&markdown).document.children.as_slice(),
+                [Block::ThematicBreak(_), Block::Paragraph(_)]
+            ));
+        }
+    }
+
+    #[test]
+    fn a_kept_dash_break_that_comes_to_open_the_document_before_a_closing_line_is_rewritten() {
         let mut document = parse("a\n\n---\n\nb\n\n---\n").document;
         document.children.remove(0);
         let markdown = document.to_markdown().unwrap();
@@ -566,6 +586,140 @@ mod source_reused_per_node {
             normalized_blocks(&document.children),
             "{markdown:?}"
         );
+    }
+
+    fn table_mut(document: &mut Document, index: usize) -> &mut Table {
+        match &mut document.children[index] {
+            Block::Table(table) => table,
+            Block::BlockQuote(quote) => match &mut quote.children[0] {
+                Block::Table(table) => table,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn new_alignments_change_only_the_delimiter_row() {
+        use TableAlignment::{Center, Left, None, Right};
+        for (source, alignments, written) in [
+            (
+                "| a  | b |\n|---|---|\n| c   | e |\n",
+                vec![Center, None],
+                "| a  | b |\n|:---:|---|\n| c   | e |\n",
+            ),
+            (
+                "> | a | b |\n>| :-- | --: |\n> | c | d |\n",
+                vec![Right, Left],
+                "> | a | b |\n>| --: | :-- |\n> | c | d |\n",
+            ),
+            (
+                "a | b\n:-:|-\nc | d\n",
+                vec![None, Left],
+                "a | b\n-|:-\nc | d\n",
+            ),
+            // A row opening with `-` and a space would open a list item, so
+            // it is rendered.
+            (
+                "a | b\n:-: | -\nc | d\n",
+                vec![None, None],
+                "a | b\n| --- | --- |\nc | d\n",
+            ),
+            // A lone run of `-` delimits no table, so the row is rendered.
+            ("a\n-:\nb\n", vec![None], "a\n| --- |\nb\n"),
+        ] {
+            let mut document = parse(source).document;
+            table_mut(&mut document, 0).alignments = alignments;
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            reads_back(&markdown, &document);
+            assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        }
+        // Columns that swap render the header row, and the delimiter row
+        // with it.
+        let mut document = parse("| a | b |\n|---|--:|\n| c | d |\n").document;
+        let table = table_mut(&mut document, 0);
+        table.alignments.reverse();
+        for row in &mut table.rows {
+            row.cells.reverse();
+        }
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "| b | a |\n| ---: | --- |\n| d | c |\n");
+        reads_back(&markdown, &document);
+        // A new column renders the rows, whose cells moved.
+        let mut document = parse("| a  |\n|---|\n| c   |\n").document;
+        let table = table_mut(&mut document, 0);
+        table.alignments.push(Right);
+        for row in &mut table.rows {
+            row.cells.push(TableCell::new([Text::from("n")]));
+        }
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "| a | n |\n| --- | ---: |\n| c | n |\n");
+        reads_back(&markdown, &document);
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn text_in_a_cell_empty_in_the_source_takes_a_space_on_either_side() {
+        for (source, row, cell, written) in [
+            (
+                "| a | b |\n|---|---|\n| c |   |\n",
+                1,
+                1,
+                "| a | b |\n|---|---|\n| c | 中文 |\n",
+            ),
+            ("|a||\n|-|-|\n", 0, 1, "|a| 中文 |\n|-|-|\n"),
+            ("> |  | b |\n> |-|-|\n", 0, 0, "> | 中文 | b |\n> |-|-|\n"),
+            // A cell the row lacks follows a pipe, and takes one after it
+            // where the row ends with one; the cells before it stay empty.
+            (
+                "| a | b | c |\n|-|-|-|\n| d |\n",
+                1,
+                2,
+                "| a | b | c |\n|-|-|-|\n| d |  | 中文 |\n",
+            ),
+            ("a | b\n-|-\nd\n", 1, 1, "a | b\n-|-\nd | 中文\n"),
+        ] {
+            let mut document = parse(source).document;
+            table_mut(&mut document, 0).rows[row].cells[cell].children =
+                vec![Text::from("中文").into()];
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            reads_back(&markdown, &document);
+            assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_blank_line_that_opened_its_container_takes_the_prefix_below_a_new_block() {
+        for (source, written) in [
+            ("> \n> a\n", "> new\n>\n>\n> a\n"),
+            ("> > \n> > a\n", "> > new\n> >\n> >\n> > a\n"),
+            ("- > \n  > a\n", "- > new\n  >\n  >\n  > a\n"),
+        ] {
+            let mut document = parse(source).document;
+            /// The children of the innermost quote at `block`.
+            fn innermost(block: &mut Block) -> &mut Vec<Block> {
+                match block {
+                    Block::List(list) => innermost(&mut list.children[0].children[0]),
+                    Block::BlockQuote(node) => {
+                        if matches!(node.children[0], Block::BlockQuote(_)) {
+                            innermost(&mut node.children[0])
+                        } else {
+                            &mut node.children
+                        }
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            let children = innermost(&mut document.children[0]);
+            children.insert(0, paragraph("new"));
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            reads_back(&markdown, &document);
+        }
     }
 
     // serialization: Unchanged source is kept

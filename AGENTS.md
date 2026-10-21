@@ -9,7 +9,7 @@ Read `docs/overview.md` before starting work.
   each unchanged node is written as its source, an edited one with its own
   syntax copied from the source around what changed, a leaf built from text
   (`with_source`) as that text, and the rest as canonical Markdown (decision
-  0017). Raw HTML is represented only as Markdown syntax nodes;
+  0020). Raw HTML is represented only as Markdown syntax nodes;
   HTML rendering and sanitization stay out of the default build.
 - The repository is a Cargo workspace whose default member is the root
   crate; `wasm/` holds `markdown-syntax-wasm`, the unpublished WebAssembly

@@ -37,7 +37,7 @@ spans, reading each `Escape` as a `Text` holding its char, each
 inside a heading, which the serializer writes as one space, as a `Text`
 holding a space, and merging adjacent `Text` nodes; and serializing that
 reparsed document SHALL yield the same text byte for byte, unless the source
-holds a detail the AST does not record (decision 0017), such as a lazy
+holds a detail the AST does not record (decision 0020), such as a lazy
 continuation line or the width of an indentation.
 
 ### Requirement: Serialize options
@@ -112,7 +112,11 @@ inlines. The writer SHALL write:
   else written once per node that is not a child), when its own fields are
   equal, and its children by these rules; a list item whose number or
   checkbox changed renders them in its marker's place, keeping its content
-  column where they fit;
+  column where they fit; a table whose alignments changed writes them in
+  its delimiter row's place, the colons of each changed column around that
+  cell's dashes in the source row, and renders that row where the number
+  of columns changed, the header row is rendered, or the row would not read
+  as a delimiter row, with its rows by these rules;
 - every other node as canonical output, with its children by these rules.
 
 A line written where the base node has a source line keeps that line's
@@ -149,8 +153,9 @@ source's lines are on both sides. Which other boundaries without a blank
 line are kept is unspecified. It SHALL keep the source before the
 document's first block and after its last when that block is written from
 the source there; every other boundary SHALL be canonical. A `---` thematic
-break that opens the document in the source and in the output SHALL be kept
-from the source unless a later line of the output closes it as frontmatter.
+break written from the source that opens the output, wherever it stood in
+the source, SHALL be kept from the source unless a later line of the output
+closes it as frontmatter.
 A node SHALL be written as canonical output even so where its source would
 read differently in its place; which placements make a node's source read
 differently is unspecified, except that a top-level block written partly
@@ -159,6 +164,11 @@ holds a different block in its place. Options SHALL apply only to the text
 the writer produces, line endings included, and a list written with its own
 syntax from the source SHALL write a new item with the marker it records;
 text and line endings copied from the source SHALL be kept as they are.
+A table cell empty in the source that is given text SHALL be written with
+one space on either side in place of the padding between its pipes, and a
+cell its source row lacks, which the parser reads as empty at the row's
+end, SHALL be written after the row, after a pipe and, where the row ends
+with a pipe, before one, with each lacking cell before it written empty.
 Parsing the output SHALL yield a document equal to the written one as
 "Round-trip stability" compares them wherever parsing the canonical output
 of the same document does.
@@ -166,6 +176,14 @@ of the same document does.
 #### Scenario: Edited items
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
 - **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n- \n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which cannot interrupt the paragraph, is written after a blank line with the space that opens it
+
+#### Scenario: Edited tables
+- **WHEN** the alignments of the table parsed from `"| a  | b |\n|---|---|\n| c   | e |\n"` are set to center and none, and separately the empty cell of the table parsed from `"| a | b |\n|---|---|\n| c |   |\n"` is given `Text("中文")`, and each document is written
+- **THEN** they return `"| a  | b |\n|:---:|---|\n| c   | e |\n"` and `"| a | b |\n|---|---|\n| c | 中文 |\n"`: the rows keep their source, and the delimiter row its pipes and dashes
+
+#### Scenario: A break that comes to open the document
+- **WHEN** the two blocks of the document parsed from `"para\n\n---\n"` are swapped and it is written
+- **THEN** it returns `"---\n\npara\n"`, since no later line closes the break as frontmatter
 
 #### Scenario: One edited link
 - **WHEN** the target of the `WikiLink` in the document parsed from ``"see  [[A]] and `` b ``"`` is changed to `B` and the document is written
