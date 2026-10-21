@@ -30,6 +30,21 @@ text with `toSource(offset)` and `spanToSource(span)` functions.
 - **WHEN** `binding.parse("# T\n\na *b*")` runs
 - **THEN** `tree.children` holds a `heading` with `depth: 1` and a `paragraph` whose children are a `text` with `value: "a "` and an `emphasis` with `delimiter: "asterisk"`
 
+### Requirement: What references and shortcodes stand for
+Every `characterReference` in a tree or inline list the binding returns
+SHALL hold `value`, the text the core crate's `CharacterReference::value`
+returns for it, and every `shortcode` SHALL hold `glyph`, the text of
+`Shortcode::glyph`, each `null` where that returns `None`. `toMarkdown`
+SHALL ignore both, writing the node from its `reference` or `name`.
+
+#### Scenario: Reference and shortcode
+- **WHEN** `binding.parse("&amp; :smile:\n")` runs
+- **THEN** its paragraph holds a `characterReference` with `reference: "&amp;"` and `value: "&"`, and a `shortcode` with `name: "smile"` and `glyph: "😄"`
+
+#### Scenario: Ignored on the way back
+- **WHEN** `toMarkdown` gets a paragraph built in JavaScript holding `{type: "characterReference", span: null, reference: "&lt;", value: "x"}`
+- **THEN** it writes `&lt;`
+
 ### Requirement: UTF-16 offsets
 Every `span` the binding returns or accepts SHALL be `[from, to]` in UTF-16
 code units of the JavaScript string it refers to, or `null` for a node

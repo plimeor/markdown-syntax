@@ -22,7 +22,9 @@ const ENUMS = {
   lineBreakKind: ["backslash", "spaces"],
 };
 
-// Each kind's wire number, name, and fields in the order of its Rust struct.
+// Each kind's wire number, name, and fields in the order of its Rust struct,
+// then what a node stands for where Rust decodes it (`decoded`): a character
+// reference's `value()` and a shortcode's `glyph()`.
 const KINDS = [
   [0, "document", [["children", "blocks"]]],
   [1, "paragraph", [["children", "leafInlines"]]],
@@ -70,12 +72,12 @@ const KINDS = [
   [32, "tableCell", [["children", "leafInlines"]]],
   [40, "text", [["value", "string"]]],
   [41, "escape", [["value", "char"]]],
-  [42, "characterReference", [["reference", "string"]]],
+  [42, "characterReference", [["reference", "string"], ["value", "decoded"]]],
   [43, "emphasis", [["delimiter", "emphasisDelimiter"], ["children", "inlines"]]],
   [44, "strong", [["delimiter", "emphasisDelimiter"], ["children", "inlines"]]],
   [45, "delete", [["children", "inlines"]]],
   [46, "mark", [["children", "inlines"]]],
-  [47, "shortcode", [["name", "string"]]],
+  [47, "shortcode", [["name", "string"], ["glyph", "decoded"]]],
   [48, "code", [["value", "string"]]],
   [
     49,
@@ -228,6 +230,7 @@ class Reader {
       case "string":
         return this.string();
       case "optionalString":
+      case "decoded":
         return this.optionalString();
       case "boolean":
         return this.word() === 1;
@@ -445,6 +448,9 @@ function encodeField(writer, node, field, type, path) {
       return string(value);
     case "optionalString":
       return optionalString(value);
+    case "decoded":
+      // Rust decodes it from the node's other fields; whatever the tree holds is ignored.
+      return writer.words.push(0);
     case "boolean":
       if (typeof value !== "boolean") missing("a boolean");
       return writer.words.push(value ? 1 : 0);
