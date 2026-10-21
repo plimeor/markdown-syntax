@@ -25,6 +25,6 @@ bar
 
 [bar]
 
-``` foo+bar
+```foo+bar
 body
 ```

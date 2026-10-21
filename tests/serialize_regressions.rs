@@ -794,6 +794,36 @@ mod recorded_spellings {
         assert_eq!(rendered(&document), "~~~\ncode\n~~~\n");
     }
 
+    /// An info string follows its fence, apart from one that opens with the
+    /// fence's char, which a space keeps out of the fence.
+    // serialization: Canonical output
+    #[test]
+    fn an_info_string_follows_its_fence() {
+        let code = |marker, info: &str| {
+            document(vec![Block::CodeBlock(CodeBlock {
+                meta: NodeMeta::default(),
+                kind: CodeBlockKind::Fenced { marker, length: 3 },
+                info: Some(info.into()),
+                value: "echo\n".into(),
+            })])
+        };
+        for (marker, info, written) in [
+            (FenceMarker::Backtick, "bash", "```bash\necho\n```\n"),
+            (FenceMarker::Tilde, "bash", "~~~bash\necho\n~~~\n"),
+            (FenceMarker::Tilde, "~a", "~~~ ~a\necho\n~~~\n"),
+            // An info string holding a backtick takes tildes.
+            (FenceMarker::Backtick, "`a", "~~~`a\necho\n~~~\n"),
+        ] {
+            let document = code(marker, info);
+            let markdown = rendered(&document);
+            assert_eq!(markdown, written, "{info:?}");
+            let Block::CodeBlock(read) = &parse(&markdown).document.children[0] else {
+                panic!("{markdown:?}");
+            };
+            assert_eq!(read.info.as_deref(), Some(info), "{markdown:?}");
+        }
+    }
+
     #[test]
     fn heading_soft_breaks_are_written_as_spaces() {
         let soft_break = || {

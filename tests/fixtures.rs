@@ -1076,7 +1076,12 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     ("[o]:u\n\t$$\na$$", "[o]: u\n\n$$\na$$\n"),
     ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
     // Values encoded by rule.
-    ("```&#x20;a&#9;\nb\n```", "``` &#x20;a&#x9;\nb\n```\n"),
+    ("```&#x20;a&#9;\nb\n```", "```&#x20;a&#x9;\nb\n```\n"),
+    // The info string follows the fence, unless it opens with the fence's
+    // char.
+    ("``` rs\na\n```", "```rs\na\n```\n"),
+    ("~~~ ~a\nb\n~~~", "~~~ ~a\nb\n~~~\n"),
+    ("~~~ `a\nb\n~~~", "~~~`a\nb\n~~~\n"),
     ("```\n```", "```\n```\n"),
     ("```\n```*", "```\n```*\n```\n"),
     ("````\n```\n````", "````\n```\n````\n"),

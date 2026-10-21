@@ -1341,8 +1341,13 @@ fn write_code_block(node: &CodeBlock, options: &SerializeOptions) -> String {
             let (fence, indent) = code_block_fence(&node.value, marker, length.max(3));
             let mut opener = fence.clone();
             if let Some(info) = &node.info {
-                opener.push(' ');
-                opener.push_str(&escape_code_info(info));
+                let info = escape_code_info(info);
+                // The info string follows the fence, apart from one that
+                // opens with the fence's char, which would lengthen it.
+                if fence.ends_with(|char| info.starts_with(char)) {
+                    opener.push(' ');
+                }
+                opener.push_str(&info);
             }
             let body = fenced_body(&opener, &node.value, &fence);
             if indent == 0 {

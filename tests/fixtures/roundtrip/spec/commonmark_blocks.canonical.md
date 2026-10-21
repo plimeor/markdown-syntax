@@ -11,7 +11,7 @@ continued.
 1. first
 2. second
 
-``` rust
+```rust
 fn main() {}
 ```
 

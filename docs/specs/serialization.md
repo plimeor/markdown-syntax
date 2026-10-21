@@ -21,7 +21,9 @@ the container prefix without its trailing whitespace, and so SHALL any blank
 line the serializer writes inside a container, except a blank line that
 opens a block quote, which SHALL be written `> `. An empty heading, list
 item, or block quote SHALL be written as its marker followed by one space:
-`# `, `- `, `1. `, `> ` (decision 0019).
+`# `, `- `, `1. `, `> ` (decision 0019). A fenced code block's info string
+SHALL follow its opening fence directly, after one space only where it
+opens with the fence's char.
 
 #### Scenario: Empty blocks
 - **WHEN** a hand-built document holding a `Heading` of depth 1 with no children, a list of one item with no blocks, or a `BlockQuote` holding a `BlankLine` and a paragraph `a` is serialized
