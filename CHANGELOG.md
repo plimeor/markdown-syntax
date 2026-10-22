@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.3...markdown-syntax-v0.8.0) - 2026-10-22
+
+### Added
+
+- *(wasm)* carry what character references and shortcodes stand for
+- [**breaking**] open a block only at a marker followed by a space, and drop setext headings
+
+### Fixed
+
+- *(serialize)* keep a table's rows when its alignments change, and blank lines and breaks moved in place
+- *(serialize)* write a fence's info string right after the fence
+
 ## [0.7.3](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.2...markdown-syntax-v0.7.3) - 2026-10-20
 
 ### Other
