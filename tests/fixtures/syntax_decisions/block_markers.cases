@@ -1,0 +1,1267 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: block_markers
+decision: A block marker opens its block only before a space or a tab: `#` to `######`, a bullet or ordered list marker, and the `>` that opens a block quote, which a bare `>` or `>text` still continues; an item whose marker line holds nothing else is empty and takes no line after it (decision 0019).
+count: 47
+
+--- case 1 options - label-bytes 61 input-bytes 11 expected-bytes 56
+from commonmark/block_quote.cases #2; verified: decision 0019
+--- input
+># a
+>b
+> c
+--- expected
+<p>&gt;# a
+&gt;b</p>
+<blockquote>
+<p>c</p>
+</blockquote>
+--- end
+--- case 2 options - label-bytes 62 input-bytes 1 expected-bytes 11
+from commonmark/block_quote.cases #17; verified: decision 0019
+--- input
+>
+--- expected
+<p>&gt;</p>
+--- end
+--- case 3 options - label-bytes 62 input-bytes 8 expected-bytes 38
+from commonmark/block_quote.cases #18; verified: decision 0019
+--- input
+>
+>  
+> 
+--- expected
+<p>&gt;</p>
+<blockquote>
+</blockquote>
+--- end
+--- case 4 options - label-bytes 62 input-bytes 9 expected-bytes 47
+from commonmark/block_quote.cases #19; verified: decision 0019
+--- input
+>
+> a
+>  
+--- expected
+<p>&gt;</p>
+<blockquote>
+<p>a</p>
+</blockquote>
+--- end
+--- case 5 options - label-bytes 62 input-bytes 13 expected-bytes 63
+from commonmark/block_quote.cases #31; verified: decision 0019
+--- input
+>>> a
+> b
+>>c
+--- expected
+<p>&gt;&gt;&gt; a</p>
+<blockquote>
+<p>b
+&gt;c</p>
+</blockquote>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 14 expected-bytes 28
+from commonmark/commonmark.cases #79; verified: decision 0019
+--- input
+## 
+#
+### ###
+
+--- expected
+<h2></h2>
+<p>#</p>
+<h3></h3>
+--- end
+--- case 7 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 18 expected-bytes 62
+from commonmark/commonmark.cases #227; verified: decision 0019
+--- input
+># Foo
+>bar
+> baz
+
+--- expected
+<p>&gt;# Foo
+&gt;bar</p>
+<blockquote>
+<p>baz</p>
+</blockquote>
+--- end
+--- case 8 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 2 expected-bytes 11
+from commonmark/commonmark.cases #237; verified: decision 0019
+--- input
+>
+
+--- expected
+<p>&gt;</p>
+--- end
+--- case 9 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 9 expected-bytes 38
+from commonmark/commonmark.cases #238; verified: decision 0019
+--- input
+>
+>  
+> 
+
+--- expected
+<p>&gt;</p>
+<blockquote>
+</blockquote>
+--- end
+--- case 10 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 12 expected-bytes 49
+from commonmark/commonmark.cases #239; verified: decision 0019
+--- input
+>
+> foo
+>  
+
+--- expected
+<p>&gt;</p>
+<blockquote>
+<p>foo</p>
+</blockquote>
+--- end
+--- case 11 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 20 expected-bytes 69
+from commonmark/commonmark.cases #249; verified: decision 0019
+--- input
+>>> foo
+> bar
+>>baz
+
+--- expected
+<p>&gt;&gt;&gt; foo</p>
+<blockquote>
+<p>bar
+&gt;baz</p>
+</blockquote>
+--- end
+--- case 12 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 22 expected-bytes 94
+from commonmark/commonmark.cases #258; verified: decision 0019
+--- input
+>>- one
+>>
+  >  > two
+
+--- expected
+<p>&gt;&gt;- one
+&gt;&gt;</p>
+<blockquote>
+<blockquote>
+<p>two</p>
+</blockquote>
+</blockquote>
+--- end
+--- case 13 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 40 expected-bytes 56
+from commonmark/commonmark.cases #276; verified: decision 0019
+--- input
+-
+  foo
+-
+  ```
+  bar
+  ```
+-
+      baz
+
+--- expected
+<p>-
+foo
+-</p>
+<pre><code>bar
+</code></pre>
+<p>-
+baz</p>
+--- end
+--- case 14 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 11 expected-bytes 31
+from commonmark/commonmark.cases #277; verified: decision 0019
+--- input
+-   
+  foo
+
+--- expected
+<ul>
+<li></li>
+</ul>
+<p>foo</p>
+--- end
+--- case 15 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 9 expected-bytes 19
+from commonmark/commonmark.cases #278; verified: decision 0019
+--- input
+-
+
+  foo
+
+--- expected
+<p>-</p>
+<p>foo</p>
+--- end
+--- case 16 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 14 expected-bytes 38
+from commonmark/commonmark.cases #279; verified: decision 0019
+--- input
+- foo
+-
+- bar
+
+--- expected
+<ul>
+<li>foo
+-</li>
+<li>bar</li>
+</ul>
+--- end
+--- case 17 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 17 expected-bytes 39
+from commonmark/commonmark.cases #281; verified: decision 0019
+--- input
+1. foo
+2.
+3. bar
+
+--- expected
+<ol>
+<li>foo
+2.</li>
+<li>bar</li>
+</ol>
+--- end
+--- case 18 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 2 expected-bytes 8
+from commonmark/commonmark.cases #282; verified: decision 0019
+--- input
+*
+
+--- expected
+<p>*</p>
+--- end
+--- case 19 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 11 expected-bytes 52
+from commonmark/commonmark.cases #313; verified: decision 0019
+--- input
+* a
+*
+
+* c
+
+--- expected
+<ul>
+<li>
+<p>a
+*</p>
+</li>
+<li>
+<p>c</p>
+</li>
+</ul>
+--- end
+--- case 20 options - label-bytes 60 input-bytes 13 expected-bytes 97
+from commonmark/gfm_table.cases #33; verified: decision 0019
+--- input
+| a |
+| - |
+>
+--- expected
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>&gt;</td>
+</tr>
+</tbody>
+</table>
+--- end
+--- case 21 options - label-bytes 60 input-bytes 13 expected-bytes 94
+from commonmark/gfm_table.cases #35; verified: decision 0019
+--- input
+| a |
+| - |
+-
+--- expected
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+--- end
+--- case 22 options - label-bytes 60 input-bytes 21 expected-bytes 122
+from commonmark/gfm_table.cases #43; verified: decision 0019
+--- input
+| a |
+| - |
+heading
+-
+--- expected
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>heading</td>
+</tr>
+<tr>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+--- end
+--- case 23 options - label-bytes 60 input-bytes 469 expected-bytes 1136
+from commonmark/gfm_table.cases #51; verified: decision 0019
+--- input
+# Tables in things
+
+## In lists
+
+*   Unordered:
+
+    | A | B |
+    | - | - |
+    | 1 | 2 |
+
+1.  Ordered:
+
+    | A | B |
+    | - | - |
+    | 1 | 2 |
+
+*   Lazy?
+    | A | B |
+    | - | - |
+   | 1 | 2 |
+  | 3 | 4 |
+ | 5 | 6 |
+| 7 | 8 |
+
+## In block quotes
+
+> W/ space:
+> | A | B |
+> | - | - |
+> | 1 | 2 |
+
+>W/o space:
+>| A | B |
+>| - | - |
+>| 1 | 2 |
+
+> Lazy?
+> | A | B |
+> | - | - |
+> | 1 | 2 |
+>| 3 | 4 |
+| 5 | 6 |
+
+### List interrupting delimiters
+
+a |
+- |
+
+a
+-|
+
+a
+|-
+
+--- expected
+<h1>Tables in things</h1>
+<h2>In lists</h2>
+<ul>
+<li>
+<p>Unordered:</p>
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+<ol>
+<li>
+<p>Ordered:</p>
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+</li>
+</ol>
+<ul>
+<li>Lazy?
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+</tr>
+</thead>
+</table>
+</li>
+</ul>
+<p>| 1 | 2 |
+| 3 | 4 |
+| 5 | 6 |
+| 7 | 8 |</p>
+<h2>In block quotes</h2>
+<blockquote>
+<p>W/ space:</p>
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+</blockquote>
+<p>&gt;W/o space:
+&gt;| A | B |
+&gt;| - | - |
+&gt;| 1 | 2 |</p>
+<blockquote>
+<p>Lazy?</p>
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+<tr>
+<td>3</td>
+<td>4</td>
+</tr>
+</tbody>
+</table>
+</blockquote>
+<p>| 5 | 6 |</p>
+<h3>List interrupting delimiters</h3>
+<p>a |</p>
+<ul>
+<li>|</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+</table>
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+</table>
+--- end
+--- case 24 options allow_dangerous_html,allow_dangerous_protocol label-bytes 60 input-bytes 849 expected-bytes 3769
+from commonmark/gfm_table.cases #56; verified: decision 0019
+--- input
+## Blank line
+
+a
+:-
+b
+
+c
+
+## Block quote
+
+a
+:-
+b
+> c
+
+## Code (fenced)
+
+a
+:-
+b
+```
+c
+```
+
+## Code (indented)
+
+a
+:-
+b
+    c
+
+## Definition
+
+a
+:-
+b
+[c]: d
+
+## Heading (atx)
+
+a
+:-
+b
+# c
+
+
+## Heading (setext) (rank 1)
+
+a
+:-
+b
+==
+c
+
+## Heading (setext) (rank 2)
+
+a
+:-
+b
+--
+c
+
+## HTML (flow, kind 1: raw)
+
+a
+:-
+b
+<pre>
+  a
+</pre>
+
+## HTML (flow, kind 2: comment)
+
+a
+:-
+b
+<!-- c -->
+
+## HTML (flow, kind 3: instruction)
+
+a
+:-
+b
+<? c ?>
+
+## HTML (flow, kind 4: declaration)
+
+a
+:-
+b
+<!C>
+
+## HTML (flow, kind 5: cdata)
+
+a
+:-
+b
+<![CDATA[c]]>
+
+## HTML (flow, kind 6: basic)
+
+a
+:-
+b
+<div>
+
+## HTML (flow, kind 7: complete)
+
+a
+:-
+b
+<x>
+
+## List (ordered, 1)
+
+a
+:-
+b
+1. c
+
+## List (ordered, other)
+
+a
+:-
+b
+2. c
+
+## List (unordered)
+
+a
+:-
+b
+* c
+
+## List (unordered, blank)
+
+a
+:-
+b
+*
+c
+
+## List (unordered, blank start)
+
+a
+:-
+b
+*
+  c
+
+## Thematic break
+
+a
+:-
+b
+***
+
+--- expected
+<h2>Blank line</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<p>c</p>
+<h2>Block quote</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>c</p>
+</blockquote>
+<h2>Code (fenced)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<pre><code>c
+</code></pre>
+<h2>Code (indented)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<pre><code>c
+</code></pre>
+<h2>Definition</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+<tr>
+<td align="left">[c]: d</td>
+</tr>
+</tbody>
+</table>
+<h2>Heading (atx)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<h1>c</h1>
+<h2>Heading (setext) (rank 1)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+<tr>
+<td align="left">==</td>
+</tr>
+<tr>
+<td align="left">c</td>
+</tr>
+</tbody>
+</table>
+<h2>Heading (setext) (rank 2)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+<tr>
+<td align="left">--</td>
+</tr>
+<tr>
+<td align="left">c</td>
+</tr>
+</tbody>
+</table>
+<h2>HTML (flow, kind 1: raw)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<pre>
+  a
+</pre>
+<h2>HTML (flow, kind 2: comment)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<!-- c -->
+<h2>HTML (flow, kind 3: instruction)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<? c ?>
+<h2>HTML (flow, kind 4: declaration)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<!C>
+<h2>HTML (flow, kind 5: cdata)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<![CDATA[c]]>
+<h2>HTML (flow, kind 6: basic)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<div>
+<h2>HTML (flow, kind 7: complete)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<x>
+<h2>List (ordered, 1)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li>c</li>
+</ol>
+<h2>List (ordered, other)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<ol start="2">
+<li>c</li>
+</ol>
+<h2>List (unordered)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>c</li>
+</ul>
+<h2>List (unordered, blank)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+<tr>
+<td align="left">*</td>
+</tr>
+<tr>
+<td align="left">c</td>
+</tr>
+</tbody>
+</table>
+<h2>List (unordered, blank start)</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+<tr>
+<td align="left">*</td>
+</tr>
+<tr>
+<td align="left">c</td>
+</tr>
+</tbody>
+</table>
+<h2>Thematic break</h2>
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">b</td>
+</tr>
+</tbody>
+</table>
+<hr />
+--- end
+--- case 25 options - label-bytes 68 input-bytes 9 expected-bytes 12
+from commonmark/gfm_task_list_item.cases #4; verified: decision 0019
+--- input
+*
+    [x]
+--- expected
+<p>*
+[x]</p>
+--- end
+--- case 26 options - label-bytes 68 input-bytes 5 expected-bytes 12
+from commonmark/gfm_task_list_item.cases #5; verified: decision 0019
+--- input
+*
+[x]
+--- expected
+<p>*
+[x]</p>
+--- end
+--- case 27 options - label-bytes 62 input-bytes 13 expected-bytes 28
+from commonmark/heading_atx.cases #30; verified: decision 0019
+--- input
+## 
+#
+### ###
+--- expected
+<h2></h2>
+<p>#</p>
+<h3></h3>
+--- end
+--- case 28 options - label-bytes 62 input-bytes 7 expected-bytes 21
+from commonmark/heading_atx.cases #31; verified: decision 0019
+--- input
+#
+a
+# b
+--- expected
+<p>#
+a</p>
+<h1>b</h1>
+--- end
+--- case 29 options - label-bytes 62 input-bytes 5 expected-bytes 37
+from commonmark/heading_atx.cases #32; verified: decision 0019
+--- input
+> #
+a
+--- expected
+<blockquote>
+<p>#
+a</p>
+</blockquote>
+--- end
+--- case 30 options - label-bytes 62 input-bytes 5 expected-bytes 37
+from commonmark/heading_atx.cases #33; verified: decision 0019
+--- input
+> a
+#
+--- expected
+<blockquote>
+<p>a
+#</p>
+</blockquote>
+--- end
+--- case 31 options allow_dangerous_html,allow_dangerous_protocol label-bytes 60 input-bytes 12 expected-bytes 16
+from commonmark/html_flow.cases #97; verified: decision 0019
+--- input
+<div
+  
+  
+>
+--- expected
+<div
+<p>&gt;</p>
+--- end
+--- case 32 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 11 expected-bytes 15
+from commonmark/html_flow.cases #144; verified: decision 0019
+--- input
+<x>
+  
+  
+>
+--- expected
+<x>
+<p>&gt;</p>
+--- end
+--- case 33 options - label-bytes 54 input-bytes 21 expected-bytes 94
+from commonmark/list.cases #7; verified: decision 0019
+--- input
+>>- one
+>>
+  >  > two
+--- expected
+<p>&gt;&gt;- one
+&gt;&gt;</p>
+<blockquote>
+<blockquote>
+<p>two</p>
+</blockquote>
+</blockquote>
+--- end
+--- case 34 options - label-bytes 55 input-bytes 39 expected-bytes 56
+from commonmark/list.cases #25; verified: decision 0019
+--- input
+-
+  foo
+-
+  ```
+  bar
+  ```
+-
+      baz
+--- expected
+<p>-
+foo
+-</p>
+<pre><code>bar
+</code></pre>
+<p>-
+baz</p>
+--- end
+--- case 35 options - label-bytes 55 input-bytes 10 expected-bytes 31
+from commonmark/list.cases #26; verified: decision 0019
+--- input
+-   
+  foo
+--- expected
+<ul>
+<li></li>
+</ul>
+<p>foo</p>
+--- end
+--- case 36 options - label-bytes 55 input-bytes 8 expected-bytes 19
+from commonmark/list.cases #27; verified: decision 0019
+--- input
+-
+
+  foo
+--- expected
+<p>-</p>
+<p>foo</p>
+--- end
+--- case 37 options - label-bytes 55 input-bytes 13 expected-bytes 38
+from commonmark/list.cases #28; verified: decision 0019
+--- input
+- foo
+-
+- bar
+--- expected
+<ul>
+<li>foo
+-</li>
+<li>bar</li>
+</ul>
+--- end
+--- case 38 options - label-bytes 55 input-bytes 16 expected-bytes 39
+from commonmark/list.cases #30; verified: decision 0019
+--- input
+1. foo
+2.
+3. bar
+--- expected
+<ol>
+<li>foo
+2.</li>
+<li>bar</li>
+</ol>
+--- end
+--- case 39 options - label-bytes 55 input-bytes 1 expected-bytes 8
+from commonmark/list.cases #31; verified: decision 0019
+--- input
+*
+--- expected
+<p>*</p>
+--- end
+--- case 40 options - label-bytes 55 input-bytes 10 expected-bytes 52
+from commonmark/list.cases #66; verified: decision 0019
+--- input
+* a
+*
+
+* c
+--- expected
+<ul>
+<li>
+<p>a
+*</p>
+</li>
+<li>
+<p>c</p>
+</li>
+</ul>
+--- end
+--- case 41 options - label-bytes 55 input-bytes 15 expected-bytes 52
+from commonmark/list.cases #78; verified: decision 0019
+--- input
+* a
+*
+
+  
+	
+* b
+--- expected
+<ul>
+<li>
+<p>a
+*</p>
+</li>
+<li>
+<p>b</p>
+</li>
+</ul>
+--- end
+--- case 42 options - label-bytes 55 input-bytes 15 expected-bytes 53
+from commonmark/list.cases #79; verified: decision 0019
+--- input
+*
+  ~~~p
+
+  ~~~
+--- expected
+<p>*</p>
+<pre><code class="language-p">
+</code></pre>
+--- end
+--- case 43 options - label-bytes 55 input-bytes 19 expected-bytes 56
+from commonmark/list.cases #81; verified: decision 0019
+--- input
+*   foo
+
+*
+
+*   bar
+--- expected
+<ul>
+<li>foo</li>
+</ul>
+<p>*</p>
+<ul>
+<li>bar</li>
+</ul>
+--- end
+--- case 44 options - label-bytes 55 input-bytes 5 expected-bytes 23
+from commonmark/list.cases #85; verified: decision 0019
+--- input
+- +
+-
+--- expected
+<ul>
+<li>+
+-</li>
+</ul>
+--- end
+--- case 45 options - label-bytes 55 input-bytes 6 expected-bytes 24
+from commonmark/list.cases #86; verified: decision 0019
+--- input
+- 1.
+-
+--- expected
+<ul>
+<li>1.
+-</li>
+</ul>
+--- end
+--- case 46 options - label-bytes 55 input-bytes 9 expected-bytes 54
+from commonmark/list.cases #87; verified: decision 0019
+--- input
+* - +
+* -
+--- expected
+<ul>
+<li>
+<ul>
+<li>+</li>
+</ul>
+</li>
+<li>-</li>
+</ul>
+--- end
+--- case 47 options - label-bytes 48 input-bytes 5 expected-bytes 19
+from gfm/core.cases #18; verified: decision 0019
+--- input
+>\
+ A
+--- expected
+<p>&gt;<br />
+A</p>
+--- end

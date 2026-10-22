@@ -3,8 +3,8 @@ source: frontmatter
 decision: Frontmatter is part of the syntax.
 count: 5
 
---- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 24 expected-bytes 23
-from commonmark/commonmark.cases #96; verified: micromark
+--- case 1 options allow_dangerous_html,allow_dangerous_protocol label-bytes 106 input-bytes 24 expected-bytes 28
+from commonmark/commonmark.cases #96; verified: micromark for the frontmatter, decision 0019 for the break
 --- input
 ---
 Foo
@@ -14,7 +14,8 @@ Bar
 Baz
 
 --- expected
-<h2>Bar</h2>
+<p>Bar</p>
+<hr />
 <p>Baz</p>
 --- end
 --- case 2 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 8 expected-bytes 0
@@ -35,8 +36,8 @@ title: Jupyter
 --- expected
 
 --- end
---- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 23 expected-bytes 23
-from commonmark/heading_setext.cases #26; verified: micromark
+--- case 4 options allow_dangerous_html,allow_dangerous_protocol label-bytes 110 input-bytes 23 expected-bytes 28
+from commonmark/heading_setext.cases #26; verified: micromark for the frontmatter, decision 0019 for the break
 --- input
 ---
 Foo
@@ -45,7 +46,8 @@ Bar
 ---
 Baz
 --- expected
-<h2>Bar</h2>
+<p>Bar</p>
+<hr />
 <p>Baz</p>
 --- end
 --- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 7 expected-bytes 0

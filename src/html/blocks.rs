@@ -37,7 +37,7 @@ pub fn render_block(block: &Block, ctx: &Ctx) -> String {
         //    list helpers that call render_paragraph directly).
         Block::Paragraph(p) => render_paragraph(p, ctx),
 
-        // 2. Heading — Atx and Setext render identically.
+        // 2. Heading.
         Block::Heading(h) => render_heading(h, ctx),
 
         // 3. ThematicBreak — all markers identical.

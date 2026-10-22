@@ -14,57 +14,62 @@ mod review_block {
     //! review. Each asserts the CommonMark-correct
     //! AST shape against the live parser.
 
-    use markdown_syntax::{parse, Block, CodeBlockKind, HeadingKind, Inline, ListDelimiter};
+    use markdown_syntax::{parse, Block, CodeBlockKind, Inline, ListDelimiter};
 
-    /// B1: a multi-line paragraph followed by a setext underline is a setext
-    /// heading whose content spans every paragraph line, not one flat paragraph.
+    /// A line of `=` after a paragraph is its text: the syntax has no setext
+    /// headings (decision 0019).
     #[test]
-    fn setext_heading_absorbs_multiline_paragraph() {
+    fn an_equals_underline_is_paragraph_text() {
         let output = parse("Foo\nbar\n===\n");
-
-        let [Block::Heading(heading)] = output.document.children.as_slice() else {
-            panic!(
-                "expected a single setext heading: {:?}",
-                output.document.children
-            );
+        let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
+            panic!("expected one paragraph: {:?}", output.document.children);
         };
-        assert_eq!(heading.depth, 1);
-        assert_eq!(heading.kind, HeadingKind::Setext);
-        // The two paragraph lines are joined with a soft line break before the
-        // underline applies, so the heading text is `Foo` then `bar`.
         assert!(matches!(
-            heading.children.as_slice(),
-            [Inline::Text(first), Inline::SoftBreak(_), Inline::Text(second)]
-                if first.value == "Foo" && second.value == "bar"
+            paragraph.children.as_slice(),
+            [
+                Inline::Text(first),
+                Inline::SoftBreak(_),
+                Inline::Text(second),
+                Inline::SoftBreak(_),
+                Inline::Text(third),
+            ] if first.value == "Foo" && second.value == "bar" && third.value == "==="
         ));
     }
 
-    /// B1 guard: a single-line setext heading still parses (the multi-line scan must
-    /// not break the original one-line case).
+    /// A `---` line after a paragraph is a thematic break, and a shorter run
+    /// of `-` is the paragraph's text.
     #[test]
-    fn setext_heading_single_line_still_parses() {
+    fn a_dash_underline_is_a_break_or_paragraph_text() {
         let output = parse("Foo\n---\n");
-        let [Block::Heading(heading)] = output.document.children.as_slice() else {
-            panic!(
-                "expected a single setext heading: {:?}",
+        assert!(
+            matches!(
+                output.document.children.as_slice(),
+                [Block::Paragraph(_), Block::ThematicBreak(_)]
+            ),
+            "{:?}",
+            output.document.children
+        );
+        for input in ["Foo\n-\n", "Foo\n--\n", "Foo\n- \n"] {
+            let output = parse(input);
+            assert!(
+                matches!(output.document.children.as_slice(), [Block::Paragraph(_)]),
+                "{input:?}: {:?}",
                 output.document.children
             );
-        };
-        assert_eq!(heading.depth, 2);
-        assert_eq!(heading.kind, HeadingKind::Setext);
-        assert!(matches!(heading.children.as_slice(), [Inline::Text(text)] if text.value == "Foo"));
+        }
     }
 
-    /// B1 guard: a block start between the paragraph lines and the underline stops
-    /// the setext heading from forming.
+    /// An ATX heading between paragraph lines and an `===` line ends the
+    /// paragraph; the `===` line opens a paragraph of its own.
     #[test]
-    fn setext_heading_rejected_when_continuation_is_block_start() {
+    fn an_equals_line_after_a_heading_is_a_paragraph() {
         let output = parse("Foo\n# heading\n===\n");
         assert!(
-            !output.document.children.iter().any(
-                |block| matches!(block, Block::Heading(heading) if heading.kind == HeadingKind::Setext)
+            matches!(
+                output.document.children.as_slice(),
+                [Block::Paragraph(_), Block::Heading(_), Block::Paragraph(_)]
             ),
-            "no setext heading should form across a block start: {:?}",
+            "{:?}",
             output.document.children
         );
     }
@@ -157,11 +162,15 @@ mod review_block {
         ));
     }
 
-    /// B3 guard: a bare `*` at block start (not interrupting) is still an empty
-    /// list.
+    /// B3 guard: `* ` at block start (not interrupting) is still an empty
+    /// list; a bare `*`, with no space after it, is a paragraph.
     #[test]
     fn empty_list_at_block_start_still_parses() {
-        let output = parse("*\n");
+        assert!(matches!(
+            parse("*\n").document.children.as_slice(),
+            [Block::Paragraph(_)]
+        ));
+        let output = parse("* \n");
         let [Block::List(list)] = output.document.children.as_slice() else {
             panic!("expected an empty list: {:?}", output.document.children);
         };
@@ -819,8 +828,8 @@ mod parser {
 
 mod lazy_lines_and_final_whitespace {
     //! A lazy line that opens a list ends the container it would otherwise
-    //! continue, and a paragraph or setext heading drops the final whitespace
-    //! of its content, as CommonMark specifies.
+    //! continue, and a paragraph drops the final whitespace of its content,
+    //! as CommonMark specifies.
 
     use markdown_syntax::{parse, Block, Inline};
 
@@ -842,7 +851,7 @@ mod lazy_lines_and_final_whitespace {
 
     #[test]
     fn an_empty_list_item_on_a_lazy_line_ends_the_block_quote() {
-        for source in ["> a\n- ", "> a\n-", "> a\n1. "] {
+        for source in ["> a\n- ", "> a\n-\t", "> a\n1. "] {
             let blocks = blocks(source);
             let [Block::BlockQuote(quote), Block::List(list)] = blocks.as_slice() else {
                 panic!("{source:?}: expected a block quote and a list, got {blocks:?}");
@@ -907,13 +916,13 @@ mod lazy_lines_and_final_whitespace {
     }
 
     #[test]
-    fn a_setext_heading_drops_the_final_whitespace_of_its_content() {
-        for source in ["Foo  \n-----", "Foo\t\n==="] {
+    fn a_paragraph_before_a_break_drops_the_final_whitespace_of_its_content() {
+        for source in ["Foo  \n-----", "Foo\t\n***"] {
             let blocks = blocks(source);
-            let [Block::Heading(heading)] = blocks.as_slice() else {
-                panic!("{source:?}: expected a heading, got {blocks:?}");
+            let [Block::Paragraph(paragraph), Block::ThematicBreak(_)] = blocks.as_slice() else {
+                panic!("{source:?}: expected a paragraph and a break, got {blocks:?}");
             };
-            assert_eq!(texts(&heading.children), ["Foo"], "{source:?}");
+            assert_eq!(texts(&paragraph.children), ["Foo"], "{source:?}");
         }
     }
 }
@@ -954,23 +963,27 @@ mod container_laziness {
         }
     }
 
+    /// A marker with nothing after it on its line opens an empty item,
+    /// which takes no line after it: the indented line is a paragraph of
+    /// its own, which the next line continues.
     #[test]
-    fn a_lazy_line_continues_a_paragraph_in_an_item_that_started_blank() {
+    fn an_item_that_starts_blank_takes_no_line_after_it() {
         let blocks = blocks("- \n  a\nb");
-        let [list] = blocks.as_slice() else {
-            panic!("expected one list, got {blocks:?}");
+        let [list, paragraph] = blocks.as_slice() else {
+            panic!("expected a list and a paragraph, got {blocks:?}");
         };
-        assert_eq!(
-            paragraph_texts(&only_item(list).children[0]),
-            ["a", "/", "b"]
-        );
+        assert!(only_item(list).children.is_empty(), "{list:?}");
+        assert_eq!(paragraph_texts(paragraph), ["a", "/", "b"]);
 
         let blocks = self::blocks("* \n  1. a\na");
-        let [list] = blocks.as_slice() else {
-            panic!("expected one list, got {blocks:?}");
+        let [list, ordered] = blocks.as_slice() else {
+            panic!("expected two lists, got {blocks:?}");
         };
-        let inner = only_item(&only_item(list).children[0]);
-        assert_eq!(paragraph_texts(&inner.children[0]), ["a", "/", "a"]);
+        assert!(only_item(list).children.is_empty(), "{list:?}");
+        assert_eq!(
+            paragraph_texts(&only_item(ordered).children[0]),
+            ["a", "/", "a"]
+        );
     }
 
     #[test]
@@ -1251,7 +1264,10 @@ mod paragraph_interruption {
     fn a_header_row_indented_four_columns_starts_no_table() {
         let blocks = parse("a\n    |b\n----").document.children;
         assert!(
-            matches!(blocks.as_slice(), [Block::Heading(_)]),
+            matches!(
+                blocks.as_slice(),
+                [Block::Paragraph(_), Block::ThematicBreak(_)]
+            ),
             "{blocks:?}"
         );
     }
@@ -1321,8 +1337,9 @@ mod paragraph_interruption {
             "{}",
             shape("* - \tb c")
         );
-        // `>1. \t` holds code, so the next line is not its lazy continuation.
-        let lazy = blocks(">1. \ta\n    \t1. ===");
+        // `> 1. \t ` holds code, so the next line is not its lazy
+        // continuation.
+        let lazy = blocks("> 1. \t a\n    \t1. ===");
         assert!(
             matches!(lazy.as_slice(), [Block::BlockQuote(_), Block::CodeBlock(_)]),
             "{lazy:?}"
@@ -1550,24 +1567,27 @@ mod gfm_tables {
         parse(source).document.children
     }
 
+    /// A run of dashes alone, without a pipe or a colon, delimits no table:
+    /// it is the paragraph's text, or from three dashes on a thematic break.
+    /// cmark-gfm forms no table there either; it reads a setext underline.
     #[test]
-    fn a_setext_underline_wins_over_a_delimiter_row_without_pipes() {
-        for source in ["| --- |\n-- ", "|a|\n---"] {
+    fn a_row_of_dashes_without_pipes_is_no_delimiter_row() {
+        let paragraph = blocks("| --- |\n-- ");
+        assert!(
+            matches!(paragraph.as_slice(), [Block::Paragraph(_)]),
+            "{paragraph:?}"
+        );
+        for source in ["|a|\n---", "a\n|b\n---", "a\n| b |\n---"] {
             let blocks = blocks(source);
             assert!(
-                matches!(blocks.as_slice(), [Block::Heading(_)]),
+                matches!(
+                    blocks.as_slice(),
+                    [Block::Paragraph(_), Block::ThematicBreak(_)]
+                ),
                 "{source:?}: {blocks:?}"
             );
         }
         assert!(matches!(blocks("a\n|---").as_slice(), [Block::Table(_)]));
-        // The paragraph's earlier lines join the heading too.
-        for source in ["a\n|b\n---", "a\n| b |\n---"] {
-            let blocks = blocks(source);
-            assert!(
-                matches!(blocks.as_slice(), [Block::Heading(heading)] if heading.children.len() == 3),
-                "{source:?}: {blocks:?}"
-            );
-        }
     }
 
     #[test]
@@ -1612,7 +1632,7 @@ mod list_items_in_containers {
     fn a_quoted_line_short_of_the_item_is_lazy_for_its_paragraph() {
         // The list marker ends the item's paragraph and the quote's content,
         // as on any lazy line, so the next line is outside the quote.
-        for source in ["> - a\n> 2.\nz", "> - > a\n>   2.\nz"] {
+        for source in ["> - a\n> 2. \nz", "> - > a\n>   2. \nz"] {
             let blocks = blocks(source);
             assert!(
                 matches!(
@@ -1683,63 +1703,15 @@ mod nested_containers {
 
     const CASES: &[Case] = &[
         Case {
-            name: "item indentation measured from the quote's content",
-            source: "  > - a\n>   ===\nb",
-            commonmark_js: "<blockquote>\n<ul>\n<li>\n<h1>a</h1>\n</li>\n</ul>\n</blockquote>\n<p>b</p>",
-            micromark: None,
-        },
-        Case {
-            name: "quote marker indented on a later line",
-            source: ">- >a\n > >\nb",
-            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n</blockquote>\n</li>\n</ul>\n<blockquote>\n</blockquote>\n</blockquote>\n<p>b</p>",
-            micromark: None,
-        },
-        Case {
-            name: "setext-like line past a quoted item",
-            source: "   > q\n  > - c\n>    ===\n    :::d",
-            commonmark_js: "<blockquote>\n<p>q</p>\n<ul>\n<li>\n<h1>c</h1>\n</li>\n</ul>\n</blockquote>\n<pre><code>:::d\n</code></pre>",
-            micromark: None,
-        },
-        Case {
             name: "fence in nested items behind a quote",
             source: "   > - - ```\n>     code\n> c",
             commonmark_js: "<blockquote>\n<ul>\n<li>\n<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ul>\n</li>\n</ul>\n<p>c</p>\n</blockquote>",
             micromark: None,
         },
         Case {
-            name: "nested item behind an inner quote",
-            source: "> - > - a\n>   > 2.\nz",
-            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<ul>\n<li>a</li>\n</ul>\n<ol start=\"2\">\n<li></li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</blockquote>\n<p>z</p>",
-            micromark: None,
-        },
-        Case {
             name: "setext-like line in an inner quote",
             source: "> - - > a\n>   > ===\nc",
             commonmark_js: "<blockquote>\n<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n</blockquote>\n</li>\n</ul>\n<blockquote>\n<p>===\nc</p>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
-            micromark: None,
-        },
-        Case {
-            name: "a quote marker four columns in is text",
-            source: "- - >=\n\t\t>```\n=",
-            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>=\n&gt;```\n=</p>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
-            micromark: None,
-        },
-        Case {
-            name: "item continuation indented four columns more",
-            source: ">- >a\n>     >- =\n=",
-            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
-            micromark: None,
-        },
-        Case {
-            name: "item continuation indented four columns more, spaced",
-            source: "> - >a\n>     >- =\n=",
-            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
-            micromark: None,
-        },
-        Case {
-            name: "tab-indented continuation of a nested quote",
-            source: "- - >a\n\t  >1. c\n->",
-            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ol>\n<li>c\n-&gt;</li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
             micromark: None,
         },
         Case {
@@ -1752,12 +1724,6 @@ mod nested_containers {
             name: "open tilde fence in a nested item",
             source: "2) 2. c\n   0. ~~~\n   \ty",
             commonmark_js: "<ol start=\"2\">\n<li>\n<ol start=\"2\">\n<li>c</li>\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\ny</li>\n</ol>",
-            micromark: None,
-        },
-        Case {
-            name: "setext and fence checks inside an item",
-            source: "1. 0. ```\n   - a\n       -\n->",
-            commonmark_js: "<ol>\n<li>\n<ol start=\"0\">\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\n<ul>\n<li>\n<h2>a</h2>\n</li>\n</ul>\n</li>\n</ol>\n<p>-&gt;</p>",
             micromark: None,
         },
         Case {
@@ -1840,6 +1806,86 @@ mod nested_containers {
         },
     ];
 
+    /// A case of plimeor/markdown-syntax#11 that this syntax reads
+    /// differently from commonmark.js by decision 0019: a block marker opens
+    /// its block only before a space or a tab, and there are no setext
+    /// headings.
+    struct Decided {
+        name: &'static str,
+        source: &'static str,
+        html: &'static str,
+        /// Why the reading differs.
+        reason: &'static str,
+        /// What commonmark.js renders, for the record.
+        commonmark_js: &'static str,
+    }
+
+    const DECIDED: &[Decided] = &[
+        Decided {
+            name: "item indentation measured from the quote's content",
+            source: "  > - a\n>   ===\nb",
+            html: "<blockquote>\n<ul>\n<li>a\n===\nb</li>\n</ul>\n</blockquote>",
+            reason: "`===` is the item paragraph's text and `b` its lazy line",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<h1>a</h1>\n</li>\n</ul>\n</blockquote>\n<p>b</p>",
+        },
+        Decided {
+            name: "quote marker indented on a later line",
+            source: ">- >a\n > >\nb",
+            html: "<p>&gt;- &gt;a</p>\n<blockquote>\n<p>&gt;\nb</p>\n</blockquote>",
+            reason: "`>-` opens no quote; ` > ` opens one, whose bare `>` opens none",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n</blockquote>\n</li>\n</ul>\n<blockquote>\n</blockquote>\n</blockquote>\n<p>b</p>",
+        },
+        Decided {
+            name: "setext-like line past a quoted item",
+            source: "   > q\n  > - c\n>    ===\n    :::d",
+            html: "<blockquote>\n<p>q</p>\n<ul>\n<li>c\n===\n:::d</li>\n</ul>\n</blockquote>",
+            reason: "`===` and `:::d` are lazy lines of the item's paragraph",
+            commonmark_js: "<blockquote>\n<p>q</p>\n<ul>\n<li>\n<h1>c</h1>\n</li>\n</ul>\n</blockquote>\n<pre><code>:::d\n</code></pre>",
+        },
+        Decided {
+            name: "nested item behind an inner quote",
+            source: "> - > - a\n>   > 2.\nz",
+            html: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<ul>\n<li>a\n2.\nz</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+            reason: "`2.` alone opens no item, so it and `z` are lazy lines",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<ul>\n<li>a</li>\n</ul>\n<ol start=\"2\">\n<li></li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</blockquote>\n<p>z</p>",
+        },
+        Decided {
+            name: "a quote marker four columns in is text",
+            source: "- - >=\n\t\t>```\n=",
+            html: "<ul>\n<li>\n<ul>\n<li>&gt;=\n&gt;```\n=</li>\n</ul>\n</li>\n</ul>",
+            reason: "`>=` opens no quote",
+            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>=\n&gt;```\n=</p>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
+        },
+        Decided {
+            name: "item continuation indented four columns more",
+            source: ">- >a\n>     >- =\n=",
+            html: "<p>&gt;- &gt;a</p>\n<blockquote>\n<pre><code>&gt;- =\n</code></pre>\n</blockquote>\n<p>=</p>",
+            reason: "`>-` opens no quote; `>     ` opens one holding indented code",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+        },
+        Decided {
+            name: "item continuation indented four columns more, spaced",
+            source: "> - >a\n>     >- =\n=",
+            html: "<blockquote>\n<ul>\n<li>&gt;a\n&gt;- =\n=</li>\n</ul>\n</blockquote>",
+            reason: "`>a` and `>-` open no quote",
+            commonmark_js: "<blockquote>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ul>\n<li>=\n=</li>\n</ul>\n</blockquote>\n</li>\n</ul>\n</blockquote>",
+        },
+        Decided {
+            name: "tab-indented continuation of a nested quote",
+            source: "- - >a\n\t  >1. c\n->",
+            html: "<ul>\n<li>\n<ul>\n<li>&gt;a\n&gt;1. c\n-&gt;</li>\n</ul>\n</li>\n</ul>",
+            reason: "`>a` and `>1.` open no quote",
+            commonmark_js: "<ul>\n<li>\n<ul>\n<li>\n<blockquote>\n<p>a</p>\n<ol>\n<li>c\n-&gt;</li>\n</ol>\n</blockquote>\n</li>\n</ul>\n</li>\n</ul>",
+        },
+        Decided {
+            name: "setext and fence checks inside an item",
+            source: "1. 0. ```\n   - a\n       -\n->",
+            html: "<ol>\n<li>\n<ol start=\"0\">\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\n<ul>\n<li>a\n-\n-&gt;</li>\n</ul>\n</li>\n</ol>",
+            reason: "`-` alone opens no item and underlines nothing",
+            commonmark_js: "<ol>\n<li>\n<ol start=\"0\">\n<li>\n<pre><code></code></pre>\n</li>\n</ol>\n<ul>\n<li>\n<h2>a</h2>\n</li>\n</ul>\n</li>\n</ol>\n<p>-&gt;</p>",
+        },
+    ];
+
     /// Tables are part of the syntax, so a delimiter row in an item makes its
     /// line a table header, where commonmark.js, without tables, reads
     /// `"<ul>\n<li>a\n|-|\nx</li>\n</ul>"`.
@@ -1859,6 +1905,26 @@ mod nested_containers {
                 "<pre><code class=\"language-math\" data-math-style=\"display\"></code></pre>\n</blockquote>"
             )
         );
+    }
+
+    // block-syntax: Block markers take a space
+    #[test]
+    fn nested_containers_read_by_decision_0019() {
+        for case in DECIDED {
+            let html = parse(case.source)
+                .document
+                .to_html()
+                .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+            assert_ne!(case.html, case.commonmark_js, "{}", case.name);
+            assert_eq!(
+                html.trim_end(),
+                case.html,
+                "{} ({:?}): {}",
+                case.name,
+                case.source,
+                case.reason
+            );
+        }
     }
 
     #[test]
@@ -1887,7 +1953,7 @@ mod one_pass_over_open_blocks {
     //! block-syntax "One pass over open blocks", indentation, tab, and blank
     //! line scenarios.
 
-    use markdown_syntax::{parse, Block, CodeBlockKind, HeadingKind, Inline, List, ListItem};
+    use markdown_syntax::{parse, Block, CodeBlockKind, Inline, List, ListItem};
 
     fn blocks_of(source: &str) -> Vec<Block> {
         parse(source).document.children
@@ -1914,13 +1980,11 @@ mod one_pass_over_open_blocks {
     #[test]
     fn the_task_checkbox_follows_cmark_gfm_and_micromark() {
         let gfm = |source: &str| parse(source).document.children;
-        // A setext heading is no paragraph, so `[x]` stays its text.
-        let blocks = gfm("- [x] a\n  ===");
+        // A heading is no paragraph, so `[x]` stays its text.
+        let blocks = gfm("- # [x] a");
         let item = only_item(&blocks[0]);
         assert_eq!(item.checked, None);
-        assert!(
-            matches!(&item.children[0], Block::Heading(heading) if heading.kind == HeadingKind::Setext)
-        );
+        assert!(matches!(&item.children[0], Block::Heading(_)));
         // The checkbox starts the paragraph left after its definitions.
         let blocks = gfm("- [a]: /u\n  [x] b");
         let item = only_item(&blocks[0]);
@@ -2004,31 +2068,31 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn item_indentation_is_measured_from_the_quotes_content() {
-        let blocks = blocks_of("  > - a\n>   ===\nb");
+        let blocks = blocks_of("  > - a\n>   # h\n\nb");
         let [quoted, after] = blocks.as_slice() else {
             panic!("{blocks:?}");
         };
         let item = only_item(&quote(quoted)[0]);
-        let [Block::Heading(heading)] = item.children.as_slice() else {
+        let [Block::Paragraph(_), Block::Heading(heading)] = item.children.as_slice() else {
             panic!("{item:?}");
         };
         assert_eq!(
-            (heading.depth, heading.kind, texts(&heading.children)),
-            (1, HeadingKind::Setext, vec!["a".to_owned()])
+            (heading.depth, texts(&heading.children)),
+            (1, vec!["h".to_owned()])
         );
         assert_eq!(paragraph(after), ["b"]);
     }
 
     #[test]
     fn a_nested_item_behind_an_inner_quote_ends_with_the_outer_quote() {
-        let blocks = blocks_of("> - > - a\n>   > 2.\nz");
+        let blocks = blocks_of("> - > - a\n>   > 2. \nz");
         assert!(matches!(blocks[0], Block::BlockQuote(_)), "{blocks:?}");
         assert_eq!(paragraph(&blocks[1]), ["z"]);
     }
 
     #[test]
     fn a_quote_marker_four_columns_in_is_text() {
-        let blocks = blocks_of("- - >=\n\t\t>```\n=");
+        let blocks = blocks_of("- - > =\n\t\t>```\n=");
         let outer = only_item(&blocks[0]);
         let inner = only_item(&outer.children[0]);
         let inner_quote = quote(&inner.children[0]);
@@ -2038,7 +2102,7 @@ mod one_pass_over_open_blocks {
 
     #[test]
     fn item_continuation_indented_four_columns_more_continues_the_paragraph() {
-        let blocks = blocks_of("> - >a\n>     >- =\n=");
+        let blocks = blocks_of("> - > a\n>     > - =\n=");
         let item = only_item(&quote(&blocks[0])[0]);
         let inner_quote = quote(&item.children[0]);
         let innermost = only_item(&inner_quote[1]);
@@ -2143,7 +2207,7 @@ mod one_pass_over_open_blocks {
         let blocks = blocks_of("2. a\n   1. ```\n\n2. b");
         assert!(blocks.len() == 1 && list(&blocks[0]).tight, "{blocks:?}");
 
-        let blocks = blocks_of("> - a\n> 2.\nz");
+        let blocks = blocks_of("> - a\n> 2. \nz");
         let inner = quote(&blocks[0]);
         assert!(
             matches!(inner, [Block::List(_), Block::List(_)]),
@@ -2484,7 +2548,7 @@ mod blank_lines_and_numbers {
             [Block::Paragraph(_), Block::BlankLine(_)]
         ));
         assert_eq!(list.children[0].meta.span, Some(Span::new(0, 6)));
-        let empty = parse("-\n\n\n- b").document;
+        let empty = parse("- \n\n\n- b").document;
         let [Block::List(list)] = empty.children.as_slice() else {
             panic!("{:?}", empty.children);
         };
@@ -2496,9 +2560,9 @@ mod blank_lines_and_numbers {
     #[test]
     fn a_quote_opening_mid_line_keeps_its_blank_first_line() {
         for (input, first) in [
-            ("> >\n> > d", Span::new(2, 4)),
-            ("- >\n  >\n  > b", Span::new(2, 4)),
-            ("\u{feff}>\n> a", Span::new(3, 5)),
+            ("> > \n> > d", Span::new(2, 5)),
+            ("- > \n  >\n  > b", Span::new(2, 5)),
+            ("\u{feff}> \n> a", Span::new(3, 6)),
         ] {
             let document = parse(input).document;
             let mut blocks = document.children.as_slice();
@@ -2582,5 +2646,197 @@ mod children {
             panic!("{:#?}", document.children);
         };
         assert_eq!(kinds(&list.children[0].children), ["paragraph"]);
+    }
+}
+
+mod block_markers_take_a_space {
+    //! Decision 0019: a block marker opens its block only when a space or a
+    //! tab follows it, there are no setext headings, and a quote's later
+    //! lines continue it with a bare `>` or `>text`.
+
+    use markdown_syntax::{parse, Block, Inline};
+
+    fn blocks(source: &str) -> Vec<Block> {
+        parse(source).document.children
+    }
+
+    fn texts(inlines: &[Inline]) -> Vec<String> {
+        inlines
+            .iter()
+            .map(|inline| match inline {
+                Inline::Text(text) => text.value.clone(),
+                Inline::SoftBreak(_) => "/".into(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn paragraph_text(block: &Block) -> Vec<String> {
+        match block {
+            Block::Paragraph(paragraph) => texts(&paragraph.children),
+            other => panic!("expected a paragraph, got {other:?}"),
+        }
+    }
+
+    // block-syntax: Block markers take a space
+    #[test]
+    fn a_lone_marker_is_paragraph_text() {
+        for source in [
+            "#", "#\n", "##", "######", "-", "*", "+", "1.", "1)", ">", ">\n", "#1", ">a",
+            ">[!NOTE]", ">>> a",
+        ] {
+            let blocks = blocks(source);
+            let [paragraph] = blocks.as_slice() else {
+                panic!("{source:?}: {blocks:?}");
+            };
+            assert_eq!(
+                paragraph_text(paragraph).concat(),
+                source.trim_end(),
+                "{source:?}"
+            );
+        }
+    }
+
+    // block-syntax: Block markers take a space
+    #[test]
+    fn a_marker_before_a_space_or_a_tab_opens_its_block() {
+        for source in ["# ", "#\t", "###### ", "# #"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Heading(heading)] if heading.children.is_empty()),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        for source in ["- ", "*\t", "+ ", "1. ", "1)\t"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::List(list)]
+                    if list.children.len() == 1 && list.children[0].children.is_empty()),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        for source in ["> ", ">\t", "> a", ">\ta"] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::BlockQuote(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+        let alert = blocks("> [!NOTE]");
+        assert!(matches!(alert.as_slice(), [Block::Alert(_)]), "{alert:?}");
+    }
+
+    /// A marker with nothing after it on its line opens no item, so the
+    /// line is paragraph text that the indented line continues; with a
+    /// space after it, it opens an empty item that takes no line after it.
+    // block-syntax: Block markers take a space
+    #[test]
+    fn an_item_cannot_start_with_a_blank_line() {
+        let bare = blocks("-\n  foo");
+        let [paragraph] = bare.as_slice() else {
+            panic!("{bare:?}");
+        };
+        assert_eq!(paragraph_text(paragraph), ["-", "/", "foo"]);
+
+        let spaced = blocks("- \n  foo");
+        let [Block::List(list), paragraph] = spaced.as_slice() else {
+            panic!("{spaced:?}");
+        };
+        assert!(list.children[0].children.is_empty(), "{list:?}");
+        assert_eq!(paragraph_text(paragraph), ["foo"]);
+    }
+
+    /// A lone marker after a paragraph's line is its text.
+    // block-syntax: Block markers take a space
+    #[test]
+    fn a_lone_marker_after_a_paragraph_continues_it() {
+        for source in ["a\n#", "a\n-", "a\n>", "a\n>b", "a\n2."] {
+            let blocks = blocks(source);
+            assert!(
+                matches!(blocks.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {blocks:?}"
+            );
+        }
+    }
+
+    // block-syntax: No setext headings
+    #[test]
+    fn an_underline_makes_no_heading() {
+        let equals = blocks("a\n===");
+        let [paragraph] = equals.as_slice() else {
+            panic!("{equals:?}");
+        };
+        assert_eq!(paragraph_text(paragraph), ["a", "/", "==="]);
+        let dashes = blocks("a\n---");
+        assert!(
+            matches!(
+                dashes.as_slice(),
+                [Block::Paragraph(_), Block::ThematicBreak(_)]
+            ),
+            "{dashes:?}"
+        );
+        let short = blocks("a\n--");
+        assert!(
+            matches!(short.as_slice(), [Block::Paragraph(_)]),
+            "{short:?}"
+        );
+    }
+
+    /// A quote opens with `> `, and its later lines continue it with a bare
+    /// `>`, a blank line in it, or with `>` before text.
+    // block-syntax: Block quote lines
+    #[test]
+    fn a_quote_continues_with_a_bare_marker() {
+        let blank = blocks("> a\n>\n> b");
+        let [Block::BlockQuote(quote)] = blank.as_slice() else {
+            panic!("{blank:?}");
+        };
+        assert!(
+            matches!(
+                quote.children.as_slice(),
+                [Block::Paragraph(_), Block::Paragraph(_)]
+            ),
+            "{quote:?}"
+        );
+
+        let unspaced = blocks("> a\n>b");
+        let [Block::BlockQuote(quote)] = unspaced.as_slice() else {
+            panic!("{unspaced:?}");
+        };
+        let [paragraph] = quote.children.as_slice() else {
+            panic!("{quote:?}");
+        };
+        assert_eq!(paragraph_text(paragraph), ["a", "/", "b"]);
+
+        // The first `>` continues the quote; the next opens a nested one
+        // only before a space.
+        let nested = blocks("> a\n>> b");
+        let [Block::BlockQuote(quote)] = nested.as_slice() else {
+            panic!("{nested:?}");
+        };
+        assert!(
+            matches!(
+                quote.children.as_slice(),
+                [Block::Paragraph(_), Block::BlockQuote(_)]
+            ),
+            "{quote:?}"
+        );
+        let unopened = blocks("> a\n>>b");
+        let [Block::BlockQuote(quote)] = unopened.as_slice() else {
+            panic!("{unopened:?}");
+        };
+        let [paragraph] = quote.children.as_slice() else {
+            panic!("{quote:?}");
+        };
+        assert_eq!(paragraph_text(paragraph), ["a", "/", ">b"]);
+
+        let start = blocks(">a\n> b");
+        assert!(
+            matches!(
+                start.as_slice(),
+                [Block::Paragraph(_), Block::BlockQuote(_)]
+            ),
+            "{start:?}"
+        );
     }
 }

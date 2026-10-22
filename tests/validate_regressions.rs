@@ -1254,35 +1254,15 @@ mod written_shapes {
                 vec![item(None, vec![paragraph(vec![text("a")]), block])],
             )])
         };
-        let mut setext = Heading::new(1, [Text::from("h")]);
-        setext.kind = HeadingKind::Setext;
-        let setext = Block::from(setext);
         let empty_item = list(true, vec![item(None, vec![])]);
         for bad in [
             paragraph(vec![text("b")]),
             definition("x", "x"),
             indented_code("code\n"),
-            setext.clone(),
             ordered(2, vec![item(None, vec![paragraph(vec![text("b")])])]),
             empty_item,
             html_block("<span>x</span>"),
             html_block("<span>"),
-            // A list whose first item the serializer starts on the line
-            // after its bullet: a dash break under a dash bullet, or content
-            // opening with a space.
-            list(
-                true,
-                vec![item(
-                    None,
-                    vec![Block::ThematicBreak(ThematicBreak {
-                        meta: NodeMeta::default(),
-                        marker: ThematicBreakMarker::Dash,
-                    })],
-                )],
-            ),
-            list(true, vec![item(None, vec![html_block(" <v>")])]),
-            // A first line that reads as a break with the bullet: `- --`.
-            list(true, vec![item(None, vec![paragraph(vec![text("--")])])]),
         ] {
             assert!(invalid(&after(true, bad.clone())), "{bad:?}");
             assert!(valid(&after(false, bad)));
@@ -1313,6 +1293,51 @@ mod written_shapes {
         assert!(valid(&parsed("- a\n  # h\n  1. b\n  <div>")));
     }
 
+    /// An item's content starts on its marker's line, after one space, so
+    /// an item whose first line would read as more space after the marker,
+    /// or as one thematic break with a `-` or `*` bullet, cannot be written:
+    /// its content cannot start below the marker, where a marker alone on
+    /// its line is an empty item.
+    // validation: Shapes that cannot be written
+    #[test]
+    fn an_item_whose_first_line_misreads_after_its_marker_is_refused() {
+        let dash_break = Block::ThematicBreak(ThematicBreak {
+            meta: NodeMeta::default(),
+            marker: ThematicBreakMarker::Dash,
+        });
+        let dash_list = |children| list(true, vec![item(None, children)]);
+        for bad in [
+            // `- ---`, `- --`, and `- - - `: one thematic break.
+            dash_list(vec![dash_break.clone()]),
+            dash_list(vec![paragraph(vec![text("--")])]),
+            dash_list(vec![dash_list(vec![dash_list(vec![])])]),
+            // ` <v>` reads as padding after the marker.
+            dash_list(vec![html_block(" <v>")]),
+        ] {
+            let diagnostics = document(vec![bad.clone()]).validate();
+            assert_eq!(diagnostics.len(), 1, "{bad:?}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].path, Some(NodePath::from([0, 0])), "{bad:?}");
+        }
+        for good in [
+            dash_list(vec![dash_list(vec![])]),
+            dash_list(vec![paragraph(vec![text("-")])]),
+            dash_list(vec![Block::ThematicBreak(ThematicBreak {
+                meta: NodeMeta::default(),
+                marker: ThematicBreakMarker::Asterisk,
+            })]),
+            ordered(1, vec![item(None, vec![dash_break])]),
+        ] {
+            let document = document(vec![good.clone()]);
+            assert!(valid(&document), "{good:?}");
+            let written = document.to_markdown().unwrap();
+            assert_eq!(
+                super::normalize::normalized(&parse(&written).document.children),
+                super::normalize::normalized(&document.children),
+                "{written:?}"
+            );
+        }
+    }
+
     /// The first block `source` parses as, without its span.
     fn block(source: &str) -> Block {
         parse(source).document.without_source().children.remove(0)
@@ -1337,9 +1362,6 @@ mod written_shapes {
     // validation: Shapes that cannot be written
     #[test]
     fn a_block_in_a_tight_item_is_not_taken_by_the_block_before_it() {
-        let mut setext = Heading::new(1, [Text::from("h")]);
-        setext.kind = HeadingKind::Setext;
-        let setext = Block::from(setext);
         let lazy_lefts = [
             "- b",
             "1. b",
@@ -1357,7 +1379,6 @@ mod written_shapes {
                 paragraph(vec![text("c")]),
                 definition("y", "y"),
                 block("| x |\n| - |"),
-                setext.clone(),
                 html_block("x"),
                 indented_code("z\n"),
             ] {
@@ -1368,7 +1389,6 @@ mod written_shapes {
             paragraph(vec![text("c")]),
             definition("y", "y"),
             block("| x |\n| - |"),
-            setext.clone(),
         ] {
             refused.push(("| a |\n| - |", right));
         }
@@ -1433,7 +1453,7 @@ mod written_shapes {
             ("| a |\n| - |", list(true, vec![item(None, vec![])])),
             ("<!-- x -->", paragraph(vec![text("c")])),
             ("[x]: /u", paragraph(vec![text("c")])),
-            ("[x]: /u", setext.clone()),
+            ("[x]: /u", block("# h")),
             ("[^1]: b", block("[^2]: c")),
             ("- ```\n  b\n  ```", paragraph(vec![text("c")])),
             ("> b\n>", paragraph(vec![text("c")])),

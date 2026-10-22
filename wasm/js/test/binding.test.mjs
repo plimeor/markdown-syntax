@@ -102,6 +102,40 @@ describe("Parse from JavaScript", () => {
   });
 });
 
+describe("What references and shortcodes stand for", () => {
+  // wasm-binding: What references and shortcodes stand for
+  test("reference and shortcode", () => {
+    const [paragraph] = binding.parse("&amp; :smile:\n").tree.children;
+    const [reference, , shortcode] = paragraph.children;
+    assert.deepEqual(reference, { type: "characterReference", span: [0, 5], reference: "&amp;", value: "&" });
+    assert.deepEqual(shortcode, { type: "shortcode", span: [6, 13], name: "smile", glyph: "😄" });
+  });
+
+  test("numeric references, aliases, and inline parses", () => {
+    const { inlines } = binding.parseInline("&#x1F600;&#169;&nbsp;:+1:", []);
+    assert.deepEqual(
+      inlines.map((node) => node.value ?? node.glyph),
+      ["😀", "©", "\u00a0", "👍"],
+    );
+  });
+
+  test("ignored on the way back", () => {
+    const document = binding.parse("a");
+    const paragraph = (children) => ({
+      type: "document",
+      span: null,
+      children: [{ type: "paragraph", span: null, children }],
+    });
+    const tree = paragraph([
+      { type: "characterReference", span: null, reference: "&lt;", value: "x" },
+      { type: "shortcode", span: null, name: "tada", glyph: "x" },
+      { type: "characterReference", span: null, reference: "&gt;" },
+      { type: "shortcode", span: null, name: "smile" },
+    ]);
+    assert.equal(document.toMarkdown(tree), "&lt;:tada:&gt;:smile:\n");
+  });
+});
+
 describe("UTF-16 offsets", () => {
   // wasm-binding: UTF-16 offsets
   test("text beyond the BMP", () => {

@@ -13,5 +13,5 @@ Document
     Text "// comment"
     SoftBreak
     Text "/* block */"
-  Heading depth=1 kind=atx
+  Heading depth=1
     Text "After"

@@ -367,8 +367,8 @@ fn read_inline(text: &str, definitions: &Definitions, with_tokens: bool) -> Inli
 #[derive(Clone, Debug)]
 pub struct InlineSource {
     /// The text the inline pass read: container markers, indentation, and an
-    /// ATX heading's opening and closing sequences removed, lines joined with
-    /// `\n`, and a setext heading without its underline.
+    /// ATX heading's opening and closing sequences removed, and lines joined
+    /// with `\n`.
     pub text: String,
     map: SourceMap,
 }
@@ -1213,13 +1213,12 @@ fn is_declaration_start(input: &str) -> bool {
         .is_some_and(|byte| input.starts_with("<!") && byte.is_ascii_alphabetic())
 }
 
-fn setext_underline_depth(input: &str) -> Option<u8> {
-    let underline = trim_up_to_three_spaces(input)?.trim_matches([' ', '\t']);
-    match underline {
-        text if !text.is_empty() && text.chars().all(|char| char == '=') => Some(1),
-        text if !text.is_empty() && text.chars().all(|char| char == '-') => Some(2),
-        _ => None,
-    }
+/// Whether `input`, past its indentation, is a run of `-` and nothing else
+/// but trailing spaces and tabs.
+fn dashes_alone(input: &str) -> bool {
+    trim_up_to_three_spaces(input)
+        .map(|rest| rest.trim_end_matches([' ', '\t']))
+        .is_some_and(|run| !run.is_empty() && run.bytes().all(|byte| byte == b'-'))
 }
 
 /// A delimiter run recorded during the inline scan for later resolution by the
@@ -4899,7 +4898,7 @@ fn table_has_separator(header: &str, delimiter: &str) -> bool {
     // the header/alignment column-count check usually suffice. The one exception
     // is a single resolved column with no disambiguating syntax: `a\n-\nb` has
     // matching one-column shapes yet no pipe and no alignment colon, so it is a
-    // loose paragraph/setext, not a table. A single column still forms a table
+    // paragraph, not a table. A single column still forms a table
     // when a pipe appears in the header/delimiter or the delimiter carries an
     // explicit alignment colon (`a\n-:`, `a\n:-:`, …).
     let Some(alignments) = parse_table_delimiter(delimiter) else {

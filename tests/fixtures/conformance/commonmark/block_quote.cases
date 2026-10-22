@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: block_quote
-count: 32
+count: 26
 
 --- case 1 options - label-bytes 27 input-bytes 13 expected-bytes 48
 should support block quotes
@@ -15,20 +15,7 @@ should support block quotes
 c</p>
 </blockquote>
 --- end
---- case 2 options - label-bytes 37 input-bytes 11 expected-bytes 48
-should support block quotes w/o space
---- input
-># a
->b
-> c
---- expected
-<blockquote>
-<h1>a</h1>
-<p>b
-c</p>
-</blockquote>
---- end
---- case 3 options - label-bytes 47 input-bytes 20 expected-bytes 48
+--- case 2 options - label-bytes 47 input-bytes 20 expected-bytes 48
 should support prefixing block quotes w/ spaces
 --- input
    > # a
@@ -41,7 +28,7 @@ should support prefixing block quotes w/ spaces
 c</p>
 </blockquote>
 --- end
---- case 4 options - label-bytes 43 input-bytes 25 expected-bytes 47
+--- case 3 options - label-bytes 43 input-bytes 25 expected-bytes 47
 should not support block quotes w/ 4 spaces
 --- input
     > # a
@@ -53,7 +40,7 @@ should not support block quotes w/ 4 spaces
 &gt; c
 </code></pre>
 --- end
---- case 5 options - label-bytes 33 input-bytes 11 expected-bytes 48
+--- case 4 options - label-bytes 33 input-bytes 11 expected-bytes 48
 should support lazy content lines
 --- input
 > # a
@@ -66,7 +53,7 @@ c
 c</p>
 </blockquote>
 --- end
---- case 6 options - label-bytes 53 input-bytes 9 expected-bytes 39
+--- case 5 options - label-bytes 53 input-bytes 9 expected-bytes 39
 should support lazy content lines inside block quotes
 --- input
 > a
@@ -79,17 +66,7 @@ b
 c</p>
 </blockquote>
 --- end
---- case 7 options - label-bytes 57 input-bytes 9 expected-bytes 37
-should support setext headings underlines in block quotes
---- input
-> a
-> ---
---- expected
-<blockquote>
-<h2>a</h2>
-</blockquote>
---- end
---- case 8 options - label-bytes 66 input-bytes 7 expected-bytes 42
+--- case 6 options - label-bytes 66 input-bytes 7 expected-bytes 42
 should not support lazy setext headings underlines in block quotes
 --- input
 > a
@@ -100,7 +77,7 @@ should not support lazy setext headings underlines in block quotes
 </blockquote>
 <hr />
 --- end
---- case 9 options - label-bytes 36 input-bytes 11 expected-bytes 59
+--- case 7 options - label-bytes 36 input-bytes 11 expected-bytes 59
 should support lists in block quotes
 --- input
 > - a
@@ -113,7 +90,7 @@ should support lists in block quotes
 </ul>
 </blockquote>
 --- end
---- case 10 options - label-bytes 45 input-bytes 9 expected-bytes 70
+--- case 8 options - label-bytes 45 input-bytes 9 expected-bytes 70
 should not support lazy lists in block quotes
 --- input
 > - a
@@ -128,7 +105,7 @@ should not support lazy lists in block quotes
 <li>b</li>
 </ul>
 --- end
---- case 11 options - label-bytes 53 input-bytes 13 expected-bytes 80
+--- case 9 options - label-bytes 53 input-bytes 13 expected-bytes 80
 should not support lazy indented code in block quotes
 --- input
 >     a
@@ -141,7 +118,7 @@ should not support lazy indented code in block quotes
 <pre><code>b
 </code></pre>
 --- end
---- case 12 options - label-bytes 55 input-bytes 11 expected-bytes 86
+--- case 10 options - label-bytes 55 input-bytes 11 expected-bytes 86
 should not support lazy fenced code in block quotes (1)
 --- input
 > ```
@@ -155,7 +132,7 @@ a
 <pre><code></code></pre>
 
 --- end
---- case 13 options - label-bytes 55 input-bytes 9 expected-bytes 63
+--- case 11 options - label-bytes 55 input-bytes 9 expected-bytes 63
 should not support lazy fenced code in block quotes (2)
 --- input
 > a
@@ -169,7 +146,7 @@ b
 </code></pre>
 
 --- end
---- case 14 options - label-bytes 68 input-bytes 11 expected-bytes 39
+--- case 12 options - label-bytes 68 input-bytes 11 expected-bytes 39
 should not support lazy indented code (or lazy list) in block quotes
 --- input
 > a
@@ -180,7 +157,7 @@ should not support lazy indented code (or lazy list) in block quotes
 - b</p>
 </blockquote>
 --- end
---- case 15 options - label-bytes 42 input-bytes 5 expected-bytes 37
+--- case 13 options - label-bytes 42 input-bytes 5 expected-bytes 37
 should support lazy, definition-like lines
 --- input
 > [
@@ -191,7 +168,7 @@ a
 a</p>
 </blockquote>
 --- end
---- case 16 options - label-bytes 57 input-bytes 10 expected-bytes 35
+--- case 14 options - label-bytes 57 input-bytes 10 expected-bytes 35
 should support a definition, followed by a lazy paragraph
 --- input
 > [a]: b
@@ -201,36 +178,7 @@ c
 <p>c</p>
 </blockquote>
 --- end
---- case 17 options - label-bytes 37 input-bytes 1 expected-bytes 26
-should support empty block quotes (1)
---- input
->
---- expected
-<blockquote>
-</blockquote>
---- end
---- case 18 options - label-bytes 37 input-bytes 8 expected-bytes 26
-should support empty block quotes (2)
---- input
->
->  
-> 
---- expected
-<blockquote>
-</blockquote>
---- end
---- case 19 options - label-bytes 60 input-bytes 9 expected-bytes 35
-should support initial or final lazy empty block quote lines
---- input
->
-> a
->  
---- expected
-<blockquote>
-<p>a</p>
-</blockquote>
---- end
---- case 20 options - label-bytes 36 input-bytes 8 expected-bytes 71
+--- case 15 options - label-bytes 36 input-bytes 8 expected-bytes 71
 should support adjacent block quotes
 --- input
 > a
@@ -244,7 +192,7 @@ should support adjacent block quotes
 <p>b</p>
 </blockquote>
 --- end
---- case 21 options - label-bytes 43 input-bytes 7 expected-bytes 37
+--- case 16 options - label-bytes 43 input-bytes 7 expected-bytes 37
 should support a paragraph in a block quote
 --- input
 > a
@@ -255,7 +203,7 @@ should support a paragraph in a block quote
 b</p>
 </blockquote>
 --- end
---- case 22 options - label-bytes 50 input-bytes 9 expected-bytes 44
+--- case 17 options - label-bytes 50 input-bytes 9 expected-bytes 44
 should support adjacent paragraphs in block quotes
 --- input
 > a
@@ -267,7 +215,7 @@ should support adjacent paragraphs in block quotes
 <p>b</p>
 </blockquote>
 --- end
---- case 23 options - label-bytes 48 input-bytes 13 expected-bytes 51
+--- case 18 options - label-bytes 48 input-bytes 13 expected-bytes 51
 should support a definition in a block quote (1)
 --- input
 [a]
@@ -278,7 +226,7 @@ should support a definition in a block quote (1)
 <blockquote>
 </blockquote>
 --- end
---- case 24 options - label-bytes 48 input-bytes 13 expected-bytes 51
+--- case 19 options - label-bytes 48 input-bytes 13 expected-bytes 51
 should support a definition in a block quote (2)
 --- input
 > [a]: b
@@ -289,7 +237,7 @@ should support a definition in a block quote (2)
 </blockquote>
 <p><a href="b">a</a></p>
 --- end
---- case 25 options - label-bytes 54 input-bytes 5 expected-bytes 44
+--- case 20 options - label-bytes 54 input-bytes 5 expected-bytes 44
 should support interrupting paragraphs w/ block quotes
 --- input
 a
@@ -300,7 +248,7 @@ a
 <p>b</p>
 </blockquote>
 --- end
---- case 26 options - label-bytes 59 input-bytes 11 expected-bytes 78
+--- case 21 options - label-bytes 59 input-bytes 11 expected-bytes 78
 should support interrupting block quotes w/ thematic breaks
 --- input
 > a
@@ -315,7 +263,7 @@ should support interrupting block quotes w/ thematic breaks
 <p>b</p>
 </blockquote>
 --- end
---- case 27 options - label-bytes 58 input-bytes 5 expected-bytes 37
+--- case 22 options - label-bytes 58 input-bytes 5 expected-bytes 37
 should not support interrupting block quotes w/ paragraphs
 --- input
 > a
@@ -326,7 +274,7 @@ b
 b</p>
 </blockquote>
 --- end
---- case 28 options - label-bytes 55 input-bytes 6 expected-bytes 44
+--- case 23 options - label-bytes 55 input-bytes 6 expected-bytes 44
 should support interrupting block quotes w/ blank lines
 --- input
 > a
@@ -338,7 +286,7 @@ b
 </blockquote>
 <p>b</p>
 --- end
---- case 29 options - label-bytes 76 input-bytes 7 expected-bytes 44
+--- case 24 options - label-bytes 76 input-bytes 7 expected-bytes 44
 should not support interrupting a blank line in a block quotes w/ paragraphs
 --- input
 > a
@@ -350,7 +298,7 @@ b
 </blockquote>
 <p>b</p>
 --- end
---- case 30 options - label-bytes 67 input-bytes 9 expected-bytes 91
+--- case 25 options - label-bytes 67 input-bytes 9 expected-bytes 91
 should not support interrupting many block quotes w/ paragraphs (1)
 --- input
 > > > a
@@ -365,24 +313,7 @@ b</p>
 </blockquote>
 </blockquote>
 --- end
---- case 31 options - label-bytes 67 input-bytes 13 expected-bytes 93
-should not support interrupting many block quotes w/ paragraphs (2)
---- input
->>> a
-> b
->>c
---- expected
-<blockquote>
-<blockquote>
-<blockquote>
-<p>a
-b
-c</p>
-</blockquote>
-</blockquote>
-</blockquote>
---- end
---- case 32 options - label-bytes 48 input-bytes 15 expected-bytes 89
+--- case 26 options - label-bytes 48 input-bytes 15 expected-bytes 89
 should support 5 spaces for indented code, not 4
 --- input
 >     a

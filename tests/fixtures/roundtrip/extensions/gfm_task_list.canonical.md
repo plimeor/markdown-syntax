@@ -12,11 +12,11 @@
 
 * [ ] In a lazy line
 
-* 
-
+*
 [x]
 
-* [x]
+*
+[x]
 
 - [ ]No space?
 

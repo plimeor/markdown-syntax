@@ -8,12 +8,8 @@ Document
         SoftBreak
         Text "</>"
   Paragraph
-    Text "<x"
+    HtmlInline "<x\ny\n>"
     SoftBreak
-    Text "y"
-  BlockQuote
-    BlankLine
-  Paragraph
     Text "b"
     SoftBreak
     HtmlInline "</x>"

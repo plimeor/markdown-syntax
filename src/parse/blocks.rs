@@ -435,7 +435,6 @@ enum Pending<'a> {
     Heading {
         span: Span,
         depth: u8,
-        kind: HeadingKind,
         text: DerivedText,
     },
     Table {
@@ -1091,12 +1090,10 @@ impl<'a> BlockParser<'a> {
         let byte = cursor.nonspace_byte();
 
         // Block quote.
-        if !indented && byte == Some(b'>') && nesting {
+        if !indented && byte == Some(b'>') && nesting && quote_opens(cursor) {
             cursor.advance_next_nonspace();
             cursor.advance_offset(1, false);
-            if matches!(line.text.as_bytes().get(cursor.offset), Some(b' ' | b'\t')) {
-                cursor.advance_offset(1, true);
-            }
+            cursor.advance_offset(1, true);
             self.close_unmatched();
             let alert = if !cursor.partial {
                 parse_alert_marker(cursor.rest())
@@ -1130,7 +1127,6 @@ impl<'a> BlockParser<'a> {
                     Pending::Heading {
                         span: Span::new(start, line.end),
                         depth,
-                        kind: HeadingKind::Atx,
                         text,
                     },
                     index,
@@ -1264,15 +1260,6 @@ impl<'a> BlockParser<'a> {
                         line.end_with_eol,
                     );
                     return Started::Leaf;
-                }
-            }
-        }
-
-        // Setext heading.
-        if interrupting && !indented && matches!(byte, Some(b'=' | b'-')) {
-            if let Some(depth) = setext_underline_depth(cursor.nonspace_rest()) {
-                if let Some(started) = self.start_setext(depth, index) {
-                    return started;
                 }
             }
         }
@@ -1625,42 +1612,6 @@ impl<'a> BlockParser<'a> {
         Some(cursor.rest_view())
     }
 
-    fn start_setext(&mut self, depth: u8, index: usize) -> Option<Started> {
-        let line = self.lines[index];
-        self.take_paragraph_definitions();
-        let top = self.stack.last()?;
-        let Kind::Paragraph(paragraph) = &top.kind else {
-            return None;
-        };
-        if paragraph.lines.is_empty() {
-            return None;
-        }
-        let frame = self.stack.pop().expect("the paragraph is open");
-        let Kind::Paragraph(paragraph) = frame.kind else {
-            unreachable!("the paragraph is open");
-        };
-        let mut text = DerivedText::default();
-        for paragraph_line in &paragraph.lines {
-            push_paragraph_line(&mut text, paragraph_line);
-        }
-        // CommonMark strips the final whitespace of a heading's content.
-        text.trim_final_whitespace();
-        let start = paragraph.lines[0].start;
-        let parent = self.stack.last_mut().expect("the document stays open");
-        parent.children.push(Child {
-            block: Pending::Heading {
-                span: Span::new(start, line.end),
-                depth,
-                kind: HeadingKind::Setext,
-                text,
-            },
-            first_line: paragraph.lines[0].index,
-            last_line: index,
-            end: line.end,
-        });
-        Some(Started::Line)
-    }
-
     /// Moves the link reference definitions the open paragraph starts with
     /// into its parent, ahead of it.
     fn take_paragraph_definitions(&mut self) {
@@ -1688,9 +1639,9 @@ impl<'a> BlockParser<'a> {
 
     fn start_table(&mut self, cursor: &Cursor<'a>, index: usize) -> Option<Started> {
         let delimiter = cursor.nonspace_rest();
-        // A delimiter row of dashes alone is a setext underline, which wins,
-        // and a list marker opens a list.
-        if setext_underline_depth(delimiter).is_some() || opens_list_item(delimiter) {
+        // A delimiter row of dashes alone is paragraph text, or a thematic
+        // break from three on, and a list marker opens a list.
+        if dashes_alone(delimiter) || opens_list_item(delimiter) {
             return None;
         }
         let Kind::Paragraph(paragraph) = &self.stack.last()?.kind else {
@@ -1979,6 +1930,17 @@ impl<'a> BlockParser<'a> {
     }
 }
 
+/// Whether the `>` the cursor's first nonspace char is opens a block quote:
+/// a space or a tab follows it. The line a quote opens on needs the space;
+/// the lines after it continue it by `quote_continues`.
+fn quote_opens(cursor: &Cursor<'_>) -> bool {
+    matches!(cursor.nonspace_rest().as_bytes(), [b'>', b' ' | b'\t', ..])
+}
+
+/// Whether the line continues an open block quote, moving the cursor past
+/// its `>` and the one space or tab after it: a `>` continues the quote
+/// with or without that space, so a bare `>` is a blank line in it and
+/// `>text` a line of it. Opening a quote takes the space (`quote_opens`).
 fn quote_continues(cursor: &mut Cursor<'_>) -> bool {
     if cursor.indented() || cursor.nonspace_byte() != Some(b'>') {
         return false;
@@ -1994,8 +1956,6 @@ fn quote_continues(cursor: &mut Cursor<'_>) -> bool {
     true
 }
 
-/// A list item's continuation: a blank line when the item holds a block, or
-/// a line indented to the item's content.
 /// What an open container does with a line.
 enum Continuation {
     /// The container continues, its markers read.
@@ -2039,11 +1999,13 @@ fn continuation(
     }
 }
 
+/// An item whose marker line holds nothing after the marker is empty and
+/// takes no line after it.
 fn item_continues(cursor: &mut Cursor<'_>, indent: usize, has_children: bool) -> bool {
+    if !has_children {
+        return false;
+    }
     if cursor.blank {
-        if !has_children {
-            return false;
-        }
         cursor.advance_next_nonspace();
     } else if cursor.indent >= indent {
         cursor.advance_offset(indent, true);
@@ -2146,11 +2108,10 @@ fn html_block_may_interrupt(kind: HtmlBlockKind) -> bool {
 /// Whether `block`, written on the line right after a paragraph's, starts
 /// there instead of continuing the paragraph, by the checks `start` makes on
 /// a line that would interrupt one: paragraph text continues the paragraph,
-/// a definition starts only a paragraph, indented code and a frontmatter
-/// fence cannot start in one (`---` underlines it), a list needs its first
-/// item's marker to interrupt, and an HTML block its first line. Whether a
-/// heading is written as a setext heading, whose text line would continue
-/// the paragraph, is the serializer's choice and is not judged here.
+/// a definition starts only a paragraph, indented code and frontmatter
+/// cannot start in one (its `---` fence is a thematic break there), a list
+/// needs its first item's marker to interrupt, and an HTML block its first
+/// line.
 pub(crate) fn interrupts_paragraph(block: &Block) -> bool {
     match block {
         Block::Paragraph(_) | Block::Definition(_) | Block::Frontmatter(_) => false,
@@ -2215,7 +2176,7 @@ pub(crate) fn html_block_ends_at_blank_line(node: &HtmlBlock) -> bool {
 }
 
 /// The delimiter and width of the list item marker `rest` opens with, when
-/// a space, a tab, or the line's end follows it.
+/// a space or a tab follows it.
 pub(super) fn list_marker_head(rest: &str) -> Option<(ListDelimiter, usize)> {
     let bytes = rest.as_bytes();
     let (delimiter, width) = match *bytes.first()? {
@@ -2239,16 +2200,17 @@ pub(super) fn list_marker_head(rest: &str) -> Option<(ListDelimiter, usize)> {
         }
         _ => return None,
     };
-    matches!(bytes.get(width), None | Some(b' ' | b'\t')).then_some((delimiter, width))
+    matches!(bytes.get(width), Some(b' ' | b'\t')).then_some((delimiter, width))
 }
 
-/// The depth and content of the ATX heading `text` opens.
+/// The depth and content of the ATX heading `text` opens: one to six `#`
+/// followed by a space or a tab.
 fn atx_heading(text: &str) -> Option<(u8, &str)> {
     let depth = text.bytes().take_while(|byte| *byte == b'#').count();
     if depth == 0 || depth > 6 {
         return None;
     }
-    if !matches!(text.as_bytes().get(depth), None | Some(b' ' | b'\t')) {
+    if !matches!(text.as_bytes().get(depth), Some(b' ' | b'\t')) {
         return None;
     }
     let content = trim_closing_hashes(trim_ascii_start(&text[depth..]));
@@ -2529,15 +2491,9 @@ impl Finish<'_> {
                     source: None,
                 })
             }
-            Pending::Heading {
-                span,
-                depth,
-                kind,
-                text,
-            } => Block::Heading(Heading {
+            Pending::Heading { span, depth, text } => Block::Heading(Heading {
                 meta: meta(span),
                 depth,
-                kind,
                 children: self.leaf_inlines(span, text, &mut Vec::new()),
                 source: None,
             }),

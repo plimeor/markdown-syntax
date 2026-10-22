@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: gfm_table
-count: 58
+count: 52
 
 --- case 1 options gfm label-bytes 21 input-bytes 17 expected-bytes 94
 should support tables
@@ -634,24 +634,7 @@ should be interrupted by a block quote
 <p>block quote?</p>
 </blockquote>
 --- end
---- case 33 options gfm label-bytes 46 input-bytes 13 expected-bytes 82
-should be interrupted by a block quote (empty)
---- input
-| a |
-| - |
->
---- expected
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-</table>
-<blockquote>
-</blockquote>
---- end
---- case 34 options gfm label-bytes 31 input-bytes 19 expected-bytes 81
+--- case 33 options gfm label-bytes 31 input-bytes 19 expected-bytes 81
 should be interrupted by a list
 --- input
 | a |
@@ -669,25 +652,7 @@ should be interrupted by a list
 <li>list?</li>
 </ul>
 --- end
---- case 35 options gfm label-bytes 39 input-bytes 13 expected-bytes 76
-should be interrupted by a list (empty)
---- input
-| a |
-| - |
--
---- expected
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-</table>
-<ul>
-<li></li>
-</ul>
---- end
---- case 36 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 36 input-bytes 26 expected-bytes 70
+--- case 34 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 36 input-bytes 26 expected-bytes 70
 should be interrupted by HTML (flow)
 --- input
 | a |
@@ -703,7 +668,7 @@ should be interrupted by HTML (flow)
 </table>
 <!-- HTML? -->
 --- end
---- case 37 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 18 expected-bytes 86
+--- case 35 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 40 input-bytes 18 expected-bytes 86
 should be interrupted by code (indented)
 --- input
 | a |
@@ -720,7 +685,7 @@ should be interrupted by code (indented)
 <pre><code>code?
 </code></pre>
 --- end
---- case 38 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 23 expected-bytes 107
+--- case 36 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 38 input-bytes 23 expected-bytes 107
 should be interrupted by code (fenced)
 --- input
 | a |
@@ -739,7 +704,7 @@ code?
 </code></pre>
 
 --- end
---- case 39 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 41 input-bytes 15 expected-bytes 62
+--- case 37 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 41 input-bytes 15 expected-bytes 62
 should be interrupted by a thematic break
 --- input
 | a |
@@ -755,7 +720,7 @@ should be interrupted by a thematic break
 </table>
 <hr />
 --- end
---- case 40 options gfm label-bytes 40 input-bytes 22 expected-bytes 73
+--- case 38 options gfm label-bytes 40 input-bytes 22 expected-bytes 73
 should be interrupted by a heading (ATX)
 --- input
 | a |
@@ -771,7 +736,7 @@ should be interrupted by a heading (ATX)
 </table>
 <h1>heading?</h1>
 --- end
---- case 41 options gfm label-bytes 49 input-bytes 21 expected-bytes 122
+--- case 39 options gfm label-bytes 49 input-bytes 21 expected-bytes 122
 should *not* be interrupted by a heading (setext)
 --- input
 | a |
@@ -795,7 +760,7 @@ heading
 </tbody>
 </table>
 --- end
---- case 42 options gfm label-bytes 106 input-bytes 23 expected-bytes 107
+--- case 40 options gfm label-bytes 106 input-bytes 23 expected-bytes 107
 should *not* be interrupted by a heading (setext), but interrupt if the underline is also a thematic break
 --- input
 | a |
@@ -817,31 +782,7 @@ heading
 </table>
 <hr />
 --- end
---- case 43 options gfm label-bytes 115 input-bytes 21 expected-bytes 121
-should *not* be interrupted by a heading (setext), but interrupt if the underline is also an empty list item bullet
---- input
-| a |
-| - |
-heading
--
---- expected
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>heading</td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li></li>
-</ul>
---- end
---- case 44 options gfm label-bytes 32 input-bytes 6 expected-bytes 78
+--- case 41 options gfm label-bytes 32 input-bytes 6 expected-bytes 78
 should support a single head row
 --- input
 a
@@ -857,7 +798,7 @@ b
 </thead>
 </table>
 --- end
---- case 45 options gfm label-bytes 37 input-bytes 15 expected-bytes 82
+--- case 42 options gfm label-bytes 37 input-bytes 15 expected-bytes 82
 should support a table in a container
 --- input
 > | a |
@@ -873,7 +814,7 @@ should support a table in a container
 </table>
 </blockquote>
 --- end
---- case 46 options gfm label-bytes 87 input-bytes 21 expected-bytes 95
+--- case 43 options gfm label-bytes 87 input-bytes 21 expected-bytes 95
 should not support a lazy body row if the head row and delimiter row are in a container
 --- input
 > | a |
@@ -891,7 +832,7 @@ should not support a lazy body row if the head row and delimiter row are in a co
 </blockquote>
 <p>| c |</p>
 --- end
---- case 47 options gfm label-bytes 97 input-bytes 21 expected-bytes 51
+--- case 44 options gfm label-bytes 97 input-bytes 21 expected-bytes 51
 should not support a lazy delimiter row if the head row and a further body row are in a container
 --- input
 > | a |
@@ -904,7 +845,7 @@ should not support a lazy delimiter row if the head row and a further body row a
 | c |</p>
 </blockquote>
 --- end
---- case 48 options gfm label-bytes 41 input-bytes 11 expected-bytes 132
+--- case 45 options gfm label-bytes 41 input-bytes 11 expected-bytes 132
 should prefer GFM tables over definitions
 --- input
 [
@@ -926,7 +867,7 @@ a
 </tbody>
 </table>
 --- end
---- case 49 options gfm label-bytes 34 input-bytes 575 expected-bytes 1374
+--- case 46 options gfm label-bytes 34 input-bytes 575 expected-bytes 1374
 should match alignment like GitHub
 --- input
 # Align
@@ -1114,7 +1055,7 @@ a
 </table>
 
 --- end
---- case 50 options gfm label-bytes 30 input-bytes 127 expected-bytes 365
+--- case 47 options gfm label-bytes 30 input-bytes 127 expected-bytes 365
 should match basic like GitHub
 --- input
 # Tables
@@ -1177,199 +1118,7 @@ should match basic like GitHub
 </table>
 
 --- end
---- case 51 options gfm label-bytes 35 input-bytes 469 expected-bytes 1235
-should match containers like GitHub
---- input
-# Tables in things
-
-## In lists
-
-*   Unordered:
-
-    | A | B |
-    | - | - |
-    | 1 | 2 |
-
-1.  Ordered:
-
-    | A | B |
-    | - | - |
-    | 1 | 2 |
-
-*   Lazy?
-    | A | B |
-    | - | - |
-   | 1 | 2 |
-  | 3 | 4 |
- | 5 | 6 |
-| 7 | 8 |
-
-## In block quotes
-
-> W/ space:
-> | A | B |
-> | - | - |
-> | 1 | 2 |
-
->W/o space:
->| A | B |
->| - | - |
->| 1 | 2 |
-
-> Lazy?
-> | A | B |
-> | - | - |
-> | 1 | 2 |
->| 3 | 4 |
-| 5 | 6 |
-
-### List interrupting delimiters
-
-a |
-- |
-
-a
--|
-
-a
-|-
-
---- expected
-<h1>Tables in things</h1>
-<h2>In lists</h2>
-<ul>
-<li>
-<p>Unordered:</p>
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>2</td>
-</tr>
-</tbody>
-</table>
-</li>
-</ul>
-<ol>
-<li>
-<p>Ordered:</p>
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>2</td>
-</tr>
-</tbody>
-</table>
-</li>
-</ol>
-<ul>
-<li>Lazy?
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-</table>
-</li>
-</ul>
-<p>| 1 | 2 |
-| 3 | 4 |
-| 5 | 6 |
-| 7 | 8 |</p>
-<h2>In block quotes</h2>
-<blockquote>
-<p>W/ space:</p>
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>2</td>
-</tr>
-</tbody>
-</table>
-</blockquote>
-<blockquote>
-<p>W/o space:</p>
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>2</td>
-</tr>
-</tbody>
-</table>
-</blockquote>
-<blockquote>
-<p>Lazy?</p>
-<table>
-<thead>
-<tr>
-<th>A</th>
-<th>B</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>2</td>
-</tr>
-<tr>
-<td>3</td>
-<td>4</td>
-</tr>
-</tbody>
-</table>
-</blockquote>
-<p>| 5 | 6 |</p>
-<h3>List interrupting delimiters</h3>
-<p>a |</p>
-<ul>
-<li>|</li>
-</ul>
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-</table>
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-</table>
-
---- end
---- case 52 options gfm label-bytes 47 input-bytes 24 expected-bytes 117
+--- case 48 options gfm label-bytes 47 input-bytes 24 expected-bytes 117
 should match a double delimiter row like GitHub
 --- input
 | a |
@@ -1395,7 +1144,7 @@ should match a double delimiter row like GitHub
 </table>
 
 --- end
---- case 53 options gfm label-bytes 51 input-bytes 429 expected-bytes 1186
+--- case 49 options gfm label-bytes 51 input-bytes 429 expected-bytes 1186
 should match examples from the GFM spec like GitHub
 --- input
 # Examples from GFM
@@ -1573,7 +1322,7 @@ bar
 </table>
 
 --- end
---- case 54 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 431 expected-bytes 943
+--- case 50 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 37 input-bytes 431 expected-bytes 943
 should match grave accent like GitHub
 --- input
 # Grave accents
@@ -1697,7 +1446,7 @@ should match grave accent like GitHub
 <p><code>\|\\</code></p>
 
 --- end
---- case 55 options gfm label-bytes 31 input-bytes 112 expected-bytes 285
+--- case 51 options gfm label-bytes 31 input-bytes 112 expected-bytes 285
 should match indent like GitHub
 --- input
 # Code
@@ -1750,550 +1499,7 @@ a
 </code></pre>
 
 --- end
---- case 56 options gfm,allow_dangerous_html,allow_dangerous_protocol label-bytes 34 input-bytes 849 expected-bytes 3682
-should match interrupt like GitHub
---- input
-## Blank line
-
-a
-:-
-b
-
-c
-
-## Block quote
-
-a
-:-
-b
-> c
-
-## Code (fenced)
-
-a
-:-
-b
-```
-c
-```
-
-## Code (indented)
-
-a
-:-
-b
-    c
-
-## Definition
-
-a
-:-
-b
-[c]: d
-
-## Heading (atx)
-
-a
-:-
-b
-# c
-
-
-## Heading (setext) (rank 1)
-
-a
-:-
-b
-==
-c
-
-## Heading (setext) (rank 2)
-
-a
-:-
-b
---
-c
-
-## HTML (flow, kind 1: raw)
-
-a
-:-
-b
-<pre>
-  a
-</pre>
-
-## HTML (flow, kind 2: comment)
-
-a
-:-
-b
-<!-- c -->
-
-## HTML (flow, kind 3: instruction)
-
-a
-:-
-b
-<? c ?>
-
-## HTML (flow, kind 4: declaration)
-
-a
-:-
-b
-<!C>
-
-## HTML (flow, kind 5: cdata)
-
-a
-:-
-b
-<![CDATA[c]]>
-
-## HTML (flow, kind 6: basic)
-
-a
-:-
-b
-<div>
-
-## HTML (flow, kind 7: complete)
-
-a
-:-
-b
-<x>
-
-## List (ordered, 1)
-
-a
-:-
-b
-1. c
-
-## List (ordered, other)
-
-a
-:-
-b
-2. c
-
-## List (unordered)
-
-a
-:-
-b
-* c
-
-## List (unordered, blank)
-
-a
-:-
-b
-*
-c
-
-## List (unordered, blank start)
-
-a
-:-
-b
-*
-  c
-
-## Thematic break
-
-a
-:-
-b
-***
-
---- expected
-<h2>Blank line</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<p>c</p>
-<h2>Block quote</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<blockquote>
-<p>c</p>
-</blockquote>
-<h2>Code (fenced)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<pre><code>c
-</code></pre>
-<h2>Code (indented)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<pre><code>c
-</code></pre>
-<h2>Definition</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-<tr>
-<td align="left">[c]: d</td>
-</tr>
-</tbody>
-</table>
-<h2>Heading (atx)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<h1>c</h1>
-<h2>Heading (setext) (rank 1)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-<tr>
-<td align="left">==</td>
-</tr>
-<tr>
-<td align="left">c</td>
-</tr>
-</tbody>
-</table>
-<h2>Heading (setext) (rank 2)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-<tr>
-<td align="left">--</td>
-</tr>
-<tr>
-<td align="left">c</td>
-</tr>
-</tbody>
-</table>
-<h2>HTML (flow, kind 1: raw)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<pre>
-  a
-</pre>
-<h2>HTML (flow, kind 2: comment)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<!-- c -->
-<h2>HTML (flow, kind 3: instruction)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<? c ?>
-<h2>HTML (flow, kind 4: declaration)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<!C>
-<h2>HTML (flow, kind 5: cdata)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<![CDATA[c]]>
-<h2>HTML (flow, kind 6: basic)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<div>
-<h2>HTML (flow, kind 7: complete)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<x>
-<h2>List (ordered, 1)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<ol>
-<li>c</li>
-</ol>
-<h2>List (ordered, other)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<ol start="2">
-<li>c</li>
-</ol>
-<h2>List (unordered)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li>c</li>
-</ul>
-<h2>List (unordered, blank)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li></li>
-</ul>
-<p>c</p>
-<h2>List (unordered, blank start)</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<ul>
-<li>c</li>
-</ul>
-<h2>Thematic break</h2>
-<table>
-<thead>
-<tr>
-<th align="left">a</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left">b</td>
-</tr>
-</tbody>
-</table>
-<hr />
-
---- end
---- case 57 options gfm label-bytes 37 input-bytes 164 expected-bytes 353
-should match loose tables like GitHub
---- input
-# Loose
-
-## Loose
-
-Header 1 | Header 2
--------- | --------
-Cell 1   | Cell 2
-Cell 3   | Cell 4
-
-## One “column”, loose
-
-a
--
-b
-
-## No pipe in first row
-
-a
-| - |
-
---- expected
-<h1>Loose</h1>
-<h2>Loose</h2>
-<table>
-<thead>
-<tr>
-<th>Header 1</th>
-<th>Header 2</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Cell 1</td>
-<td>Cell 2</td>
-</tr>
-<tr>
-<td>Cell 3</td>
-<td>Cell 4</td>
-</tr>
-</tbody>
-</table>
-<h2>One “column”, loose</h2>
-<h2>a</h2>
-<p>b</p>
-<h2>No pipe in first row</h2>
-<table>
-<thead>
-<tr>
-<th>a</th>
-</tr>
-</thead>
-</table>
-
---- end
---- case 58 options gfm label-bytes 38 input-bytes 290 expected-bytes 443
+--- case 52 options gfm label-bytes 38 input-bytes 290 expected-bytes 443
 should match loose escapes like GitHub
 --- input
 # Some more escapes

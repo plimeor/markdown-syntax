@@ -10,11 +10,57 @@ how containers nest. Owned by the block parser.
 
 ### Requirement: CommonMark blocks
 The parser SHALL recognize CommonMark block constructs as the CommonMark
-specification 0.31.2 defines them. Where commonmark.js renders a case
-otherwise, and for nested containers, the output SHALL match commonmark.js:
-blank lines inside a fence in a list item hold no whitespace past the item's
-indentation, and a fence a container ends right after its opening line is
-empty.
+specification 0.31.2 defines them, except setext headings and block markers
+not followed by a space or a tab, which "No setext headings" and "Block
+markers take a space" state (decision 0019). Where commonmark.js renders a
+case otherwise, and for nested containers, the output SHALL match
+commonmark.js: blank lines inside a fence in a list item hold no whitespace
+past the item's indentation, and a fence a container ends right after its
+opening line is empty.
+
+### Requirement: Block markers take a space
+A block marker SHALL open its block only when a space or a tab follows it on
+its line: `#` to `######` an ATX heading, `-`, `*`, or `+` a bullet list
+item, `1.` or `1)` (any number of up to nine digits) an ordered list item,
+and `>` a block quote or an alert when no open quote takes the line. A
+marker that the line's end or any other char follows SHALL be read as
+paragraph text, or as the open paragraph's continuation. A list item whose
+marker line holds nothing after the marker but spaces and tabs SHALL be
+empty and SHALL take no line after it; an empty item SHALL NOT interrupt a
+paragraph.
+
+#### Scenario: Lone markers
+- **WHEN** `"#"`, `"-"`, `"1."`, `">"`, `">a"`, and `">>> a"` are each parsed
+- **THEN** each document holds one `Paragraph` whose text is the input
+
+#### Scenario: Empty blocks
+- **WHEN** `"# "`, `"- "`, and `"> "` are each parsed
+- **THEN** the documents hold an empty `Heading`, a `List` of one empty item, and a `BlockQuote`
+
+#### Scenario: No item starts with a blank line
+- **WHEN** `"-\n  foo"` and `"- \n  foo"` are each parsed
+- **THEN** the first holds one `Paragraph` `-`/`foo`, and the second a `List` of one empty item and a `Paragraph` `foo`
+
+### Requirement: Block quote lines
+A line SHALL continue an open block quote when it opens with `>`, up to
+three spaces in, whether a space or a tab follows the `>` or not: a bare
+`>` is a blank line in the quote, and `>text` a line of it whose content is
+`text`. The `>` after it opens a quote nested in that one only as "Block
+markers take a space" states.
+
+#### Scenario: Bare markers continue a quote
+- **WHEN** `"> a\n>\n> b"` and `"> a\n>b"` are each parsed
+- **THEN** the first holds one `BlockQuote` of two paragraphs, and the second one `BlockQuote` whose paragraph holds `a`, a `SoftBreak`, and `b`
+
+### Requirement: No setext headings
+The parser SHALL NOT read setext headings: a line of `=` after a paragraph
+SHALL be the paragraph's text, and a line of `-` its text or, from three
+`-` on, a thematic break after it. A line of `-` alone, without a pipe or a
+colon, SHALL NOT be a table's delimiter row.
+
+#### Scenario: Underlines
+- **WHEN** `"a\n==="` and `"a\n---"` are each parsed
+- **THEN** the first holds one `Paragraph` `a`/`===`, and the second a `Paragraph` and a `ThematicBreak`
 
 ### Requirement: GFM blocks
 The parser SHALL recognize GFM tables and task list items as the GFM

@@ -114,7 +114,7 @@ pub(crate) fn rewritten_after_an_edit(input: &str, blocks: &[Block], index: usiz
 /// fence does and an unclosed one does not: a copy of the writer's
 /// `closed_by_a_blank_line` in `src/serialize.rs`, which the tests cannot
 /// call.
-fn closed_by_a_blank_line(text: &str) -> bool {
+pub(crate) fn closed_by_a_blank_line(text: &str) -> bool {
     let gap = if text.ends_with('\n') {
         "\n"
     } else if text.ends_with('\r') {
@@ -266,6 +266,111 @@ fn edit_children(block: &mut Block) -> bool {
     }
 }
 
+/// The next alignment of each of a table's columns, `None`, `Left`,
+/// `Center`, `Right`, and `None` again; false for other blocks.
+fn realign(block: &mut Block) -> bool {
+    let Block::Table(node) = block else {
+        return false;
+    };
+    for alignment in &mut node.alignments {
+        *alignment = match alignment {
+            TableAlignment::None => TableAlignment::Left,
+            TableAlignment::Left => TableAlignment::Center,
+            TableAlignment::Center => TableAlignment::Right,
+            TableAlignment::Right => TableAlignment::None,
+        };
+    }
+    true
+}
+
+/// Adds a column after a table's last, or removes its last where another
+/// stays: a cell `new` in each row, or each row's last cell where it has
+/// one in that column; false for other blocks.
+fn edit_columns(block: &mut Block, add: bool) -> bool {
+    let Block::Table(node) = block else {
+        return false;
+    };
+    if add {
+        node.alignments.push(TableAlignment::None);
+        for row in &mut node.rows {
+            let count = node.alignments.len() - 1;
+            row.cells.truncate(count);
+            row.cells
+                .resize_with(count, || TableCell::new(Vec::<Inline>::new()));
+            row.cells.push(TableCell::new([Text::from("new")]));
+        }
+        return true;
+    }
+    if node.alignments.len() < 2 {
+        return false;
+    }
+    node.alignments.pop();
+    for row in &mut node.rows {
+        row.cells.truncate(node.alignments.len());
+    }
+    true
+}
+
+/// Gives the first cell of a table that is empty in the source the text
+/// `new`, and returns its path below the table (row, cell); `None` for
+/// other blocks and a table without one.
+fn fill_empty_cell(block: &mut Block) -> Option<(usize, usize)> {
+    let Block::Table(node) = block else {
+        return None;
+    };
+    let (row, cell) = node.rows.iter().enumerate().find_map(|(index, row)| {
+        row.cells
+            .iter()
+            .position(|cell| cell.children.is_empty() && cell.meta.span.is_some())
+            .map(|cell| (index, cell))
+    })?;
+    node.rows[row].cells[cell].children = vec![Text::from("new").into()];
+    Some((row, cell))
+}
+
+/// Where a new block goes before the block at `index` of `siblings`: before
+/// the blank lines that precede it too, so that a blank line opening a
+/// container comes to follow a block.
+fn before(siblings: &[Block], index: usize) -> usize {
+    siblings[..index]
+        .iter()
+        .rposition(|block| !matches!(block, Block::BlankLine(_)))
+        .map_or(0, |at| at + 1)
+}
+
+/// `input` with the empty cell at `span`, the first empty cell of its row,
+/// given the text `new`, as an edit of that cell alone writes it: the
+/// padding between its pipes replaced by the text with a space on either
+/// side, or, for a cell the source row lacks, which the parser reads as
+/// empty at the row's end, the text after a pipe, and before one where the
+/// row ends with a pipe.
+fn filled(input: &str, span: Span) -> String {
+    let (before, after) = input.split_at(span.start);
+    if after.starts_with('|') {
+        let pipe = before.rfind('|').expect("a cell after a pipe");
+        return format!("{} new {after}", &before[..=pipe]);
+    }
+    if before.trim_end_matches([' ', '\t']).ends_with('|') {
+        format!("{before} new |{after}")
+    } else {
+        format!("{before} | new{after}")
+    }
+}
+
+/// Whether `written` holds the lines of `input`, all but one of them as
+/// they are.
+fn one_line_differs(input: &str, written: &str) -> bool {
+    let (input, written): (Vec<_>, Vec<_>) =
+        (input.split('\n').collect(), written.split('\n').collect());
+    input.len() == written.len()
+        && input
+            .iter()
+            .zip(&written)
+            .filter(|(line, written)| line != written)
+            .count()
+            == 1
+}
+
 /// Removes the first inline of a paragraph or heading holding more than
 /// one, and adds a link after the rest; false for other blocks.
 fn edit_inlines(block: &mut Block) -> bool {
@@ -306,10 +411,25 @@ pub(crate) fn simulated_edits(
             .map(move |(path, index)| (document, path, *index))
     }) {
         for edit in [
-            "leaf", "own", "delete", "insert", "break", "child", "inline", "task", "wide",
+            "leaf",
+            "own",
+            "delete",
+            "insert",
+            "before",
+            "break",
+            "child",
+            "inline",
+            "task",
+            "wide",
+            "align",
+            "add column",
+            "drop column",
+            "cell",
         ] {
             let mut edited = document.clone();
             let siblings = siblings_at(&mut edited.children, path);
+            // The span of the empty cell the edit fills.
+            let mut filled_cell = None;
             let applied = match edit {
                 "leaf" => {
                     matches!(
@@ -336,6 +456,21 @@ pub(crate) fn simulated_edits(
                     );
                     true
                 }
+                "before" => {
+                    let at = before(siblings, index);
+                    siblings.insert(at, Paragraph::new([Text::from("new")]).into());
+                    true
+                }
+                "align" => realign(&mut siblings[index]),
+                "add column" => edit_columns(&mut siblings[index], true),
+                "drop column" => edit_columns(&mut siblings[index], false),
+                "cell" => match (fill_empty_cell(&mut siblings[index]), &siblings[index]) {
+                    (Some((row, cell)), Block::Table(node)) => {
+                        filled_cell = node.rows[row].cells[cell].meta.span;
+                        true
+                    }
+                    _ => false,
+                },
                 "child" => edit_children(&mut siblings[index]),
                 "inline" => edit_inlines(&mut siblings[index]),
                 "task" => match &mut siblings[index] {
@@ -405,6 +540,14 @@ pub(crate) fn simulated_edits(
                     if let Some(leaf_lines) = leaf_lines.as_deref_mut() {
                         leaf_lines.push(at.clone());
                     }
+                }
+                // A table's new alignments change its delimiter row alone.
+                Ok(markdown) if edit == "align" && !one_line_differs(input, &markdown) => failures
+                    .push(format!(
+                        "{at}: {markdown:?} rewrites more than the delimiter row"
+                    )),
+                Ok(markdown) if filled_cell.is_some_and(|span| markdown != filled(input, span)) => {
+                    failures.push(format!("{at}: {markdown:?} pads the filled cell otherwise"))
                 }
                 Ok(markdown) => {
                     // An edit inside a top-level block keeps the source

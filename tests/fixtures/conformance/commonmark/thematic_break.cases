@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: thematic_break
-count: 26
+count: 25
 
 --- case 1 options - label-bytes 68 input-bytes 11 expected-bytes 20
 should support thematic breaks w/ asterisks, dashes, and underscores
@@ -190,17 +190,7 @@ bar
 <hr />
 <p>bar</p>
 --- end
---- case 24 options - label-bytes 85 input-bytes 11 expected-bytes 23
-should not support thematic breaks w/ dashes interrupting paragraphs (setext heading)
---- input
-Foo
----
-bar
---- expected
-<h2>Foo</h2>
-<p>bar</p>
---- end
---- case 25 options - label-bytes 39 input-bytes 13 expected-bytes 41
+--- case 24 options - label-bytes 39 input-bytes 13 expected-bytes 41
 should support thematic breaks in lists
 --- input
 - Foo
@@ -213,7 +203,7 @@ should support thematic breaks in lists
 </li>
 </ul>
 --- end
---- case 26 options - label-bytes 31 input-bytes 7 expected-bytes 42
+--- case 25 options - label-bytes 31 input-bytes 7 expected-bytes 42
 should not support lazyness (1)
 --- input
 > ---

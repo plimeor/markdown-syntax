@@ -7,7 +7,7 @@ One blank line separates.
 
 Two blank lines leave one node.
 
->
+> 
 > quote with blank edges
 >
 

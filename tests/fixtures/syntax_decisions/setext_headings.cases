@@ -1,0 +1,734 @@
+# markdown-syntax AST->HTML conformance suite v1: syntax decisions
+source: setext_headings
+decision: There are no setext headings: a line of `=` after a paragraph is its text, and a line of `-` its text or, from three on, a thematic break (decision 0019).
+count: 56
+
+--- case 1 options - label-bytes 61 input-bytes 9 expected-bytes 42
+from commonmark/block_quote.cases #7; verified: decision 0019
+--- input
+> a
+> ---
+--- expected
+<blockquote>
+<p>a</p>
+<hr />
+</blockquote>
+--- end
+--- case 2 options - label-bytes 62 input-bytes 25 expected-bytes 59
+from commonmark/code_fenced.cases #23; verified: decision 0019
+--- input
+foo
+---
+~~~
+bar
+~~~
+# baz
+--- expected
+<p>foo</p>
+<hr />
+<pre><code>bar
+</code></pre>
+<h1>baz</h1>
+--- end
+--- case 3 options - label-bytes 63 input-bytes 45 expected-bytes 103
+from commonmark/code_indented.cases #9; verified: decision 0019
+--- input
+# Heading
+    foo
+Heading
+------
+    foo
+----
+--- expected
+<h1>Heading</h1>
+<pre><code>foo
+</code></pre>
+<p>Heading</p>
+<hr />
+<pre><code>foo
+</code></pre>
+<hr />
+--- end
+--- case 4 options - label-bytes 64 input-bytes 14 expected-bytes 31
+from commonmark/code_indented.cases #24; verified: decision 0019
+--- input
+- Foo
+     ---
+--- expected
+<ul>
+<li>Foo
+<hr />
+</li>
+</ul>
+--- end
+--- case 5 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 12 expected-bytes 28
+from commonmark/commonmark.cases #59; verified: decision 0019
+--- input
+Foo
+---
+bar
+
+--- expected
+<p>Foo</p>
+<hr />
+<p>bar</p>
+--- end
+--- case 6 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 41 expected-bytes 64
+from commonmark/commonmark.cases #80; verified: decision 0019
+--- input
+Foo *bar*
+=========
+
+Foo *bar*
+---------
+
+--- expected
+<p>Foo <em>bar</em>
+=========</p>
+<p>Foo <em>bar</em></p>
+<hr />
+--- end
+--- case 7 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 19 expected-bytes 32
+from commonmark/commonmark.cases #81; verified: decision 0019
+--- input
+Foo *bar
+baz*
+====
+
+--- expected
+<p>Foo <em>bar
+baz</em>
+====</p>
+--- end
+--- case 8 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 22 expected-bytes 32
+from commonmark/commonmark.cases #82; verified: decision 0019
+--- input
+  Foo *bar
+baz*	
+====
+
+--- expected
+<p>Foo <em>bar
+baz</em>
+====</p>
+--- end
+--- case 9 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 37 expected-bytes 30
+from commonmark/commonmark.cases #83; verified: decision 0019
+--- input
+Foo
+-------------------------
+
+Foo
+=
+
+--- expected
+<p>Foo</p>
+<hr />
+<p>Foo
+=</p>
+--- end
+--- case 10 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 37 expected-bytes 50
+from commonmark/commonmark.cases #84; verified: decision 0019
+--- input
+   Foo
+---
+
+  Foo
+-----
+
+  Foo
+  ===
+
+--- expected
+<p>Foo</p>
+<hr />
+<p>Foo</p>
+<hr />
+<p>Foo
+===</p>
+--- end
+--- case 11 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 18 expected-bytes 17
+from commonmark/commonmark.cases #86; verified: decision 0019
+--- input
+Foo
+   ----      
+
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 12 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 12 expected-bytes 17
+from commonmark/commonmark.cases #89; verified: decision 0019
+--- input
+Foo  
+-----
+
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 13 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 10 expected-bytes 18
+from commonmark/commonmark.cases #90; verified: decision 0019
+--- input
+Foo\
+----
+
+--- expected
+<p>Foo\</p>
+<hr />
+--- end
+--- case 14 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 46 expected-bytes 93
+from commonmark/commonmark.cases #91; verified: decision 0019
+--- input
+`Foo
+----
+`
+
+<a title="a lot
+---
+of dashes"/>
+
+--- expected
+<p>`Foo</p>
+<hr />
+<p>`</p>
+<p>&lt;a title=&quot;a lot</p>
+<hr />
+<p>of dashes&quot;/&gt;</p>
+--- end
+--- case 15 options allow_dangerous_html,allow_dangerous_protocol label-bytes 61 input-bytes 12 expected-bytes 21
+from commonmark/commonmark.cases #95; verified: decision 0019
+--- input
+Foo
+Bar
+---
+
+--- expected
+<p>Foo
+Bar</p>
+<hr />
+--- end
+--- case 16 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 14 expected-bytes 22
+from commonmark/commonmark.cases #100; verified: decision 0019
+--- input
+\> foo
+------
+
+--- expected
+<p>&gt; foo</p>
+<hr />
+--- end
+--- case 17 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 17 expected-bytes 39
+from commonmark/commonmark.cases #101; verified: decision 0019
+--- input
+Foo
+
+bar
+---
+baz
+
+--- expected
+<p>Foo</p>
+<p>bar</p>
+<hr />
+<p>baz</p>
+--- end
+--- case 18 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 46 expected-bytes 103
+from commonmark/commonmark.cases #113; verified: decision 0019
+--- input
+# Heading
+    foo
+Heading
+------
+    foo
+----
+
+--- expected
+<h1>Heading</h1>
+<pre><code>foo
+</code></pre>
+<p>Heading</p>
+<hr />
+<pre><code>foo
+</code></pre>
+<hr />
+--- end
+--- case 19 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 26 expected-bytes 59
+from commonmark/commonmark.cases #139; verified: decision 0019
+--- input
+foo
+---
+~~~
+bar
+~~~
+# baz
+
+--- expected
+<p>foo</p>
+<hr />
+<pre><code>bar
+</code></pre>
+<h1>baz</h1>
+--- end
+--- case 20 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 26 expected-bytes 37
+from commonmark/commonmark.cases #213; verified: decision 0019
+--- input
+[foo]: /url
+bar
+===
+[foo]
+
+--- expected
+<p>bar
+===
+<a href="/url">foo</a></p>
+--- end
+--- case 21 options allow_dangerous_html,allow_dangerous_protocol label-bytes 62 input-bytes 26 expected-bytes 58
+from commonmark/commonmark.cases #298; verified: decision 0019
+--- input
+- # Foo
+- Bar
+  ---
+  baz
+
+--- expected
+<ul>
+<li>
+<h1>Foo</h1>
+</li>
+<li>Bar
+<hr />
+baz</li>
+</ul>
+--- end
+--- case 22 options - label-bytes 61 input-bytes 25 expected-bytes 37
+from commonmark/definition.cases #32; verified: decision 0019
+--- input
+[foo]: /url
+bar
+===
+[foo]
+--- expected
+<p>bar
+===
+<a href="/url">foo</a></p>
+--- end
+--- case 23 options - label-bytes 61 input-bytes 10 expected-bytes 0
+from commonmark/definition.cases #72; verified: decision 0019
+--- input
+[
+a
+=
+]: b
+--- expected
+
+--- end
+--- case 24 options - label-bytes 61 input-bytes 14 expected-bytes 0
+from commonmark/definition.cases #73; verified: decision 0019
+--- input
+[a]: b '
+c
+=
+'
+--- expected
+
+--- end
+--- case 25 options - label-bytes 61 input-bytes 6 expected-bytes 16
+from commonmark/frontmatter.cases #4; verified: decision 0019
+--- input
+--
+---
+--- expected
+<p>--</p>
+<hr />
+--- end
+--- case 26 options - label-bytes 62 input-bytes 9 expected-bytes 19
+from commonmark/frontmatter.cases #13; verified: decision 0019
+--- input
+--- a
+---
+--- expected
+<p>--- a</p>
+<hr />
+--- end
+--- case 27 options - label-bytes 54 input-bytes 9 expected-bytes 14
+from commonmark/fuzz.cases #1; verified: decision 0019
+--- input
+[
+~
+a
+-
+
+
+--- expected
+<p>[
+~
+a
+-</p>
+--- end
+--- case 28 options - label-bytes 60 input-bytes 164 expected-bytes 345
+from commonmark/gfm_table.cases #57; verified: decision 0019
+--- input
+# Loose
+
+## Loose
+
+Header 1 | Header 2
+-------- | --------
+Cell 1   | Cell 2
+Cell 3   | Cell 4
+
+## One “column”, loose
+
+a
+-
+b
+
+## No pipe in first row
+
+a
+| - |
+
+--- expected
+<h1>Loose</h1>
+<h2>Loose</h2>
+<table>
+<thead>
+<tr>
+<th>Header 1</th>
+<th>Header 2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cell 1</td>
+<td>Cell 2</td>
+</tr>
+<tr>
+<td>Cell 3</td>
+<td>Cell 4</td>
+</tr>
+</tbody>
+</table>
+<h2>One “column”, loose</h2>
+<p>a
+-
+b</p>
+<h2>No pipe in first row</h2>
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+</table>
+--- end
+--- case 29 options - label-bytes 64 input-bytes 19 expected-bytes 33
+from commonmark/heading_setext.cases #1; verified: decision 0019
+--- input
+Foo *bar*
+=========
+--- expected
+<p>Foo <em>bar</em>
+=========</p>
+--- end
+--- case 30 options - label-bytes 64 input-bytes 19 expected-bytes 30
+from commonmark/heading_setext.cases #2; verified: decision 0019
+--- input
+Foo *bar*
+---------
+--- expected
+<p>Foo <em>bar</em></p>
+<hr />
+--- end
+--- case 31 options - label-bytes 64 input-bytes 18 expected-bytes 32
+from commonmark/heading_setext.cases #3; verified: decision 0019
+--- input
+Foo *bar
+baz*
+====
+--- expected
+<p>Foo <em>bar
+baz</em>
+====</p>
+--- end
+--- case 32 options - label-bytes 64 input-bytes 21 expected-bytes 32
+from commonmark/heading_setext.cases #4; verified: decision 0019
+--- input
+  Foo *bar
+baz*	
+====
+--- expected
+<p>Foo <em>bar
+baz</em>
+====</p>
+--- end
+--- case 33 options - label-bytes 64 input-bytes 29 expected-bytes 17
+from commonmark/heading_setext.cases #5; verified: decision 0019
+--- input
+Foo
+-------------------------
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 34 options - label-bytes 64 input-bytes 5 expected-bytes 12
+from commonmark/heading_setext.cases #6; verified: decision 0019
+--- input
+Foo
+=
+--- expected
+<p>Foo
+=</p>
+--- end
+--- case 35 options - label-bytes 64 input-bytes 10 expected-bytes 14
+from commonmark/heading_setext.cases #7; verified: decision 0019
+--- input
+ Foo
+  ===
+--- expected
+<p>Foo
+===</p>
+--- end
+--- case 36 options - label-bytes 64 input-bytes 9 expected-bytes 17
+from commonmark/heading_setext.cases #8; verified: decision 0019
+--- input
+  Foo
+---
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 37 options - label-bytes 64 input-bytes 10 expected-bytes 17
+from commonmark/heading_setext.cases #9; verified: decision 0019
+--- input
+   Foo
+---
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 38 options - label-bytes 65 input-bytes 17 expected-bytes 17
+from commonmark/heading_setext.cases #12; verified: decision 0019
+--- input
+Foo
+   ----      
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 39 options - label-bytes 65 input-bytes 8 expected-bytes 12
+from commonmark/heading_setext.cases #13; verified: decision 0019
+--- input
+Foo
+   =
+--- expected
+<p>Foo
+=</p>
+--- end
+--- case 40 options - label-bytes 65 input-bytes 11 expected-bytes 17
+from commonmark/heading_setext.cases #18; verified: decision 0019
+--- input
+Foo  
+-----
+--- expected
+<p>Foo</p>
+<hr />
+--- end
+--- case 41 options - label-bytes 65 input-bytes 10 expected-bytes 18
+from commonmark/heading_setext.cases #19; verified: decision 0019
+--- input
+Foo\
+-----
+--- expected
+<p>Foo\</p>
+<hr />
+--- end
+--- case 42 options - label-bytes 65 input-bytes 11 expected-bytes 27
+from commonmark/heading_setext.cases #20; verified: decision 0019
+--- input
+`Foo
+----
+`
+--- expected
+<p>`Foo</p>
+<hr />
+<p>`</p>
+--- end
+--- case 43 options - label-bytes 65 input-bytes 32 expected-bytes 65
+from commonmark/heading_setext.cases #21; verified: decision 0019
+--- input
+<a title="a lot
+---
+of dashes"/>
+--- expected
+<p>&lt;a title=&quot;a lot</p>
+<hr />
+<p>of dashes&quot;/&gt;</p>
+--- end
+--- case 44 options - label-bytes 65 input-bytes 11 expected-bytes 21
+from commonmark/heading_setext.cases #25; verified: decision 0019
+--- input
+Foo
+Bar
+---
+--- expected
+<p>Foo
+Bar</p>
+<hr />
+--- end
+--- case 45 options - label-bytes 65 input-bytes 13 expected-bytes 22
+from commonmark/heading_setext.cases #30; verified: decision 0019
+--- input
+\> foo
+------
+--- expected
+<p>&gt; foo</p>
+<hr />
+--- end
+--- case 46 options - label-bytes 65 input-bytes 15 expected-bytes 32
+from commonmark/heading_setext.cases #31; verified: decision 0019
+--- input
+Foo
+bar
+---
+baz
+--- expected
+<p>Foo
+bar</p>
+<hr />
+<p>baz</p>
+--- end
+--- case 47 options - label-bytes 65 input-bytes 16 expected-bytes 39
+from commonmark/heading_setext.cases #32; verified: decision 0019
+--- input
+Foo
+
+bar
+---
+baz
+--- expected
+<p>Foo</p>
+<p>bar</p>
+<hr />
+<p>baz</p>
+--- end
+--- case 48 options - label-bytes 65 input-bytes 15 expected-bytes 27
+from commonmark/heading_setext.cases #36; verified: decision 0019
+--- input
+Foo  
+bar
+-----
+--- expected
+<p>Foo<br />
+bar</p>
+<hr />
+--- end
+--- case 49 options - label-bytes 65 input-bytes 14 expected-bytes 27
+from commonmark/heading_setext.cases #37; verified: decision 0019
+--- input
+Foo\
+bar
+-----
+--- expected
+<p>Foo<br />
+bar</p>
+<hr />
+--- end
+--- case 50 options - label-bytes 65 input-bytes 5 expected-bytes 12
+from commonmark/heading_setext.cases #38; verified: decision 0019
+--- input
+a
+-
+b
+--- expected
+<p>a
+-
+b</p>
+--- end
+--- case 51 options - label-bytes 65 input-bytes 10 expected-bytes 10
+from commonmark/heading_setext.cases #39; verified: decision 0019
+--- input
+[a]: b
+=
+=
+--- expected
+<p>=
+=</p>
+--- end
+--- case 52 options - label-bytes 55 input-bytes 25 expected-bytes 58
+from commonmark/list.cases #49; verified: decision 0019
+--- input
+- # Foo
+- Bar
+  ---
+  baz
+--- expected
+<ul>
+<li>
+<h1>Foo</h1>
+</li>
+<li>Bar
+<hr />
+baz</li>
+</ul>
+--- end
+--- case 53 options - label-bytes 67 input-bytes 10 expected-bytes 14
+from commonmark/misc_line_ending.cases #22; verified: decision 0019
+--- input
+A
+B
+-
+C
+--- expected
+<p>A
+B
+-
+C</p>
+--- end
+--- case 54 options - label-bytes 65 input-bytes 11 expected-bytes 28
+from commonmark/thematic_break.cases #24; verified: decision 0019
+--- input
+Foo
+---
+bar
+--- expected
+<p>Foo</p>
+<hr />
+<p>bar</p>
+--- end
+--- case 55 options - label-bytes 47 input-bytes 16 expected-bytes 29
+from gfm/core.cases #7; verified: decision 0019
+--- input
+Hi
+==
+
+Ok
+-----
+
+--- expected
+<p>Hi
+==</p>
+<p>Ok</p>
+<hr />
+--- end
+--- case 56 options - label-bytes 54 input-bytes 47 expected-bytes 93
+from gfm/regressions.cases #8; verified: decision 0019
+--- input
+
+`Foo
+----
+`
+
+<a title="a lot
+---
+of dashes"/>
+
+--- expected
+<p>`Foo</p>
+<hr />
+<p>`</p>
+<p>&lt;a title=&quot;a lot</p>
+<hr />
+<p>of dashes&quot;/&gt;</p>
+--- end

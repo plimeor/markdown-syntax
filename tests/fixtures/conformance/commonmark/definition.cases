@@ -1,6 +1,6 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: definition
-count: 77
+count: 74
 
 --- case 1 options - label-bytes 31 input-bytes 26 expected-bytes 43
 should support link definitions
@@ -315,18 +315,7 @@ should not support definitions in headings
 <p>bar</p>
 </blockquote>
 --- end
---- case 32 options - label-bytes 48 input-bytes 25 expected-bytes 42
-should support setext headings after definitions
---- input
-[foo]: /url
-bar
-===
-[foo]
---- expected
-<h1>bar</h1>
-<p><a href="/url">foo</a></p>
---- end
---- case 33 options - label-bytes 66 input-bytes 8 expected-bytes 8
+--- case 32 options - label-bytes 66 input-bytes 8 expected-bytes 8
 should not support setext heading underlines after definitions (1)
 --- input
 [a]: b
@@ -334,7 +323,7 @@ should not support setext heading underlines after definitions (1)
 --- expected
 <p>=</p>
 --- end
---- case 34 options - label-bytes 66 input-bytes 21 expected-bytes 33
+--- case 33 options - label-bytes 66 input-bytes 21 expected-bytes 33
 should not support setext heading underlines after definitions (2)
 --- input
 [foo]: /url
@@ -344,7 +333,7 @@ should not support setext heading underlines after definitions (2)
 <p>===
 <a href="/url">foo</a></p>
 --- end
---- case 35 options - label-bytes 44 input-bytes 82 expected-bytes 113
+--- case 34 options - label-bytes 44 input-bytes 82 expected-bytes 113
 should support definitions after definitions
 --- input
 [foo]: /foo-url "foo"
@@ -360,7 +349,7 @@ should support definitions after definitions
 <a href="/bar-url" title="bar">bar</a>,
 <a href="/baz-url">baz</a></p>
 --- end
---- case 36 options - label-bytes 46 input-bytes 20 expected-bytes 56
+--- case 35 options - label-bytes 46 input-bytes 20 expected-bytes 56
 should support definitions in block quotes (1)
 --- input
 > [foo]: /url
@@ -371,7 +360,7 @@ should support definitions in block quotes (1)
 </blockquote>
 <p><a href="/url">foo</a></p>
 --- end
---- case 37 options - label-bytes 46 input-bytes 17 expected-bytes 26
+--- case 36 options - label-bytes 46 input-bytes 17 expected-bytes 26
 should support definitions in block quotes (2)
 --- input
 > [a]: <> 'b
@@ -380,7 +369,7 @@ should support definitions in block quotes (2)
 <blockquote>
 </blockquote>
 --- end
---- case 38 options - label-bytes 46 input-bytes 18 expected-bytes 63
+--- case 37 options - label-bytes 46 input-bytes 18 expected-bytes 63
 should support definitions in block quotes (3)
 --- input
 > [a]
@@ -394,7 +383,7 @@ should support definitions in block quotes (3)
 </blockquote>
 
 --- end
---- case 39 options - label-bytes 33 input-bytes 38 expected-bytes 43
+--- case 38 options - label-bytes 33 input-bytes 38 expected-bytes 43
 should match w/ character escapes
 --- input
 [\[\+\]]: example.com
@@ -403,7 +392,7 @@ Link: [\[\+\]].
 --- expected
 <p>Link: <a href="example.com">[+]</a>.</p>
 --- end
---- case 40 options - label-bytes 72 input-bytes 24 expected-bytes 34
+--- case 39 options - label-bytes 72 input-bytes 24 expected-bytes 34
 should support character escapes & references in unenclosed destinations
 --- input
 [x]: \"&#x20;\(\)\"
@@ -412,7 +401,7 @@ should support character escapes & references in unenclosed destinations
 --- expected
 <p><a href="%22%20()%22">x</a></p>
 --- end
---- case 41 options - label-bytes 70 input-bytes 24 expected-bytes 33
+--- case 40 options - label-bytes 70 input-bytes 24 expected-bytes 33
 should support character escapes & references in enclosed destinations
 --- input
 [x]: <\>&#x20;\+\>>
@@ -421,7 +410,7 @@ should support character escapes & references in enclosed destinations
 --- expected
 <p><a href="%3E%20+%3E">x</a></p>
 --- end
---- case 42 options - label-bytes 65 input-bytes 11 expected-bytes 27
+--- case 41 options - label-bytes 65 input-bytes 11 expected-bytes 27
 should not support a line ending at start of enclosed destination
 --- input
 [x]: <
@@ -431,7 +420,7 @@ should not support a line ending at start of enclosed destination
 <p>[x]: &lt;</p>
 <p>[x]</p>
 --- end
---- case 43 options - label-bytes 56 input-bytes 12 expected-bytes 28
+--- case 42 options - label-bytes 56 input-bytes 12 expected-bytes 28
 should not support a line ending in enclosed destination
 --- input
 [x]: <x
@@ -441,7 +430,7 @@ should not support a line ending in enclosed destination
 <p>[x]: &lt;x</p>
 <p>[x]</p>
 --- end
---- case 44 options - label-bytes 71 input-bytes 12 expected-bytes 25
+--- case 43 options - label-bytes 71 input-bytes 12 expected-bytes 25
 should not support ascii control characters at the start of destination
 --- input
 [x]: a
@@ -451,7 +440,7 @@ should not support ascii control characters at the start of destination
 <p>[x]: a</p>
 <p>[x]</p>
 --- end
---- case 45 options - label-bytes 58 input-bytes 13 expected-bytes 26
+--- case 44 options - label-bytes 58 input-bytes 13 expected-bytes 26
 should not support ascii control characters in destination
 --- input
 [x]: ab
@@ -461,7 +450,7 @@ should not support ascii control characters in destination
 <p>[x]: ab</p>
 <p>[x]</p>
 --- end
---- case 46 options - label-bytes 76 input-bytes 14 expected-bytes 27
+--- case 45 options - label-bytes 76 input-bytes 14 expected-bytes 27
 should support ascii control characters at the start of enclosed destination
 --- input
 [x]: <a>
@@ -470,7 +459,7 @@ should support ascii control characters at the start of enclosed destination
 --- expected
 <p><a href="%0Ba">x</a></p>
 --- end
---- case 47 options - label-bytes 64 input-bytes 15 expected-bytes 28
+--- case 46 options - label-bytes 64 input-bytes 15 expected-bytes 28
 should support ascii control characters in enclosed destinations
 --- input
 [x]: <ab>
@@ -479,7 +468,7 @@ should support ascii control characters in enclosed destinations
 --- expected
 <p><a href="a%0Bb">x</a></p>
 --- end
---- case 48 options - label-bytes 56 input-bytes 16 expected-bytes 39
+--- case 47 options - label-bytes 56 input-bytes 16 expected-bytes 39
 should support character escapes at the start of a title
 --- input
 [x]: a "\""
@@ -488,7 +477,7 @@ should support character escapes at the start of a title
 --- expected
 <p><a href="a" title="&quot;">x</a></p>
 --- end
---- case 49 options - label-bytes 35 input-bytes 15 expected-bytes 34
+--- case 48 options - label-bytes 35 input-bytes 15 expected-bytes 34
 should support double quoted titles
 --- input
 [x]: a "'"
@@ -497,7 +486,7 @@ should support double quoted titles
 --- expected
 <p><a href="a" title="'">x</a></p>
 --- end
---- case 50 options - label-bytes 35 input-bytes 15 expected-bytes 39
+--- case 49 options - label-bytes 35 input-bytes 15 expected-bytes 39
 should support single quoted titles
 --- input
 [x]: a '"'
@@ -506,7 +495,7 @@ should support single quoted titles
 --- expected
 <p><a href="a" title="&quot;">x</a></p>
 --- end
---- case 51 options - label-bytes 36 input-bytes 16 expected-bytes 40
+--- case 50 options - label-bytes 36 input-bytes 16 expected-bytes 40
 should support paren enclosed titles
 --- input
 [x]: a ("')
@@ -515,7 +504,7 @@ should support paren enclosed titles
 --- expected
 <p><a href="a" title="&quot;'">x</a></p>
 --- end
---- case 52 options - label-bytes 70 input-bytes 14 expected-bytes 27
+--- case 51 options - label-bytes 70 input-bytes 14 expected-bytes 27
 should not support more opening than closing parens in the destination
 --- input
 [x]: a(()
@@ -525,7 +514,7 @@ should not support more opening than closing parens in the destination
 <p>[x]: a(()</p>
 <p>[x]</p>
 --- end
---- case 53 options - label-bytes 69 input-bytes 15 expected-bytes 28
+--- case 52 options - label-bytes 69 input-bytes 15 expected-bytes 28
 should support balanced opening and closing parens in the destination
 --- input
 [x]: a(())
@@ -534,7 +523,7 @@ should support balanced opening and closing parens in the destination
 --- expected
 <p><a href="a(())">x</a></p>
 --- end
---- case 54 options - label-bytes 70 input-bytes 14 expected-bytes 27
+--- case 53 options - label-bytes 70 input-bytes 14 expected-bytes 27
 should not support more closing than opening parens in the destination
 --- input
 [x]: a())
@@ -544,7 +533,7 @@ should not support more closing than opening parens in the destination
 <p>[x]: a())</p>
 <p>[x]</p>
 --- end
---- case 55 options - label-bytes 54 input-bytes 14 expected-bytes 24
+--- case 54 options - label-bytes 54 input-bytes 14 expected-bytes 24
 should support trailing whitespace after a destination
 --- input
 [x]: a  	
@@ -553,7 +542,7 @@ should support trailing whitespace after a destination
 --- expected
 <p><a href="a">x</a></p>
 --- end
---- case 56 options - label-bytes 48 input-bytes 17 expected-bytes 34
+--- case 55 options - label-bytes 48 input-bytes 17 expected-bytes 34
 should support trailing whitespace after a title
 --- input
 [x]: a "X" 	
@@ -562,7 +551,7 @@ should support trailing whitespace after a title
 --- expected
 <p><a href="a" title="X">x</a></p>
 --- end
---- case 57 options - label-bytes 50 input-bytes 71 expected-bytes 83
+--- case 56 options - label-bytes 50 input-bytes 71 expected-bytes 83
 should support character references in definitions
 --- input
 [&amp;&copy;&]: example.com/&amp;&copy;& "&amp;&copy;&"
@@ -571,7 +560,7 @@ should support character references in definitions
 --- expected
 <p><a href="example.com/&amp;%C2%A9&amp;" title="&amp;©&amp;">&amp;©&amp;</a></p>
 --- end
---- case 58 options - label-bytes 49 input-bytes 21 expected-bytes 34
+--- case 57 options - label-bytes 49 input-bytes 21 expected-bytes 34
 should support a line ending before a destination
 --- input
 [x]:
@@ -581,7 +570,7 @@ example.com
 --- expected
 <p><a href="example.com">x</a></p>
 --- end
---- case 59 options - label-bytes 46 input-bytes 23 expected-bytes 34
+--- case 58 options - label-bytes 46 input-bytes 23 expected-bytes 34
 should support whitespace before a destination
 --- input
 [x]: 	
@@ -591,7 +580,7 @@ example.com
 --- expected
 <p><a href="example.com">x</a></p>
 --- end
---- case 60 options - label-bytes 28 input-bytes 16 expected-bytes 22
+--- case 59 options - label-bytes 28 input-bytes 16 expected-bytes 22
 should ignore an empty title
 --- input
 [x]: <> ""
@@ -599,7 +588,7 @@ should ignore an empty title
 --- expected
 <p><a href=""></a></p>
 --- end
---- case 61 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 15 expected-bytes 31
+--- case 60 options allow_dangerous_html,allow_dangerous_protocol label-bytes 57 input-bytes 15 expected-bytes 31
 should not support a less than in an enclosed destination
 --- input
 [a]
@@ -609,7 +598,7 @@ should not support a less than in an enclosed destination
 <p>[a]</p>
 <p>[a]: &lt;b<c></p>
 --- end
---- case 62 options - label-bytes 65 input-bytes 13 expected-bytes 26
+--- case 61 options - label-bytes 65 input-bytes 13 expected-bytes 26
 should not support an extra left paren (`(`) in a raw destination
 --- input
 [a]
@@ -619,7 +608,7 @@ should not support an extra left paren (`(`) in a raw destination
 <p>[a]</p>
 <p>[a]: b(c</p>
 --- end
---- case 63 options - label-bytes 66 input-bytes 13 expected-bytes 26
+--- case 62 options - label-bytes 66 input-bytes 13 expected-bytes 26
 should not support an extra right paren (`)`) in a raw destination
 --- input
 [a]
@@ -629,7 +618,7 @@ should not support an extra right paren (`)`) in a raw destination
 <p>[a]</p>
 <p>[a]: b)c</p>
 --- end
---- case 64 options - label-bytes 85 input-bytes 26 expected-bytes 40
+--- case 63 options - label-bytes 85 input-bytes 26 expected-bytes 40
 should support 4 or more sets of parens in a raw destination (link resources don’t)
 --- input
 [a]
@@ -639,7 +628,7 @@ should support 4 or more sets of parens in a raw destination (link resources don
 <p><a href="a(1(2(3(4()))))b">a</a></p>
 
 --- end
---- case 65 options - label-bytes 72 input-bytes 14 expected-bytes 27
+--- case 64 options - label-bytes 72 input-bytes 14 expected-bytes 27
 should not support a final (unbalanced) right paren in a raw destination
 --- input
 [a]
@@ -649,7 +638,7 @@ should not support a final (unbalanced) right paren in a raw destination
 <p>[a]</p>
 <p>[a]: aaa)</p>
 --- end
---- case 66 options - label-bytes 93 input-bytes 18 expected-bytes 41
+--- case 65 options - label-bytes 93 input-bytes 18 expected-bytes 41
 should not support a final (unbalanced) right paren in a raw destination “before” a title
 --- input
 [a]
@@ -659,7 +648,7 @@ should not support a final (unbalanced) right paren in a raw destination “befo
 <p>[a]</p>
 <p>[a]: aaa) &quot;a&quot;</p>
 --- end
---- case 67 options - label-bytes 46 input-bytes 67 expected-bytes 38
+--- case 66 options - label-bytes 46 input-bytes 67 expected-bytes 38
 should support subsequent indented definitions
 --- input
  [a]: b "c"
@@ -671,7 +660,7 @@ should support subsequent indented definitions
 --- expected
 <p>n <a href="l" title="m">k</a> o</p>
 --- end
---- case 68 options - label-bytes 49 input-bytes 19 expected-bytes 26
+--- case 67 options - label-bytes 49 input-bytes 19 expected-bytes 26
 should support line prefixes in definition labels
 --- input
 [a
@@ -683,7 +672,7 @@ should support line prefixes in definition labels
 <p><a href="c">a
 b</a></p>
 --- end
---- case 69 options - label-bytes 75 input-bytes 11 expected-bytes 24
+--- case 68 options - label-bytes 75 input-bytes 11 expected-bytes 24
 should not support definitions w/ only a closing paren as a raw destination
 --- input
 [a]: )
@@ -693,7 +682,7 @@ should not support definitions w/ only a closing paren as a raw destination
 <p>[a]: )</p>
 <p>[a]</p>
 --- end
---- case 70 options - label-bytes 80 input-bytes 12 expected-bytes 25
+--- case 69 options - label-bytes 80 input-bytes 12 expected-bytes 25
 should not support definitions w/ closing paren + more text as a raw destination
 --- input
 [a]: )b
@@ -703,7 +692,7 @@ should not support definitions w/ closing paren + more text as a raw destination
 <p>[a]: )b</p>
 <p>[a]</p>
 --- end
---- case 71 options - label-bytes 77 input-bytes 12 expected-bytes 25
+--- case 70 options - label-bytes 77 input-bytes 12 expected-bytes 25
 should not support definitions w/ text + a closing paren as a raw destination
 --- input
 [a]: b)
@@ -713,31 +702,7 @@ should not support definitions w/ text + a closing paren as a raw destination
 <p>[a]: b)</p>
 <p>[a]</p>
 --- end
---- case 72 options - label-bytes 52 input-bytes 10 expected-bytes 24
-should prefer setext headings over definition labels
---- input
-[
-a
-=
-]: b
---- expected
-<h1>[
-a</h1>
-<p>]: b</p>
---- end
---- case 73 options - label-bytes 52 input-bytes 14 expected-bytes 28
-should prefer setext headings over definition titles
---- input
-[a]: b '
-c
-=
-'
---- expected
-<h1>[a]: b '
-c</h1>
-<p>'</p>
---- end
---- case 74 options - label-bytes 52 input-bytes 10 expected-bytes 27
+--- case 71 options - label-bytes 52 input-bytes 10 expected-bytes 27
 should prefer thematic breaks over definition labels
 --- input
 [
@@ -748,7 +713,7 @@ should prefer thematic breaks over definition labels
 <hr />
 <p>]: b</p>
 --- end
---- case 75 options - label-bytes 52 input-bytes 14 expected-bytes 31
+--- case 72 options - label-bytes 52 input-bytes 14 expected-bytes 31
 should prefer thematic breaks over definition titles
 --- input
 [a]: b '
@@ -759,7 +724,7 @@ should prefer thematic breaks over definition titles
 <hr />
 <p>'</p>
 --- end
---- case 76 options - label-bytes 50 input-bytes 10 expected-bytes 39
+--- case 73 options - label-bytes 50 input-bytes 10 expected-bytes 39
 should prefer code (fenced) over definition labels
 --- input
 [
@@ -771,7 +736,7 @@ should prefer code (fenced) over definition labels
 </code></pre>
 
 --- end
---- case 77 options - label-bytes 50 input-bytes 14 expected-bytes 43
+--- case 74 options - label-bytes 50 input-bytes 14 expected-bytes 43
 should prefer code (fenced) over definition titles
 --- input
 [a]: b '

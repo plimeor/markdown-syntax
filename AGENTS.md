@@ -9,7 +9,7 @@ Read `docs/overview.md` before starting work.
   each unchanged node is written as its source, an edited one with its own
   syntax copied from the source around what changed, a leaf built from text
   (`with_source`) as that text, and the rest as canonical Markdown (decision
-  0017). Raw HTML is represented only as Markdown syntax nodes;
+  0020). Raw HTML is represented only as Markdown syntax nodes;
   HTML rendering and sanitization stay out of the default build.
 - The repository is a Cargo workspace whose default member is the root
   crate; `wasm/` holds `markdown-syntax-wasm`, the unpublished WebAssembly
@@ -79,7 +79,7 @@ scope, and call-graph limits are in [docs/codegraph.md](docs/codegraph.md).
   `cargo test --profile ci --features html --test html_conformance -- --nocapture`.
   It fails only when an entry in `tests/html_conformance/deviations.rs` names
   no case, names a case twice, or names a case that now passes, or when
-  `commonmark/commonmark.cases` no longer holds its 643 cases.
+  `commonmark/commonmark.cases` no longer holds its 612 cases.
 - An oracle case that differs by decision of this syntax (a construct the
   syntax drops, one the oracle lacks or turns off, or a rule shared with
   another reference renderer) leaves the bench. Its input moves to

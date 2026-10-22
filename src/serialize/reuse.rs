@@ -255,6 +255,21 @@ fn prefixed(
         .collect()
 }
 
+/// Whether `line`, a quote's first content line, is a blank line that would
+/// not open the quote: an empty one, which takes the bare `>` of a blank
+/// line, or one copied with its prefixes that ends in a `>`.
+fn opens_bare(line: &Line) -> bool {
+    if line.full {
+        line.body.ends_with('>')
+            && line
+                .body
+                .chars()
+                .all(|char| matches!(char, ' ' | '\t' | '>'))
+    } else {
+        line.body.is_empty()
+    }
+}
+
 /// Whether `gap`, the source between two siblings, holds a line of nothing
 /// but container prefixes: a blank line where the siblings stand.
 pub(super) fn holds_blank_line(gap: &str) -> bool {
@@ -390,16 +405,8 @@ pub(super) fn keeps_gap(
                     .map(|line| line.body.as_str()),
                 None => source[right_span.start..].split(['\n', '\r']).next(),
             };
-            // A sibling kept whole whose line holds whitespace before it:
-            // inside a container, whose prefix ends with a space, nearly
-            // always, which leaves the probe for an empty item to the top
-            // level.
-            let indented =
-                right_lines.is_none() && source[..right_span.start].ends_with([' ', '\t']);
             match last_leaf(source, left_block) {
-                Some((leaf, markers)) => {
-                    starts_after_leaf(leaf, &markers, right_block, first, indented)
-                }
+                Some((leaf, markers)) => starts_after_leaf(leaf, &markers, right_block, first),
                 None => true,
             }
         }
@@ -422,13 +429,14 @@ fn last_leaf<'b>(source: &str, block: &'b Block) -> Option<(&'b Block, String)> 
         Block::FootnoteDefinition(node) => (&node.children, String::from("[^a]: ")),
         Block::List(list) => {
             let item = list.children.last()?;
-            // An empty item, written as its marker, stands for itself.
+            // An empty item, written as its marker and a space, stands for
+            // itself.
             if item.children.is_empty() {
                 let marker = item.meta.span.map(|span| {
                     let text = source[span.start..span.end].trim_start();
                     &text[..text.find(char::is_whitespace).unwrap_or(text.len())]
                 });
-                return Some((block, String::from(marker.unwrap_or("-"))));
+                return Some((block, format!("{} ", marker.unwrap_or("-"))));
             }
             (&item.children, item_marker(source, item))
         }
@@ -503,17 +511,11 @@ fn item_marker(source: &str, item: &ListItem) -> String {
 /// (`first`) ends a table; where they are some, only where that line, as a
 /// lazy line, ends the containers holding a paragraph, which no row
 /// continues a table with. After an alert's marker line, which takes a lazy
-/// line as its paragraph's, the same; after an empty item, a list, where
-/// the line is no deeper than its marker, which `indented`, a sibling kept
-/// whole after whitespace on its line, leaves unknown; after a directive,
-/// whose lines no probe stands for, never; after any other leaf always.
-fn starts_after_leaf(
-    left: &Block,
-    markers: &str,
-    right: &Block,
-    first: Option<&str>,
-    indented: bool,
-) -> bool {
+/// line as its paragraph's, the same; after an empty item, which takes no
+/// line, where the line does not continue its list with another item;
+/// after a directive, whose lines no probe stands for, never; after any
+/// other leaf always.
+fn starts_after_leaf(left: &Block, markers: &str, right: &Block, first: Option<&str>) -> bool {
     // Whether `first`, after `before`, starts a block of its own after the
     // first block `before` opens, or after the first item of a list.
     let ends = |before: &str| {
@@ -530,15 +532,14 @@ fn starts_after_leaf(
     match left {
         Block::ContainerDirective(_) => false,
         Block::Paragraph(_) | Block::Definition(_) if markers.is_empty() => {
-            super::written_after_paragraph_interrupts(right)
+            crate::parse::interrupts_paragraph(right)
         }
         Block::Paragraph(_) | Block::Definition(_) => ends(&format!("{markers}a")),
         Block::Alert(_) => ends(&format!("{markers}> [!NOTE]")),
         Block::Table(_) if markers.is_empty() => ends("| a |\n| - |"),
-        // An empty item, its marker last in `markers`, takes a line indented
-        // past its marker: one kept from the source after indentation,
-        // which the probe does not see, always.
-        Block::List(_) => !indented && ends(markers),
+        // An empty item, its marker last in `markers`, takes no line, so
+        // the line stays out of the list unless it is another item.
+        Block::List(_) => ends(markers),
         // No lazy line continues a table.
         Block::Table(_) => true,
         // Each ends where its own syntax or line does.
@@ -617,8 +618,6 @@ pub(super) struct Reuse<'a, 'c> {
 /// top level and every container.
 #[derive(Default)]
 pub(super) struct Placement<'b> {
-    /// Whether a sibling, a blank line included, was written.
-    started: bool,
     /// The last sibling written other than a blank line.
     last: Option<&'b Block>,
     /// The marker of the list written last, with only blank lines after it.
@@ -628,34 +627,27 @@ pub(super) struct Placement<'b> {
 }
 
 impl<'b> Placement<'b> {
-    /// The last sibling written other than a blank line.
-    pub(super) fn last(&self) -> Option<&'b Block> {
-        self.last
-    }
-
     /// The marker of the list written last, with only blank lines after it.
     pub(super) fn previous_list(&self) -> Option<char> {
         self.previous_list
     }
 
     /// Whether `block`, written from the source with text that opens with
-    /// `text`, reads as part of what is written before it. One that follows
-    /// its predecessor in the source across a kept gap (`follows`) reads as
-    /// there unless that predecessor is an open list, whose last item's
-    /// column moved.
+    /// `text`, reads as part of what is written before it, or, written
+    /// first, as indented code. One that follows its predecessor in the
+    /// source across a kept gap (`follows`) reads as there unless that
+    /// predecessor is an open list, whose last item's column moved.
     pub(super) fn takes_in(&self, block: &Block, text: &str, follows: bool) -> bool {
-        self.started
-            && if follows {
-                self.open_list && super::moves_into_previous(block, text, self.last, None)
-            } else {
-                super::moves_into_previous(block, text, self.last, self.previous_list)
-            }
+        if follows {
+            self.open_list && super::moves_into_previous(block, text, self.last, None)
+        } else {
+            super::moves_into_previous(block, text, self.last, self.previous_list)
+        }
     }
 
     /// Records `block`, written after the siblings so far: the marker it was
     /// written with when it is a list, and whether it is an open list.
     pub(super) fn wrote(&mut self, block: &'b Block, marker: Option<char>, open_list: bool) {
-        self.started = true;
         if matches!(block, Block::BlankLine(_)) {
             return;
         }
@@ -1085,11 +1077,9 @@ impl Reuse<'_, '_> {
                     _ => Out::Render,
                 }
             }
-            (Block::Table(node), Block::Table(base))
-                if own_block_fields_equal(block, base_block) =>
-            {
-                self.table(node, base, span)?
-            }
+            // A table whose alignments changed renders them in its
+            // delimiter row's place.
+            (Block::Table(node), Block::Table(base)) => self.table(node, base, span)?,
             _ => {
                 if self.correspondence.holds(block, base) {
                     Out::Kept(span)
@@ -1122,44 +1112,15 @@ impl Reuse<'_, '_> {
             return Ok(Out::Render);
         };
         let body_end = self.body_end(span);
-        Ok(match node.kind {
-            HeadingKind::Atx => {
-                if text.contains(['\n', '\r']) || from < span.start || to > body_end {
-                    return Ok(Out::Render);
-                }
-                let line = format!(
-                    "{}{text}{}",
-                    &self.source[span.start..from],
-                    &self.source[to..body_end]
-                );
-                Out::Lines(content(&line))
-            }
-            HeadingKind::Setext => {
-                // The underline, the line after the text's last, is the
-                // source's line, with the whitespace that ends the text's.
-                let line_end = self.line_end(to);
-                let ending = self.ending_at(line_end);
-                let underline_start = line_end + ending.len();
-                if self.last_line(span).is_none() || underline_start > body_end {
-                    return Ok(Out::Render);
-                }
-                let mut written = self.leaf_lines(span, &text, false);
-                let last = written.last_mut().expect("a leaf has a line");
-                let trailing = &self.source[to..line_end];
-                if trailing.trim_start_matches([' ', '\t']).is_empty() {
-                    last.body.push_str(trailing);
-                }
-                last.ending = ending;
-                last.copied_ending = true;
-                written.push(Line {
-                    body: self.source[underline_start..body_end].into(),
-                    ending: String::new(),
-                    full: true,
-                    copied_ending: true,
-                });
-                Out::Lines(written)
-            }
-        })
+        if text.contains(['\n', '\r']) || from < span.start || to > body_end {
+            return Ok(Out::Render);
+        }
+        let line = format!(
+            "{}{text}{}",
+            &self.source[span.start..from],
+            &self.source[to..body_end]
+        );
+        Ok(Out::Lines(content(&line)))
     }
 
     /// An HTML container at `span` whose base holds the blocks `base` and
@@ -1233,7 +1194,7 @@ impl Reuse<'_, '_> {
     /// marker, the `>` and the space after it, where the base's first block
     /// starts on that line; every other content line takes the canonical
     /// prefix.
-    fn quoted(&self, span: Span, base: &[Block], lines: Vec<Line>) -> Out {
+    fn quoted(&self, span: Span, base: &[Block], mut lines: Vec<Line>) -> Out {
         let marker = base
             .first()
             .filter(|first| !matches!(first, Block::BlankLine(_)))
@@ -1254,6 +1215,18 @@ impl Reuse<'_, '_> {
             _ => marker
                 .filter(|_| lines.first().is_some_and(|first| !first.body.is_empty()))
                 .map(|marker| (marker, false)),
+        };
+        // A blank first line that is not the base's opens the quote, which
+        // takes `> `: a bare `>`, the canonical prefix of a later blank
+        // line and what a copied one may hold, continues a quote but opens
+        // none.
+        let opening = match lines.first_mut() {
+            Some(first) if opening.is_none() && opens_bare(first) => {
+                first.body.clear();
+                first.full = false;
+                Some(("> ", false))
+            }
+            _ => opening,
         };
         Out::Lines(prefixed(lines, opening, "> ", ">"))
     }
@@ -1277,13 +1250,18 @@ impl Reuse<'_, '_> {
     /// Appends `count` empty content lines to `lines`, then a line for each
     /// of `blank_lines`: the source line of one written from the source,
     /// with the source's line ending before it, unless it opens the
-    /// container, whose own syntax opens that line; an empty content line
-    /// otherwise.
+    /// container, whose own syntax opens that line, or opened it in the
+    /// source, where its span starts at the container's marker and not at
+    /// its line's start; an empty content line otherwise.
     fn push_blank_lines(&self, lines: &mut Vec<Line>, count: usize, blank_lines: &[Option<Span>]) {
         push_empty(lines, count);
         for blank in blank_lines {
             match blank {
-                Some(span) if !lines.is_empty() => {
+                Some(span)
+                    if !lines.is_empty()
+                        && span.start > 0
+                        && self.line_start(span.start) == span.start =>
+                {
                     let start = span.start;
                     let ending = self.source[..start]
                         .strip_suffix("\r\n")
@@ -1422,24 +1400,16 @@ impl Reuse<'_, '_> {
                 }
                 _ => None,
             };
-            // A break on the line after a paragraph's would underline it.
-            let underlines = join == Join::Line
-                && blank_lines.is_empty()
-                && matches!(child, Block::ThematicBreak(_))
-                && matches!(placement.last(), Some(Block::Paragraph(_)));
-            if written.as_ref().is_some_and(|written| {
-                (gap.is_none() && underlines)
-                    || placement.takes_in(child, &written[0].body, gap.is_some())
-            }) {
+            if written
+                .as_ref()
+                .is_some_and(|written| placement.takes_in(child, &written[0].body, gap.is_some()))
+            {
                 written = None;
                 at = None;
             }
-            let written = match (written, child) {
-                (Some(written), _) => written,
-                (None, Block::ThematicBreak(node)) if underlines => {
-                    content(&super::write_thematic_break(node, false, true))
-                }
-                (None, _) => content(&write_blocks(
+            let written = match written {
+                Some(written) => written,
+                None => content(&write_blocks(
                     core::slice::from_ref(child),
                     self.options,
                     Join::Gap,
@@ -1699,7 +1669,7 @@ impl Reuse<'_, '_> {
             // An item left without blocks keeps its marker, and with it the
             // column the next item's indentation is measured against.
             Children::Render if item.children.is_empty() => {
-                return Ok((Out::Lines(content(marker.trim_end())), false));
+                return Ok((Out::Lines(content(&empty_item_marker(&marker))), false));
             }
             Children::Render => return Ok((Out::Render, false)),
         };
@@ -1749,7 +1719,12 @@ impl Reuse<'_, '_> {
 
     /// A row at `span` whose base is `base`, with the same cells there:
     /// its source with each cell that changed written in its place, inline
-    /// by inline, and encoded as cell source.
+    /// by inline, and encoded as cell source. A cell empty in the source
+    /// holds only the padding between its pipes, so its text takes the
+    /// canonical space on either side in place of that padding; a cell the
+    /// source row lacks, which the parser reads as empty at the row's end,
+    /// is written after the row with every missing cell before it, each
+    /// after a pipe, and before one where the row ends with a pipe.
     fn row(
         &mut self,
         row: &TableRow,
@@ -1762,6 +1737,9 @@ impl Reuse<'_, '_> {
         let body_end = self.body_end(span);
         let mut written = String::new();
         let mut at = span.start;
+        // The cells the source row lacks that were passed over, which a
+        // missing cell given text after them writes as empty cells.
+        let mut missing = 0;
         for (cell, base_cell) in row.cells.iter().zip(&base.cells) {
             let Some(cell_span) = cell.meta.span.filter(|cell_span| {
                 Some(*cell_span) == base_cell.meta.span
@@ -1770,20 +1748,51 @@ impl Reuse<'_, '_> {
             }) else {
                 return Ok(None);
             };
-            written.push_str(&self.source[at..cell_span.start]);
+            let lacking = cell_span.is_empty() && cell_span.start == body_end;
             let kept = cell.source.as_deref();
             if self.leaf_holds(Some(cell_span), kept, &cell.children, &base_cell.children) {
-                written.push_str(&self.source[cell_span.start..cell_span.end]);
-            } else {
-                let Some(text) =
-                    self.leaf_text(cell_span, kept, &cell.children, &base_cell.children, true)?
-                else {
-                    return Ok(None);
-                };
-                if text.contains(['\n', '\r']) {
-                    return Ok(None);
+                written.push_str(&self.source[at..cell_span.end]);
+                missing += usize::from(lacking);
+                at = cell_span.end;
+                continue;
+            }
+            let Some(text) =
+                self.leaf_text(cell_span, kept, &cell.children, &base_cell.children, true)?
+            else {
+                return Ok(None);
+            };
+            if text.contains(['\n', '\r']) {
+                return Ok(None);
+            }
+            let text = super::encode_cell(&text);
+            let before = &self.source[at..cell_span.start];
+            if lacking {
+                written.push_str(before);
+                let bordered = ends_with_pipe(&written);
+                for text in core::iter::repeat_n("", missing).chain([text.as_str()]) {
+                    if bordered {
+                        written.push_str(&format!(" {text} |"));
+                    } else {
+                        written.push_str(&format!(" | {text}"));
+                    }
                 }
-                written.push_str(&super::encode_cell(&text));
+                missing = 0;
+            } else {
+                match before
+                    .rfind('|')
+                    .filter(|_| cell_span.is_empty() && !text.is_empty())
+                {
+                    Some(pipe) => {
+                        written.push_str(&before[..=pipe]);
+                        written.push(' ');
+                        written.push_str(&text);
+                        written.push(' ');
+                    }
+                    None => {
+                        written.push_str(before);
+                        written.push_str(&text);
+                    }
+                }
             }
             at = cell_span.end;
         }
@@ -1793,17 +1802,21 @@ impl Reuse<'_, '_> {
 
     fn table(&mut self, node: &Table, base: &Table, span: Span) -> Result<Out, SerializeError> {
         let span_of = |row: &TableRow| row.meta.span;
-        // The delimiter row: the line after the header row.
-        let delimiter = base.rows.first().and_then(|header| {
+        // The delimiter row: the line after the header row, with each cell
+        // whose alignment changed written in its place.
+        let mut delimiter = base.rows.first().and_then(|header| {
             let after = self.body_end(header.meta.span?);
             let rest = &self.source[after..];
             let start = after + rest.len() - rest.trim_start_matches(['\r', '\n']).len();
             let end = self.line_end(start);
             let line = self.source[start..end].trim_start_matches([' ', '\t', '>']);
-            (start > after && !line.is_empty())
-                .then(|| (String::from(&self.source[start..end]), self.ending_at(end)))
+            if start == after || line.is_empty() {
+                return None;
+            }
+            let line = realigned(&self.source[start..end], &base.alignments, &node.alignments)?;
+            Some((line, self.ending_at(end)))
         });
-        let mut all_kept = node.rows.len() == base.rows.len();
+        let mut all_kept = node.rows.len() == base.rows.len() && node.alignments == base.alignments;
         let mut lines = Vec::new();
         // The source's line ending after the line written last.
         let mut ending: Option<String> = None;
@@ -1829,13 +1842,22 @@ impl Reuse<'_, '_> {
                 None => false,
             };
             all_kept &= holds && found.is_some_and(|(at, _)| at == index);
+            // Whether the row is written from its source, whole or cell by
+            // cell.
+            let mut from_source = true;
             let mut written = match (holds, row.meta.span, found) {
                 (true, Some(span), _) => content(&self.source[span.start..self.body_end(span)]),
                 (false, Some(span), Some((_, base_row))) => match self.row(row, base_row, span)? {
                     Some(text) => content(&text),
-                    None => content(&write_row(row)?),
+                    None => {
+                        from_source = false;
+                        content(&write_row(row)?)
+                    }
                 },
-                _ => content(&write_row(row)?),
+                _ => {
+                    from_source = false;
+                    content(&write_row(row)?)
+                }
             };
             // A later row keeps its source line's prefix where it reads as
             // that line does there.
@@ -1852,6 +1874,11 @@ impl Reuse<'_, '_> {
             end_with_source_ending(&mut lines, ending.take());
             extend(&mut lines, written);
             ending = found.and(row.meta.span).map(|span| self.ending_after(span));
+            // New alignments under a rendered header, as after a column
+            // moved, render the delimiter row with it.
+            if index == 0 && !from_source && node.alignments != base.alignments {
+                delimiter = None;
+            }
             if index == 0 {
                 let written = match &delimiter {
                     Some((line, _)) => Line {
@@ -1872,6 +1899,68 @@ impl Reuse<'_, '_> {
         }
         Ok(Out::Lines(lines))
     }
+}
+
+/// `line`, a delimiter row as the source holds it, container prefixes
+/// included, with the colons of each cell whose alignment is not the
+/// `base` one any more written for its alignment in `alignments` around the
+/// cell's dashes; the line itself where they are the same, and `None` where
+/// the columns differ, which takes a rendered row. A cell's colons and
+/// dashes are the only run of them on the line, since a container prefix
+/// holds neither.
+fn realigned(line: &str, base: &[TableAlignment], alignments: &[TableAlignment]) -> Option<String> {
+    if base == alignments {
+        return Some(line.into());
+    }
+    if base.len() != alignments.len() {
+        return None;
+    }
+    let mut written = String::new();
+    let mut rest = line;
+    for (base, alignment) in base.iter().zip(alignments) {
+        let start = rest.find([':', '-'])?;
+        let end = rest[start..]
+            .find(|char| !matches!(char, ':' | '-'))
+            .map_or(rest.len(), |end| start + end);
+        written.push_str(&rest[..start]);
+        let cell = &rest[start..end];
+        if base == alignment {
+            written.push_str(cell);
+        } else {
+            let dashes = cell.trim_matches(':');
+            let (left, right) = match alignment {
+                TableAlignment::None => ("", ""),
+                TableAlignment::Left => (":", ""),
+                TableAlignment::Center => (":", ":"),
+                TableAlignment::Right => ("", ":"),
+            };
+            written.push_str(left);
+            written.push_str(dashes);
+            written.push_str(right);
+        }
+        rest = &rest[end..];
+    }
+    // A run of colons or dashes beyond the columns is no delimiter row the
+    // tree reads, a row of dashes alone, without a pipe or a colon,
+    // delimits no table, and one opening with `-` and a space or a tab
+    // opens a list item.
+    if rest.contains([':', '-']) {
+        return None;
+    }
+    written.push_str(rest);
+    let content = written.trim_start_matches([' ', '\t', '>']);
+    let item = content
+        .strip_prefix('-')
+        .is_some_and(|rest| rest.starts_with([' ', '\t']));
+    (written.contains(['|', ':']) && !item).then_some(written)
+}
+
+/// Whether a row written so far, `row`, ends with a pipe after any spaces
+/// and tabs: one that no backslash escapes, and so a border.
+fn ends_with_pipe(row: &str) -> bool {
+    let row = row.trim_end_matches([' ', '\t']);
+    row.strip_suffix('|')
+        .is_some_and(|before| (before.len() - before.trim_end_matches('\\').len()) % 2 == 0)
 }
 
 /// The column, from an item's start, that the lines the writer indents in
@@ -1900,6 +1989,19 @@ fn content_column(marker: &str, task: bool, same_line: bool) -> Option<usize> {
         space if space.contains('\t') => None,
         space => Some(width + space.len()),
     }
+}
+
+/// `marker`, an item's marker up to its first child, as an empty item's:
+/// the marker and one space or tab after it, which opens the item.
+fn empty_item_marker(marker: &str) -> String {
+    let trimmed = marker.trim_end();
+    let after = &marker[trimmed.len()..];
+    let gap = after
+        .chars()
+        .next()
+        .filter(|char| matches!(char, ' ' | '\t'))
+        .unwrap_or(' ');
+    format!("{trimmed}{gap}")
 }
 
 /// `marker`, an item's marker as the source writes it, with `number` in
@@ -2131,12 +2233,9 @@ fn own_block_fields_equal(one: &Block, other: &Block) -> bool {
         Block::Heading(Heading {
             meta: _,
             depth,
-            kind,
             children: _,
             source: _,
-        }) => {
-            matches!(other, Block::Heading(other) if other.depth == *depth && other.kind == *kind)
-        }
+        }) => matches!(other, Block::Heading(other) if other.depth == *depth),
         Block::BlockQuote(BlockQuote {
             meta: _,
             children: _,

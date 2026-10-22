@@ -1,30 +1,15 @@
 # markdown-syntax AST->HTML conformance suite v1
 source: fuzz
-count: 14
+count: 13
 
---- case 1 options - label-bytes 31 input-bytes 9 expected-bytes 15
-1: label, blank lines, and code
---- input
-[
-~
-a
--
-
-
---- expected
-<h2>[
-~
-a</h2>
-
---- end
---- case 2 options gfm label-bytes 55 input-bytes 11 expected-bytes 73
+--- case 1 options gfm label-bytes 55 input-bytes 11 expected-bytes 73
 2: gfm: email autolink literals running into each other
 --- input
 a@b.c+d@e.f
 --- expected
 <p><a href="mailto:a@b.c">a@b.c</a><a href="mailto:+d@e.f">+d@e.f</a></p>
 --- end
---- case 3 options - label-bytes 52 input-bytes 11 expected-bytes 47
+--- case 2 options - label-bytes 52 input-bytes 11 expected-bytes 47
 3-a: containers should not pierce into indented code
 --- input
     x
@@ -36,7 +21,7 @@ a@b.c+d@e.f
 <li></li>
 </ul>
 --- end
---- case 4 options - label-bytes 52 input-bytes 13 expected-bytes 75
+--- case 3 options - label-bytes 52 input-bytes 13 expected-bytes 75
 3-b: containers should not pierce into indented code
 --- input
     a
@@ -51,28 +36,28 @@ a@b.c+d@e.f
 </li>
 </ul>
 --- end
---- case 5 options - label-bytes 40 input-bytes 4 expected-bytes 10
+--- case 4 options - label-bytes 40 input-bytes 4 expected-bytes 10
 4-a: trailing whitespace and broken data
 --- input
 a * 
 --- expected
 <p>a *</p>
 --- end
---- case 6 options - label-bytes 48 input-bytes 3 expected-bytes 8
+--- case 5 options - label-bytes 48 input-bytes 3 expected-bytes 8
 4-b: trailing whitespace and broken data (GH-13)
 --- input
 _  
 --- expected
 <p>_</p>
 --- end
---- case 7 options gfm label-bytes 48 input-bytes 4 expected-bytes 10
+--- case 6 options gfm label-bytes 48 input-bytes 4 expected-bytes 10
 4-c: trailing whitespace and broken data (GH-14)
 --- input
 a ~ 
 --- expected
 <p>a ~</p>
 --- end
---- case 8 options gfm label-bytes 59 input-bytes 6 expected-bytes 45
+--- case 7 options gfm label-bytes 59 input-bytes 6 expected-bytes 45
 7: lazy container lines almost starting fenced code (GH-19)
 --- input
 > x
@@ -83,35 +68,35 @@ a ~
 </blockquote>
 <p>``</p>
 --- end
---- case 9 options gfm label-bytes 41 input-bytes 7 expected-bytes 41
+--- case 8 options gfm label-bytes 41 input-bytes 7 expected-bytes 41
 8-a: autolink literals after tabs (GH-18)
 --- input
 a	b@c.d
 --- expected
 <p>a	<a href="mailto:b@c.d">b@c.d</a></p>
 --- end
---- case 10 options gfm label-bytes 41 input-bytes 8 expected-bytes 42
+--- case 9 options gfm label-bytes 41 input-bytes 8 expected-bytes 42
 8-b: autolink literals after tabs (GH-18)
 --- input
 aa	b@c.d
 --- expected
 <p>aa	<a href="mailto:b@c.d">b@c.d</a></p>
 --- end
---- case 11 options gfm label-bytes 41 input-bytes 9 expected-bytes 43
+--- case 10 options gfm label-bytes 41 input-bytes 9 expected-bytes 43
 8-c: autolink literals after tabs (GH-18)
 --- input
 aaa	b@c.d
 --- expected
 <p>aaa	<a href="mailto:b@c.d">b@c.d</a></p>
 --- end
---- case 12 options gfm label-bytes 41 input-bytes 10 expected-bytes 44
+--- case 11 options gfm label-bytes 41 input-bytes 10 expected-bytes 44
 8-d: autolink literals after tabs (GH-18)
 --- input
 aaaa	b@c.d
 --- expected
 <p>aaaa	<a href="mailto:b@c.d">b@c.d</a></p>
 --- end
---- case 13 options gfm label-bytes 61 input-bytes 20 expected-bytes 125
+--- case 12 options gfm label-bytes 61 input-bytes 20 expected-bytes 125
 9: autolink literals that end in table cell delimiter (GH-20)
 --- input
 | a |
@@ -131,7 +116,7 @@ aaaa	b@c.d
 </tbody>
 </table>
 --- end
---- case 14 options gfm label-bytes 40 input-bytes 11 expected-bytes 40
+--- case 13 options gfm label-bytes 40 input-bytes 11 expected-bytes 40
 10: attention in different links (GH-21)
 --- input
 [*]() [*]()

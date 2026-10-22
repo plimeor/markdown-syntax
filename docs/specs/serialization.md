@@ -18,7 +18,16 @@ independent of source details the AST does not record. An ordered item
 without a number SHALL be written with the previous item's number plus one,
 or 1 when it is the first. A `BlankLine` SHALL be written as one line holding
 the container prefix without its trailing whitespace, and so SHALL any blank
-line the serializer writes inside a container.
+line the serializer writes inside a container, except a blank line that
+opens a block quote, which SHALL be written `> `. An empty heading, list
+item, or block quote SHALL be written as its marker followed by one space:
+`# `, `- `, `1. `, `> ` (decision 0019). A fenced code block's info string
+SHALL follow its opening fence directly, after one space only where it
+opens with the fence's char.
+
+#### Scenario: Empty blocks
+- **WHEN** a hand-built document holding a `Heading` of depth 1 with no children, a list of one item with no blocks, or a `BlockQuote` holding a `BlankLine` and a paragraph `a` is serialized
+- **THEN** `to_markdown()` returns `"# \n"`, `"- \n"`, or `"> \n> a\n"`, each of which reads back as the document
 
 ### Requirement: Round-trip stability
 For a parsed document without its source, parsing the Markdown that
@@ -28,7 +37,7 @@ spans, reading each `Escape` as a `Text` holding its char, each
 inside a heading, which the serializer writes as one space, as a `Text`
 holding a space, and merging adjacent `Text` nodes; and serializing that
 reparsed document SHALL yield the same text byte for byte, unless the source
-holds a detail the AST does not record (decision 0017), such as a lazy
+holds a detail the AST does not record (decision 0020), such as a lazy
 continuation line or the width of an indentation.
 
 ### Requirement: Serialize options
@@ -92,24 +101,28 @@ equal and their children correspond pairwise; a leaf with its own source
 (`with_source`) whose inlines are the ones `parse_inline` reads from that
 source with the definitions of the document being written corresponds when
 that source equals the base leaf's inline source, and is written as that
-source wherever it is written, except that an ATX heading, a table cell, or
+source wherever it is written, except that a heading, a table cell, or
 a directive label whose source holds a line ending is written from its
 inlines. The writer SHALL write:
 
 - a node that corresponds to its match, under containers that all keep their
   source prefixes, as its span's source text;
 - any other matched node with the source text of its own syntax (markers,
-  fences, delimiters, underlines, the table's delimiter row, and everything
+  fences, delimiters, the table's delimiter row, and everything
   else written once per node that is not a child), when its own fields are
   equal, and its children by these rules; a list item whose number or
   checkbox changed renders them in its marker's place, keeping its content
-  column where they fit;
+  column where they fit; a table whose alignments changed writes them in
+  its delimiter row's place, the colons of each changed column around that
+  cell's dashes in the source row, and renders that row where the number
+  of columns changed, the header row is rendered, or the row would not read
+  as a delimiter row, with its rows by these rules;
 - every other node as canonical output, with its children by these rules.
 
 A line written where the base node has a source line keeps that line's
 source prefix (container markers and indentation) and the line ending before
-it: a setext underline, a table's delimiter row, and a blank line matched to
-the base's whole, unless it opens its container, whose own syntax opens it;
+it: a table's delimiter row, and a blank line matched to the base's whole,
+unless it opens its container, whose own syntax opens it;
 an item's marker, for an item whose own fields are equal and whose
 whitespace before its content is spaces or one tab, as its source text up
 to its first child, tabs and line endings included, the line its
@@ -140,8 +153,9 @@ source's lines are on both sides. Which other boundaries without a blank
 line are kept is unspecified. It SHALL keep the source before the
 document's first block and after its last when that block is written from
 the source there; every other boundary SHALL be canonical. A `---` thematic
-break that opens the document in the source and in the output SHALL be kept
-from the source unless a later line of the output closes it as frontmatter.
+break written from the source that opens the output, wherever it stood in
+the source, SHALL be kept from the source unless a later line of the output
+closes it as frontmatter.
 A node SHALL be written as canonical output even so where its source would
 read differently in its place; which placements make a node's source read
 differently is unspecified, except that a top-level block written partly
@@ -150,13 +164,26 @@ holds a different block in its place. Options SHALL apply only to the text
 the writer produces, line endings included, and a list written with its own
 syntax from the source SHALL write a new item with the marker it records;
 text and line endings copied from the source SHALL be kept as they are.
+A table cell empty in the source that is given text SHALL be written with
+one space on either side in place of the padding between its pipes, and a
+cell its source row lacks, which the parser reads as empty at the row's
+end, SHALL be written after the row, after a pipe and, where the row ends
+with a pipe, before one, with each lacking cell before it written empty.
 Parsing the output SHALL yield a document equal to the written one as
 "Round-trip stability" compares them wherever parsing the canonical output
 of the same document does.
 
 #### Scenario: Edited items
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
-- **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n-\n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which would underline the paragraph, is written canonically
+- **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n- \n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which cannot interrupt the paragraph, is written after a blank line with the space that opens it
+
+#### Scenario: Edited tables
+- **WHEN** the alignments of the table parsed from `"| a  | b |\n|---|---|\n| c   | e |\n"` are set to center and none, and separately the empty cell of the table parsed from `"| a | b |\n|---|---|\n| c |   |\n"` is given `Text("中文")`, and each document is written
+- **THEN** they return `"| a  | b |\n|:---:|---|\n| c   | e |\n"` and `"| a | b |\n|---|---|\n| c | 中文 |\n"`: the rows keep their source, and the delimiter row its pipes and dashes
+
+#### Scenario: A break that comes to open the document
+- **WHEN** the two blocks of the document parsed from `"para\n\n---\n"` are swapped and it is written
+- **THEN** it returns `"---\n\npara\n"`, since no later line closes the break as frontmatter
 
 #### Scenario: One edited link
 - **WHEN** the target of the `WikiLink` in the document parsed from ``"see  [[A]] and `` b ``"`` is changed to `B` and the document is written

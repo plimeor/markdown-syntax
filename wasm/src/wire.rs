@@ -6,14 +6,16 @@
 //! then the strings themselves as one run of UTF-16 code units. A node is its
 //! kind, its span as two UTF-16 offsets (`NO_SPAN` and 0 for none), and then
 //! its fields in the order of its Rust struct; a list of nodes is its length
-//! followed by the nodes.
+//! followed by the nodes. A character reference is followed by its decoded
+//! value and a shortcode by its glyph, each an optional string: written
+//! towards JavaScript, and read past, as none, on the way back.
 
 use markdown_syntax::prelude::*;
 use markdown_syntax::{
     AlertKind, AutolinkForm, CodeBlockKind, DirectiveAttribute, EmphasisDelimiter, FenceMarker,
-    FrontmatterKind, HeadingKind, HtmlContainerContent, HtmlTag, LineBreakKind,
-    LinkDestinationKind, LinkTitleKind, ListDelimiter, MathInlineKind, ReferenceKind,
-    TableAlignment, ThematicBreakMarker, Title,
+    FrontmatterKind, HtmlContainerContent, HtmlTag, LineBreakKind, LinkDestinationKind,
+    LinkTitleKind, ListDelimiter, MathInlineKind, ReferenceKind, TableAlignment,
+    ThematicBreakMarker, Title,
 };
 
 /// The start word of a node without a span.
@@ -224,7 +226,6 @@ impl<'t> Writer<'t> {
             Block::Heading(node) => {
                 self.head(kind::HEADING, &node.meta);
                 self.word(u32::from(node.depth));
-                self.word(node.kind as u32);
                 self.leaf(node.source(), &node.children);
             }
             Block::ThematicBreak(ThematicBreak { meta, marker }) => {
@@ -406,9 +407,10 @@ impl<'t> Writer<'t> {
                 self.head(kind::ESCAPE, meta);
                 self.word(u32::from(*value));
             }
-            Inline::CharacterReference(CharacterReference { meta, reference }) => {
-                self.head(kind::CHARACTER_REFERENCE, meta);
-                self.str(reference);
+            Inline::CharacterReference(node) => {
+                self.head(kind::CHARACTER_REFERENCE, &node.meta);
+                self.str(&node.reference);
+                self.opt_str(node.value().as_deref());
             }
             Inline::Emphasis(Emphasis {
                 meta,
@@ -436,9 +438,10 @@ impl<'t> Writer<'t> {
                 self.head(kind::MARK, meta);
                 self.inlines(children);
             }
-            Inline::Shortcode(Shortcode { meta, name }) => {
-                self.head(kind::SHORTCODE, meta);
-                self.str(name);
+            Inline::Shortcode(node) => {
+                self.head(kind::SHORTCODE, &node.meta);
+                self.str(&node.name);
+                self.opt_str(node.glyph());
             }
             Inline::Tag(Tag { meta, name }) => {
                 self.head(kind::TAG, meta);
@@ -924,17 +927,11 @@ impl<'m> Reader<'m> {
                     depth @ 1..=6 => depth as u8,
                     other => return malformed(format!("{other} is not a heading depth")),
                 };
-                let kind =
-                    self.enumerated(&[HeadingKind::Atx, HeadingKind::Setext], "heading kind")?;
                 let mut node = match self.leaf()? {
                     Leaf::Source(text) => {
-                        Heading::with_source(depth, kind, &text, &Definitions::default()).0
+                        Heading::with_source(depth, &text, &Definitions::default()).0
                     }
-                    Leaf::Inlines(children) => {
-                        let mut node = Heading::new(depth, children);
-                        node.kind = kind;
-                        node
-                    }
+                    Leaf::Inlines(children) => Heading::new(depth, children),
                 };
                 node.meta = meta;
                 Block::Heading(node)
@@ -1178,10 +1175,12 @@ impl<'m> Reader<'m> {
                     None => return malformed("an escape holds no char"),
                 },
             }),
-            kind::CHARACTER_REFERENCE => Inline::CharacterReference(CharacterReference {
-                meta,
-                reference: self.str()?,
-            }),
+            kind::CHARACTER_REFERENCE => {
+                let reference = self.str()?;
+                // The decoded value is the reference's to give, not the tree's.
+                self.opt_str()?;
+                Inline::CharacterReference(CharacterReference { meta, reference })
+            }
             kind::EMPHASIS => Inline::Emphasis(Emphasis {
                 meta,
                 delimiter: self.emphasis_delimiter()?,
@@ -1200,10 +1199,12 @@ impl<'m> Reader<'m> {
                 meta,
                 children: self.inlines()?,
             }),
-            kind::SHORTCODE => Inline::Shortcode(Shortcode {
-                meta,
-                name: self.str()?,
-            }),
+            kind::SHORTCODE => {
+                let name = self.str()?;
+                // The glyph is the name's to give, not the tree's.
+                self.opt_str()?;
+                Inline::Shortcode(Shortcode { meta, name })
+            }
             kind::TAG => Inline::Tag(Tag {
                 meta,
                 name: self.str()?,
@@ -1323,7 +1324,7 @@ mod tests {
         round_trip(concat!(
             "---\na: b\n---\n\n",
             "# H *e* **s** __u__ ~~d~~ ==m== :smile: `c` \\* &amp; <b>\n\n",
-            "Setext\n===\n\n",
+            "#  \n\n",
             "***\n\n",
             "> [!NOTE] title\n> a\n\n",
             "> q\n\n",
@@ -1403,6 +1404,57 @@ mod tests {
             roles,
             ["Text", "Syntax", "Text", "Syntax", "Destination", "Syntax"]
         );
+    }
+
+    #[test]
+    fn references_and_shortcodes_carry_what_they_stand_for() {
+        let inlines: Vec<Inline> = vec![
+            CharacterReference::new("&amp;").into(),
+            CharacterReference::new("&nope;").into(),
+            Shortcode {
+                meta: NodeMeta::default(),
+                name: "smile".into(),
+            }
+            .into(),
+            Shortcode {
+                meta: NodeMeta::default(),
+                name: "nope".into(),
+            }
+            .into(),
+        ];
+        let mut writer = Writer::new(&[0]);
+        writer.inlines(&inlines);
+        let message = writer.finish();
+        let words: Vec<u32> = message[8..]
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+            .collect();
+        let reader = Reader::new(&message, &[0]).unwrap();
+        // The count, then per node its kind, span, string, and the value or
+        // glyph: none, or a string's index plus one.
+        let carried: Vec<(u32, Option<String>)> = (0..words[0] as usize)
+            .map(|index| {
+                let at = 1 + 5 * index;
+                let value = match words[at + 4] {
+                    0 => None,
+                    string => Some(reader.string(string as usize - 1).unwrap()),
+                };
+                (words[at], value)
+            })
+            .collect();
+        assert_eq!(
+            carried,
+            [
+                (kind::CHARACTER_REFERENCE, Some("&".into())),
+                (kind::CHARACTER_REFERENCE, None),
+                (kind::SHORTCODE, Some("😄".into())),
+                (kind::SHORTCODE, None),
+            ]
+        );
+        // On the way back the values are read past: the nodes are their
+        // reference and name alone.
+        let mut reader = Reader::new(&message, &[0]).unwrap();
+        assert_eq!(reader.inlines().unwrap(), inlines);
     }
 
     #[test]

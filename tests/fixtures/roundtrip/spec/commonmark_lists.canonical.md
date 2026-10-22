@@ -3,7 +3,7 @@
   - child
   - second
 - code
-  ``` rs
+  ```rs
   let x = 1;
   ```
 

@@ -111,7 +111,7 @@ impl<const N: usize> From<[usize; N]> for NodePath {
 pub enum Block {
     /// A paragraph of inline content.
     Paragraph(Paragraph),
-    /// An ATX (`# h`) or setext (underlined) heading.
+    /// An ATX heading: `# h`.
     Heading(Heading),
     /// A thematic break / horizontal rule: `---`, `***`, or `___`.
     ThematicBreak(ThematicBreak),
@@ -156,28 +156,17 @@ pub struct Paragraph {
     pub(crate) source: Option<String>,
 }
 
-/// A heading. Source: `# Title` (ATX) or `Title\n===` (setext).
+/// A heading. Source: `# Title` … `###### Title` (ATX).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Heading {
     /// Node metadata (source span).
     pub meta: NodeMeta,
     /// Heading level, 1..=6.
     pub depth: u8,
-    /// Whether the heading used ATX or setext syntax.
-    pub kind: HeadingKind,
     /// The heading's inline content.
     pub children: Vec<Inline>,
     /// The text the content was built from, by [`Heading::with_source`].
     pub(crate) source: Option<String>,
-}
-
-/// Which heading syntax produced a [`Heading`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HeadingKind {
-    /// ATX heading: `# Title` … `###### Title`.
-    Atx,
-    /// Setext heading: `Title` underlined with `===` (level 1) or `---` (level 2).
-    Setext,
 }
 
 /// A blank line the source holds beyond the one that separates two blocks:
@@ -1231,7 +1220,7 @@ impl Paragraph {
 }
 
 impl Heading {
-    /// An ATX heading of the given depth.
+    /// A heading of the given depth.
     pub fn new<I, T>(depth: u8, children: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -1240,23 +1229,20 @@ impl Heading {
         Self {
             meta: NodeMeta::default(),
             depth,
-            kind: HeadingKind::Atx,
             children: children.into_iter().map(Into::into).collect(),
             source: None,
         }
     }
 
-    /// A heading of the given depth and kind whose content is `text`, built
-    /// as [`Paragraph::with_source`] builds a paragraph.
+    /// A heading of the given depth whose content is `text`, built as
+    /// [`Paragraph::with_source`] builds a paragraph.
     pub fn with_source(
         depth: u8,
-        kind: HeadingKind,
         text: &str,
         definitions: &Definitions,
     ) -> (Self, Vec<Diagnostic>) {
         let (children, diagnostics) = read_source(text, definitions);
         let heading = Self {
-            kind,
             source: Some(text.into()),
             ..Self::new(depth, children)
         };

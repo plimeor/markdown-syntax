@@ -101,7 +101,6 @@ export interface Paragraph extends Node<"paragraph"> {
 }
 export interface Heading extends Node<"heading"> {
   depth: 1 | 2 | 3 | 4 | 5 | 6;
-  kind: "atx" | "setext";
   children: Inline[];
   /** In a tree for `toMarkdown`: the text to build the content from; `children` is then ignored and may be `[]`. */
   source?: string;
@@ -199,6 +198,12 @@ export interface Escape extends Node<"escape"> {
 }
 export interface CharacterReference extends Node<"characterReference"> {
   reference: string;
+  /**
+   * The character the reference stands for, as Rust's `CharacterReference::value()`
+   * decodes it; null for a reference that does not decode. Every tree the binding
+   * returns holds it; `toMarkdown` ignores it, so a tree built for it may leave it out.
+   */
+  value?: string | null;
 }
 export interface Emphasis extends Node<"emphasis"> {
   delimiter: EmphasisDelimiter;
@@ -216,6 +221,12 @@ export interface Mark extends Node<"mark"> {
 }
 export interface Shortcode extends Node<"shortcode"> {
   name: string;
+  /**
+   * The emoji the shortcode stands for, as Rust's `Shortcode::glyph()` gives it from
+   * the pinned gemoji table; null for a name the table does not hold. Every tree the
+   * binding returns holds it; `toMarkdown` ignores it, so a tree built for it may leave it out.
+   */
+  glyph?: string | null;
 }
 export interface Tag extends Node<"tag"> {
   /** The name as written, without the `#`; `/` separates levels. */
