@@ -91,6 +91,42 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
+    fn unchanged_blocks_beside_edited_ones_keep_their_source_under_options() {
+        use markdown_syntax::{FenceMarker, OrderedDelimiter};
+
+        let source = "*  a\n   b\n\n~~~js\nx\n~~~\n\n1) one\n2) two\n\n> q *e*\n> - c\n\npara\n";
+        let mut document = parse(source).document;
+        let Block::List(list) = &mut document.children[2] else {
+            panic!("{:?}", document.children);
+        };
+        list.children[1].children[0] = paragraph("deux");
+        let Block::BlockQuote(quote) = &mut document.children[3] else {
+            panic!("{:?}", document.children);
+        };
+        let Block::List(list) = &mut quote.children[1] else {
+            panic!("{:?}", quote.children);
+        };
+        list.children
+            .push(ListItem::new([Paragraph::new([Text::from("d")])]));
+        document.children[4] = paragraph("new");
+        let mut fence = parse("~~~rs\ny\n~~~").document.without_source();
+        let Block::CodeBlock(code) = &mut fence.children[0] else {
+            panic!("{:?}", fence.children);
+        };
+        code.meta = NodeMeta::default();
+        document.children.push(fence.children.remove(0));
+        let mut options = crlf();
+        options.bullet = Some(BulletMarker::Plus);
+        options.ordered_delimiter = Some(OrderedDelimiter::Period);
+        options.fence_marker = Some(FenceMarker::Backtick);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "*  a\n   b\n\n~~~js\nx\n~~~\n\n1) one\n2) deux\n\n> q *e*\n> - c\r\n> - d\r\n\r\n\
+             new\r\n\r\n```rs\r\ny\r\n```\r\n"
+        );
+    }
+
+    #[test]
     fn a_block_with_any_span_changed_is_written_canonically() {
         let mut document = parse("*  x\n\n# T #").document;
         let Block::List(list) = &mut document.children[0] else {
