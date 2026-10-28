@@ -2314,6 +2314,64 @@ mod directive_containers {
     }
 
     #[test]
+    fn text_after_a_container_directive_opener_makes_the_line_paragraph_text() {
+        for opener in [
+            ":::x[a]junk",
+            ":::x[a]{b=c}junk",
+            ":::x{b=c}junk",
+            ":::x junk",
+            ":::x[a]\tjunk",
+            "::::x[a] junk",
+        ] {
+            let output = parse(&format!("{opener}\nbody\n:::"));
+            let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
+                panic!("{opener:?}: {:?}", output.document);
+            };
+            assert_eq!(
+                texts(&paragraph.children),
+                [opener, "\n", "body", "\n", ":::"],
+                "{opener:?}"
+            );
+            assert!(output.diagnostics.is_empty(), "{opener:?}: {output:?}");
+        }
+        // Nor does such a line end a paragraph, or open a directive in one.
+        let blocks = parse("p\n:::x junk\n:::").document.children;
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(
+            texts(&paragraph.children),
+            ["p", "\n", ":::x junk", "\n", ":::"]
+        );
+        let blocks = parse(":::outer\n:::inner junk\n:::\nafter")
+            .document
+            .children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::Paragraph(inner)] = outer.children.as_slice() else {
+            panic!("{outer:?}");
+        };
+        assert_eq!(texts(&inner.children), [":::inner junk"]);
+        assert_eq!(texts(&after.children), ["after"]);
+    }
+
+    #[test]
+    fn spaces_and_tabs_after_a_container_directive_opener_keep_it_open() {
+        let blocks = parse(":::x[a]{b=c} \t\nbody\n:::").document.children;
+        let [Block::ContainerDirective(directive)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(directive.name, "x");
+        assert_eq!(texts(&directive.label), ["a"]);
+        assert_eq!(directive.attributes.len(), 1);
+        assert!(matches!(
+            directive.children.as_slice(),
+            [Block::Paragraph(_)]
+        ));
+    }
+
+    #[test]
     fn nested_directives_close_innermost_first() {
         let blocks = parse(":::outer\n:::inner\nx\n:::\n:::\nafter")
             .document

@@ -379,7 +379,7 @@ describe("Write from JavaScript", () => {
   });
 
   test("a parser diagnostic has no path", () => {
-    const { diagnostics } = binding.parse(":::Bad name\n");
+    const { diagnostics } = binding.parse(":::1bad\n");
     assert.ok(diagnostics.length > 0);
     assert.ok(diagnostics.every((diagnostic) => diagnostic.path === null));
   });

@@ -1447,7 +1447,8 @@ impl<'a> BlockParser<'a> {
         // Container directive.
         if !indented && byte == Some(b':') {
             if let Some((fence, rest)) = directive_container_opener_prefix(cursor.nonspace_rest()) {
-                match parse_directive_opener(rest, |_, _, _| true) {
+                // Only whitespace may follow a container directive's opener.
+                match parse_directive_opener(rest, |_, _, rest| is_blank(rest)) {
                     Ok(opener) if nesting => {
                         let source = cursor.view(cursor.next_nonspace);
                         let label = opener.label.map(|label| {
@@ -1479,10 +1480,8 @@ impl<'a> BlockParser<'a> {
                         cursor.skip_to_end();
                         return Started::Container;
                     }
-                    Ok(_) => {}
-                    // A bad name or an unclosed `[` / `{`: nothing is refused
-                    // for what follows the opener.
-                    Err(_) => {
+                    Ok(_) | Err(Refused::Follow) => {}
+                    Err(Refused::Name | Refused::Unclosed) => {
                         if !tip_holds_text {
                             self.diagnostics.push(Diagnostic::new(
                                 DiagnosticSeverity::Error,
