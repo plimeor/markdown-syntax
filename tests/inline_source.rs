@@ -59,6 +59,92 @@ mod inline_source_of_a_leaf_block {
     }
 
     #[test]
+    fn a_table_header_row_that_continues_a_paragraph() {
+        // Each header row is a line the paragraph or definitions before it
+        // read as a continuation, where it cannot open a block; at the start
+        // of a document it would open an item, a definition, or HTML.
+        for (input, path, header, at) in [
+            ("a\n2) b | c\n--|--", &[1, 0, 0][..], "2) b", 2),
+            ("a\n10. b | c\n--|--", &[1, 0, 0], "10. b", 2),
+            ("--2. \n3) \n|-", &[1, 0, 0], "3)", 6),
+            ("a\n- \n|-", &[1, 0, 0], "-", 2),
+            ("a\n* \n|-", &[1, 0, 0], "*", 2),
+            ("a\n+ \n|-", &[1, 0, 0], "+", 2),
+            ("a\n1. \n|-", &[1, 0, 0], "1.", 2),
+            ("a\n[x]: /u|c\n-|-", &[1, 0, 0], "[x]: /u", 2),
+            ("a\n<x>\n|-", &[1, 0, 0], "<x>", 2),
+            ("a\r\n2) b | c\r\n--|--", &[1, 0, 0], "2) b", 3),
+            ("a\r2) b | c\r--|--", &[1, 0, 0], "2) b", 2),
+            ("[a]: /u\n2) c | d\n--|--", &[1, 0, 0], "2) c", 8),
+            // The paragraph is a continuation of the definitions before it.
+            ("[a]: /u\nb\n2) c | d\n--|--", &[2, 0, 0], "2) c", 10),
+            ("[a]: /u\n    b\n2) c | d\n--|--", &[2, 0, 0], "2) c", 14),
+        ] {
+            let source = inline_source(input, path)
+                .unwrap_or_else(|| panic!("{input:?} {path:?}: no inline source"));
+            assert_eq!((source.text.as_str(), source.to_source(0)), (header, at));
+            assert!(leaves::leaves_reproduce(input).is_ok(), "{input:?}");
+        }
+        // After a blank line the row opens a list, as it does read alone.
+        let input = "a\n\n2) b | c\n--|--";
+        assert_eq!(
+            inline_source(input, &[1, 0, 0]).unwrap().text,
+            "b | c\n--|--"
+        );
+        assert_eq!(leaves::leaves_reproduce(input), Ok(2));
+    }
+
+    /// Every document of up to four lines drawn from lines that open a
+    /// paragraph or definition, lines that only continue one, and table
+    /// delimiter rows reads each leaf's inline source as `leaf_sources` does.
+    #[test]
+    fn leaves_after_paragraphs_and_definitions_reproduce() {
+        const LINES: &[&str] = &[
+            "a",
+            "[a]: /u",
+            "[b]:",
+            "/v",
+            "    b",
+            "b | c",
+            "2) b | c",
+            "10. b",
+            "- ",
+            "1. ",
+            "<x>",
+            "[x]: /u|c",
+            "> a",
+            "- a",
+            "# h",
+            "```",
+            "===",
+            "",
+            "|-",
+            "-|-",
+        ];
+        let mut inputs: Vec<String> = LINES.iter().map(|line| (*line).to_string()).collect();
+        let mut failures = Vec::new();
+        for lines in 1..=4 {
+            if lines > 1 {
+                inputs = inputs
+                    .iter()
+                    .flat_map(|input| LINES.iter().map(move |line| format!("{input}\n{line}")))
+                    .collect();
+            }
+            for input in &inputs {
+                if let Err(failure) = leaves::leaves_reproduce(input) {
+                    failures.push(failure);
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} failures:\n{}",
+            failures.len(),
+            failures[..failures.len().min(40)].join("\n")
+        );
+    }
+
+    #[test]
     fn table_cell() {
         let input = "| h |\n| - |\n| a\\|b *c* |";
         let source = inline_source(input, &[0, 1, 0]).unwrap();

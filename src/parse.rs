@@ -533,10 +533,11 @@ impl Document {
     /// paragraph, a heading, a table cell (its table's path, its row's index,
     /// and its own), or the label of a leaf or container directive (its
     /// directive's path), read again from the source of the top-level block
-    /// holding it, so that the cost is linear in that block. `None` for a
-    /// document without a source, or a path that names no such leaf, a
-    /// directive without a label, or a node without a span or one the source
-    /// does not hold.
+    /// holding it and of the paragraphs and link reference definitions that
+    /// run into that block without a blank line, so that the cost is linear
+    /// in those blocks. `None` for a document without a source, or a path
+    /// that names no such leaf, a directive without a label, or a node
+    /// without a span or one the source does not hold.
     pub fn inline_source(&self, path: &NodePath) -> Option<InlineSource> {
         let source = self.source()?;
         let (&first, rest) = path.0.split_first()?;
@@ -576,23 +577,15 @@ impl Document {
                 _ => return None,
             };
         };
-        let end = top.span()?.end;
-        // The top-level block is read with the definitions right before it,
-        // which may have opened its paragraph, so that a line reads as a
-        // continuation there and not as indented code; and from the start of
-        // its line, where it reads as it does in the document.
-        let opening = self.children[..first]
-            .iter()
-            .rev()
-            .take_while(|block| matches!(block, Block::Definition(_)))
-            .last()
-            .unwrap_or(top);
-        let start = opening.span()?.start;
+        let Span { start, end } = top.span()?;
+        let start = paragraph_run_start(&self.children[..first], start, source);
         if end > source.len() || start > end || !source.is_char_boundary(start) {
             return None;
         }
         let bytes = source.as_bytes();
         let mut start = start;
+        // From the start of its line, where it reads as it does in the
+        // document.
         while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
             start -= 1;
         }
@@ -638,6 +631,36 @@ impl Document {
         let lines = collect_lines(source, &map);
         Some(read(blocks::leaf_contents(source, &lines)))
     }
+}
+
+/// Where a top-level block that starts at `start` in `source` is read from so
+/// that it reads as it does in the whole document, given the top-level
+/// blocks `before` it: the start of the run of paragraphs and link reference
+/// definitions that runs into it without a blank line, or `start`. Such a run
+/// leaves a paragraph open, in which the next line is a continuation (one
+/// indented four columns, one opening an item that cannot interrupt a
+/// paragraph, one shaped as a definition or as HTML that cannot interrupt
+/// one) or a table's header row; read alone, that line opens a block of its
+/// own. After a blank line or any other block, the line that opens a
+/// top-level block reads as it would at the start of a document.
+fn paragraph_run_start(before: &[Block], start: usize, source: &str) -> usize {
+    let mut start = start;
+    for block in before.iter().rev() {
+        if !matches!(block, Block::Paragraph(_) | Block::Definition(_)) {
+            break;
+        }
+        let Some(span) = block.span() else { break };
+        let Some(gap) = source.get(span.end..start) else {
+            break;
+        };
+        let line_endings =
+            gap.matches('\n').count() + gap.matches('\r').count() - gap.matches("\r\n").count();
+        if line_endings > 1 {
+            break;
+        }
+        start = span.start;
+    }
+    start
 }
 
 /// The path and inline source of every leaf of `children` whose content
