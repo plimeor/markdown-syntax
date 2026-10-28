@@ -63,11 +63,14 @@ pub(super) fn parse_top_level_at(
 /// split into `lines` (paragraphs, headings, table cells, and directive
 /// labels), with the span of its node (a label's is its directive's), in
 /// document order. Neither the inlines nor the blocks themselves are built.
+/// `input` starts at the document's first line, after any byte order mark,
+/// when `opens_frontmatter`, and at a later line of it otherwise.
 pub(super) fn leaf_contents<'a>(
     input: &'a str,
     lines: &'a [Line<'a>],
+    opens_frontmatter: bool,
 ) -> Vec<(Span, DerivedText<'a>)> {
-    let (children, _) = read_blocks(input, lines);
+    let (children, _) = read_blocks(input, lines, opens_frontmatter);
     let mut leaves = Vec::new();
     for child in children {
         keep_leaves(input, child.block, &mut leaves);
@@ -77,8 +80,13 @@ pub(super) fn leaf_contents<'a>(
 
 /// The top-level blocks of the document `input`, split into `lines`, closed
 /// with their inline content not read yet, and the block pass's diagnostics.
-fn read_blocks<'a>(input: &'a str, lines: &'a [Line<'a>]) -> (Vec<Child<'a>>, Vec<Diagnostic>) {
-    let mut parser = BlockParser::new(input, lines);
+/// A frontmatter block opens only where `opens_frontmatter`.
+fn read_blocks<'a>(
+    input: &'a str,
+    lines: &'a [Line<'a>],
+    opens_frontmatter: bool,
+) -> (Vec<Child<'a>>, Vec<Diagnostic>) {
+    let mut parser = BlockParser::new(input, lines, opens_frontmatter);
     for index in 0..lines.len() {
         parser.read_line(index);
     }
@@ -107,7 +115,7 @@ fn read_document<'a>(
         indices.is_none_or(|indices| indices.windows(2).all(|pair| pair[0] < pair[1])),
         "indices in ascending order"
     );
-    let (children, mut found) = read_blocks(input, lines);
+    let (children, mut found) = read_blocks(input, lines, true);
     let mut definitions = Vec::new();
     for child in &children {
         collect_definitions(&child.block, &mut definitions);
@@ -832,6 +840,9 @@ struct BlockParser<'a> {
     /// lines alike takes one over, so containers opening one after another do
     /// not each read the lines ahead again.
     retired: Vec<(Vec<ReachKey>, Box<Lookahead<'a>>)>,
+    /// The input starts at the document's first line, which may open a
+    /// frontmatter block; read from a later line, it opens none.
+    opens_frontmatter: bool,
 }
 
 /// What `reach` reads of an open block: its kind, and the column or line it
@@ -850,7 +861,7 @@ fn reach_key(kind: &Kind<'_>) -> ReachKey {
 }
 
 impl<'a> BlockParser<'a> {
-    fn new(input: &'a str, lines: &'a [Line<'a>]) -> Self {
+    fn new(input: &'a str, lines: &'a [Line<'a>], opens_frontmatter: bool) -> Self {
         let start = lines.first().map_or(0, |line| line.start);
         BlockParser {
             input,
@@ -870,6 +881,7 @@ impl<'a> BlockParser<'a> {
             all_closed: true,
             after_alert_marker: false,
             retired: Vec::new(),
+            opens_frontmatter,
         }
     }
 
@@ -1337,7 +1349,7 @@ impl<'a> BlockParser<'a> {
             }
         }
 
-        if index == 0 && self.stack.len() == 1 {
+        if index == 0 && self.stack.len() == 1 && self.opens_frontmatter {
             if let Some(started) = self.start_frontmatter(index) {
                 return started;
             }

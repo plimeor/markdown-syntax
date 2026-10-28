@@ -144,6 +144,27 @@ mod inline_source_of_a_leaf_block {
         );
     }
 
+    /// A frontmatter fence opens frontmatter only on the document's first
+    /// line; a block read again from a later line reads its fence as the
+    /// whole document does.
+    #[test]
+    fn a_fence_after_the_first_line_is_not_frontmatter() {
+        for (input, path, text) in [
+            ("x\n\n+++\na\n+++", [1], "+++\na\n+++"),
+            ("x\n\n+++\na\n+++\n", [1], "+++\na\n+++"),
+            ("\u{feff}x\n\n+++\na\n+++", [1], "+++\na\n+++"),
+            ("+++\na\n+++\n\nb", [1], "b"),
+            ("\u{feff}+++\na\n+++\n\nb", [1], "b"),
+        ] {
+            assert_eq!(
+                inline_source(input, &path).map(|source| source.text),
+                Some(String::from(text)),
+                "{input:?}"
+            );
+            assert!(leaves::leaves_reproduce(input).is_ok(), "{input:?}");
+        }
+    }
+
     #[test]
     fn table_cell() {
         let input = "| h |\n| - |\n| a\\|b *c* |";

@@ -598,7 +598,10 @@ impl Document {
         let slice = source.get(start..top.end)?;
         let map = SourceMap::verbatim(slice.len(), start);
         let lines = collect_lines(slice, &map);
-        let (_, text) = blocks::leaf_contents(slice, &lines)
+        // Only a read from the start of the document's content opens
+        // frontmatter, as only the whole document's first line does.
+        let content_start = source.len() - after_byte_order_mark(source).0.len();
+        let (_, text) = blocks::leaf_contents(slice, &lines, start == content_start)
             .into_iter()
             .find(|(span, _)| *span == leaf)?;
         let (text, map) = text.into_parts();
@@ -632,7 +635,7 @@ impl Document {
     ) -> Option<R> {
         let (source, map) = after_byte_order_mark(self.source()?);
         let lines = collect_lines(source, &map);
-        Some(read(blocks::leaf_contents(source, &lines)))
+        Some(read(blocks::leaf_contents(source, &lines, true)))
     }
 }
 
@@ -657,7 +660,8 @@ pub(crate) struct TopLevelRead {
 /// shaped as a definition or as HTML that cannot interrupt one) or a table's
 /// header row; read alone, that line opens a block of its own. After a blank
 /// line or any other block, the line that opens a top-level block reads as it
-/// would at the start of a document.
+/// would at the start of a document, but for opening frontmatter, which only
+/// the document's first line does.
 fn top_level_reads(children: &[Block], source: &str) -> Vec<TopLevelRead> {
     let mut reads: Vec<TopLevelRead> = Vec::with_capacity(children.len());
     let bytes = source.as_bytes();
