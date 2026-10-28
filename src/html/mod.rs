@@ -15,7 +15,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::{ast::Document, diagnostic::Diagnostic, validate::validate_document};
 
-use self::footnotes::FootnoteContext;
+use self::footnotes::{FootnoteBody, FootnoteContext};
 use self::refs::DefMap;
 
 /// How raw HTML is handled in safe mode (when `allow_dangerous_html` is off).
@@ -86,8 +86,8 @@ pub enum HtmlError {
 /// Render-time context threaded through the block/inline renderers. Holds the
 /// resolved definition map, the footnote document state, and the config flags.
 pub(crate) struct Ctx<'a> {
-    pub defs: &'a DefMap,
-    pub footnotes: &'a FootnoteContext,
+    pub defs: &'a DefMap<'a>,
+    pub footnotes: &'a FootnoteContext<'a>,
     pub allow_dangerous_html: bool,
     pub allow_dangerous_protocol: bool,
     pub allow_any_img_src: bool,
@@ -128,9 +128,10 @@ impl Document {
 
 /// Render a whole validated document to HTML.
 ///
-/// Top-level blocks are rendered, empty-string results are filtered, survivors
-/// are joined with a single `\n` (no leading/trailing newline), then the
-/// document-end footnote section is appended when any footnote was referenced.
+/// Top-level blocks are rendered into one buffer, empty results are filtered,
+/// survivors are joined with a single `\n` (no leading/trailing newline), then
+/// the document-end footnote section is appended when any footnote was
+/// referenced. An inline footnote's body renders as one paragraph.
 fn render_document(doc: &Document, options: &HtmlOptions) -> String {
     let defs = DefMap::build(&doc.children);
     let footnote_ctx = footnotes::build(&doc.children);
@@ -147,16 +148,17 @@ fn render_document(doc: &Document, options: &HtmlOptions) -> String {
         tasklist_attr_order: options.tasklist_attr_order,
     };
 
-    let mut out = blocks::render_blocks_joined(&doc.children, &ctx);
+    let mut out = String::new();
+    blocks::render_blocks_joined(&doc.children, &ctx, &mut out);
 
-    let section = footnotes::emit_footnote_section(&footnote_ctx, |body| {
-        blocks::render_blocks_joined(body, &ctx)
-    });
-    if !section.is_empty() {
+    if footnote_ctx.has_any() {
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(&section);
+        footnotes::emit_footnote_section(&footnote_ctx, &mut out, |body, out| match body {
+            FootnoteBody::Blocks(blocks) => blocks::render_blocks_joined(blocks, &ctx, out),
+            FootnoteBody::Paragraph(inlines) => blocks::render_paragraph_of(inlines, &ctx, out),
+        });
     }
 
     out
