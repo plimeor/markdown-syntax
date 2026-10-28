@@ -64,6 +64,18 @@ non-empty label or attribute braces holding a non-whitespace char.
 - **WHEN** `"Inside :badge[ok]{flag}."` and `"(:e[x])"` are parsed with `parse`
 - **THEN** each paragraph holds one `TextDirective`
 
+### Requirement: Directive labels close at their balancing bracket
+The label of a text, leaf, or container directive SHALL end at the first `]`
+that balances its opening `[`, with the brackets in it nesting as pairs and
+those in a backslash escape, a code span, an autolink, or raw HTML not
+counted. A backtick run that opens no code span SHALL be literal text as a
+whole, as CommonMark reads a backtick string, so no shorter run inside it
+opens a code span.
+
+#### Scenario: A backtick run that opens no code span in a label
+- **WHEN** ``":t[a``] b`] c"`` and ``":t[``[ `] c"`` are parsed with `parse`
+- **THEN** the first paragraph holds a `TextDirective` whose label is `Text("a``")`, then ``Text(" b`] c")``, and the second holds only text: its label's `[` is left open
+
 ### Requirement: Wikilinks
 The parser SHALL read `[[target|label]]` on one line as a `WikiLink`, with the
 target before the first `|` and the label after it, or both equal to the

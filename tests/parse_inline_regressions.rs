@@ -1090,6 +1090,73 @@ mod gemoji_shortcodes {
     }
 }
 
+mod backtick_runs_in_directive_labels {
+    //! A backtick run that opens no code span is literal text whole, in the
+    //! walk to a text directive label's `]` as in the label's own content: no
+    //! shorter run inside it opens a code span.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph(source: &str) -> (Vec<Inline>, Vec<DiagnosticCode>) {
+        let output = parse(source);
+        let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
+            panic!("{source:?}: {:?}", output.document);
+        };
+        let codes = output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        (paragraph.children.clone(), codes)
+    }
+
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_run_ends_no_label_past_its_first_closing_bracket() {
+        let (inlines, codes) = paragraph(":t[a``] b`] c");
+        let [Inline::TextDirective(directive), Inline::Text(after)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert!(
+            matches!(directive.label.as_slice(), [Inline::Text(label)] if label.value == "a``"),
+            "{inlines:?}"
+        );
+        assert_eq!(after.value, " b`] c");
+        assert_eq!(codes, []);
+    }
+
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_run_hides_no_open_bracket_in_a_label() {
+        let (inlines, codes) = paragraph(":t[``[ `] c");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == ":t[``[ `] c"),
+            "{inlines:?}"
+        );
+        assert_eq!(codes, [DiagnosticCode::InvalidDirectiveName]);
+    }
+
+    #[test]
+    fn a_run_after_an_escaped_backtick_opens_a_code_span_in_a_label() {
+        // The escape takes the run's first backtick; the rest opens a code
+        // span that holds the first `]`.
+        let (inlines, codes) = paragraph(":t[a\\``] b`] c");
+        let [Inline::TextDirective(directive), Inline::Text(after)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert!(
+            matches!(
+                directive.label.as_slice(),
+                [Inline::Text(a), Inline::Escape(escape), Inline::Code(code)]
+                    if a.value == "a" && escape.value == '`' && code.value == "] b"
+            ),
+            "{inlines:?}"
+        );
+        assert_eq!(after.value, " c");
+        assert_eq!(codes, []);
+    }
+}
+
 mod underscore_beside_tilde {
     //! A `_` run gets no strikethrough bonus beside a `~`.
 

@@ -85,9 +85,11 @@ The parser SHALL recognize `::name[label]{attrs}` leaf directives standing
 alone on their line, followed by nothing but spaces and tabs, and `:::name`
 container directives, whose container closes at a fence of at least the
 opening fence's length. A directive name SHALL be one or more runs of ASCII
-letters joined by single `-` chars. A closing fence SHALL close the innermost
-open container directive it can close, and SHALL do so before any block
-inside that directive reads the line. A container directive's content lines
+letters joined by single `-` chars, and its label SHALL close as the inline
+syntax's requirement *Directive labels close at their balancing bracket*
+says. A closing fence SHALL close the innermost open container directive it
+can close, and SHALL do so before any block inside that directive reads the
+line. A container directive's content lines
 are read as the document's lines are: a line that looks like a directive
 opener inside a fenced code block or HTML block is that block's content, and
 one inside a list item opens a directive in that item. A line with a

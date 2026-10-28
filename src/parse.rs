@@ -4072,7 +4072,9 @@ fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
 
 /// One step of the walk to a link label's closing `]`: escapes, code spans,
 /// autolinks, and inline HTML are stepped over whole, so brackets inside them
-/// do not count; other brackets nest.
+/// do not count; other brackets nest. A backtick run that opens no code span
+/// is literal text and is stepped over whole too, as the inline pass reads
+/// it: no shorter run inside it opens one.
 fn link_label_step(lookups: &mut impl Lookups, input: &str, cursor: usize) -> BracketStep {
     let Some((next, char)) = next_char(input, cursor) else {
         return BracketStep::End;
@@ -4081,7 +4083,10 @@ fn link_label_step(lookups: &mut impl Lookups, input: &str, cursor: usize) -> Br
         '\\' => {
             BracketStep::Pass(next_char(input, next).map_or(next, |(after_escape, _)| after_escape))
         }
-        '`' => BracketStep::Pass(code_span_end(lookups, input, cursor).unwrap_or(next)),
+        '`' => BracketStep::Pass(
+            code_span_end(lookups, input, cursor)
+                .unwrap_or_else(|| cursor + backtick_run_len(input, cursor)),
+        ),
         '<' => BracketStep::Pass(
             autolink_end(lookups, input, cursor)
                 .or_else(|| html_inline_end(lookups, input, cursor))

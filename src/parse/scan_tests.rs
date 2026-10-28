@@ -36,10 +36,18 @@ mod reference {
                     continue;
                 }
                 '`' => {
-                    if let Some((end, _)) = parse_code_span(input, cursor) {
-                        cursor = end;
-                        continue;
-                    }
+                    // A run that opens no code span is literal text whole.
+                    cursor = parse_code_span(input, cursor).map_or_else(
+                        || {
+                            cursor
+                                + input[cursor..]
+                                    .bytes()
+                                    .take_while(|byte| *byte == b'`')
+                                    .count()
+                        },
+                        |(end, _)| end,
+                    );
+                    continue;
                 }
                 '<' => {
                     if let Some(end) = parse_autolink_end(input, cursor) {

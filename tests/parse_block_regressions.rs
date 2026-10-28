@@ -1520,6 +1520,35 @@ mod footnotes_and_directives {
         }
     }
 
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_backtick_run_in_a_block_directive_label_is_text_whole() {
+        // The run opens no code span, so no shorter run inside it pairs with
+        // the later backtick: the `]` after the run closes the leaf label,
+        // which text then follows, and the `[` after it stays open.
+        for (source, diagnostics) in [
+            ("::x[a``]b`]", &[][..]),
+            ("::x[``[ `]", &[DiagnosticCode::InvalidDirectiveName][..]),
+            (
+                ":::x[``[ `]\nbody\n:::",
+                &[DiagnosticCode::InvalidDirectiveName][..],
+            ),
+        ] {
+            let output = parse(source);
+            assert!(
+                matches!(output.document.children.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {:?}",
+                output.document.children
+            );
+            let codes: Vec<_> = output
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect();
+            assert_eq!(codes, diagnostics, "{source:?}");
+        }
+    }
+
     #[test]
     fn a_digit_in_a_nested_directive_name_leaves_its_lines_as_text() {
         let output = parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
