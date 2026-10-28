@@ -116,7 +116,9 @@ inlines. The writer SHALL write:
   its delimiter row's place, the colons of each changed column around that
   cell's dashes in the source row, and renders that row where the number
   of columns changed, the header row is rendered, or the row would not read
-  as a delimiter row, with its rows by these rules;
+  as a delimiter row, with its rows by these rules; a list item or a
+  footnote definition whose match holds no blocks has no source around
+  blocks to keep, and is rendered where it holds any;
 - every other node as canonical output, with its children by these rules.
 
 A line written where the base node has a source line keeps that line's
@@ -176,6 +178,10 @@ of the same document does.
 #### Scenario: Edited items
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
 - **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n- \n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which cannot interrupt the paragraph, is written after a blank line with the space that opens it
+
+#### Scenario: Blocks in a container that held none
+- **WHEN** a hand-built paragraph `Text("x")` is added to the footnote definition of the document parsed from `"a\n\n[^5]:\n\nb\n"`, and separately to the alert of the one parsed from `"> [!NOTE]\n"`, and each document is written
+- **THEN** they return `"a\n\n[^5]: x\n\nb\n"` and `"> [!NOTE]\n> x\n"`: the definition is rendered between the kept paragraphs, and the alert keeps its opening line
 
 #### Scenario: Edited tables
 - **WHEN** the alignments of the table parsed from `"| a  | b |\n|---|---|\n| c   | e |\n"` are set to center and none, and separately the empty cell of the table parsed from `"| a | b |\n|---|---|\n| c |   |\n"` is given `Text("中文")`, and each document is written

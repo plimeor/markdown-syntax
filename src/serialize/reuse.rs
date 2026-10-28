@@ -998,9 +998,14 @@ impl Reuse<'_, '_> {
                 match self.children(&node.children, &base.children, Join::Gap)? {
                     Children::Kept => Out::Kept(span),
                     Children::Lines(lines, _) => {
-                        let start = first_block(&base.children)
+                        // A definition that held no blocks has no source
+                        // around them to keep, as an empty item has none.
+                        let Some(start) = first_block(&base.children)
                             .and_then(Block::span)
-                            .map_or(usize::MAX, |at| at.start);
+                            .map(|at| at.start)
+                        else {
+                            return Ok(Out::Render);
+                        };
                         let line_end = self.line_end(span.start);
                         if start <= line_end {
                             let marker = &self.source[span.start..start];

@@ -897,6 +897,71 @@ mod source_reused_per_node {
         reads_back(&markdown, &document);
     }
 
+    /// The blocks a container holds, a list's first item's.
+    fn held(block: &mut Block) -> &mut Vec<Block> {
+        match block {
+            Block::BlockQuote(node) => &mut node.children,
+            Block::Alert(node) => &mut node.children,
+            Block::FootnoteDefinition(node) => &mut node.children,
+            Block::ContainerDirective(node) => &mut node.children,
+            Block::List(node) => &mut node.children[0].children,
+            Block::HtmlContainer(node) => match &mut node.content {
+                HtmlContainerContent::Blocks(blocks) => blocks,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("not a container: {other:?}"),
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_container_that_held_no_blocks_takes_new_ones() {
+        use markdown_syntax::__private::{
+            parse_with_leaf_contents, to_markdown_against, to_markdown_against_with,
+        };
+        // A footnote definition and an item have no source around their
+        // blocks to keep and are rendered; every other container keeps its
+        // own lines.
+        for (source, path, expected) in [
+            ("a\n\n[^5]:\n\nb\n", &[1][..], "a\n\n[^5]: x\n\nb\n"),
+            ("[^5]:   \n", &[0], "[^5]: x\n"),
+            ("> [^5]:\n", &[0, 0], "> [^5]: x\n"),
+            ("- [^5]:\n", &[0, 0], "- [^5]: x\n"),
+            ("- \n\nb\n", &[0], "- x\n\nb\n"),
+            ("> \n\nb\n", &[0], "> \n> x\n\nb\n"),
+            ("> [!NOTE]\n", &[0], "> [!NOTE]\n> x\n"),
+            (":::name\n:::\n", &[0], ":::name\nx\n:::\n"),
+            (
+                "<details>\n</details>\n",
+                &[0],
+                "<details>\nx\n\n</details>\n",
+            ),
+        ] {
+            let (output, kept) =
+                parse_with_leaf_contents(source, |_, contents| contents.each_keeping(|_, _| {}));
+            let parsed = output.document;
+            let mut document = parsed.clone();
+            let mut blocks = &mut document.children;
+            for &index in path {
+                blocks = held(&mut blocks[index]);
+            }
+            blocks.push(paragraph("x"));
+            let options = SerializeOptions::default();
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, expected, "{source:?}");
+            reads_back(&markdown, &document);
+            assert_eq!(document.to_markdown_with(&options).as_deref(), Ok(expected));
+            assert_eq!(
+                to_markdown_against(&document, &parsed, &options).as_deref(),
+                Ok(expected)
+            );
+            assert_eq!(
+                to_markdown_against_with(&document, &parsed, &kept, &options).as_deref(),
+                Ok(expected)
+            );
+        }
+    }
+
     /// A blank line that becomes a quote's first line opens the quote with
     /// `> `: its source line, a bare `>`, continues a quote but opens none.
     // serialization: Unchanged source is kept

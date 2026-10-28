@@ -500,6 +500,15 @@ describe("Write the changed blocks", () => {
     assert.equal(document.toMarkdownBlocks([0, 1]), "a\n\nb\n");
   });
 
+  test("a block given to a footnote definition that held none", () => {
+    const document = binding.parse("a\n\n[^5]:\n\nb\n");
+    const note = structuredClone(document.tree.children[1]);
+    note.children.push({ type: "paragraph", span: null, children: [{ type: "text", span: null, value: "x" }] });
+    assert.equal(document.toMarkdownBlocks([0, note, 2]), "a\n\n[^5]: x\n\nb\n");
+    assert.equal(document.toMarkdown(resolved(document, [0, note, 2])), "a\n\n[^5]: x\n\nb\n");
+    assert.equal(binding.parse("c\n").toMarkdown(), "c\n");
+  });
+
   test("a refused document returns the diagnostics of the blocks as listed", () => {
     const document = binding.parse("a\n");
     const empty = { type: "paragraph", span: null, children: [] };
