@@ -2711,8 +2711,8 @@ fn trim_delimiter_text_head(node: &mut Inline, count: usize) {
 
 /// Forward lookups the inline scanners ask of one input. `DirectLookups`
 /// answers each with a fresh scan, for callers that ask once; `InlineLookups`
-/// memoizes the answers for the many questions one inline pass asks. Both
-/// answer identically.
+/// memoizes the answers for the many questions one inline pass or one label
+/// walk asks. Both answer identically.
 trait Lookups {
     /// The first occurrence of `pattern` that starts at or after `from`.
     fn find(&mut self, pattern: &'static str, from: usize) -> Option<usize>;
@@ -4060,11 +4060,15 @@ fn contains_link_inline(inlines: &[Inline]) -> bool {
     })
 }
 
+/// The `]` closing the link label that opens at `open`, found by one walk.
+/// The walk asks a forward lookup at every code span, autolink, and raw HTML
+/// opener in the label, so its lookups keep tables rather than scan the rest
+/// of `input` for each.
 fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
     if input.as_bytes().get(open) != Some(&b'[') {
         return None;
     }
-    let mut lookups = DirectLookups { input };
+    let mut lookups = InlineLookups::new(input, None);
     bracket_walk(open + 1, |cursor| {
         link_label_step(&mut lookups, input, cursor)
     })
