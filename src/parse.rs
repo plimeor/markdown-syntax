@@ -6155,27 +6155,33 @@ fn is_valid_hostchar(char: char) -> bool {
 //
 // cmark walks bytes with `is_valid_hostchar` decoding each char; this walks
 // chars directly (UTF-8 safe) over the host prefix, which yields the same
-// dot/underscore-segment verdict. A `\` escapes the following char, so a host
-// can run on over escaped spaces through later `www.` candidates; the walk
-// stops at the eleventh dot, which settles the verdict, so that the walks
-// from all the candidates of a pass stay linear in total.
+// dot/underscore-segment verdict. As in cmark, a `\` past the first char and
+// before at least two more is skipped, and the char after it is read by the
+// same rules as any other: an escaped `_` or `.` counts, and an escaped space
+// or punctuation char ends the host. A `_` before a `www.` lets a host run on
+// through later `www.` candidates; the walk stops at the eleventh dot, which
+// settles the verdict, so that the walks from all the candidates of a pass
+// stay linear in total.
 fn check_domain(data: &str, allow_short: bool) -> bool {
     let mut np = 0usize;
     let mut uscore1 = 0usize;
     let mut uscore2 = 0usize;
 
     let mut chars = data.char_indices().peekable();
-    while let Some((offset, char)) = chars.next() {
+    while let Some((mut offset, mut char)) = chars.next() {
+        if char == '\\' && offset != 0 {
+            let mut ahead = chars.clone();
+            if let (Some(escaped), Some(_)) = (ahead.next(), ahead.next()) {
+                (offset, char) = escaped;
+                chars.next();
+            }
+        }
         // cmark's accounting loop runs `for (i = 1; i < size - 1; i++)`: it
         // never inspects the first char (offset 0) nor the final char of the
         // chunk. We replicate that — a trailing `_` (e.g. `http://a_`) is not
         // counted, so the link still forms.
         let account = offset != 0 && chars.peek().is_some();
         match char {
-            '\\' => {
-                // Escape: consume the next char as a literal host char.
-                chars.next();
-            }
             '_' if account => uscore2 += 1,
             '.' if account => {
                 uscore1 = uscore2;

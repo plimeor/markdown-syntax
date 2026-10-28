@@ -614,12 +614,16 @@ mod reference {
         let mut uscore2 = 0usize;
 
         let mut chars = data.char_indices().peekable();
-        while let Some((offset, char)) = chars.next() {
-            let account = offset != 0 && chars.peek().is_some();
-            match char {
-                '\\' => {
+        while let Some((mut offset, mut char)) = chars.next() {
+            if char == '\\' && offset != 0 {
+                let mut ahead = chars.clone();
+                if let (Some(escaped), Some(_)) = (ahead.next(), ahead.next()) {
+                    (offset, char) = escaped;
                     chars.next();
                 }
+            }
+            let account = offset != 0 && chars.peek().is_some();
+            match char {
                 '_' if account => uscore2 += 1,
                 '.' if account => {
                     uscore1 = uscore2;
@@ -1131,7 +1135,20 @@ fn literal_autolink_scans_match_the_reference_scan() {
 
 #[test]
 fn every_literal_autolink_the_parser_reads_has_its_destination() {
-    for input in generated_inputs(700, 40, 16) {
+    let mut inputs = generated_inputs(700, 40, 16);
+    inputs.extend(host_inputs(3000, 16));
+    // Escapes, spaces, and `_` around `www.` candidates, repeated past the
+    // eleven dots that settle `check_domain`.
+    for piece in [
+        " www.a_\\",
+        "\\ www._",
+        "WWW._\\ é",
+        "\\ www..._b",
+        "_www.a\\_",
+    ] {
+        inputs.extend((1..=13).map(|count| piece.repeat(count)));
+    }
+    for input in inputs {
         for index in boundaries(&input) {
             let Some((end, prefix)) =
                 parse_literal_autolink(&input, index, &mut LiteralAutolinkScan::default(), true)

@@ -112,6 +112,10 @@ no link text, so a URL in its content links.
 - **WHEN** `"[https://foo.com]"` and `"[a [b](c) https://x.y]"` are parsed with `parse`
 - **THEN** neither holds an `Autolink`: each URL is text
 
+#### Scenario: An escaped char in a host
+- **WHEN** `"www.a\\_b"`, `" www.a_\\"` repeated 11 times, and `"www.a_b.c\\.d"` are parsed with `parse`
+- **THEN** the first two hold no `Autolink`, since an escaped `_` counts in its segment and an escaped space ends the host; the third is one `Autolink` to `http://www.a_b.c\.d`, since an escaped `.` is a dot
+
 ### Requirement: Marks pair in closing order
 The parser SHALL pair every emphasis-like mark (`*`, `_`, `~~`, and `==`) on
 one delimiter stack: each closer, taken in source order, pairs with the

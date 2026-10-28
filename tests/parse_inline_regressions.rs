@@ -884,6 +884,7 @@ mod literal_autolink_boundaries {
                     format!("link {}", autolink.destination().unwrap_or_default())
                 }
                 Inline::WikiLink(wiki) => format!("wiki {}", wiki.target),
+                Inline::Escape(escape) => format!("escape {}", escape.value),
                 other => format!("{other:?}"),
             })
             .collect()
@@ -940,6 +941,22 @@ mod literal_autolink_boundaries {
             shape("see https://example.com"),
             ["text see ", "link https://example.com"]
         );
+    }
+
+    // inline-syntax: Literal autolinks
+    #[test]
+    fn the_host_check_reads_an_escaped_char_like_any_other() {
+        // As in cmark-gfm's `check_domain`: an escaped space ends the host,
+        // an escaped `_` counts in its segment, and an escaped `.` is a dot.
+        for count in [1, 10, 11, 12, 25] {
+            let source = " www.a_\\".repeat(count);
+            assert_eq!(shape(&source), [format!("text {}", &source[1..])]);
+            let document = parse(&source).document;
+            assert_eq!(document.validate(), [], "{count}");
+            assert_eq!(document.to_markdown().as_deref(), Ok(source.as_str()));
+        }
+        assert_eq!(shape("www.a\\_b"), ["text www.a", "escape _", "text b"]);
+        assert_eq!(shape("www.a_b.c\\.d"), ["link http://www.a_b.c\\.d"]);
     }
 
     #[test]
