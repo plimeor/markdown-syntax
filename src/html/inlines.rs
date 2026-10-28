@@ -347,10 +347,14 @@ pub fn apply_tagfilter(value: &str, out: &mut String) {
 
 /// True when the char after a blocklisted tag name terminates the tag name
 /// (so `<scriptx>` is not filtered but `<script>`/`<script `/`<script/` are).
+/// The terminators are those of a browser's tag name state: ASCII whitespace
+/// (tab, line feed, form feed, carriage return, space), `/`, and `>`. A
+/// browser reads on through other whitespace, as in `<title\u{a0}x>` or
+/// `<style\u{b}>`, which name no blocklisted element.
 fn tag_terminates(rest: &str) -> bool {
-    match rest.chars().next() {
+    match rest.as_bytes().first() {
         None => true,
-        Some(c) => c == '>' || c == '/' || c.is_whitespace(),
+        Some(b) => matches!(b, b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\x0c' | b'\r'),
     }
 }
 

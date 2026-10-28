@@ -359,6 +359,16 @@ fn raw_html_and_tagfilter_options_are_independent() {
         parse_render("<div>\n<titlé\n</TITLE>\n", &filtered),
         "<div>\n<titlé\n&lt;/TITLE>",
     );
+    // A name ends where a browser ends it: at ASCII whitespace, `/`, or `>`,
+    // and at the end of the value, but not at other whitespace, a vertical
+    // tab among it.
+    assert_eq!(
+        parse_render(
+            "<div>\n<title\u{a0}x>\n<script\u{85}>\n<script/src=x>\n<style\x0b>\n<xmp\n",
+            &filtered,
+        ),
+        "<div>\n<title\u{a0}x>\n<script\u{85}>\n&lt;script/src=x>\n<style\x0b>\n&lt;xmp",
+    );
 }
 
 // html-rendering: Wiki embeds are marked
