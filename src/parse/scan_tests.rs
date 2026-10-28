@@ -615,36 +615,44 @@ mod reference {
         }
     }
 
-    /// cmark-gfm `check_domain`, walking the whole host.
+    /// cmark-gfm `check_domain`, walking the whole host: the loop over the
+    /// bytes of `data` as cmark holds them (a NUL replaced by U+FFFD), each
+    /// read by `is_valid_hostchar`, which decodes the char starting at the byte
+    /// and finds none at a continuation byte. How a decoded non-ASCII char is
+    /// classified never changes the verdict: the byte after it ends the walk.
+    /// A vertical tab ends the host here, as it ends a GFM spec domain, where
+    /// cmark-gfm reads on.
     pub(super) fn check_domain(data: &str, allow_short: bool) -> bool {
+        let data = data.replace('\0', "\u{FFFD}");
+        let bytes = data.as_bytes();
+        let size = bytes.len();
+        let is_valid_hostchar = |index: usize| {
+            data.is_char_boundary(index)
+                && data[index..].chars().next().is_some_and(|char| {
+                    let space = matches!(char, '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ')
+                        || (!char.is_ascii() && char.is_whitespace());
+                    !space && !crate::unicode_punctuation::is_unicode_punctuation(char)
+                })
+        };
         let mut np = 0usize;
         let mut uscore1 = 0usize;
         let mut uscore2 = 0usize;
 
-        let mut chars = data.char_indices().peekable();
-        while let Some((mut offset, mut char)) = chars.next() {
-            if char == '\\' && offset != 0 {
-                let mut ahead = chars.clone();
-                if let (Some(escaped), Some(_)) = (ahead.next(), ahead.next()) {
-                    (offset, char) = escaped;
-                    chars.next();
-                }
+        let mut i = 1;
+        while i + 1 < size {
+            if bytes[i] == b'\\' && i + 2 < size {
+                i += 1;
             }
-            let account = offset != 0 && chars.peek().is_some();
-            match char {
-                '_' if account => uscore2 += 1,
-                '.' if account => {
-                    uscore1 = uscore2;
-                    uscore2 = 0;
-                    np += 1;
-                }
-                '_' | '.' | '-' => {}
-                _ => {
-                    if !is_valid_hostchar(source_char(char)) {
-                        break;
-                    }
-                }
+            if bytes[i] == b'_' {
+                uscore2 += 1;
+            } else if bytes[i] == b'.' {
+                uscore1 = uscore2;
+                uscore2 = 0;
+                np += 1;
+            } else if !is_valid_hostchar(i) && bytes[i] != b'-' {
+                break;
             }
+            i += 1;
         }
 
         if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
@@ -1016,7 +1024,7 @@ fn scan_tables_are_kept_only_from_inputs_up_to_the_kept_length() {
 fn host_inputs(count: usize, seed: u64) -> Vec<String> {
     const HOST_PIECES: &[&str] = &[
         "www.", "a", "b", ".", "..", "_", "-", "\\", "\\ ", "\\.", "\\\n", " ", "\n", "/", ":",
-        "中", "é", "。",
+        "中", "é", "。", "\u{a0}", "😀", "\u{b}", "\0", "\u{fffd}", "http://",
     ];
     let mut rng = Rng(seed);
     (0..count)

@@ -128,6 +128,10 @@ no link text, so a URL in its content links.
 - **WHEN** `"www.a\\_b"`, `" www.a_\\"` repeated 11 times, and `"www.a_b.c\\.d"` are parsed with `parse`
 - **THEN** the first two hold no `Autolink`, since an escaped `_` counts in its segment and an escaped space ends the host; the third is one `Autolink` to `http://www.a_b.c\.d`, since an escaped `.` is a dot
 
+#### Scenario: A non-ASCII char in a host
+- **WHEN** `"www.é.x_y.z"`, `"http://é_a.b_c"`, `"www.a_b.c_dé"`, and `"www.a_b.c\u{b}.d.e"` are parsed with `parse`
+- **THEN** the first two are each one `Autolink`, to `http://www.é.x_y.z` and `http://é_a.b_c`, since, as in cmark-gfm, the host check reads bytes and ends inside the first non-ASCII char, so no `_` after it counts; the third holds no `Autolink`, since its `_` comes before the `é`; nor does the fourth, since a GFM domain holds only alphanumerics, `_`, `-`, and `.`, so the vertical tab ends it after `c`, where cmark-gfm reads on through it
+
 ### Requirement: Marks pair in closing order
 The parser SHALL pair every emphasis-like mark (`*`, `_`, `~~`, and `==`) on
 one delimiter stack: each closer, taken in source order, pairs with the

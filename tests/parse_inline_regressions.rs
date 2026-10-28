@@ -959,6 +959,56 @@ mod literal_autolink_boundaries {
         assert_eq!(shape("www.a_b.c\\.d"), ["link http://www.a_b.c\\.d"]);
     }
 
+    // inline-syntax: Literal autolinks
+    #[test]
+    fn the_host_check_ends_at_a_non_ascii_char() {
+        // As in cmark-gfm's `check_domain`, which walks bytes: the byte after
+        // a non-ASCII char's first byte decodes to no char and ends the host,
+        // so a `_` after it is not counted. Outputs observed from cmark-gfm
+        // 0.29.0.gfm.13 with the autolink extension.
+        for source in [
+            "www.é.x_y.z",
+            "www.中.x_y.z",
+            "www.a\\é.b_c.d",
+            "www.éa_b.c_d",
+            "http://é_a.b_c",
+            "http://aé_b.c_d",
+        ] {
+            let destination = if source.starts_with("www.") {
+                format!("http://{source}")
+            } else {
+                source.to_string()
+            };
+            assert_eq!(shape(source), [format!("link {destination}")], "{source:?}");
+            let document = parse(source).document;
+            assert_eq!(document.validate(), [], "{source:?}");
+            assert_eq!(
+                document.without_source().to_markdown(),
+                Ok(format!("{source}\n")),
+                "{source:?}"
+            );
+        }
+        // A `_` before the non-ASCII char still counts, and an ASCII host
+        // checks its last two segments.
+        for source in ["www.a_b.c_dé", "www.a.b_c.d"] {
+            assert_eq!(shape(source), [format!("text {source}")], "{source:?}");
+        }
+        // A vertical tab ends a GFM spec domain, as it ends the URL: no `_`
+        // after it counts, and a `_` before it is in the domain's last
+        // segments.
+        assert_eq!(
+            shape("www.a\u{b}b_c.d"),
+            ["link http://www.a", "text \u{b}b_c.d"]
+        );
+        assert_eq!(
+            shape("www.a\u{b}b.c"),
+            ["link http://www.a", "text \u{b}b.c"]
+        );
+        for source in ["www.a_b.c\u{b}.d.e", "http://a_b.c\u{b}.d.e"] {
+            assert_eq!(shape(source), [format!("text {source}")], "{source:?}");
+        }
+    }
+
     #[test]
     fn a_no_break_space_before_an_email_like_run_is_text() {
         assert_eq!(shape("\u{a0}e+@"), ["text \u{a0}e+@"]);

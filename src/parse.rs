@@ -6185,37 +6185,44 @@ fn is_valid_hostchar(char: char) -> bool {
 // is required (the `www.` rule). The URL extent past the host is determined by
 // `autolink_url_end`, so only the verdict matters here.
 //
-// cmark walks bytes with `is_valid_hostchar` decoding each char; this walks
-// chars directly (UTF-8 safe) over the host prefix, which yields the same
-// dot/underscore-segment verdict. As in cmark, a `\` past the first char and
-// before at least two more is skipped, and the char after it is read by the
-// same rules as any other: an escaped `_` or `.` counts, and an escaped space
-// or punctuation char ends the host. A `_` before a `www.` lets a host run on
-// through later `www.` candidates; the walk stops at the eleventh dot, which
-// settles the verdict, so that the walks from all the candidates of a pass
-// stay linear in total.
+// As in cmark, the walk reads bytes, from the second byte of `data` to the
+// last but one; neither end is counted, so a trailing `_` (`http://a_`) still
+// links. A `\` with at least two bytes after it is skipped, and the byte after
+// it is read by the same rules as any other: an escaped `_` or `.` counts, an
+// escaped `-` goes on, and any other escaped space or punctuation byte ends
+// the host. A non-ASCII byte ends the host: cmark's `is_valid_hostchar`
+// decodes a char at a lead byte, and the byte after it, a continuation byte,
+// decodes to none, so no `_` or `.` after a non-ASCII char is counted
+// (`www.é.x_y.z` links); a continuation byte at the second byte ends it at
+// once. A NUL, which cmark reads as U+FFFD, is read as such a char. A byte is
+// a host char unless it is ASCII punctuation or a whitespace char of the GFM
+// spec (tab, line feed, vertical tab, form feed, carriage return, space):
+// cmark-gfm reads on through a vertical tab, but the GFM spec builds a domain
+// of alphanumerics, `_`, `-`, and `.` only, so a vertical tab, one of its
+// whitespace chars, ends it. A `_` before a `www.` lets a host run on through
+// later `www.` candidates; the walk stops at the eleventh dot, which settles
+// the verdict, so that the walks from all the candidates of a pass stay linear
+// in total.
 fn check_domain(data: &str, allow_short: bool) -> bool {
+    let bytes = data.as_bytes();
     let mut np = 0usize;
     let mut uscore1 = 0usize;
     let mut uscore2 = 0usize;
 
-    let mut chars = data.char_indices().peekable();
-    while let Some((mut offset, mut char)) = chars.next() {
-        if char == '\\' && offset != 0 {
-            let mut ahead = chars.clone();
-            if let (Some(escaped), Some(_)) = (ahead.next(), ahead.next()) {
-                (offset, char) = escaped;
-                chars.next();
-            }
+    // A NUL first byte is a three-byte char to cmark: its second byte ends
+    // the host.
+    let mut index = if bytes.first() == Some(&0) {
+        bytes.len()
+    } else {
+        1
+    };
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'\\' && index + 2 < bytes.len() {
+            index += 1;
         }
-        // cmark's accounting loop runs `for (i = 1; i < size - 1; i++)`: it
-        // never inspects the first char (offset 0) nor the final char of the
-        // chunk. We replicate that — a trailing `_` (e.g. `http://a_`) is not
-        // counted, so the link still forms.
-        let account = offset != 0 && chars.peek().is_some();
-        match char {
-            '_' if account => uscore2 += 1,
-            '.' if account => {
+        match bytes[index] {
+            b'_' => uscore2 += 1,
+            b'.' => {
                 uscore1 = uscore2;
                 uscore2 = 0;
                 np += 1;
@@ -6223,13 +6230,12 @@ fn check_domain(data: &str, allow_short: bool) -> bool {
                     return true;
                 }
             }
-            '_' | '.' | '-' => {}
-            _ => {
-                if !is_valid_hostchar(source_char(char)) {
-                    break;
-                }
-            }
+            b'-' => {}
+            0 | 0x80.. | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' | b' ' => break,
+            byte if byte.is_ascii_punctuation() => break,
+            _ => {}
         }
+        index += 1;
     }
 
     if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
