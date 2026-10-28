@@ -1,0 +1,24 @@
+[package]
+name = "markdown-syntax-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Native throughput and allocation benchmark of markdown-syntax against pulldown-cmark, comrak, and markdown-rs"
+
+# Its own workspace: the library's build never sees this tool.
+[workspace]
+
+[dependencies]
+markdown-syntax = { path = "../..", features = ["html"] }
+pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
+comrak = { version = "0.59.0", default-features = false }
+markdown = "1.0.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# One profile for every crate in the graph, ours and the peers alike.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
