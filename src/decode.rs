@@ -26,8 +26,8 @@ pub(crate) fn decode_selected_escapes_and_references(
     let mut cursor = 0;
     while let Some(char) = input[cursor..].chars().next() {
         if char == '&' {
-            if let Some((end, value)) = parse_character_reference(input, cursor) {
-                output.push_str(&value);
+            if let Some((end, value)) = character_reference(input, cursor) {
+                value.push_to(&mut output);
                 cursor = end;
                 continue;
             }
@@ -56,10 +56,39 @@ pub(crate) fn decode_character_reference(reference: &str) -> Option<String> {
         .map(|(_, value)| value)
 }
 
+/// `character_reference`, with the text the reference names as a `String`.
+pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
+    character_reference(input, index).map(|(end, value)| {
+        let text = match value {
+            ReferenceValue::Char(char) => char.into(),
+            ReferenceValue::Named(text) => text.into(),
+        };
+        (end, text)
+    })
+}
+
+/// The text a character reference names.
+#[derive(Clone, Copy)]
+pub(crate) enum ReferenceValue {
+    /// A numeric reference's character.
+    Char(char),
+    /// A named reference's text.
+    Named(&'static str),
+}
+
+impl ReferenceValue {
+    fn push_to(self, output: &mut String) {
+        match self {
+            Self::Char(char) => output.push(char),
+            Self::Named(text) => output.push_str(text),
+        }
+    }
+}
+
 /// The character reference starting at the `&` at `index`: the byte offset
 /// just past its `;` and the text it names, or `None` when no valid reference
 /// starts there.
-pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(usize, String)> {
+pub(crate) fn character_reference(input: &str, index: usize) -> Option<(usize, ReferenceValue)> {
     let rest = input.get(index..)?;
     if let Some(rest) = rest
         .strip_prefix("&#x")
@@ -72,7 +101,7 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         let value = u32::from_str_radix(&rest[..digits], 16).ok()?;
         return Some((
             index + 3 + digits + 1,
-            character_reference_value(value).into(),
+            ReferenceValue::Char(character_reference_value(value)),
         ));
     }
     if let Some(rest) = rest.strip_prefix("&#") {
@@ -83,7 +112,7 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         let value = rest[..digits].parse::<u32>().ok()?;
         return Some((
             index + 2 + digits + 1,
-            character_reference_value(value).into(),
+            ReferenceValue::Char(character_reference_value(value)),
         ));
     }
 
@@ -92,7 +121,8 @@ pub(crate) fn parse_character_reference(input: &str, index: usize) -> Option<(us
         return None;
     }
     let name = &rest[1..name_end];
-    named_character_reference(name).map(|value| (index + name_end + 1, value.into()))
+    named_character_reference(name)
+        .map(|value| (index + name_end + 1, ReferenceValue::Named(value)))
 }
 
 /// Finds the `;` that ends a character reference body, looking no further than

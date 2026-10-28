@@ -12,11 +12,23 @@ use alloc::vec::Vec;
 use crate::ast::{BlankLine, Block, HtmlContainerContent, NodeMeta};
 use crate::span::Span;
 
-/// Adds the `BlankLine` nodes of a document whose top-level blocks are
-/// `blocks`, read from `input`, which may open with a byte order mark.
-pub(super) fn add_blank_lines(input: &str, blocks: &mut Vec<Block>) {
-    let lines = Lines::new(input);
-    lines.fill(blocks, Span::new(0, input.len()), Edges::BOTH);
+/// The blank lines that are `BlankLine` nodes between the top-level blocks
+/// of the document `input`, which may open with a byte order mark, at
+/// `spans`, in order, each with the index of the block it comes before
+/// (`spans.len()` after the last). Only where the blocks are is read, so
+/// their inline content need not be.
+pub(super) fn between_top_level(input: &str, spans: &[Span]) -> Vec<(usize, Span)> {
+    Lines::new(input).gaps(
+        spans.iter().copied(),
+        Span::new(0, input.len()),
+        Edges::BOTH,
+    )
+}
+
+/// Adds the `BlankLine` nodes inside `block`, a top-level block of the
+/// document `input`, which may open with a byte order mark.
+pub(super) fn add_inside(input: &str, block: &mut Block) {
+    Lines::new(input).fill_block(block);
 }
 
 /// Which ends of a container count every blank line: the others leave the
@@ -56,46 +68,63 @@ impl Edges {
     };
 }
 
-/// The start of each line of the input, and the end of its last line.
+/// The lines of the input, read only inside the gap a question names, so the
+/// pass reads each byte of a gap a bounded number of times.
 struct Lines<'a> {
     input: &'a str,
-    starts: Vec<usize>,
 }
 
 impl<'a> Lines<'a> {
     fn new(input: &'a str) -> Self {
-        let bytes = input.as_bytes();
-        let mut starts = alloc::vec![0];
-        let mut index = 0;
-        while index < bytes.len() {
-            match bytes[index] {
-                b'\n' => starts.push(index + 1),
-                b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
-                    index += 1;
-                    starts.push(index + 1);
-                }
-                b'\r' => starts.push(index + 1),
-                _ => {}
-            }
-            index += 1;
-        }
-        // A last line without a line ending ends at the end of the input.
-        if starts.last() != Some(&input.len()) {
-            starts.push(input.len());
-        }
-        Self { input, starts }
+        Self { input }
     }
 
-    /// The blank lines that start at or after `from` and end, with their
-    /// line ending, at or before `to`.
-    fn blank_in(&self, from: usize, to: usize) -> Vec<Span> {
-        let first = self.starts.partition_point(|&start| start < from);
-        let mut blank = Vec::new();
-        for pair in self.starts[first..].windows(2) {
-            let [start, end] = [pair[0], pair[1]];
-            if end > to {
-                break;
+    /// Whether a line starts at `at`: the start of the input or the end of a
+    /// line ending.
+    fn starts_line(&self, at: usize) -> bool {
+        let bytes = self.input.as_bytes();
+        let Some(before) = at.checked_sub(1) else {
+            return true;
+        };
+        match bytes.get(before) {
+            Some(b'\n') => true,
+            Some(b'\r') => bytes.get(at) != Some(&b'\n'),
+            _ => false,
+        }
+    }
+
+    /// The end, after its line ending, of the line `at` falls inside, when it
+    /// ends at or before `to`. A last line without a line ending ends at the
+    /// end of the input; there is no line at the end of the input.
+    fn line_end(&self, at: usize, to: usize) -> Option<usize> {
+        let bytes = self.input.as_bytes();
+        let to = to.min(bytes.len());
+        let ending = bytes[at.min(to)..to]
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
+            .map(|offset| at + offset);
+        let end = match ending {
+            Some(index) if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') => {
+                index + 2
             }
+            Some(index) => index + 1,
+            None if to == bytes.len() && at < to => to,
+            None => return None,
+        };
+        (end <= to).then_some(end)
+    }
+
+    /// Calls `found` with each blank line that starts at or after `from`
+    /// and ends, with its line ending, at or before `to`.
+    fn blank_in(&self, from: usize, to: usize, mut found: impl FnMut(Span)) {
+        let mut start = from;
+        if !self.starts_line(from) {
+            match self.line_end(from, to) {
+                Some(end) => start = end,
+                None => return,
+            }
+        }
+        while let Some(end) = self.line_end(start, to) {
             let line = &self.input[start..end];
             // A byte order mark is not content.
             let line = match start {
@@ -103,20 +132,49 @@ impl<'a> Lines<'a> {
                 _ => line,
             };
             if !line.is_empty() && is_blank(line) {
-                blank.push(Span::new(start, end));
+                found(Span::new(start, end));
             }
+            start = end;
         }
-        blank
+    }
+
+    /// Calls `keep` with each blank line of the gap from `from` to `to`, after
+    /// `head`, that is a node at an edge of kind `edge`.
+    fn gap(
+        &self,
+        from: usize,
+        to: usize,
+        head: Option<Span>,
+        edge: Edge,
+        mut keep: impl FnMut(Span),
+    ) {
+        let mut skip = match edge {
+            Edge::Each => 0,
+            Edge::AfterOne => 1,
+            Edge::None => return,
+        };
+        let mut found = |span| {
+            if skip == 0 {
+                keep(span);
+            } else {
+                skip -= 1;
+            }
+        };
+        if let Some(head) = head {
+            found(head);
+        }
+        self.blank_in(from, to, found);
     }
 
     /// The rest of the line `from` falls inside, from `from` with its line
     /// ending, when it ends at or before `to`; `None` when `from` starts a
     /// line.
     fn rest_of_line(&self, from: usize, to: usize) -> Option<Span> {
-        let next = self.starts.partition_point(|&start| start <= from);
-        let end = *self.starts.get(next)?;
-        let starts_a_line = next > 0 && self.starts[next - 1] == from;
-        (!starts_a_line && end <= to && from < end).then(|| Span::new(from, end))
+        if self.starts_line(from) {
+            return None;
+        }
+        let end = self.line_end(from, to)?;
+        Some(Span::new(from, end))
     }
 
     /// Adds the blank lines of `blocks`, the children of a container whose
@@ -125,71 +183,75 @@ impl<'a> Lines<'a> {
         for block in blocks.iter_mut() {
             self.fill_block(block);
         }
-        let spans: Vec<Span> = blocks.iter().filter_map(Block::span).collect();
-        if spans.len() != blocks.len() {
+        if !blocks.iter().all(|block| block.span().is_some()) {
             return;
         }
-        let mut gaps: Vec<(usize, Vec<Span>)> = Vec::new();
+        let spans = blocks.iter().filter_map(Block::span);
+        let blank = self.gaps(spans, region, edges);
+        if blank.is_empty() {
+            return;
+        }
+        let nodes = core::mem::replace(blocks, Vec::with_capacity(blocks.len() + blank.len()));
+        let mut blank = blank.into_iter().peekable();
+        for (index, block) in nodes.into_iter().enumerate() {
+            while let Some((_, span)) = blank.next_if(|(before, _)| *before == index) {
+                blocks.push(blank_line(span));
+            }
+            blocks.push(block);
+        }
+        blocks.extend(blank.map(|(_, span)| blank_line(span)));
+    }
+
+    /// The blank lines that are nodes in the gaps around the blocks at
+    /// `spans`, the children of a container whose content lies in `region`,
+    /// in order, each with the index of the block it comes before (the
+    /// number of blocks after the last).
+    fn gaps(
+        &self,
+        spans: impl Iterator<Item = Span> + Clone,
+        region: Span,
+        edges: Edges,
+    ) -> Vec<(usize, Span)> {
+        let mut blank = Vec::new();
         let mut from = region.start;
         // A container that opens inside a line (a block quote after a list
         // marker or another quote's `>`) holds the rest of that line as its
         // first line.
         let head = self
-            .rest_of_line(from, spans.first().map_or(region.end, |span| span.start))
+            .rest_of_line(
+                from,
+                spans.clone().next().map_or(region.end, |span| span.start),
+            )
             .filter(|rest| is_blank(&self.input[rest.start..rest.end]));
         if let Some(rest) = head {
             from = rest.end;
         }
-        for (index, span) in spans.iter().enumerate() {
-            let mut blank = self.blank_in(from, span.start);
-            if index == 0 {
-                blank.splice(0..0, head);
-            }
-            let edge = if index == 0 {
-                edges.leading
-            } else {
-                Edge::AfterOne
+        let mut count = 0;
+        for (index, span) in spans.enumerate() {
+            let (head, edge) = match index {
+                0 => (head, edges.leading),
+                _ => (None, Edge::AfterOne),
             };
-            keep(&mut blank, edge);
-            if !blank.is_empty() {
-                gaps.push((index, blank));
-            }
+            self.gap(from, span.start, head, edge, |span| {
+                blank.push((index, span))
+            });
             from = span.end;
+            count += 1;
         }
-        let mut blank = self.blank_in(from, region.end);
-        if spans.is_empty() {
-            blank.splice(0..0, head);
-        }
-        keep(
-            &mut blank,
-            if spans.is_empty() {
-                // A container of blank lines alone holds each of them.
-                match edges.leading {
-                    Edge::None => Edge::None,
-                    _ => Edge::Each,
-                }
-            } else {
-                edges.trailing
-            },
-        );
-        if !blank.is_empty() {
-            gaps.push((spans.len(), blank));
-        }
-        if gaps.is_empty() {
-            return;
-        }
-        let count = blocks.len() + gaps.iter().map(|(_, blank)| blank.len()).sum::<usize>();
-        let nodes = core::mem::replace(blocks, Vec::with_capacity(count));
-        let mut gaps = gaps.into_iter().peekable();
-        for (index, block) in nodes.into_iter().enumerate() {
-            if let Some((_, blank)) = gaps.next_if(|(at, _)| *at == index) {
-                blocks.extend(blank.into_iter().map(blank_line));
-            }
-            blocks.push(block);
-        }
-        if let Some((_, blank)) = gaps.next() {
-            blocks.extend(blank.into_iter().map(blank_line));
-        }
+        let (head, edge) = if count == 0 {
+            // A container of blank lines alone holds each of them.
+            let edge = match edges.leading {
+                Edge::None => Edge::None,
+                _ => Edge::Each,
+            };
+            (head, edge)
+        } else {
+            (None, edges.trailing)
+        };
+        self.gap(from, region.end, head, edge, |span| {
+            blank.push((count, span));
+        });
+        blank
     }
 
     fn fill_block(&self, block: &mut Block) {
@@ -236,13 +298,15 @@ impl<'a> Lines<'a> {
                     if earlier.children.is_empty() {
                         continue;
                     }
-                    let mut blank = self.blank_in(end, start);
-                    keep(&mut blank, Edge::AfterOne);
+                    let mut last = None;
+                    self.gap(end, start, None, Edge::AfterOne, |span| {
+                        earlier.children.push(blank_line(span));
+                        last = Some(span);
+                    });
                     // The item's span grows over the blank lines it holds.
-                    if let (Some(span), Some(last)) = (&mut earlier.meta.span, blank.last()) {
+                    if let (Some(span), Some(last)) = (&mut earlier.meta.span, last) {
                         span.end = last.end;
                     }
-                    earlier.children.extend(blank.into_iter().map(blank_line));
                 }
             }
             _ => {}
@@ -256,26 +320,14 @@ impl<'a> Lines<'a> {
     }
 }
 
-/// Keeps the blank lines of a gap that are nodes at an edge of kind `edge`.
-fn keep(blank: &mut Vec<Span>, edge: Edge) {
-    match edge {
-        Edge::Each => {}
-        Edge::AfterOne => {
-            if !blank.is_empty() {
-                blank.drain(..1);
-            }
-        }
-        Edge::None => blank.clear(),
-    }
-}
-
 /// Whether a line holds only whitespace and container markers.
 fn is_blank(line: &str) -> bool {
     line.bytes()
         .all(|byte| matches!(byte, b' ' | b'\t' | b'>' | b'\n' | b'\r'))
 }
 
-fn blank_line(span: Span) -> Block {
+/// The `BlankLine` node of the blank line at `span`.
+pub(super) fn blank_line(span: Span) -> Block {
     Block::BlankLine(BlankLine {
         meta: NodeMeta::new(Some(span)),
     })

@@ -14,12 +14,21 @@
 
 use alloc::vec::Vec;
 
-/// Every start position of `pattern` in `input`, overlapping ones included,
-/// in ascending order.
-pub(crate) fn pattern_starts(input: &str, pattern: &str) -> Vec<usize> {
-    (0..input.len())
-        .filter(|index| input.as_bytes()[*index..].starts_with(pattern.as_bytes()))
-        .collect()
+/// Pushes every start position of `pattern` in `input`, overlapping ones
+/// included, in ascending order, to `starts`, an empty buffer.
+pub(crate) fn pattern_starts(input: &str, pattern: &str, starts: &mut Vec<usize>) {
+    let (bytes, pattern) = (input.as_bytes(), pattern.as_bytes());
+    match *pattern {
+        [] => starts.extend(0..input.len()),
+        [only] => crate::swar::each_any(bytes, [only], |index| starts.push(index)),
+        [first, second, ref rest @ ..] => {
+            crate::swar::each_pair(bytes, [first, second], |index| {
+                if bytes[index + 2..].starts_with(rest) {
+                    starts.push(index);
+                }
+            });
+        }
+    }
 }
 
 /// Sorted positions of every match of a position-intrinsic predicate (one whose
@@ -27,20 +36,45 @@ pub(crate) fn pattern_starts(input: &str, pattern: &str) -> Vec<usize> {
 /// one pass on first use.
 #[derive(Default)]
 pub(crate) struct Positions {
-    positions: Option<Vec<usize>>,
+    positions: Vec<usize>,
+    collected: bool,
 }
 
 impl Positions {
-    /// The first matching position at or after `from`.
+    /// The first matching position at or after `from`. `collect` pushes the
+    /// positions, in ascending order, to an empty buffer.
     pub(crate) fn first_at_or_after(
         &mut self,
         from: usize,
-        collect: impl FnOnce() -> Vec<usize>,
+        collect: impl FnOnce(&mut Vec<usize>),
     ) -> Option<usize> {
-        let positions = self.positions.get_or_insert_with(collect);
+        if !self.collected {
+            collect(&mut self.positions);
+            self.collected = true;
+        }
+        let positions = &self.positions;
         positions
             .get(positions.partition_point(|position| *position < from))
             .copied()
+    }
+
+    /// Forgets the positions, keeping their buffer for the next input.
+    pub(crate) fn clear(&mut self) {
+        let Self {
+            positions,
+            collected,
+        } = self;
+        positions.clear();
+        *collected = false;
+    }
+
+    /// Whether no positions are collected.
+    pub(crate) fn is_clear(&self) -> bool {
+        let Self {
+            positions,
+            collected,
+        } = self;
+        !collected && positions.is_empty()
     }
 }
 
@@ -93,7 +127,7 @@ impl PathMemo {
         mut step: impl FnMut(usize) -> Step,
     ) -> Option<usize> {
         if self.answers.is_empty() {
-            self.answers = alloc::vec![UNKNOWN; nodes];
+            self.answers.resize(nodes, UNKNOWN);
         }
         let mut cursor = start;
         let answer = loop {
@@ -111,6 +145,19 @@ impl PathMemo {
             self.answers[position] = encode(answer);
         }
         answer
+    }
+
+    /// Forgets every answer, keeping the table for the next input.
+    pub(crate) fn clear(&mut self) {
+        let Self { answers, pending } = self;
+        answers.clear();
+        pending.clear();
+    }
+
+    /// Whether no answer is kept.
+    pub(crate) fn is_clear(&self) -> bool {
+        let Self { answers, pending } = self;
+        answers.is_empty() && pending.is_empty()
     }
 }
 
@@ -187,7 +234,7 @@ impl BracketMemo {
         mut step: impl FnMut(usize) -> BracketStep,
     ) -> Option<usize> {
         if self.answers.is_empty() {
-            self.answers = alloc::vec![UNKNOWN; positions];
+            self.answers.resize(positions, UNKNOWN);
         }
         self.frames.push((start, Phase::Enter));
         let mut answer = None;
@@ -234,5 +281,18 @@ impl BracketMemo {
             }
         }
         answer
+    }
+
+    /// Forgets every answer, keeping the table for the next input.
+    pub(crate) fn clear(&mut self) {
+        let Self { answers, frames } = self;
+        answers.clear();
+        frames.clear();
+    }
+
+    /// Whether no answer is kept.
+    pub(crate) fn is_clear(&self) -> bool {
+        let Self { answers, frames } = self;
+        answers.is_empty() && frames.is_empty()
     }
 }

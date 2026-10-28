@@ -120,6 +120,111 @@ d
             );
         }
     }
+
+    /// The top-level list of `document`.
+    fn list(document: &mut Document, index: usize) -> &mut List {
+        match &mut document.children[index] {
+            Block::List(list) => list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_leaf_of_an_edited_list_reads_from_the_whole_list() {
+        // A paragraph moved into another item, which does not hold its lines.
+        let mut moved = parse("- a\n- b *c*").document;
+        let paragraph = list(&mut moved, 0).children[1].children.remove(0);
+        list(&mut moved, 0).children[0].children.push(paragraph);
+        let source = moved.inline_source(&NodePath::from([0, 0, 1])).unwrap();
+        assert_eq!(source.text, "b *c*");
+        assert_eq!((source.to_source(0), source.to_source(2)), (6, 8));
+
+        // An item whose span is gone.
+        let mut cleared = parse("- a\n- b *c*").document;
+        list(&mut cleared, 0).children[1].meta.span = None;
+        let source = cleared.inline_source(&NodePath::from([0, 1, 0])).unwrap();
+        assert_eq!(source.text, "b *c*");
+        assert_eq!((source.to_source(0), source.to_source(2)), (6, 8));
+
+        // Items in another order each still hold their own lines.
+        let mut swapped = parse("- a *x*\n- b *c*\n  d").document;
+        list(&mut swapped, 0).children.swap(0, 1);
+        let source = swapped.inline_source(&NodePath::from([0, 0, 0])).unwrap();
+        assert_eq!(
+            (source.text.as_str(), source.to_source(0)),
+            ("b *c*\nd", 10)
+        );
+        let source = swapped.inline_source(&NodePath::from([0, 1, 0])).unwrap();
+        assert_eq!((source.text.as_str(), source.to_source(0)), ("a *x*", 2));
+
+        // An item moved from another list, whose lines the list does not hold.
+        let mut joined = parse("- a\n\nx\n\n- b *c*").document;
+        let item = list(&mut joined, 2).children.remove(0);
+        list(&mut joined, 0).children.push(item);
+        assert!(joined.inline_source(&NodePath::from([0, 1, 0])).is_none());
+    }
+
+    #[test]
+    fn debug_shows_the_text_and_each_segment() {
+        let one = inline_source("a *b*", &[0]).unwrap();
+        assert_eq!(
+            format!("{one:?}"),
+            "InlineSource { text: \"a *b*\", map: SourceMap { segments: [Segment { \
+             text_start: 0, text_end: 5, source_start: 0, source_end: 5 }] } }"
+        );
+        assert_eq!(
+            format!("{one:#?}"),
+            r#"InlineSource {
+    text: "a *b*",
+    map: SourceMap {
+        segments: [
+            Segment {
+                text_start: 0,
+                text_end: 5,
+                source_start: 0,
+                source_end: 5,
+            },
+        ],
+    },
+}"#
+        );
+        let lines = inline_source("> a *b*\n> c\n> d", &[0, 0]).unwrap();
+        assert_eq!(
+            format!("{lines:?}"),
+            "InlineSource { text: \"a *b*\\nc\\nd\", map: SourceMap { segments: [\
+             Segment { text_start: 0, text_end: 6, source_start: 2, source_end: 8 }, \
+             Segment { text_start: 6, text_end: 8, source_start: 10, source_end: 12 }, \
+             Segment { text_start: 8, text_end: 9, source_start: 14, source_end: 15 }] } }"
+        );
+        assert_eq!(
+            format!("{lines:#?}"),
+            r#"InlineSource {
+    text: "a *b*\nc\nd",
+    map: SourceMap {
+        segments: [
+            Segment {
+                text_start: 0,
+                text_end: 6,
+                source_start: 2,
+                source_end: 8,
+            },
+            Segment {
+                text_start: 6,
+                text_end: 8,
+                source_start: 10,
+                source_end: 12,
+            },
+            Segment {
+                text_start: 8,
+                text_end: 9,
+                source_start: 14,
+                source_end: 15,
+            },
+        ],
+    },
+}"#
+        );
+    }
 }
 
 mod leaves_built_from_their_source {

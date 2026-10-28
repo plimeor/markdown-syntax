@@ -19,8 +19,10 @@ use super::{InlineToken, TokenRole};
 
 /// The tokens of `inlines`, read from `input`, tiling `input`.
 pub(super) fn tokens(input: &str, inlines: &[Inline]) -> Vec<InlineToken> {
+    // A text node, the most common inline, is one token; other inlines are
+    // two or more.
     let mut tokens = Tokens {
-        tokens: Vec::new(),
+        tokens: Vec::with_capacity(2 * inlines.len()),
         at: 0,
     };
     // Pre-order with an explicit stack: a node is numbered when it is taken,

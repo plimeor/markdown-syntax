@@ -6,7 +6,10 @@
 use alloc::vec::Vec;
 
 use super::*;
-use crate::test_support::{boundaries, generated_inputs, query_orders, Rng};
+use crate::decode::parse_character_reference;
+use crate::test_support::{
+    boundaries, fixture_inputs, generated_inputs, labels, query_orders, Rng,
+};
 
 /// Plain forward scans that define what each memoized or bounded lookup must
 /// answer. Each runs from its start position to its answer with no shared
@@ -676,6 +679,21 @@ mod reference {
         };
         Some((accumulated, close, label_end_line))
     }
+
+    /// `is_reference_label`, walking `label` as it is written between
+    /// brackets and normalizing it whole.
+    pub(super) fn is_reference_label(label: &str) -> bool {
+        let written = alloc::format!("[{label}]");
+        path_walk(1, |cursor| reference_label_step(&written, cursor)) == Some(written.len() - 1)
+            && reference_label_is_within_limit(label)
+            && !normalize_label(label).is_empty()
+            && !holds_blank_line(label)
+    }
+
+    /// `is_written_footnote_label`, reading the `]` written after `label`.
+    pub(super) fn is_written_footnote_label(label: &str) -> bool {
+        is_footnote_label(label) && !is_escaped_at(&alloc::format!("{label}]"), label.len())
+    }
 }
 
 /// Runs `check` once per input and query order, with a fresh `InlineScan` each
@@ -855,6 +873,109 @@ fn inline_math_matches_the_reference_scan() {
     });
 }
 
+/// One set of tables given from each input's scans to the next input's, as
+/// the passes over a document's leaves give them, through inputs ordered
+/// long, short, long, so that each input finds tables an input of another
+/// length filled and cleared: every memo answers at every start as the
+/// reference scan does, and every lookup as the unmemoized one.
+#[test]
+fn scan_tables_given_from_input_to_input_answer_as_the_reference_scan() {
+    let mut inputs = generated_inputs(160, 60, 21);
+    inputs.sort_by_key(String::len);
+    let mut ordered = Vec::with_capacity(inputs.len());
+    while let Some(long) = inputs.pop() {
+        ordered.push(long);
+        if !inputs.is_empty() {
+            ordered.push(inputs.remove(0));
+        }
+    }
+    let mut tables = ScanTables::default();
+    for input in &ordered {
+        let input = input.as_str();
+        let mut scan = InlineScan::with_tables(input, tables);
+        for index in boundaries(input) {
+            assert_eq!(
+                scan.link_label_end(index),
+                reference::find_link_label_end(input, index),
+                "{input:?} at {index}"
+            );
+            assert_eq!(
+                scan.reference_label_end(index),
+                reference::find_reference_label_end(input, index),
+                "{input:?} at {index}"
+            );
+            assert_eq!(
+                scan.wikilink_close(index),
+                reference::find_wikilink_close(input, index),
+                "{input:?} at {index}"
+            );
+            assert_eq!(
+                scan.directive_attributes_close(index),
+                reference::find_directive_attributes_close(input, index),
+                "{input:?} at {index}"
+            );
+            // The lookups answer as the same constructs read without tables.
+            let (lookups, direct) = (&mut scan.lookups, &mut DirectLookups { input });
+            match input.as_bytes().get(index) {
+                Some(b'`') => assert_eq!(
+                    parse_code_span_with(lookups, input, index),
+                    parse_code_span_with(direct, input, index),
+                    "{input:?} at {index}"
+                ),
+                Some(b'<') => {
+                    assert_eq!(
+                        autolink_end(lookups, input, index),
+                        autolink_end(direct, input, index),
+                        "{input:?} at {index}"
+                    );
+                    assert_eq!(
+                        html_inline_end(lookups, input, index),
+                        html_inline_end(direct, input, index),
+                        "{input:?} at {index}"
+                    );
+                }
+                Some(b'$') => assert_eq!(
+                    parse_math_inline(lookups, input, index),
+                    parse_math_inline(direct, input, index),
+                    "{input:?} at {index}"
+                ),
+                _ => {}
+            }
+            assert_eq!(
+                parse_link_destination(lookups, input, index),
+                parse_link_destination(direct, input, index),
+                "{input:?} at {index}"
+            );
+            assert_eq!(
+                parse_math_code_inline(lookups, input, index),
+                parse_math_code_inline(direct, input, index),
+                "{input:?} at {index}"
+            );
+        }
+        tables = scan.into_tables();
+        assert!(tables.memos.is_some(), "{input:?}");
+        assert!(tables.is_clear(), "{input:?}");
+    }
+}
+
+/// A pass gives its tables to the next one only from an input of at most
+/// `KEPT_TABLES_INPUT_LEN` bytes.
+#[test]
+fn scan_tables_are_kept_only_from_inputs_up_to_the_kept_length() {
+    for (len, kept) in [
+        (KEPT_TABLES_INPUT_LEN, true),
+        (KEPT_TABLES_INPUT_LEN + 1, false),
+    ] {
+        let input = "[`".repeat(len / 2) + &"[".repeat(len % 2);
+        let mut scan = InlineScan::new(&input);
+        assert_eq!(scan.link_label_end(0), None);
+        assert_eq!(scan.lookups.code_span_close(1, 1), Some(1));
+        let tables = scan.into_tables();
+        assert_eq!(tables.lookups.is_some(), kept, "{len}");
+        assert_eq!(tables.memos.is_some(), kept, "{len}");
+    }
+}
+
 /// Inputs dense in host chars, dots, underscores and escapes, so that hosts
 /// run past the eleven dots that settle `check_domain`.
 fn host_inputs(count: usize, seed: u64) -> Vec<String> {
@@ -1025,4 +1146,272 @@ fn html_container_closes_match_the_reference_scan() {
             }
         }
     }
+}
+
+/// `parse` and `parse_inline` of `input` as `Debug` text.
+fn parsed(input: &str) -> String {
+    let output = crate::parse(input);
+    let inline = crate::parse_inline(input, &Definitions::of(&output.document));
+    alloc::format!("{output:?}\n{inline:?}")
+}
+
+/// The inline pass reads a run of text, past the bytes `TEXT_STOPS` reads on
+/// at and the positions `literal_autolink_may_start` rules out, as it reads
+/// the run a char at a time with `literal_email_may_start` holding at every
+/// char, so a literal autolink is tried at each `http://`, `https://`, `www.`,
+/// and email local-part or scheme byte: on every fixture input, its CRLF
+/// variant, and generated inputs, some of them dense in literal autolinks.
+/// `text_runs_end_where_a_literal_autolink_may_start` shows that
+/// `literal_autolink_may_start` holds wherever a literal autolink forms.
+#[test]
+fn text_runs_parse_as_their_chars_one_at_a_time() {
+    const AUTOLINK_PIECES: &[&str] = &[
+        "http://", "https://", "HTTP://", "hTtps://", "www.", "WWW.", "wWw.", "x.y", "a", "B", "1",
+        "_", "-", "+", ".", "@", "a@b.c", "mailto:", "MAILTO:", "xmpp:", "/", " ", "\n", "(", ")",
+        "*", "~", "<", "é", "中",
+    ];
+    let mut rng = Rng(0x7e47);
+    let autolinks = (0..3_000).map(|_| {
+        (0..rng.below(16))
+            .map(|_| AUTOLINK_PIECES[rng.below(AUTOLINK_PIECES.len())])
+            .collect::<String>()
+    });
+    let fixtures = fixture_inputs();
+    let crlf = fixtures.iter().map(|input| input.replace('\n', "\r\n"));
+    let inputs = fixtures
+        .iter()
+        .cloned()
+        .chain(crlf)
+        .chain(generated_inputs(3_000, 40, 29))
+        .chain(autolinks);
+    for input in inputs {
+        let in_runs = parsed(&input);
+        CHAR_BY_CHAR.with(|on| on.set(true));
+        let by_char = parsed(&input);
+        CHAR_BY_CHAR.with(|on| on.set(false));
+        assert_eq!(in_runs, by_char, "{input:?}");
+    }
+}
+
+#[test]
+fn ascii_labels_normalize_as_the_casefold_does() {
+    for label in labels() {
+        assert_eq!(normalize_label(&label), casefold_label(&label), "{label:?}");
+    }
+}
+
+/// Inputs dense in literal autolinks and in what nearly forms one.
+fn literal_autolink_inputs(count: usize, seed: u64) -> Vec<String> {
+    const PIECES: &[&str] = &[
+        "http://", "https://", "HTTP://", "http:/", "https", "www.", "WWW.", "wWw.", "ww", "w",
+        "h", "x.y", "a", "B", "1", "_", "-", "+", ".", ":", "@", "@@", "a@b.c", "mailto:", "xmpp:",
+        "+x@y.z", "/", " ", "\n", "(", ")", "*", "`", "[", "]", "<", "é", "中",
+    ];
+    let mut rng = Rng(seed);
+    (0..count)
+        .map(|_| {
+            (0..rng.below(20))
+                .map(|_| PIECES[rng.below(PIECES.len())])
+                .collect()
+        })
+        .collect()
+}
+
+/// `EmailStarts` answers as the walk to the next position whose run of
+/// local-part and scheme bytes ends at an `@` and that starts the content,
+/// is a `+`, or follows a byte that is no ASCII letter or digit, for
+/// queries in any order.
+#[test]
+fn email_starts_match_the_reference_walk() {
+    let reference = |input: &str, from: usize| {
+        let bytes = input.as_bytes();
+        (from..bytes.len())
+            .find(|&position| {
+                let run = bytes[position..]
+                    .iter()
+                    .take_while(|byte| is_email_local_or_scheme_byte(**byte))
+                    .count();
+                run > 0
+                    && bytes.get(position + run) == Some(&b'@')
+                    && (position == 0
+                        || bytes[position] == b'+'
+                        || !bytes[position - 1].is_ascii_alphanumeric())
+            })
+            .unwrap_or(bytes.len())
+    };
+    let inputs = literal_autolink_inputs(1500, 0x5eed_e3a2)
+        .into_iter()
+        .chain(generated_inputs(300, 40, 30));
+    check_scans(inputs.collect(), 31, |input, scan, from| {
+        assert_eq!(
+            scan.literal_autolinks
+                .email_starts
+                .first_at_or_after(input, from),
+            reference(input, from),
+            "{input:?} from {from}"
+        );
+    });
+}
+
+/// A run of text that `plain_text_end` reads from any position ends at or
+/// before every later position at which a literal autolink forms, inside an
+/// open `[` or not, where `literal_autolink_may_start` holds.
+#[test]
+fn text_runs_end_where_a_literal_autolink_may_start() {
+    let inputs = literal_autolink_inputs(1500, 0x5eed_e3a3)
+        .into_iter()
+        .chain(generated_inputs(300, 40, 32));
+    for input in inputs {
+        let positions = boundaries(&input);
+        let starts: Vec<usize> = positions
+            .iter()
+            .copied()
+            .filter(|&index| {
+                [true, false].into_iter().any(|urls| {
+                    parse_literal_autolink(&input, index, &mut LiteralAutolinkScan::default(), urls)
+                        .is_some()
+                })
+            })
+            .collect();
+        let mut scan = LiteralAutolinkScan::default();
+        for &index in &starts {
+            assert!(
+                literal_autolink_may_start(&input, index, &mut scan),
+                "{input:?} at {index}"
+            );
+        }
+        let mut scan = LiteralAutolinkScan::default();
+        for &from in positions.iter().filter(|&&from| from > 0) {
+            let next = starts
+                .iter()
+                .copied()
+                .find(|&start| start >= from)
+                .unwrap_or(input.len());
+            let end = plain_text_end(&input, from, &mut scan);
+            assert!(end <= next, "{input:?} from {from}: {end} past {next}");
+        }
+    }
+}
+
+/// Labels over the chars the walk to a label's `]` and label normalization
+/// treat specially: every string of up to five of them, and `labels()`.
+fn walk_labels() -> Vec<String> {
+    let chars = ['\\', '[', ']', 'a', 'B', ' ', '\n', '\r', 'é', '\0'];
+    let mut labels = labels();
+    let mut grown = Vec::from([String::new()]);
+    for _ in 0..5 {
+        grown = grown
+            .iter()
+            .flat_map(|label| {
+                chars
+                    .iter()
+                    .map(move |char| alloc::format!("{label}{char}"))
+            })
+            .collect();
+        labels.extend(grown.iter().cloned());
+    }
+    labels
+}
+
+#[test]
+fn reference_labels_match_the_written_walk() {
+    for label in walk_labels() {
+        assert_eq!(
+            is_reference_label(&label),
+            reference::is_reference_label(&label),
+            "{label:?}"
+        );
+        assert_eq!(
+            is_written_footnote_label(&label),
+            reference::is_written_footnote_label(&label),
+            "{label:?}"
+        );
+    }
+}
+
+/// `normalizes_to` answers as comparing `normalize_label`'s result does: for
+/// each label's own identifier, that identifier one char shorter or longer
+/// or with a char changed, another label's identifier, and the label.
+#[test]
+fn labels_normalize_to_their_identifier_alone() {
+    let labels = walk_labels();
+    for (index, label) in labels.iter().enumerate() {
+        let identifier = normalize_label(label);
+        let mut candidates = Vec::from([
+            identifier.clone(),
+            alloc::format!("{identifier}a"),
+            normalize_label(&labels[(index * 7 + 3) % labels.len()]),
+            label.clone(),
+        ]);
+        if let Some((last, _)) = identifier.char_indices().last() {
+            candidates.push(String::from(&identifier[..last]));
+            candidates.push(alloc::format!("{}a", &identifier[..last]));
+        }
+        for candidate in candidates {
+            assert_eq!(
+                normalizes_to(label, &candidate),
+                normalize_label(label) == candidate,
+                "{label:?} to {candidate:?}"
+            );
+        }
+    }
+}
+
+/// Definitions hold their identifiers in the order of their bytes, and a
+/// lookup finds an identifier exactly when they hold it, whatever bytes the
+/// identifiers share: among strings of up to five of a few chars, U+0000
+/// and the eight-byte prefixes a lookup compares first among them, each
+/// held or not.
+#[test]
+fn definitions_find_exactly_the_identifiers_they_hold() {
+    let chars = ['\0', 'a', 'b', 'é'];
+    let mut identifiers = Vec::from([String::new()]);
+    let mut grown = Vec::from([String::new()]);
+    for _ in 0..5 {
+        grown = grown
+            .iter()
+            .flat_map(|text| chars.iter().map(move |char| alloc::format!("{text}{char}")))
+            .collect();
+        identifiers.extend(grown.iter().cloned());
+    }
+    identifiers
+        .extend(["aaaaaaaa", "aaaaaaaab", "aaaaaaaa\0", "aaaaaaa", "aaaaaaab"].map(String::from));
+    for held_every in [1, 2, 3, 7] {
+        let held: Vec<&String> = identifiers.iter().step_by(held_every).collect();
+        let definitions = Definitions::sorted(
+            held.iter()
+                .map(|text| Identifier::new(String::from(text.as_str())))
+                .collect(),
+        );
+        // In the order of their bytes, as a sorted list of the texts is.
+        let mut texts: Vec<&String> = held.clone();
+        texts.sort_unstable();
+        texts.dedup();
+        assert!(definitions
+            .identifiers
+            .iter()
+            .map(|identifier| &identifier.text)
+            .eq(texts));
+        let labels = definitions.labels();
+        for identifier in &identifiers {
+            let found = labels.find(identifier.as_bytes());
+            assert_eq!(
+                found.is_some(),
+                held.contains(&identifier),
+                "{identifier:?}"
+            );
+            if let Some(index) = found {
+                assert_eq!(&labels.own[index].text, identifier);
+            }
+        }
+    }
+}
+
+#[test]
+fn definitions_read_as_their_identifiers() {
+    let definitions = Definitions::new(["Foo  Bar", "\u{1E9E}"]);
+    assert_eq!(
+        alloc::format!("{definitions:?}"),
+        r#"Definitions { identifiers: ["foo bar", "ss"] }"#
+    );
 }

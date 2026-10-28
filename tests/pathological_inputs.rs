@@ -575,6 +575,30 @@ fn literal_autolinks_in_open_labels_grow_linearly() {
     }
 }
 
+#[test]
+fn backtick_runs_before_long_text_in_an_open_label_grow_linearly() {
+    let _serial = one_at_a_time();
+    // Every backtick in a run inside a label left open asks where a code
+    // span of its length closes; the text after the run must not be read
+    // again for each one. The run grows as the square root of the text, so
+    // a cost of the run times the text grows as the input to the power 1.5:
+    // sixteen times the input takes sixty-four times as long, where a linear
+    // cost takes sixteen.
+    let setup = |n: usize| {
+        let run = 4 * (n as f64).sqrt() as usize;
+        format!(":t[{}{}", "`".repeat(run), "a".repeat(n))
+    };
+    let n = 16_000;
+    let linear = |[small, large]: &[Duration; 2]| *large <= *small * 32;
+    let samples = growth_samples(&[setup(n), setup(16 * n)], parse_input, linear);
+    let [small, large] = samples;
+    assert!(
+        linear(&samples),
+        "backticks before text in an open label: {small:?} at {n}, {large:?} at {} per sample",
+        16 * n
+    );
+}
+
 // untrusted-input-cost: Linear time
 #[test]
 fn tags_grow_linearly() {

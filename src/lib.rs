@@ -3,6 +3,9 @@
 #![deny(missing_docs)]
 
 extern crate alloc;
+// The unit tests read the fixture corpus and keep per-thread switches.
+#[cfg(test)]
+extern crate std;
 
 mod compare;
 mod decode;
@@ -10,6 +13,8 @@ mod entities;
 mod gemoji;
 mod leaves;
 mod memo;
+mod name_table;
+mod swar;
 #[cfg(test)]
 mod test_support;
 mod unicode_cjk;

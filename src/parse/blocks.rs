@@ -21,27 +21,64 @@ use core::cell::RefCell;
 
 use crate::memo::BracketMemo;
 
-/// Reads the blocks of the document split into `lines`.
-pub(super) fn parse_document(lines: &[Line<'_>], diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
-    read_document(lines, diagnostics, None)
-}
-
-/// The inline content the parser reads for each leaf of the document split
-/// into `lines` (paragraphs, headings, table cells, and directive labels),
-/// with the span of its node (a label's is its directive's), in document
-/// order. The inlines themselves are not read.
-pub(super) fn leaf_contents(lines: &[Line<'_>]) -> Vec<(Span, DerivedText)> {
-    let leaves = RefCell::new(Vec::new());
-    read_document(lines, &mut Vec::new(), Some(&leaves));
-    leaves.into_inner()
-}
-
-fn read_document(
+/// Reads the top-level blocks of the document `input`, split into `lines`,
+/// with the `BlankLine` nodes of `whole`, the input `input` was cut from
+/// after its byte order mark.
+pub(super) fn parse_document(
+    whole: &str,
+    input: &str,
     lines: &[Line<'_>],
     diagnostics: &mut Vec<Diagnostic>,
-    leaves: Option<&RefCell<Vec<(Span, DerivedText)>>>,
 ) -> Vec<Block> {
-    let mut parser = BlockParser::new(lines);
+    read_document(whole, input, lines, diagnostics, None, None).1
+}
+
+/// Reads the top-level blocks of the document `input`, split into `lines`,
+/// as `parse_document` does, with the inline content of each of its leaves
+/// as `leaf_contents` returns it.
+pub(super) fn parse_document_with_leaves<'a>(
+    whole: &str,
+    input: &'a str,
+    lines: &'a [Line<'a>],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (Vec<Block>, Vec<(Span, DerivedText<'a>)>) {
+    let leaves = RefCell::new(Vec::new());
+    let (_, blocks) = read_document(whole, input, lines, diagnostics, Some(&leaves), None);
+    (blocks, leaves.into_inner())
+}
+
+/// How many top-level blocks `parse_document` reads, and the ones at
+/// `indices`, ascending, as it reads them; the inline content of the others
+/// is not read.
+pub(super) fn parse_top_level_at(
+    whole: &str,
+    input: &str,
+    lines: &[Line<'_>],
+    indices: &[usize],
+) -> (usize, Vec<Block>) {
+    read_document(whole, input, lines, &mut Vec::new(), None, Some(indices))
+}
+
+/// The inline content the parser reads for each leaf of the document `input`,
+/// split into `lines` (paragraphs, headings, table cells, and directive
+/// labels), with the span of its node (a label's is its directive's), in
+/// document order. Neither the inlines nor the blocks themselves are built.
+pub(super) fn leaf_contents<'a>(
+    input: &'a str,
+    lines: &'a [Line<'a>],
+) -> Vec<(Span, DerivedText<'a>)> {
+    let (children, _) = read_blocks(input, lines);
+    let mut leaves = Vec::new();
+    for child in children {
+        keep_leaves(input, child.block, &mut leaves);
+    }
+    leaves
+}
+
+/// The top-level blocks of the document `input`, split into `lines`, closed
+/// with their inline content not read yet, and the block pass's diagnostics.
+fn read_blocks<'a>(input: &'a str, lines: &'a [Line<'a>]) -> (Vec<Child<'a>>, Vec<Diagnostic>) {
+    let mut parser = BlockParser::new(input, lines);
     for index in 0..lines.len() {
         parser.read_line(index);
     }
@@ -49,28 +86,84 @@ fn read_document(
         parser.close_top();
     }
     let document = parser.stack.pop().expect("the document stays open");
+    (document.children, parser.diagnostics)
+}
+
+/// The number of top-level blocks of the document `input`, split into
+/// `lines`, with the `BlankLine` nodes of `whole` between them, and those
+/// at `indices`, ascending, or else all of them, in order, each with its
+/// inline content and the `BlankLine` nodes inside it. Which blocks there
+/// are and where they lie is known before any inline content is read, so
+/// the other blocks are never built.
+fn read_document<'a>(
+    whole: &str,
+    input: &'a str,
+    lines: &'a [Line<'a>],
+    diagnostics: &mut Vec<Diagnostic>,
+    leaves: Option<&RefCell<Vec<(Span, DerivedText<'a>)>>>,
+    indices: Option<&[usize]>,
+) -> (usize, Vec<Block>) {
+    debug_assert!(
+        indices.is_none_or(|indices| indices.windows(2).all(|pair| pair[0] < pair[1])),
+        "indices in ascending order"
+    );
+    let (children, mut found) = read_blocks(input, lines);
     let mut definitions = Vec::new();
-    for child in &document.children {
+    for child in &children {
         collect_definitions(&child.block, &mut definitions);
     }
-    // Sorted and deduplicated so `definition_exists` can binary-search.
-    definitions.sort_unstable();
-    definitions.dedup();
-    let mut found = parser.diagnostics;
+    let definitions = Definitions::sorted(definitions);
     let finish = Finish {
-        definitions: Labels { own: &definitions },
+        input,
+        definitions: definitions.labels(),
         leaves,
+        inline: RefCell::default(),
     };
-    let blocks = document
-        .children
-        .into_iter()
-        .map(|child| finish.block(child.block, &mut found))
-        .collect();
+    let mut spans = Vec::with_capacity(children.len());
+    spans.extend(children.iter().filter_map(|child| child.block.span()));
+    debug_assert!(
+        spans.windows(2).all(|pair| pair[0].end <= pair[1].start),
+        "top-level blocks in source order, apart"
+    );
+    // A block without a span leaves the gaps unknown, and no blank line a
+    // node.
+    let blank = if spans.len() == children.len() {
+        blank_lines::between_top_level(whole, &spans)
+    } else {
+        Vec::new()
+    };
+    let count = children.len() + blank.len();
+    let mut blocks = Vec::with_capacity(indices.map_or(count, <[usize]>::len));
+    let mut indices = indices.map(|indices| indices.iter().peekable());
+    let mut wanted = |index: usize| match &mut indices {
+        Some(indices) => indices.next_if_eq(&&index).is_some(),
+        None => true,
+    };
+    let mut blank = blank.into_iter().peekable();
+    let mut children = children.into_iter();
+    let mut index = 0;
+    for at in 0.. {
+        while let Some((_, span)) = blank.next_if(|(before, _)| *before == at) {
+            if wanted(index) {
+                blocks.push(blank_lines::blank_line(span));
+            }
+            index += 1;
+        }
+        let Some(child) = children.next() else {
+            break;
+        };
+        if wanted(index) {
+            let mut block = finish.block(child.block, &mut found);
+            blank_lines::add_inside(whole, &mut block);
+            blocks.push(block);
+        }
+        index += 1;
+    }
     // Block diagnostics are found in the block pass and inline ones after it;
     // both are reported in source order.
     found.sort_by_key(|diagnostic| diagnostic.span.map(|span| span.start));
     diagnostics.extend(found);
-    blocks
+    (count, blocks)
 }
 
 /// Where the parser is in the line it reads: the byte and source column
@@ -78,7 +171,7 @@ fn read_document(
 /// other than a space or tab is.
 #[derive(Clone, Copy)]
 struct Cursor<'a> {
-    line: Line<'a>,
+    line: &'a Line<'a>,
     offset: usize,
     column: usize,
     /// The tab at `offset` is split: `column` is inside it.
@@ -89,10 +182,13 @@ struct Cursor<'a> {
     indent: usize,
     /// Nothing but spaces and tabs is left.
     blank: bool,
+    /// The `offset` and `column` that `next_nonspace`,
+    /// `next_nonspace_column`, `indent`, and `blank` were found from.
+    found_from: (usize, usize),
 }
 
 impl<'a> Cursor<'a> {
-    fn new(line: Line<'a>) -> Self {
+    fn new(line: &'a Line<'a>) -> Self {
         let mut cursor = Cursor {
             line,
             offset: 0,
@@ -102,12 +198,18 @@ impl<'a> Cursor<'a> {
             next_nonspace_column: line.column,
             indent: 0,
             blank: true,
+            found_from: (usize::MAX, 0),
         };
         cursor.find_next_nonspace();
         cursor
     }
 
     fn find_next_nonspace(&mut self) {
+        // The cursor has not moved since they were found.
+        if self.found_from == (self.offset, self.column) {
+            return;
+        }
+        self.found_from = (self.offset, self.column);
         let bytes = self.line.text.as_bytes();
         let mut index = self.offset;
         let mut column = self.column;
@@ -221,13 +323,13 @@ impl<'a> Cursor<'a> {
 
     /// The line from `offset` on, as a line of its own.
     fn view(&self, offset: usize) -> Line<'a> {
-        view(&self.line, offset)
+        view(self.line, offset)
     }
 
     /// The line from the column reached, as a line of its own: a tab split
     /// there spans only the columns left of it.
     fn rest_view(&self) -> Line<'a> {
-        let mut line = view(&self.line, self.offset);
+        let mut line = view(self.line, self.offset);
         line.column = self.column;
         line
     }
@@ -250,7 +352,7 @@ fn view<'a>(line: &Line<'a>, offset: usize) -> Line<'a> {
 /// A line's content from where the block parser left it.
 #[derive(Clone, Copy)]
 struct Content<'a> {
-    line: Line<'a>,
+    line: &'a Line<'a>,
     offset: usize,
     /// The columns of a split tab at `offset` that the content starts with,
     /// as spaces.
@@ -279,7 +381,68 @@ impl<'a> Content<'a> {
     }
 
     fn view(&self) -> Line<'a> {
-        view(&self.line, self.offset)
+        view(self.line, self.offset)
+    }
+}
+
+/// Text read from the input in pieces. Pieces that follow one another in the
+/// input are kept as the input range they span, which is copied once, when a
+/// piece that does not follow arrives or the text is taken.
+#[derive(Default)]
+struct InputText {
+    text: String,
+    /// The input range read after `text`.
+    run: (usize, usize),
+}
+
+impl InputText {
+    /// Appends `piece`, a slice of `input` or other text.
+    fn push(&mut self, input: &str, piece: &str) {
+        if piece.is_empty() {
+            return;
+        }
+        match slice_offset_in(input, piece) {
+            Some(start) if self.run.0 < self.run.1 && start == self.run.1 => {
+                self.run.1 = start + piece.len();
+            }
+            Some(start) => {
+                self.flush(input);
+                self.run = (start, start + piece.len());
+            }
+            None => {
+                self.flush(input);
+                self.text.push_str(piece);
+            }
+        }
+    }
+
+    /// Appends `content`, as `Content::push_into` does.
+    fn push_content(&mut self, input: &str, content: &Content<'_>) {
+        if content.split > 0 {
+            self.flush(input);
+            self.text.extend(core::iter::repeat_n(' ', content.split));
+        }
+        self.push(input, content.text());
+    }
+
+    fn len(&self) -> usize {
+        self.text.len() + (self.run.1 - self.run.0)
+    }
+
+    /// The text read so far.
+    fn text(&mut self, input: &str) -> &str {
+        self.flush(input);
+        &self.text
+    }
+
+    fn into_string(mut self, input: &str) -> String {
+        self.flush(input);
+        self.text
+    }
+
+    fn flush(&mut self, input: &str) {
+        let (start, end) = mem::take(&mut self.run);
+        self.text.push_str(&input[start..end]);
     }
 }
 
@@ -299,6 +462,70 @@ struct ParagraphLine<'a> {
 impl<'a> ParagraphLine<'a> {
     fn text(&self) -> &'a str {
         self.content.text()
+    }
+}
+
+/// A paragraph's lines, held without an allocation while there is one: most
+/// paragraphs have one line, and every paragraph keeps its lines until the
+/// inline pass reads them.
+enum ParagraphLines<'a> {
+    One(ParagraphLine<'a>),
+    Many(Vec<ParagraphLine<'a>>),
+}
+
+impl<'a> ParagraphLines<'a> {
+    fn push(&mut self, line: ParagraphLine<'a>) {
+        match self {
+            Self::One(first) => {
+                let mut lines = Vec::with_capacity(4);
+                lines.extend([*first, line]);
+                *self = Self::Many(lines);
+            }
+            Self::Many(lines) => lines.push(line),
+        }
+    }
+
+    /// Removes the first `count` lines, of which there are at least `count`.
+    fn remove_first(&mut self, count: usize) {
+        debug_assert!(count <= self.len());
+        match self {
+            Self::One(_) if count > 0 => *self = Self::Many(Vec::new()),
+            Self::One(_) => {}
+            Self::Many(lines) => {
+                lines.drain(..count);
+            }
+        }
+    }
+
+    fn pop(&mut self) -> Option<ParagraphLine<'a>> {
+        match self {
+            Self::One(line) => {
+                let line = *line;
+                *self = Self::Many(Vec::new());
+                Some(line)
+            }
+            Self::Many(lines) => lines.pop(),
+        }
+    }
+}
+
+impl<'a> core::ops::Deref for ParagraphLines<'a> {
+    type Target = [ParagraphLine<'a>];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::One(line) => core::slice::from_ref(line),
+            Self::Many(lines) => lines,
+        }
+    }
+}
+
+impl core::ops::DerefMut for ParagraphLines<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::One(line) => core::slice::from_mut(line),
+            Self::Many(lines) => lines,
+        }
     }
 }
 
@@ -339,7 +566,7 @@ enum Kind<'a> {
         checked: Option<bool>,
         number: Option<u64>,
     },
-    ContainerDirective(Box<OpenDirective>),
+    ContainerDirective(Box<OpenDirective<'a>>),
     FootnoteDefinition {
         label: String,
     },
@@ -353,36 +580,36 @@ enum Kind<'a> {
     Code(CodeState),
     HtmlBlock {
         kind: HtmlBlockKind,
-        value: String,
+        value: InputText,
         lines: usize,
     },
-    Table(TableState),
+    Table(TableState<'a>),
     /// A block read whole when it opened, which takes its lines up to `until`.
+    /// The block is boxed: every open block is as large as the largest kind.
     Swallow {
         until: usize,
-        block: Option<Block>,
+        block: Box<Block>,
     },
 }
 
-struct OpenDirective {
+struct OpenDirective<'a> {
     name: String,
-    label: Option<DerivedText>,
+    label: Option<DerivedText<'a>>,
     attributes: Vec<DirectiveAttribute>,
     fence: usize,
     opener: Span,
     closed: bool,
 }
 
-#[derive(Default)]
 struct ParagraphState<'a> {
-    lines: Vec<ParagraphLine<'a>>,
+    lines: ParagraphLines<'a>,
     /// The first of the trailing lines that reached the paragraph lazily.
     lazy_from: Option<usize>,
 }
 
 struct CodeState {
     kind: CodeKind,
-    value: String,
+    value: InputText,
     /// Indented code: the value's length after its last line that is not
     /// blank, that line, and where it ends.
     content_len: usize,
@@ -404,9 +631,9 @@ enum CodeKind {
     Indented,
 }
 
-struct TableState {
+struct TableState<'a> {
     alignments: Vec<TableAlignment>,
-    rows: Vec<(Span, Vec<TableCellSource>)>,
+    rows: Vec<(Span, Vec<TableCellSource<'a>>)>,
 }
 
 /// The lines ahead that reach a container, each from where the container
@@ -430,17 +657,17 @@ enum Pending<'a> {
     Done(Block),
     Paragraph {
         span: Span,
-        lines: Vec<ParagraphLine<'a>>,
+        lines: ParagraphLines<'a>,
     },
     Heading {
         span: Span,
         depth: u8,
-        text: DerivedText,
+        text: DerivedText<'a>,
     },
     Table {
         span: Span,
         alignments: Vec<TableAlignment>,
-        rows: Vec<(Span, Vec<TableCellSource>)>,
+        rows: Vec<(Span, Vec<TableCellSource<'a>>)>,
     },
     BlockQuote {
         span: Span,
@@ -475,21 +702,41 @@ enum Pending<'a> {
         span: Span,
         opening: HtmlTag,
         closing: HtmlTag,
-        text: DerivedText,
+        text: DerivedText<'a>,
     },
     LeafDirective {
         span: Span,
         name: String,
-        label: Option<DerivedText>,
+        label: Option<DerivedText<'a>>,
         attributes: Vec<DirectiveAttribute>,
     },
     ContainerDirective {
         span: Span,
         name: String,
-        label: Option<DerivedText>,
+        label: Option<DerivedText<'a>>,
         attributes: Vec<DirectiveAttribute>,
         children: Vec<Child<'a>>,
     },
+}
+
+impl Pending<'_> {
+    /// The span of the block this becomes.
+    fn span(&self) -> Option<Span> {
+        match self {
+            Pending::Done(block) => block.span(),
+            Pending::Paragraph { span, .. }
+            | Pending::Heading { span, .. }
+            | Pending::Table { span, .. }
+            | Pending::BlockQuote { span, .. }
+            | Pending::List { span, .. }
+            | Pending::Item { span, .. }
+            | Pending::FootnoteDefinition { span, .. }
+            | Pending::HtmlContainer { span, .. }
+            | Pending::Summary { span, .. }
+            | Pending::LeafDirective { span, .. }
+            | Pending::ContainerDirective { span, .. } => Some(*span),
+        }
+    }
 }
 
 impl Frame<'_> {
@@ -568,6 +815,8 @@ enum LeafStep {
 }
 
 struct BlockParser<'a> {
+    /// The input `lines` were split from.
+    input: &'a str,
     lines: &'a [Line<'a>],
     stack: Vec<Frame<'a>>,
     diagnostics: Vec<Diagnostic>,
@@ -601,9 +850,10 @@ fn reach_key(kind: &Kind<'_>) -> ReachKey {
 }
 
 impl<'a> BlockParser<'a> {
-    fn new(lines: &'a [Line<'a>]) -> Self {
+    fn new(input: &'a str, lines: &'a [Line<'a>]) -> Self {
         let start = lines.first().map_or(0, |line| line.start);
         BlockParser {
+            input,
             lines,
             stack: alloc::vec![Frame {
                 kind: Kind::Document,
@@ -624,7 +874,7 @@ impl<'a> BlockParser<'a> {
     }
 
     fn read_line(&mut self, index: usize) {
-        let line = self.lines[index];
+        let line = &self.lines[index];
         let mut cursor = Cursor::new(line);
         // An alert's marker line ends like a paragraph's first line.
         let alert_open = match self.stack.last_mut().map(|top| &mut top.kind) {
@@ -635,9 +885,10 @@ impl<'a> BlockParser<'a> {
         let leaf = self.stack.last().is_some_and(Frame::is_leaf);
         let containers = self.stack.len() - usize::from(leaf);
 
-        // The open containers, from the outside in.
+        // The open containers, from the outside in. Those before `extended`
+        // take the line: from there on it is blank.
         let mut matched = 1;
-        let mut extended = Vec::new();
+        let mut extended = 1;
         let mut directives = Vec::new();
         while matched < containers {
             cursor.find_next_nonspace();
@@ -653,7 +904,7 @@ impl<'a> BlockParser<'a> {
                         true
                     }
                     Continuation::HtmlClose => {
-                        self.extend_frames(&extended, index, line.end_with_eol);
+                        self.extend_frames(extended, index, line.end_with_eol);
                         self.close_html_container(matched, &cursor, index);
                         return;
                     }
@@ -661,9 +912,8 @@ impl<'a> BlockParser<'a> {
             if !continues {
                 break;
             }
-            // A list's span is its items'.
-            if !blank && !matches!(self.stack[matched].kind, Kind::List { .. }) {
-                extended.push(matched);
+            if !blank {
+                extended = matched + 1;
             }
             matched += 1;
         }
@@ -679,8 +929,7 @@ impl<'a> BlockParser<'a> {
                 && directive_container_closing_fence(state.nonspace_rest(), directive.fence)
                     .is_some()
             {
-                let outer: Vec<usize> = extended.iter().copied().filter(|f| *f < frame).collect();
-                self.extend_frames(&outer, index, line.end_with_eol);
+                self.extend_frames(extended.min(frame), index, line.end_with_eol);
                 while self.stack.len() > frame + 1 {
                     self.close_top();
                 }
@@ -693,7 +942,7 @@ impl<'a> BlockParser<'a> {
                 return;
             }
         }
-        self.extend_frames(&extended, index, line.end_with_eol);
+        self.extend_frames(extended, index, line.end_with_eol);
 
         // A block read whole takes its lines lazily too.
         if matched < containers {
@@ -782,14 +1031,16 @@ impl<'a> BlockParser<'a> {
                 frame.end = line.end;
             }
             Kind::Code(code) => {
+                let input = self.input;
                 let content = cursor.content();
-                content.push_into(&mut code.value);
+                code.value.push_content(input, &content);
                 // A last line without a line ending still ends one, empty or
                 // not, as every line of the value does.
                 if line.eol.is_empty() {
-                    code.value.push_str(value_line_ending(&code.value));
+                    let ending = value_line_ending(code.value.text(input));
+                    code.value.push(input, ending);
                 } else {
-                    code.value.push_str(code_line_ending(&line, in_container));
+                    code.value.push(input, code_line_ending(line, in_container));
                 }
                 if let CodeKind::Indented = code.kind {
                     if !is_blank(&content.whole()) {
@@ -801,11 +1052,16 @@ impl<'a> BlockParser<'a> {
                 frame.extend(index, line.end_with_eol);
             }
             Kind::HtmlBlock { kind, value, lines } => {
-                let content = cursor.content().whole();
+                let input = self.input;
+                let line_content = cursor.content();
+                let content = line_content.whole();
                 if *lines > 0 {
-                    value.push('\n');
+                    // The lines are joined with `\n`, the previous line's own
+                    // ending where it is one.
+                    let eol = self.lines[index - 1].eol;
+                    value.push(input, if eol == "\n" { eol } else { "\n" });
                 }
-                value.push_str(&content);
+                value.push_content(input, &line_content);
                 *lines += 1;
                 let ends = match kind {
                     HtmlBlockKind::RawTag => ["script", "pre", "style", "textarea"]
@@ -822,14 +1078,13 @@ impl<'a> BlockParser<'a> {
             Kind::Table(table) => {
                 let row = cursor.rest();
                 let row_line = cursor.rest_view();
-                let mut cells = table_row_cells(&row_line, row);
-                cells.truncate(table.alignments.len());
-                while cells.len() < table.alignments.len() {
-                    cells.push(TableCellSource {
-                        text: DerivedText::default(),
-                        span: Span::new(line.end, line.end),
-                    });
-                }
+                // A row has its header's cells, the ones it lacks empty.
+                let mut cells = Vec::with_capacity(table.alignments.len());
+                cells.extend(table_row_cells(&row_line, row).take(table.alignments.len()));
+                cells.resize_with(table.alignments.len(), || TableCellSource {
+                    text: DerivedText::default(),
+                    span: Span::new(line.end, line.end),
+                });
                 table.rows.push((Span::new(block_start, line.end), cells));
                 frame.extend(index, line.end_with_eol);
             }
@@ -843,13 +1098,13 @@ impl<'a> BlockParser<'a> {
                     let content = cursor.content();
                     self.add_frame(
                         Kind::Paragraph(ParagraphState {
-                            lines: alloc::vec![ParagraphLine {
+                            lines: ParagraphLines::One(ParagraphLine {
                                 content,
                                 start: block_start,
                                 indent,
                                 index,
-                            }],
-                            ..ParagraphState::default()
+                            }),
+                            lazy_from: None,
                         }),
                         block_start,
                         index,
@@ -860,9 +1115,13 @@ impl<'a> BlockParser<'a> {
         }
     }
 
-    fn extend_frames(&mut self, frames: &[usize], index: usize, end: usize) {
-        for &frame in frames {
-            self.stack[frame].extend(index, end);
+    /// Extends the open containers `stack[1..to]` over line `index`, ending
+    /// at `end`; a list's span is its items'.
+    fn extend_frames(&mut self, to: usize, index: usize, end: usize) {
+        for frame in &mut self.stack[1..to] {
+            if !matches!(frame.kind, Kind::List { .. }) {
+                frame.extend(index, end);
+            }
         }
     }
 
@@ -885,12 +1144,12 @@ impl<'a> BlockParser<'a> {
             let content = cursor.content();
             self.add_frame(
                 Kind::Paragraph(ParagraphState {
-                    lines: alloc::vec![ParagraphLine {
+                    lines: ParagraphLines::One(ParagraphLine {
                         content,
                         start: block_start,
                         indent,
                         index,
-                    }],
+                    }),
                     lazy_from: Some(0),
                 }),
                 block_start,
@@ -1151,7 +1410,7 @@ impl<'a> BlockParser<'a> {
                             indent,
                             info,
                         },
-                        value: String::new(),
+                        value: InputText::default(),
                         content_len: 0,
                         content_line: index,
                         content_end: line.end_with_eol,
@@ -1172,7 +1431,7 @@ impl<'a> BlockParser<'a> {
                 self.add_frame(
                     Kind::Code(CodeState {
                         kind: CodeKind::Math { length, indent },
-                        value: String::new(),
+                        value: InputText::default(),
                         content_len: 0,
                         content_line: index,
                         content_end: line.end_with_eol,
@@ -1252,7 +1511,7 @@ impl<'a> BlockParser<'a> {
                     self.add_frame(
                         Kind::HtmlBlock {
                             kind,
-                            value: String::new(),
+                            value: InputText::default(),
                             lines: 0,
                         },
                         start,
@@ -1405,7 +1664,7 @@ impl<'a> BlockParser<'a> {
             self.add_frame(
                 Kind::Code(CodeState {
                     kind: CodeKind::Indented,
-                    value: String::new(),
+                    value: InputText::default(),
                     content_len: 0,
                     content_line: index,
                     content_end: line.end_with_eol,
@@ -1441,7 +1700,7 @@ impl<'a> BlockParser<'a> {
         self.add_frame(
             Kind::Swallow {
                 until: close,
-                block: Some(block),
+                block: Box::new(block),
             },
             lines[index].start,
             index,
@@ -1581,7 +1840,7 @@ impl<'a> BlockParser<'a> {
     /// Line `index` from where the containers `stack[..=frame]` leave it, when
     /// they all continue on it.
     fn reach(&self, frame: usize, index: usize) -> Option<Line<'a>> {
-        let mut cursor = Cursor::new(self.lines[index]);
+        let mut cursor = Cursor::new(&self.lines[index]);
         for open in &self.stack[1..=frame] {
             cursor.find_next_nonspace();
             // A line past the one being read follows content in each item.
@@ -1625,7 +1884,7 @@ impl<'a> BlockParser<'a> {
         if used == 0 {
             return;
         }
-        paragraph.lines.drain(..used);
+        paragraph.lines.remove_first(used);
         if let Some(lazy_from) = &mut paragraph.lazy_from {
             *lazy_from = lazy_from.saturating_sub(used);
         }
@@ -1657,7 +1916,7 @@ impl<'a> BlockParser<'a> {
             return None;
         }
         let alignments = parse_table_delimiter(delimiter)?;
-        if table_row_cell_ranges(header.text()).len() != alignments.len() {
+        if table_row_cell_ranges(header.text()).count() != alignments.len() {
             return None;
         }
         // Definitions the paragraph starts with are not its rows. They are
@@ -1672,7 +1931,7 @@ impl<'a> BlockParser<'a> {
         }
         let line = cursor.line;
         let header_line = header.content.view();
-        let cells = table_row_cells(&header_line, header_line.text);
+        let cells = table_row_cells(&header_line, header_line.text).collect();
         let header_row = (Span::new(header.start, header.content.line.end), cells);
 
         // The header row leaves the paragraph, which closes with what is left.
@@ -1715,20 +1974,27 @@ impl<'a> BlockParser<'a> {
             Some(Kind::Item { .. })
         ) && self.stack.last().is_some_and(|top| top.children.is_empty());
         let mut checked = None;
-        let children = self.finish_frame(frame, fresh_item, &mut checked);
+        // The parent's children are taken while `finish_frame` pushes the
+        // frame's blocks onto them, and put back after: during the call the
+        // parent holds none, and the call does not read the stack.
+        let parent = self.stack.last_mut().expect("the document stays open");
+        let mut siblings = mem::take(&mut parent.children);
+        self.finish_frame(frame, fresh_item, &mut checked, &mut siblings);
         let parent = self.stack.last_mut().expect("the document stays open");
         if let (Some(value), Kind::Item { checked, .. }) = (checked, &mut parent.kind) {
             *checked = Some(value);
         }
-        parent.children.extend(children);
+        parent.children = siblings;
     }
 
+    /// Pushes onto `found` the blocks `frame` closes into.
     fn finish_frame(
         &mut self,
         frame: Frame<'a>,
         fresh_item: bool,
         checked: &mut Option<bool>,
-    ) -> Vec<Child<'a>> {
+        found: &mut Vec<Child<'a>>,
+    ) {
         let Frame {
             kind,
             first_line,
@@ -1744,10 +2010,11 @@ impl<'a> BlockParser<'a> {
             Kind::Document => unreachable!("the document stays open"),
             Kind::Paragraph(paragraph) => {
                 let mut lines = paragraph.lines;
-                let (mut found, used) = take_definitions(&lines);
-                lines.drain(..used);
+                let (definitions, used) = take_definitions(&lines);
+                found.extend(definitions);
+                lines.remove_first(used);
                 if lines.is_empty() {
-                    return found;
+                    return;
                 }
                 if fresh_item {
                     *checked = take_task_marker(&mut lines);
@@ -1769,16 +2036,17 @@ impl<'a> BlockParser<'a> {
                     last_line,
                     end,
                 });
-                return found;
+                return;
             }
             Kind::Code(code) => {
                 let CodeState {
                     kind,
-                    mut value,
+                    value,
                     content_len,
                     content_line,
                     content_end,
                 } = code;
+                let mut value = value.into_string(self.input);
                 let (kind, info, end, last_line) = match kind {
                     CodeKind::Fenced {
                         marker,
@@ -1814,25 +2082,26 @@ impl<'a> BlockParser<'a> {
                     }),
                     None => Block::MathBlock(MathBlock { meta, value }),
                 };
-                return alloc::vec![Child {
+                found.push(Child {
                     block: Pending::Done(block),
                     first_line,
                     last_line,
                     end,
-                }];
+                });
+                return;
             }
             Kind::HtmlBlock { value, .. } => Pending::Done(Block::HtmlBlock(HtmlBlock {
                 meta: NodeMeta::new(Some(Span::new(start, end))),
-                value,
+                value: value.into_string(self.input),
             })),
             Kind::Table(table) => Pending::Table {
                 span: Span::new(start, end),
                 alignments: table.alignments,
                 rows: table.rows,
             },
-            Kind::Swallow { block, .. } => Pending::Done(block.expect("a swallowed block")),
+            Kind::Swallow { block, .. } => Pending::Done(*block),
             Kind::BlockQuote { alert, .. } => {
-                return alloc::vec![Child {
+                found.push(Child {
                     block: Pending::BlockQuote {
                         span: Span::new(start, children_end),
                         alert,
@@ -1841,7 +2110,8 @@ impl<'a> BlockParser<'a> {
                     first_line,
                     last_line,
                     end: children_end,
-                }];
+                });
+                return;
             }
             Kind::List { ordered, delimiter } => {
                 let tight = list_is_tight(&children);
@@ -1856,7 +2126,7 @@ impl<'a> BlockParser<'a> {
                     }) => span.start,
                     _ => start,
                 };
-                return alloc::vec![Child {
+                found.push(Child {
                     block: Pending::List {
                         span: Span::new(span_start, children_end),
                         ordered,
@@ -1867,12 +2137,13 @@ impl<'a> BlockParser<'a> {
                     first_line,
                     last_line,
                     end: children_end,
-                }];
+                });
+                return;
             }
             Kind::Item {
                 checked, number, ..
             } => {
-                return alloc::vec![Child {
+                found.push(Child {
                     block: Pending::Item {
                         span: Span::new(start, children_end),
                         checked,
@@ -1882,7 +2153,8 @@ impl<'a> BlockParser<'a> {
                     first_line,
                     last_line: children_last_line,
                     end: children_end,
-                }];
+                });
+                return;
             }
             Kind::FootnoteDefinition { label } => Pending::FootnoteDefinition {
                 span: Span::new(start, children_end),
@@ -1921,12 +2193,12 @@ impl<'a> BlockParser<'a> {
                 }
             }
         };
-        alloc::vec![Child {
+        found.push(Child {
             block,
             first_line,
             last_line: last_line.max(children_last_line),
             end: children_end,
-        }]
+        });
     }
 }
 
@@ -2310,8 +2582,78 @@ fn code_line_ending<'a>(line: &Line<'a>, in_container: bool) -> &'a str {
     }
 }
 
-fn push_paragraph_line(text: &mut DerivedText, line: &ParagraphLine<'_>) {
-    text.push_line(&line.content.line, line.text());
+fn push_paragraph_line<'a>(text: &mut JoinedLines<'a>, line: &ParagraphLine<'a>) {
+    text.push_line(line.content.line, line.text());
+}
+
+/// The inline content of the paragraph of `lines`, split from `input`.
+fn paragraph_text<'a>(input: &'a str, lines: &[ParagraphLine<'a>]) -> DerivedText<'a> {
+    // The lines' text and the `\n` joining each to the one before.
+    let len = lines
+        .iter()
+        .map(|line| line.text().len() + 1)
+        .sum::<usize>();
+    let mut text = JoinedLines::new(input, len.saturating_sub(1));
+    for line in lines {
+        push_paragraph_line(&mut text, line);
+    }
+    // CommonMark strips the final whitespace of a paragraph.
+    let mut text = text.finish();
+    text.trim_final_whitespace();
+    text
+}
+
+/// Pushes onto `leaves` the inline content of each leaf of `block`, with the
+/// span of its node, in the order `Finish::block` reads them, without
+/// building the block.
+fn keep_leaves<'a>(input: &'a str, block: Pending<'a>, leaves: &mut Vec<(Span, DerivedText<'a>)>) {
+    let children = match block {
+        Pending::Done(_) | Pending::Summary { .. } => return,
+        Pending::Paragraph { span, lines } => {
+            leaves.push((span, paragraph_text(input, &lines)));
+            return;
+        }
+        Pending::Heading { span, text, .. } => {
+            leaves.push((span, text));
+            return;
+        }
+        Pending::Table { rows, .. } => {
+            for (_, cells) in rows {
+                leaves.extend(cells.into_iter().map(|cell| (cell.span, cell.text)));
+            }
+            return;
+        }
+        Pending::LeafDirective { span, label, .. } => {
+            leaves.extend(label.map(|label| (span, label)));
+            return;
+        }
+        Pending::ContainerDirective {
+            span,
+            label,
+            children,
+            ..
+        } => {
+            leaves.extend(label.map(|label| (span, label)));
+            children
+        }
+        Pending::List { items, .. } => {
+            for item in items {
+                if let Pending::Item { children, .. } = item.block {
+                    for child in children {
+                        keep_leaves(input, child.block, leaves);
+                    }
+                }
+            }
+            return;
+        }
+        Pending::Item { .. } => unreachable!("items only sit in their lists"),
+        Pending::BlockQuote { children, .. }
+        | Pending::FootnoteDefinition { children, .. }
+        | Pending::HtmlContainer { children, .. } => children,
+    };
+    for child in children {
+        keep_leaves(input, child.block, leaves);
+    }
 }
 
 /// The link reference definitions a paragraph's lines start with, and how
@@ -2324,15 +2666,24 @@ fn take_definitions<'a>(lines: &[ParagraphLine<'a>]) -> (Vec<Child<'a>>, usize) 
         return (Vec::new(), 0);
     }
     // Each line is read from its first char other than a space or tab, as
-    // a paragraph's lines are.
-    let views: Vec<Line<'a>> = lines
-        .iter()
-        .map(|line| view(&line.content.line, line.content.offset))
-        .collect();
+    // a paragraph's lines are. Most paragraphs have one line, read in place.
+    let view = |line: &ParagraphLine<'a>| &line.content.line.text[line.content.offset..];
+    let one;
+    let many: Vec<&'a str>;
+    let views: &[&'a str] = match lines {
+        [line] => {
+            one = [view(line)];
+            &one
+        }
+        _ => {
+            many = lines.iter().map(view).collect();
+            &many
+        }
+    };
     let mut found = Vec::new();
     let mut index = 0;
     while index < views.len() && lines[index].text().starts_with('[') {
-        let Some((mut definition, next)) = parse_definition(&views, index) else {
+        let Some((mut definition, next)) = parse_definition(views, index) else {
             break;
         };
         let end = lines[next - 1].content.line.end_with_eol;
@@ -2352,7 +2703,7 @@ fn take_definitions<'a>(lines: &[ParagraphLine<'a>]) -> (Vec<Child<'a>>, usize) 
 /// is part of the item's marker: `[ ]`, `[x]`, or `[X]` before a space or tab
 /// or the line's end, or `[` ending the line before `]` or `x]`. The item
 /// needs content after it.
-fn take_task_marker(lines: &mut Vec<ParagraphLine<'_>>) -> Option<bool> {
+fn take_task_marker(lines: &mut ParagraphLines<'_>) -> Option<bool> {
     let first = lines[0].text();
     if let Some(checked) = task_marker_checked(first) {
         let after = &first[3..];
@@ -2361,7 +2712,7 @@ fn take_task_marker(lines: &mut Vec<ParagraphLine<'_>>) -> Option<bool> {
             return Some(checked);
         }
         if is_blank(after) && lines.len() > 1 {
-            lines.remove(0);
+            lines.remove_first(1);
             return Some(checked);
         }
         return None;
@@ -2376,7 +2727,7 @@ fn take_task_marker(lines: &mut Vec<ParagraphLine<'_>>) -> Option<bool> {
         if is_blank(&second[consumed..]) && lines.len() < 3 {
             return None;
         }
-        lines.remove(0);
+        lines.remove_first(1);
         lines[0].content.offset += consumed;
         return Some(checked);
     }
@@ -2400,8 +2751,8 @@ fn list_is_tight(items: &[Child<'_>]) -> bool {
     })
 }
 
-fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
-    let children = |children: &[Child<'_>], definitions: &mut Vec<String>| {
+fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<Identifier>) {
+    let children = |children: &[Child<'_>], definitions: &mut Vec<Identifier>| {
         for child in children {
             collect_definitions(&child.block, definitions);
         }
@@ -2409,7 +2760,9 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
     match block {
         Pending::Done(Block::Definition(definition)) => {
             // As the document holds it once U+0000 is replaced.
-            definitions.push(definition.identifier.replace('\0', "\u{FFFD}"));
+            definitions.push(Identifier::new(
+                definition.identifier.replace('\0', "\u{FFFD}"),
+            ));
         }
         Pending::BlockQuote {
             children: inner, ..
@@ -2432,59 +2785,57 @@ fn collect_definitions(block: &Pending<'_>, definitions: &mut Vec<String>) {
 }
 
 /// Parses the inline content of closed blocks.
-struct Finish<'o> {
+struct Finish<'o, 'a> {
+    /// The input the blocks' lines were split from.
+    input: &'a str,
     definitions: Labels<'o>,
-    /// Where each leaf's inline content is kept, in place of its inlines,
-    /// when `leaf_contents` asks for it.
-    leaves: Option<&'o RefCell<Vec<(Span, DerivedText)>>>,
+    /// Where each leaf's inline content is kept, when
+    /// `parse_document_with_leaves` asks for it.
+    leaves: Option<&'o RefCell<Vec<(Span, DerivedText<'a>)>>>,
+    /// What the inline parses of the leaves share.
+    inline: RefCell<InlineState>,
 }
 
-impl Finish<'_> {
-    fn inlines(&self, text: &DerivedText, diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
+impl<'a> Finish<'_, 'a> {
+    fn inlines(&self, text: &DerivedText<'_>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
         parse_inlines(
-            &text.text,
+            text.text(),
             text.map(),
             Some(self.definitions),
             diagnostics,
             None,
+            &mut self.inline.borrow_mut(),
         )
     }
 
     /// The inlines of the leaf at `span` (a label's is its directive's), read
-    /// from `text`, or none when `text` is kept for `leaf_contents`.
+    /// from `text`, which is kept when leaves are.
     fn leaf_inlines(
         &self,
         span: Span,
-        text: DerivedText,
+        text: DerivedText<'a>,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Vec<Inline> {
-        match self.leaves {
-            Some(leaves) => {
-                leaves.borrow_mut().push((span, text));
-                Vec::new()
-            }
-            None => self.inlines(&text, diagnostics),
+        let inlines = self.inlines(&text, diagnostics);
+        if let Some(leaves) = self.leaves {
+            leaves.borrow_mut().push((span, text));
         }
+        inlines
     }
 
-    fn blocks(&self, children: Vec<Child<'_>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
+    fn blocks(&self, children: Vec<Child<'a>>, diagnostics: &mut Vec<Diagnostic>) -> Vec<Block> {
         children
             .into_iter()
             .map(|child| self.block(child.block, diagnostics))
             .collect()
     }
 
-    fn block(&self, block: Pending<'_>, diagnostics: &mut Vec<Diagnostic>) -> Block {
+    fn block(&self, block: Pending<'a>, diagnostics: &mut Vec<Diagnostic>) -> Block {
         let meta = |span: Span| NodeMeta::new(Some(span));
         match block {
             Pending::Done(block) => block,
             Pending::Paragraph { span, lines } => {
-                let mut text = DerivedText::default();
-                for line in &lines {
-                    push_paragraph_line(&mut text, line);
-                }
-                // CommonMark strips the final whitespace of a paragraph.
-                text.trim_final_whitespace();
+                let text = paragraph_text(self.input, &lines);
                 Block::Paragraph(Paragraph {
                     meta: meta(span),
                     children: self.leaf_inlines(span, text, diagnostics),

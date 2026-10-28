@@ -15,7 +15,7 @@ use crate::{
     parse::{
         alert_title, frontmatter_fence_kind, html_block_ends_at_blank_line, html_block_left_open,
         html_block_opens, interrupts_paragraph, is_blank, is_footnote_label, is_reference_label,
-        is_written_footnote_label, normalize_label, reads_as_inline_math, MAX_BLOCK_NESTING,
+        is_written_footnote_label, normalizes_to, reads_as_inline_math, MAX_BLOCK_NESTING,
     },
     serialize::{
         item_misreads_after_marker, write_inline_math, written_marker, written_opens_fence_like,
@@ -576,7 +576,7 @@ fn validate_reference_label(
     written: bool,
     diagnostics: &mut Report,
 ) {
-    if normalize_label(label) != identifier {
+    if !normalizes_to(label, identifier) {
         diagnostics.push(Diagnostic::invalid(
             span,
             "reference identifier must be the normalized label",
@@ -598,7 +598,7 @@ fn validate_footnote_label(
     identifier: &str,
     diagnostics: &mut Report,
 ) {
-    if normalize_label(label) != identifier {
+    if !normalizes_to(label, identifier) {
         diagnostics.push(Diagnostic::invalid(
             span,
             "footnote identifier must be the normalized label",
@@ -690,6 +690,12 @@ fn validate_inlines(inlines: &[Inline], diagnostics: &mut Report) {
     validate_inline_nodes(inlines, diagnostics);
 }
 
+/// Whether `text` holds a `\n` or a `\r`, searched for both at once, eight
+/// bytes at a time.
+fn holds_line_ending(text: &str) -> bool {
+    crate::swar::find_any(text.as_bytes(), 0, [b'\n', b'\r']) < text.len()
+}
+
 /// Inline content closed by a `]`, which closes after a line break as well, so
 /// it may end with a hard line break.
 fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Report) {
@@ -699,7 +705,7 @@ fn validate_inline_nodes(inlines: &[Inline], diagnostics: &mut Report) {
         }
         match inline {
             Inline::Text(node) => {
-                if node.value.contains(['\n', '\r']) {
+                if holds_line_ending(&node.value) {
                     diagnostics.push(Diagnostic::invalid(
                         node.meta.span,
                         "text cannot hold a line ending; a line ends with a soft or hard break",
@@ -956,7 +962,7 @@ fn validate_code_inline(code: &CodeInline, diagnostics: &mut Report) {
             "inline code value cannot be empty",
         ));
     }
-    if code.value.contains(['\n', '\r']) {
+    if holds_line_ending(&code.value) {
         diagnostics.push(Diagnostic::invalid(
             code.meta.span,
             "inline code value cannot hold a line ending",

@@ -4,6 +4,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::ops::ControlFlow;
 
 use crate::ast::*;
 use crate::parse::Definitions;
@@ -24,38 +25,99 @@ pub(crate) fn visit(
     path: &mut Vec<usize>,
     visit_leaf: &mut impl FnMut(&[usize], Option<Span>, Option<&str>),
 ) {
+    let _ = walk(blocks, path, &mut |path, leaf| {
+        visit_leaf(path, leaf.span, leaf.source);
+        ControlFlow::Continue(())
+    });
+}
+
+/// The path of the first leaf in `blocks` that `matches` holds for, given
+/// its kept text and its inlines; the leaves after it are not visited.
+pub(crate) fn find(
+    blocks: &[Block],
+    matches: &mut impl FnMut(Option<&str>, &[Inline]) -> bool,
+) -> Option<Vec<usize>> {
+    let mut found = None;
+    let _ = walk(blocks, &mut Vec::new(), &mut |path, leaf| {
+        if matches(leaf.source, leaf.inlines) {
+            found = Some(path.to_vec());
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    found
+}
+
+/// One leaf as `walk` finds it.
+struct Leaf<'a> {
+    span: Option<Span>,
+    inlines: &'a [Inline],
+    source: Option<&'a str>,
+}
+
+impl<'a> Leaf<'a> {
+    fn new(span: Option<Span>, inlines: &'a [Inline], source: &'a Option<String>) -> Self {
+        Self {
+            span,
+            inlines,
+            source: source.as_deref(),
+        }
+    }
+}
+
+/// Calls `visit_leaf` with the path of its container and every leaf in
+/// `blocks`, in document order, until it breaks.
+fn walk(
+    blocks: &[Block],
+    path: &mut Vec<usize>,
+    visit_leaf: &mut impl FnMut(&[usize], Leaf<'_>) -> ControlFlow<()>,
+) -> ControlFlow<()> {
     for (index, block) in blocks.iter().enumerate() {
         path.push(index);
         match block {
-            Block::Paragraph(node) => visit_leaf(path, node.meta.span, node.source.as_deref()),
-            Block::Heading(node) => visit_leaf(path, node.meta.span, node.source.as_deref()),
-            Block::LeafDirective(node) => {
-                visit_leaf(path, node.meta.span, node.label_source.as_deref())
-            }
+            Block::Paragraph(node) => visit_leaf(
+                path,
+                Leaf::new(node.meta.span, &node.children, &node.source),
+            )?,
+            Block::Heading(node) => visit_leaf(
+                path,
+                Leaf::new(node.meta.span, &node.children, &node.source),
+            )?,
+            Block::LeafDirective(node) => visit_leaf(
+                path,
+                Leaf::new(node.meta.span, &node.label, &node.label_source),
+            )?,
             Block::ContainerDirective(node) => {
-                visit_leaf(path, node.meta.span, node.label_source.as_deref());
-                visit(&node.children, path, visit_leaf);
+                visit_leaf(
+                    path,
+                    Leaf::new(node.meta.span, &node.label, &node.label_source),
+                )?;
+                walk(&node.children, path, visit_leaf)?;
             }
             Block::Table(node) => {
                 for (row, cells) in node.rows.iter().enumerate() {
                     for (cell, node) in cells.cells.iter().enumerate() {
                         path.extend([row, cell]);
-                        visit_leaf(path, node.meta.span, node.source.as_deref());
+                        visit_leaf(
+                            path,
+                            Leaf::new(node.meta.span, &node.children, &node.source),
+                        )?;
                         path.truncate(path.len() - 2);
                     }
                 }
             }
-            Block::BlockQuote(node) => visit(&node.children, path, visit_leaf),
-            Block::Alert(node) => visit(&node.children, path, visit_leaf),
-            Block::FootnoteDefinition(node) => visit(&node.children, path, visit_leaf),
+            Block::BlockQuote(node) => walk(&node.children, path, visit_leaf)?,
+            Block::Alert(node) => walk(&node.children, path, visit_leaf)?,
+            Block::FootnoteDefinition(node) => walk(&node.children, path, visit_leaf)?,
             Block::HtmlContainer(node) => match &node.content {
-                HtmlContainerContent::Blocks(children) => visit(children, path, visit_leaf),
+                HtmlContainerContent::Blocks(children) => walk(children, path, visit_leaf)?,
                 HtmlContainerContent::Inlines(_) => {}
             },
             Block::List(node) => {
                 for (item, node) in node.children.iter().enumerate() {
                     path.push(item);
-                    visit(&node.children, path, visit_leaf);
+                    walk(&node.children, path, visit_leaf)?;
                     path.pop();
                 }
             }
@@ -69,6 +131,7 @@ pub(crate) fn visit(
         }
         path.pop();
     }
+    ControlFlow::Continue(())
 }
 
 /// Calls `visit_leaf` with every leaf in `blocks`, in document order.
