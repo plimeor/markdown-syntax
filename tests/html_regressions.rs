@@ -353,6 +353,12 @@ fn raw_html_and_tagfilter_options_are_independent() {
         parse_render("a <iframe>\n", &filtered),
         "<p>a &lt;iframe></p>",
     );
+    // A name that goes on past a blocklisted one, with a character of more
+    // than one byte, is not filtered.
+    assert_eq!(
+        parse_render("<div>\n<titlé\n</TITLE>\n", &filtered),
+        "<div>\n<titlé\n&lt;/TITLE>",
+    );
 }
 
 // html-rendering: Wiki embeds are marked

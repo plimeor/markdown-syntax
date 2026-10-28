@@ -327,9 +327,13 @@ pub fn apply_tagfilter(value: &str, out: &mut String) {
         }
         let after = &value[i + 1..];
         let tag_body = after.strip_prefix('/').unwrap_or(after);
+        // A head that matches a name is ASCII, so the name ends on a char
+        // boundary of `tag_body`.
         let matched = BLOCKED.iter().find(|tag| {
-            tag_body.len() >= tag.len()
-                && tag_body[..tag.len()].eq_ignore_ascii_case(tag)
+            tag_body
+                .as_bytes()
+                .get(..tag.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(tag.as_bytes()))
                 && tag_terminates(&tag_body[tag.len()..])
         });
         if matched.is_some() {
