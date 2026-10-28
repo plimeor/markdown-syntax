@@ -60,7 +60,7 @@ fn leaves<'a>(blocks: &'a [Block], path: &mut Vec<usize>, found: &mut Vec<Leaf<'
 
 /// Whether two inline sources hold the same text and map each of its offsets
 /// to the same source offset.
-fn same_source(one: &InlineSource, other: &InlineSource) -> bool {
+pub(crate) fn same_source(one: &InlineSource, other: &InlineSource) -> bool {
     one.text == other.text
         && (0..=one.text.len())
             .filter(|&offset| one.text.is_char_boundary(offset))

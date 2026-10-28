@@ -207,10 +207,12 @@ fn read_source<R>(
             Vec::new(),
         )
     };
+    let reads = top_level_reads(&children, input);
     let mut document = Document::parsed(
         NodeMeta::new(Some(Span::new(0, input.len()))),
         children,
         input,
+        reads,
     );
     if source.contains('\0') {
         nul_replacement::replace_in_document(&mut document);
@@ -534,12 +536,18 @@ impl Document {
     /// and its own), or the label of a leaf or container directive (its
     /// directive's path), read again from the source of the top-level block
     /// holding it and of the paragraphs and link reference definitions that
-    /// run into that block without a blank line, so that the cost is linear
-    /// in those blocks. `None` for a document without a source, or a path
-    /// that names no such leaf, a directive without a label, or a node
-    /// without a span or one the source does not hold.
+    /// ran into that block without a blank line when it was parsed, so that
+    /// the cost is linear in those blocks.
+    ///
+    /// The leaf is found by its span: in an edited document, it is the
+    /// source's leaf at that span, as [`Document::leaf_sources`] gives it for
+    /// the document as parsed, whatever the other top-level blocks now are.
+    /// `None` for a document without a source, or a path that names no such
+    /// leaf, a directive without a label, a node without a span, a top-level
+    /// block whose span is not that of a parsed top-level block, or a node
+    /// whose span is not that of a leaf the source holds in that block.
     pub fn inline_source(&self, path: &NodePath) -> Option<InlineSource> {
-        let source = self.source()?;
+        let (source, reads) = self.source_and_reads()?;
         let (&first, rest) = path.0.split_first()?;
         let top = self.children.get(first)?;
         let mut block = top;
@@ -577,22 +585,17 @@ impl Document {
                 _ => return None,
             };
         };
-        let Span { start, end } = top.span()?;
-        let start = paragraph_run_start(&self.children[..first], start, source);
-        if end > source.len() || start > end || !source.is_char_boundary(start) {
+        let top = top.span()?;
+        if leaf.start < top.start || leaf.end > top.end {
             return None;
         }
-        let bytes = source.as_bytes();
-        let mut start = start;
-        // From the start of its line, where it reads as it does in the
-        // document.
-        while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
-            start -= 1;
-        }
-        if start == 0 && source.starts_with('\u{feff}') {
-            start = '\u{feff}'.len_utf8().min(end);
-        }
-        let slice = source.get(start..end)?;
+        let first_at = reads.partition_point(|read| read.span.start < top.start);
+        let read = reads[first_at..]
+            .iter()
+            .take_while(|read| read.span.start == top.start)
+            .find(|read| read.span == top)?;
+        let start = read.read_from;
+        let slice = source.get(start..top.end)?;
         let map = SourceMap::verbatim(slice.len(), start);
         let lines = collect_lines(slice, &map);
         let (_, text) = blocks::leaf_contents(slice, &lines)
@@ -633,32 +636,71 @@ impl Document {
     }
 }
 
-/// Where a top-level block that starts at `start` in `source` is read from so
-/// that it reads as it does in the whole document, given the top-level
-/// blocks `before` it: the start of the run of paragraphs and link reference
-/// definitions that runs into it without a blank line, or `start`. Such a run
-/// leaves a paragraph open, in which the next line is a continuation (one
-/// indented four columns, one opening an item that cannot interrupt a
-/// paragraph, one shaped as a definition or as HTML that cannot interrupt
-/// one) or a table's header row; read alone, that line opens a block of its
-/// own. After a blank line or any other block, the line that opens a
-/// top-level block reads as it would at the start of a document.
-fn paragraph_run_start(before: &[Block], start: usize, source: &str) -> usize {
-    let mut start = start;
-    for block in before.iter().rev() {
-        if !matches!(block, Block::Paragraph(_) | Block::Definition(_)) {
-            break;
-        }
-        let Some(span) = block.span() else { break };
-        let Some(gap) = source.get(span.end..start) else {
-            break;
+/// Where `parse` read a top-level block from: the facts `inline_source`
+/// needs to read the block again as it reads in the whole document, recorded
+/// at parse time so that edits to the tree do not change them.
+#[derive(Clone, Copy)]
+pub(crate) struct TopLevelRead {
+    /// The block's span.
+    span: Span,
+    /// The start of the line where reading starts so that the block reads as
+    /// it does in the document.
+    read_from: usize,
+}
+
+/// Where each top-level block of `children`, parsed from `source`, is read
+/// from so that it reads as it does in the whole document: the start of the
+/// line that opens the run of paragraphs and link reference definitions that
+/// runs into it without a blank line, or of its own line. Such a run leaves a
+/// paragraph open, in which the next line is a continuation (one indented
+/// four columns, one opening an item that cannot interrupt a paragraph, one
+/// shaped as a definition or as HTML that cannot interrupt one) or a table's
+/// header row; read alone, that line opens a block of its own. After a blank
+/// line or any other block, the line that opens a top-level block reads as it
+/// would at the start of a document.
+fn top_level_reads(children: &[Block], source: &str) -> Vec<TopLevelRead> {
+    let mut reads: Vec<TopLevelRead> = Vec::with_capacity(children.len());
+    let bytes = source.as_bytes();
+    let mut previous: Option<(&Block, Span)> = None;
+    for block in children {
+        let span = block.span().expect("a parsed block has a span");
+        let continues = previous.is_some_and(|(before, before_span)| {
+            matches!(before, Block::Paragraph(_) | Block::Definition(_))
+                && bytes
+                    .get(before_span.end..span.start)
+                    .is_some_and(|gap| line_endings(gap) <= 1)
+        });
+        let read_from = match reads.last() {
+            Some(read) if continues => read.read_from,
+            _ => line_start(source, span.start),
         };
-        let line_endings =
-            gap.matches('\n').count() + gap.matches('\r').count() - gap.matches("\r\n").count();
-        if line_endings > 1 {
-            break;
+        reads.push(TopLevelRead { span, read_from });
+        previous = Some((block, span));
+    }
+    reads
+}
+
+/// How many line endings `gap` holds, `\r\n` counting as one.
+fn line_endings(gap: &[u8]) -> usize {
+    let mut count = 0;
+    for (at, &byte) in gap.iter().enumerate() {
+        if byte == b'\r' || (byte == b'\n' && (at == 0 || gap[at - 1] != b'\r')) {
+            count += 1;
         }
-        start = span.start;
+    }
+    count
+}
+
+/// The start of the line of `source` that holds byte `at`, after a leading
+/// U+FEFF.
+fn line_start(source: &str, at: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut start = at.min(bytes.len());
+    while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
+        start -= 1;
+    }
+    if start == 0 && source.starts_with('\u{feff}') {
+        start = '\u{feff}'.len_utf8().min(at);
     }
     start
 }

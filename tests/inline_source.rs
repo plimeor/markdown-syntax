@@ -250,6 +250,206 @@ d
         assert!(joined.inline_source(&NodePath::from([0, 1, 0])).is_none());
     }
 
+    /// The table of `document` at `index`.
+    fn table(document: &mut Document, index: usize) -> &mut Table {
+        match &mut document.children[index] {
+            Block::Table(table) => table,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Asserts that the leaf at `path` of `edited` reads as the leaf at
+    /// `parsed_path` of `parse(input)` does in `leaf_sources`.
+    fn reads_as_parsed(edited: &Document, path: &[usize], input: &str, parsed_path: &[usize]) {
+        let parsed = parse(input).document.leaf_sources();
+        let (_, expected) = parsed
+            .iter()
+            .find(|(at, _)| at.0 == parsed_path)
+            .unwrap_or_else(|| panic!("{input:?} holds no leaf at {parsed_path:?}"));
+        let read = edited
+            .inline_source(&NodePath::from(path))
+            .unwrap_or_else(|| panic!("{input:?} {path:?}: no inline source"));
+        assert!(
+            leaves::same_source(&read, expected),
+            "{input:?} {path:?}: {read:?}, not {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_leaf_reads_as_parsed_whatever_the_other_top_level_blocks_become() {
+        // The table's header row continues the paragraph the definition
+        // opened, so the table is read from the definition's line, as it was
+        // parsed, wherever the definition and the paragraph go.
+        let input = "[d]: /u\n    a\n2) b | c\n--|--";
+        let parsed = parse(input).document;
+        let check = |edited: &Document, table_at: usize| {
+            reads_as_parsed(edited, &[table_at, 0, 0], input, &[2, 0, 0]);
+            reads_as_parsed(edited, &[table_at, 0, 1], input, &[2, 0, 1]);
+        };
+
+        let mut removed = parsed.clone();
+        removed.children.remove(0);
+        check(&removed, 1);
+        reads_as_parsed(&removed, &[0], input, &[1]);
+
+        let mut replaced = parsed.clone();
+        replaced.children[0] = Paragraph::new([Text::from("x")]).into();
+        check(&replaced, 2);
+        assert!(replaced.inline_source(&NodePath::from([0])).is_none());
+
+        let mut reordered = parsed.clone();
+        reordered.children.reverse();
+        check(&reordered, 0);
+        reads_as_parsed(&reordered, &[1], input, &[1]);
+
+        let mut inserted = parsed.clone();
+        inserted
+            .children
+            .insert(2, Heading::new(1, [Text::from("h")]).into());
+        inserted.children.insert(2, BlankLine::new().into());
+        let paragraph = parse("e").document.children.remove(0);
+        inserted.children.insert(0, paragraph);
+        check(&inserted, 5);
+
+        let mut alone = parsed.clone();
+        alone.children.drain(..2);
+        check(&alone, 0);
+    }
+
+    #[test]
+    fn none_where_the_source_holds_no_such_leaf_in_that_block() {
+        let input = "a\n2) b | c\n--|--\n\n> d";
+        let parsed = parse(input).document;
+
+        // A top-level block whose span no parsed top-level block has: read
+        // alone, the table's header row would be a paragraph at the cell's
+        // span holding `a\\|b`, where the cell holds `a|b`.
+        let mut narrowed = parse("a\\|b\n|-").document;
+        assert_eq!(
+            narrowed
+                .inline_source(&NodePath::from([0, 0, 0]))
+                .unwrap()
+                .text,
+            "a|b"
+        );
+        table(&mut narrowed, 0).meta.span = Some(Span::new(0, 4));
+        assert_eq!(
+            table(&mut narrowed, 0).rows[0].cells[0].meta.span,
+            Some(Span::new(0, 4))
+        );
+        assert!(narrowed.inline_source(&NodePath::from([0, 0, 0])).is_none());
+
+        // A hand-built top-level block around a parsed leaf.
+        let mut wrapped = parsed.clone();
+        let paragraph = wrapped.children.remove(0);
+        wrapped.children[0] = BlockQuote {
+            meta: NodeMeta::default(),
+            children: vec![paragraph],
+        }
+        .into();
+        assert!(wrapped.inline_source(&NodePath::from([0, 0])).is_none());
+
+        // A parsed leaf moved into another parsed top-level block.
+        let mut moved = parsed.clone();
+        let paragraph = moved.children.remove(0);
+        let Block::BlockQuote(quote) = &mut moved.children[1] else {
+            panic!("{:?}", moved.children);
+        };
+        quote.children.push(paragraph);
+        assert!(moved.inline_source(&NodePath::from([1, 1])).is_none());
+        reads_as_parsed(&moved, &[1, 0], input, &[2, 0]);
+    }
+
+    /// Every document of up to three lines drawn from the lines of
+    /// `leaves_after_paragraphs_and_definitions_reproduce`, with its
+    /// top-level blocks reversed and with each one alone, reads each leaf as
+    /// `leaf_sources` reads it in the document as parsed, and as
+    /// `leaf_sources` reads the edited document.
+    #[test]
+    fn leaves_of_reordered_and_lone_top_level_blocks_read_as_parsed() {
+        const LINES: &[&str] = &[
+            "a",
+            "[a]: /u",
+            "[b]:",
+            "/v",
+            "    b",
+            "b | c",
+            "2) b | c",
+            "10. b",
+            "- ",
+            "1. ",
+            "<x>",
+            "[x]: /u|c",
+            "> a",
+            "- a",
+            "# h",
+            "```",
+            "===",
+            "",
+            "|-",
+            "-|-",
+        ];
+        let mut inputs: Vec<String> = LINES.iter().map(|line| (*line).to_string()).collect();
+        let mut failures = Vec::new();
+        for lines in 1..=3 {
+            if lines > 1 {
+                inputs = inputs
+                    .iter()
+                    .flat_map(|input| LINES.iter().map(move |line| format!("{input}\n{line}")))
+                    .collect();
+            }
+            for input in &inputs {
+                let parsed = parse(input).document;
+                let leaves = parsed.leaf_sources();
+                let count = parsed.children.len();
+                let mut reversed = parsed.clone();
+                reversed.children.reverse();
+                let mut edits = vec![(reversed, (0..count).rev().collect::<Vec<_>>())];
+                for index in 0..count {
+                    let mut alone = parsed.clone();
+                    alone.children = vec![alone.children.swap_remove(index)];
+                    edits.push((alone, vec![index]));
+                }
+                for (edited, from) in &edits {
+                    let mut read = 0;
+                    for (path, expected) in &leaves {
+                        let Some(at) = from.iter().position(|&index| index == path.0[0]) else {
+                            continue;
+                        };
+                        let mut edited_path = path.clone();
+                        edited_path.0[0] = at;
+                        match edited.inline_source(&edited_path) {
+                            Some(found) if leaves::same_source(&found, expected) => read += 1,
+                            found => failures.push(format!(
+                                "{input:?} {path:?} at {edited_path:?}: {found:?}, not {expected:?}"
+                            )),
+                        }
+                    }
+                    // `leaf_sources` reads the edited document as
+                    // `inline_source` does.
+                    let edited_leaves = edited.leaf_sources();
+                    let agrees = edited_leaves.len() == read
+                        && edited_leaves.iter().all(|(path, source)| {
+                            edited
+                                .inline_source(path)
+                                .is_some_and(|found| leaves::same_source(&found, source))
+                        });
+                    if !agrees {
+                        failures.push(format!(
+                            "{input:?} as {from:?}: leaf_sources gives {edited_leaves:?}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} failures:\n{}",
+            failures.len(),
+            failures[..failures.len().min(40)].join("\n")
+        );
+    }
+
     #[test]
     fn debug_shows_the_text_and_each_segment() {
         let one = inline_source("a *b*", &[0]).unwrap();
