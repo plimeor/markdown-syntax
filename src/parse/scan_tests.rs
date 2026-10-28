@@ -92,8 +92,9 @@ mod reference {
             let end = rest.find("-->")? + 3;
             return Some((index + end, rest[..end].into()));
         }
+        // The `?>` closing a processing instruction follows its `<?`.
         if rest.starts_with("<?") {
-            let end = rest.find("?>")? + 2;
+            let end = rest[2..].find("?>")? + 4;
             return Some((index + end, rest[..end].into()));
         }
         if rest.starts_with("<![CDATA[") {
@@ -814,6 +815,28 @@ fn angle_constructs_match_the_reference_scan() {
             "{input:?} at {index}"
         );
     });
+}
+
+/// Inline HTML whose closing string could overlap its opening one, which the
+/// generated inputs rarely hold.
+#[test]
+fn overlapping_html_closes_match_the_reference_scan() {
+    for input in [
+        "<?>", "<?> b ?>", "<??>", "<?x?>", "<?", "<?>?>", "a <?> b", "<!-->", "<!--->", "<!-- -->",
+    ] {
+        for index in boundaries(input) {
+            if input.as_bytes().get(index) != Some(&b'<') {
+                continue;
+            }
+            let expected = reference::parse_html_inline(input, index).map(|(end, _)| end);
+            let mut scan = InlineScan::new(input);
+            assert_eq!(
+                html_inline_end(&mut scan.lookups, input, index),
+                expected,
+                "{input:?} at {index}"
+            );
+        }
+    }
 }
 
 #[test]
