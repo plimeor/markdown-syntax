@@ -838,6 +838,24 @@ mod recorded_spellings {
         assert_eq!(rendered(&heading(1)), "# foo bar\n");
         assert_eq!(rendered(&heading(3)), "### foo bar\n");
     }
+
+    #[test]
+    fn a_soft_break_after_a_text_backslash_is_written_a_space_from_it() {
+        let soft_break = || {
+            Inline::SoftBreak(SoftBreak {
+                meta: NodeMeta::default(),
+            })
+        };
+        let document = paragraph_document(vec![text("a\\"), soft_break(), text("b")]);
+        assert_eq!(rendered(&document), "a\\ \nb\n");
+        assert_eq!(
+            normalized(&parse("a\\ \nb").document),
+            normalized(&document)
+        );
+        // An escaped backslash escapes no line ending.
+        let document = paragraph_document(vec![escape('\\'), soft_break(), text("b")]);
+        assert_eq!(rendered(&document), "\\\\\nb\n");
+    }
 }
 
 mod text_as_recorded {

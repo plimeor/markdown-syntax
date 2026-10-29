@@ -23,11 +23,18 @@ opens a block quote, which SHALL be written `> `. An empty heading, list
 item, or block quote SHALL be written as its marker followed by one space:
 `# `, `- `, `1. `, `> ` (decision 0019). A fenced code block's info string
 SHALL follow its opening fence directly, after one space only where it
-opens with the fence's char.
+opens with the fence's char. A `SoftBreak` outside a heading SHALL be
+written as a line ending, or as its source where it is copied, after one
+space where the text written before it ends with a backslash that no
+backslash escapes, which the line ending would otherwise make a hard break.
 
 #### Scenario: Empty blocks
 - **WHEN** a hand-built document holding a `Heading` of depth 1 with no children, a list of one item with no blocks, or a `BlockQuote` holding a `BlankLine` and a paragraph `a` is serialized
 - **THEN** `to_markdown()` returns `"# \n"`, `"- \n"`, or `"> \n> a\n"`, each of which reads back as the document
+
+#### Scenario: A backslash before a soft break
+- **WHEN** the document parsed from `"a\\\t\nb"`, a paragraph holding `Text("a\\")`, a `SoftBreak`, and `Text("b")`, is serialized without its source
+- **THEN** `to_markdown()` returns `"a\\ \nb\n"`, which reads back as the document
 
 ### Requirement: Round-trip stability
 For a parsed document without its source, parsing the Markdown that

@@ -1049,6 +1049,17 @@ mod source_reused_per_node {
         }
     }
 
+    // serialization: Canonical output, Unchanged source is kept
+    #[test]
+    fn a_backslash_typed_before_a_kept_soft_break_stays_text() {
+        let mut document = parse("`` a `` x\ny").document;
+        first_text(&mut document.children).value.push('\\');
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "`` a `` x\\ \ny");
+        reads_back(&markdown, &document);
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+    }
+
     // serialization: Unchanged source is kept
     #[test]
     fn an_edited_label_or_cell_keeps_the_rest_of_its_line() {

@@ -186,18 +186,11 @@ const INPUTS_PER_GENERATOR: usize = 2_000;
 ///
 /// Each difference is whitespace or a blank line that the AST does not
 /// record, as decision 0016 (Consequences) accepts.
-const NOT_READING_BACK: &[(&str, &str)] = &[
-    (
-        "__$$++\t\\\t\n}$==",
-        "the tab between a final backslash and the line ending, which keeps the \
-         backslash from making a hard break, is not recorded",
-    ),
-    (
-        "-->\n\t$$[^1]: -->```:::- ",
-        "the tab indenting the paragraph's continuation line, which keeps `$$` \
+const NOT_READING_BACK: &[(&str, &str)] = &[(
+    "-->\n\t$$[^1]: -->```:::- ",
+    "the tab indenting the paragraph's continuation line, which keeps `$$` \
          from opening a math block, is not recorded",
-    ),
-];
+)];
 
 fn generated(pieces: &[&str], max_pieces: usize, seed: u64) -> Vec<String> {
     let mut rng = Rng(seed);

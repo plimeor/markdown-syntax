@@ -2197,6 +2197,7 @@ fn write_inline_run(
                     output.push_str(&text[before_text.end..at_text.start]);
                 }
             }
+            space_before_soft_break(inline, context, output);
             if inline == base_inline {
                 output.push_str(&text[at_text.start..at_text.end]);
                 copied = Some((at, at_text));
@@ -2230,11 +2231,25 @@ fn write_inline_run(
             }
         }
         if copied.is_none() {
+            space_before_soft_break(inline, context, output);
             output.push_str(&write_inlines(core::slice::from_ref(inline), context)?);
         }
         previous = copied;
     }
     Ok(true)
+}
+
+/// Pushes the space that keeps a backslash `output` ends with as text
+/// where `inline`, written next, is a soft break outside a heading, as
+/// `write_inline` writes it; a space already there keeps it, so a second
+/// call adds none.
+fn space_before_soft_break(inline: &Inline, context: Context, output: &mut String) {
+    if matches!(inline, Inline::SoftBreak(_))
+        && !context.heading
+        && super::ends_with_unescaped_backslash(output)
+    {
+        output.push(' ');
+    }
 }
 
 /// Whether two inlines hold the same own fields, children aside: false for

@@ -1042,6 +1042,10 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     // Text, escapes, and references as written.
     ("a\\.b \\#tag", "a\\.b \\#tag\n"),
     ("&#35;tag &amp; x", "&#35;tag &amp; x\n"),
+    // A backslash before a soft break stays text, a space from it.
+    ("a\\ \nb", "a\\ \nb\n"),
+    ("*a\\\t\nb*", "*a\\ \nb*\n"),
+    ("a\\\\\nb", "a\\\\\nb\n"),
     (
         "Test \\`hello world` here.",
         "Test \\`hello world` here.\n",

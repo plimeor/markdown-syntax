@@ -2096,7 +2096,15 @@ fn write_inline(
         }
         Inline::Html(node) => out.push_opaque(|out| out.push_str(&node.value)),
         Inline::SoftBreak(_) if context.heading => out.push(' '),
-        Inline::SoftBreak(_) => out.push('\n'),
+        Inline::SoftBreak(_) => {
+            // A backslash right before the line ending would make it a hard
+            // break; one space between them, which the parser strips, keeps
+            // the backslash text.
+            if ends_with_unescaped_backslash(out) {
+                out.push(' ');
+            }
+            out.push('\n');
+        }
         Inline::LineBreak(node) => match node.kind {
             LineBreakKind::Backslash => out.push_str("\\\n"),
             LineBreakKind::Spaces => out.push_str("  \n"),
@@ -2138,6 +2146,12 @@ fn write_inline(
         }
     }
     Ok(())
+}
+
+/// Whether `text` ends with an odd run of backslashes, whose last one no
+/// backslash escapes.
+fn ends_with_unescaped_backslash(text: &str) -> bool {
+    text.bytes().rev().take_while(|byte| *byte == b'\\').count() % 2 == 1
 }
 
 fn emphasis_delimiter(delimiter: EmphasisDelimiter) -> &'static str {
