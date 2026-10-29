@@ -366,6 +366,67 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
+    fn a_table_whose_header_row_reads_otherwise_where_it_moved_is_rewritten() {
+        // `2) b | c` cannot interrupt a paragraph, so after `a` it is the
+        // table's header row, and opening the document it opens a list.
+        for (source, written) in [
+            ("a\n2) b | c\n--|--", "| 2) b | c |\n| --- | --- |\n"),
+            (
+                "a\n2) b | c\n--|--\n| x | y",
+                "| 2) b | c |\n| --- | --- |\n| q | y |\n",
+            ),
+        ] {
+            let mut document = parse(source).document;
+            document.children.remove(0);
+            if let Some(row) = document.children.iter_mut().find_map(|block| match block {
+                Block::Table(table) => table.rows.get_mut(1),
+                _ => None,
+            }) {
+                row.cells[0].children = vec![Text::from("q").into()];
+            }
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            assert_eq!(
+                normalized_blocks(&parse(&markdown).document.children),
+                normalized_blocks(&document.children),
+            );
+            assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        }
+        // Opening the document, a `+++` header row opens frontmatter that a
+        // `+++` row or a later block's line closes; elsewhere it does not.
+        for (source, written) in [
+            ("\n+++\n|--|\n+++", "| +++ |\n| --- |\n| +++ |\n"),
+            ("a\n+++\n|--|\n\n+++", "| +++ |\n| --- |\n\n+++"),
+        ] {
+            let mut document = parse(source).document;
+            document.children.remove(0);
+            assert_eq!(document.to_markdown().unwrap(), written, "{source:?}");
+        }
+        // After a byte order mark as well.
+        let mut document = parse("\u{feff}+++\n|--|\n\nx").document;
+        document
+            .children
+            .push(Paragraph::new([Text::from("+++")]).into());
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "| +++ |\n| --- |\n\nx\n\n+++\n"
+        );
+        let mut document = parse("a\n+++\n|--|\n+++\n\nz").document;
+        document.children.swap(0, 2);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "z\n\n+++\n|--|\n+++\n\na\n"
+        );
+        // A header row that opens no block keeps its source anywhere.
+        let mut document = parse("a\n| b | c |\n|--|--|\n\nz").document;
+        document.children.swap(0, 2);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "z\n\n| b | c |\n|--|--|\n\na\n"
+        );
+    }
+
+    #[test]
     fn a_kept_last_block_keeps_its_own_line_ending() {
         let mut document = parse("    a\r\n    b\r\n\r\nc").document;
         document.children.remove(1);

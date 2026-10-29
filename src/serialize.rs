@@ -233,26 +233,37 @@ impl Document {
             sources: sources.map(LeafSources::lent),
         };
         let base_definitions = DefinitionsOf::new(base);
-        let mut write = |whole: &[bool]| {
-            write_reusing(
-                blocks,
-                &mut correspondence,
-                &base_definitions,
-                source,
-                options,
-                &definitions,
-                whole,
-            )
-        };
-        // A `---` break kept opening the document stays only while no later
-        // line closes it as frontmatter, which every write is checked for.
-        let opens_with_break = matches!(blocks.first(), Some(Block::ThematicBreak(_)));
-        let mut whole = alloc::vec![false; blocks.len()];
-        let (mut output, mut partly) = write(&whole)?;
-        if opens_with_break && opens_frontmatter(&output) {
+        // A first block other than frontmatter that the output opens with
+        // from the source stays so only while no later line closes its
+        // first line as frontmatter, or its canonical output would be
+        // closed as well; every write is checked for it.
+        let opens_with_block = !matches!(blocks.first(), None | Some(Block::Frontmatter(_)));
+        let mut write = |whole: &mut [bool]| {
+            let mut write_once = |whole: &[bool]| {
+                write_reusing(
+                    blocks,
+                    &mut correspondence,
+                    &base_definitions,
+                    source,
+                    options,
+                    &definitions,
+                    whole,
+                )
+            };
+            let written = write_once(whole)?;
+            if !opens_with_block || whole[0] || !opens_frontmatter(&written.0) {
+                return Ok(written);
+            }
             whole[0] = true;
-            (output, partly) = write(&whole)?;
-        }
+            let rewritten = write_once(whole)?;
+            if opens_frontmatter(&rewritten.0) {
+                whole[0] = false;
+                return Ok(written);
+            }
+            Ok(rewritten)
+        };
+        let mut whole = alloc::vec![false; blocks.len()];
+        let (mut output, partly) = write(&mut whole)?;
         if partly.is_empty() {
             return Ok((output, 0));
         }
@@ -263,18 +274,15 @@ impl Document {
         for index in &misread {
             whole[*index] = true;
         }
-        output = write(&whole)?.0;
-        if opens_with_break && !whole[0] && opens_frontmatter(&output) {
-            whole[0] = true;
-            output = write(&whole)?.0;
-        }
+        output = write(&mut whole)?.0;
         Ok((output, misread.len()))
     }
 }
 
-/// Whether `output` opens with frontmatter: its first line is a fence that
-/// a later line closes.
+/// Whether `output` opens with frontmatter: its first line, after any byte
+/// order mark, is a fence that a later line closes.
 fn opens_frontmatter(output: &str) -> bool {
+    let output = output.strip_prefix('\u{feff}').unwrap_or(output);
     let mut lines = output.split(['\n', '\r']);
     let opening = lines.next().and_then(crate::parse::frontmatter_fence_kind);
     opening.is_some() && lines.any(|line| crate::parse::frontmatter_fence_kind(line) == opening)
@@ -316,9 +324,11 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
 /// differently in its new place: one a blank line and a paragraph after it
 /// would change, as they extend an unclosed fence, when it comes before a
 /// block other than its successor in the source; one the block before it
-/// would take in (`moves_into_previous`); and a `---` break that opens the
-/// document where a later line closes it as frontmatter, which `whole`
-/// marks.
+/// would take in (`moves_into_previous`); one away from its predecessor
+/// that followed a line holding text (`follows_a_text_line`), whose text
+/// read alone is not one block of its kind where its canonical output is
+/// (`misreads_unlike_its_rendering`); and a first block whose first line a
+/// later line closes as frontmatter, which `whole` marks.
 fn write_reusing<'a>(
     blocks: &[Block],
     correspondence: &mut Correspondence<'a>,
@@ -504,22 +514,32 @@ fn write_reusing<'a>(
         // A block whose source the block before it could take in stays only
         // after its predecessor in the source, written as it was there.
         let taken_in = |text: &str| placement.takes_in(block, text, follows_run);
-        if let Some((_, lines)) = &partly[index] {
-            if taken_in(&lines[0].body) {
+        // A block whose first line the source read where it opens no block,
+        // after a line holding text, stays away from that line where its
+        // text reads alone as a block of its kind, or its canonical output
+        // does not either.
+        let moved_out_of_context = |position: usize| {
+            !follows_predecessor && follows_a_text_line(source, span_of(&base[position]).start)
+        };
+        if let Some((position, lines)) = &partly[index] {
+            if taken_in(&lines[0].body)
+                || (moved_out_of_context(*position)
+                    && misreads_unlike_its_rendering(block, &reuse::join(lines, "\n"), options))
+            {
                 partly[index] = None;
             }
         }
         let mut at = reused[index];
-        if at.is_some() {
-            let start = span_of(block).start;
-            // A `---` break that opens the document stays a break while no
-            // later line closes it as frontmatter (`Document::write`), which
+        if let Some(position) = at {
+            let span = span_of(block);
+            let start = span.start;
+            // A first block whose first line a later line would close as
+            // frontmatter is written canonically (`Document::write`), which
             // `whole` marks, wherever it stood in the source.
-            let rewritten = matches!(block, Block::ThematicBreak(_))
-                && index == 0
-                && whole[0]
-                && source[start..].starts_with("---")
-                || taken_in(&source[start..]);
+            let rewritten = whole[index]
+                || taken_in(&source[start..])
+                || (moved_out_of_context(position)
+                    && misreads_unlike_its_rendering(block, &source[start..span.end], options));
             if rewritten {
                 at = None;
             }
@@ -930,6 +950,38 @@ fn closed_by_a_blank_line(text: &str) -> bool {
             matches!(block, Block::BlankLine(_))
                 || block.span().is_some_and(|span| span.end <= text.len())
         })
+}
+
+/// Whether the line holding `start` in `source` follows a line holding
+/// text, which a block starting there continued where it cannot interrupt
+/// a paragraph: a table's header row, a paragraph after a definition's.
+fn follows_a_text_line(source: &str, start: usize) -> bool {
+    let line_start = source[..start].rfind(['\n', '\r']).map_or(0, |at| at + 1);
+    let before = strip_line_ending(&source[..line_start]);
+    let previous = &before[before.rfind(['\n', '\r']).map_or(0, |at| at + 1)..];
+    !crate::parse::is_blank(previous)
+}
+
+/// Whether `text`, the source of `block`, reads as one block of its kind
+/// where it opens a block after a blank line, where no frontmatter opens: a
+/// first line that opens another block there, as `2) a | b` opens a list
+/// that cannot interrupt a paragraph, does not.
+fn reads_alone_as(block: &Block, text: &str) -> bool {
+    let probe = format!("\n{text}");
+    matches!(
+        crate::parse(&probe).document.children.as_slice(),
+        [Block::BlankLine(_), only]
+            if core::mem::discriminant(only) == core::mem::discriminant(block)
+    )
+}
+
+/// Whether `text`, the source of `block`, does not read alone as one block
+/// of its kind (`reads_alone_as`) while the block's canonical output does: a
+/// paragraph's, written as its text, reads as its source.
+fn misreads_unlike_its_rendering(block: &Block, text: &str, options: &SerializeOptions) -> bool {
+    !reads_alone_as(block, text)
+        && write_blocks(core::slice::from_ref(block), options, Join::Gap, true, None)
+            .is_ok_and(|written| reads_alone_as(block, &written))
 }
 
 /// Pushes the gap between two top-level blocks in the options' line ending.

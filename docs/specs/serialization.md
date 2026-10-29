@@ -161,10 +161,13 @@ item is not the base's last item written from the source, only where the
 source's lines are on both sides. Which other boundaries without a blank
 line are kept is unspecified. It SHALL keep the source before the
 document's first block and after its last when that block is written from
-the source there; every other boundary SHALL be canonical. A `---` thematic
-break written from the source that opens the output, wherever it stood in
-the source, SHALL be kept from the source unless a later line of the output
-closes it as frontmatter.
+the source there; every other boundary SHALL be canonical. A block other
+than frontmatter written from the source that opens the output, such as a
+`---` thematic break, wherever it stood in the source, SHALL be kept from
+the source while no later line of the output closes its first line, after
+any byte order mark, as frontmatter. Where one does, the block SHALL be
+written as canonical output if the output then opens with no frontmatter,
+and kept from the source otherwise.
 A node SHALL be written as canonical output even so where its source would
 read differently in its place; which placements make a node's source read
 differently is unspecified, except that a top-level block written partly
@@ -193,6 +196,12 @@ of the same document does.
 #### Scenario: Edited tables
 - **WHEN** the alignments of the table parsed from `"| a  | b |\n|---|---|\n| c   | e |\n"` are set to center and none, and separately the empty cell of the table parsed from `"| a | b |\n|---|---|\n| c |   |\n"` is given `Text("中文")`, and each document is written
 - **THEN** they return `"| a  | b |\n|:---:|---|\n| c   | e |\n"` and `"| a | b |\n|---|---|\n| c | 中文 |\n"`: the rows keep their source, and the delimiter row its pipes and dashes
+
+#### Scenario: A table whose header row continued a paragraph
+- **WHEN** the paragraph is removed from the document parsed from `"a\n2) b | c\n--|--"`, whose header row `2) b | c`, a list item that cannot interrupt a paragraph, is the table's, and the document is written
+- **THEN** `to_markdown()` returns `"| 2) b | c |\n| --- | --- |\n"`, which reads back as the table, where the source `"2) b | c\n--|--"` reads as a list, as "Parsing the output" requires of a document whose canonical output reads back
+- **WHEN** the paragraph is removed from the document parsed from `"a\n+++\n|--|\n\n+++"` and it is written
+- **THEN** it returns `"| +++ |\n| --- |\n\n+++"`, where the table's source, opening the output, would read as frontmatter that the last line closes
 
 #### Scenario: A break that comes to open the document
 - **WHEN** the two blocks of the document parsed from `"para\n\n---\n"` are swapped and it is written
