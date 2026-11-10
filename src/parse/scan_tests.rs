@@ -1019,6 +1019,45 @@ fn scan_tables_are_kept_only_from_inputs_up_to_the_kept_length() {
     }
 }
 
+/// A pass returns a list of up to `KEPT_NODES_LEN` nodes without the
+/// capacity of a longer one, and keeps its node buffer for the next pass
+/// only when the buffer holds no more than that; the passes share one state,
+/// so that a short pass after a long one keeps a buffer again.
+#[test]
+fn a_node_buffer_is_kept_only_up_to_the_kept_nodes() {
+    // An escape between two texts: every unit after the first adds two
+    // nodes.
+    let flat = |nodes: usize| {
+        String::from("a") + &"\\*a".repeat((nodes - 1) / 2) + &"\\*".repeat(1 - nodes % 2)
+    };
+    let long = flat(KEPT_NODES_LEN + 1);
+    let mut state = InlineState::default();
+    for (input, returned, kept) in [
+        (flat(KEPT_NODES_LEN), KEPT_NODES_LEN, true),
+        (long.clone(), KEPT_NODES_LEN + 1, false),
+        (flat(3), 3, true),
+        // One emphasis around the nodes, and one link whose text they are.
+        (alloc::format!("*{long}*"), 1, false),
+        (alloc::format!("[{long}](u)"), 1, false),
+    ] {
+        let inlines = parse_inlines_with_context(&input, 0, None, &mut Vec::new(), &mut state);
+        assert_eq!(inlines.len(), returned, "{}", input.len());
+        assert_eq!(state.buffers.nodes.capacity() > 0, kept, "{}", input.len());
+        assert!(
+            state.buffers.nodes.capacity() <= KEPT_NODES_LEN,
+            "{}",
+            input.len()
+        );
+        if returned <= KEPT_NODES_LEN {
+            assert!(inlines.capacity() <= KEPT_NODES_LEN, "{}", input.len());
+        } else {
+            // The list the pass grew, where a copy would fit its nodes.
+            assert!(inlines.capacity() > returned, "{}", input.len());
+        }
+        assert!(state.is_idle(), "{}", input.len());
+    }
+}
+
 /// Inputs dense in host chars, dots, underscores and escapes, so that hosts
 /// run past the eleven dots that settle `check_domain`.
 fn host_inputs(count: usize, seed: u64) -> Vec<String> {

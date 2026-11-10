@@ -2996,6 +2996,10 @@ impl ScanMemos {
 /// The longest input whose scan tables a pass keeps for the next pass.
 const KEPT_TABLES_INPUT_LEN: usize = 1 << 14;
 
+/// The most nodes a pass returns as a copy that fits them, and the largest
+/// capacity, in nodes, of a node buffer a pass keeps for the next pass.
+const KEPT_NODES_LEN: usize = 1 << 11;
+
 /// The tables an `InlineScan` builds, kept empty from one pass to the next,
 /// boxed so that a pass moves them in and out cheaply; `None` until a pass
 /// uses them.
@@ -3187,13 +3191,20 @@ impl InlineState {
 /// it; a pass nested in it finds the buffer taken and works in a new one.
 ///
 /// This is a compromise: it gives up memory for allocations. The buffers
-/// keep the capacity of the largest leaf's working lists until the document
-/// is parsed, and the copy a pass returns is made while the node buffer it
-/// was built in still holds the nodes. Over many leaves of ordinary size the
-/// peak stays below that of lists allocated anew in every pass. It stops
-/// holding when one leaf holds most of the document: its node list is then
-/// held twice at once, buffer and copy, which a pass returning its own list
-/// would not do.
+/// keep the capacity of the largest leaf's working lists, the node buffer's
+/// up to a bound, until the document is parsed, and the copy a pass returns
+/// is made while the node buffer it was built in still holds the nodes.
+/// Over many leaves of ordinary size the peak stays below that of lists
+/// allocated anew in every pass. Two bounds on the node buffer keep a long
+/// leaf from costing more. A pass whose list ends with more than
+/// `KEPT_NODES_LEN` nodes returns the list itself in place of a copy: its
+/// nodes are not held twice, and the list keeps the capacity it grew to
+/// while the pass built its nodes for as long as the document holds it. And
+/// a node buffer that grew past the capacity of `KEPT_NODES_LEN` nodes is
+/// dropped where a pass would give it back, so the buffer kept between
+/// passes stays small. A pass after either grows its buffer anew, a cost
+/// small beside a long pass's own and paid again by each leaf where all are
+/// long.
 #[derive(Default)]
 struct InlineBuffers {
     nodes: Vec<Inline>,
@@ -3263,7 +3274,8 @@ fn parse_inline_content(
     state: &mut InlineState,
 ) -> Vec<Inline> {
     let bytes = input.as_bytes();
-    // The pass builds its nodes in a buffer and returns a copy that fits them.
+    // The pass builds its nodes in a buffer and returns a copy that fits
+    // them, or, when they are many, the list itself.
     let mut nodes = take_buffer(&mut state.buffers.nodes);
     let mut text = PendingText::new(input, base_offset);
     let mut index = 0;
@@ -3715,9 +3727,16 @@ fn parse_inline_content(
         &brackets.formed,
         buffers,
     );
-    let mut inlines = Vec::with_capacity(nodes.len());
-    inlines.append(&mut nodes);
-    give_buffer(&mut buffers.nodes, nodes);
+    let inlines = if nodes.len() > KEPT_NODES_LEN {
+        nodes
+    } else {
+        let mut inlines = Vec::with_capacity(nodes.len());
+        inlines.append(&mut nodes);
+        if nodes.capacity() <= KEPT_NODES_LEN {
+            give_buffer(&mut buffers.nodes, nodes);
+        }
+        inlines
+    };
     give_buffer(&mut buffers.delimiters, delimiters);
     brackets.give_back(buffers);
     buffers.scan = pass.scan.into_tables();
