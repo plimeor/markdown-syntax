@@ -727,6 +727,10 @@ fn edited_nodes_at_every_depth_read_back() {
 #[rustfmt::skip]
 const NOT_KEPT_AFTER_APPENDING: &[(&str, &str)] = &[
     ("READ_BACK_INPUTS \">  * \\t[x] : # <div>a\\n> |-|\" [0, 0, 0, 0]", "a space and a tab after a marker, which could open indented code at another column, render its item"),
+    ("cases/gfm/block_directive.cases#2 [0, 0, 2]", "the appended `X` makes the paragraph's last line `:::X`, a container directive opener, so the paragraph is not written in place"),
+    ("cases/gfm/block_directive.cases#3 [0, 0, 1]", "the appended `X` makes the paragraph's last line `:::X`, a container directive opener, so the paragraph is not written in place"),
+    ("cases/gfm/block_directive.cases#4 [1, 0]", "the appended `X` makes the paragraph's last line `:::X`, a container directive opener, so the paragraph is not written in place"),
+    ("cases/gfm/block_directive.cases#5 [1, 0, 0]", "the appended `X` makes the paragraph's last line `:::X`, a container directive opener, so the paragraph is not written in place"),
 ];
 
 /// The block at `path`, through list items, table rows, and containers;
@@ -1038,6 +1042,10 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     // Text, escapes, and references as written.
     ("a\\.b \\#tag", "a\\.b \\#tag\n"),
     ("&#35;tag &amp; x", "&#35;tag &amp; x\n"),
+    // A backslash before a soft break stays text, a space from it.
+    ("a\\ \nb", "a\\ \nb\n"),
+    ("*a\\\t\nb*", "*a\\ \nb*\n"),
+    ("a\\\\\nb", "a\\\\\nb\n"),
     (
         "Test \\`hello world` here.",
         "Test \\`hello world` here.\n",
@@ -1121,6 +1129,15 @@ const CANONICAL_INPUTS: &[(&str, &str)] = &[
     ("- a\n- \n  ---", "- a\n- \n\n---\n"),
     ("[o]:u\n\t$$\na$$", "[o]: u\n\n$$\na$$\n"),
     ("- a\n  - b\n   <div>", "- a\n  - b\n   <div>\n"),
+    // Text after a block directive's opener keeps the line paragraph text;
+    // spaces and tabs after it do not.
+    (":::x[a]junk\nbody", ":::x[a]junk\nbody\n"),
+    (":::x[a]{b=c}junk", ":::x[a]{b=c}junk\n"),
+    (":::x{b=c}junk", ":::x{b=c}junk\n"),
+    (":::x junk", ":::x junk\n"),
+    ("::x[a]junk", "::x[a]junk\n"),
+    ("p\n:::x junk", "p\n:::x junk\n"),
+    (":::x[a] \t\nbody\n:::", ":::x[a]\nbody\n:::\n"),
     // Values encoded by rule.
     ("```&#x20;a&#9;\nb\n```", "```&#x20;a&#x9;\nb\n```\n"),
     // The info string follows the fence, unless it opens with the fence's

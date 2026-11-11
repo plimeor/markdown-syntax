@@ -6,9 +6,9 @@
 //!     emoji.json LICENSE v4.1.0 src/gemoji.rs
 //! ```
 //!
-//! The table holds every name and alias with its emoji, sorted by name so the
-//! library looks a name up by binary search, and is headed by gemoji's
-//! version and MIT notice.
+//! The table holds every name and alias with its emoji, sorted by name, from
+//! which the library's `name_table!` builds the compact table it looks a name
+//! up in, and is headed by gemoji's version and MIT notice.
 
 use std::{env, fmt::Write as _, fs, process::ExitCode};
 
@@ -85,9 +85,14 @@ fn generate(emoji: &str, license: &str, tag: &str) -> Result<String, String> {
     }
     let _ = writeln!(
         table,
-        "\n/// Every gemoji name and alias with its emoji, sorted by name.\n\
+        "\nuse crate::name_table::{{name_table, NameTable}};\n\
+         \n\
+         /// Every gemoji name and alias with its emoji, sorted by name. A lookup\n\
+         /// reads it as [`TABLE`], built from it at compile time; it is a `const`\n\
+         /// that no runtime code names, so it is not kept.\n\
          #[rustfmt::skip]\n\
-         static SHORTCODES: [(&str, &str); {}] = [",
+         #[allow(clippy::large_const_arrays)]\n\
+         const SHORTCODES: [(&str, &str); {}] = [",
         shortcodes.len()
     );
     for (name, glyph) in &shortcodes {
@@ -95,12 +100,21 @@ fn generate(emoji: &str, license: &str, tag: &str) -> Result<String, String> {
     }
     table.push_str(
         "];\n\n\
+         /// [`SHORTCODES`] as the lookup reads them.\n\
+         static TABLE: NameTable = name_table!(SHORTCODES);\n\n\
          /// The emoji gemoji gives `name`.\n\
          pub(crate) fn glyph(name: &str) -> Option<&'static str> {\n    \
-         SHORTCODES\n        \
-         .binary_search_by(|(entry, _)| (*entry).cmp(name))\n        \
-         .ok()\n        \
-         .map(|at| SHORTCODES[at].1)\n\
+         TABLE.get(name)\n\
+         }\n\
+         \n\
+         #[cfg(test)]\n\
+         mod tests {\n    \
+         use super::*;\n\
+         \n    \
+         #[test]\n    \
+         fn finds_what_the_list_holds() {\n        \
+         crate::name_table::assert_finds_what_the_list_holds(&SHORTCODES, glyph);\n    \
+         }\n\
          }\n",
     );
     Ok(table)

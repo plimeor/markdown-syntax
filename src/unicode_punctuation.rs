@@ -366,6 +366,10 @@ static PUNCTUATION_RANGES: [(char, char); 349] = [
 /// ASCII range. ASCII punctuation is handled separately by the caller via
 /// [`char::is_ascii_punctuation`]; this covers the non-ASCII `P*`/`S*` set.
 pub(crate) fn is_unicode_punctuation(value: char) -> bool {
+    // The table's ASCII ranges are exactly the ASCII punctuation.
+    if value.is_ascii() {
+        return value.is_ascii_punctuation();
+    }
     PUNCTUATION_RANGES
         .binary_search_by(|&(start, end)| {
             if value < start {

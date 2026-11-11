@@ -1,0 +1,6426 @@
+{
+ "meta": {
+  "date": "2026-10-27T20:42:31.860Z",
+  "commit": "347b5d4",
+  "cpu": "Apple M4",
+  "cores": 10,
+  "node": "v24.21.0",
+  "v8": "13.6.233.17-node.53",
+  "wasm": {
+   "path": "target/wasm32-unknown-unknown/wasm/markdown_syntax_wasm.wasm",
+   "bytes": 841166
+  },
+  "packages": {
+   "markdown-it": "15.0.3",
+   "marked": "18.1.2",
+   "commonmark": "0.31.2",
+   "micromark": "4.0.3",
+   "mdast-util-from-markdown": "2.1.0",
+   "micromark-extension-gfm": "3.0.0",
+   "mdast-util-gfm": "3.1.0",
+   "mdast-util-to-markdown": "2.2.1",
+   "@lezer/markdown": "1.8.1",
+   "@lezer/common": "1.5.4",
+   "markdown-wasm": "1.2.0",
+   "esbuild": "0.28.2"
+  },
+  "args": {
+   "rounds": 3,
+   "time": 400,
+   "filter": null,
+   "sections": null
+  },
+  "corpus": {
+   "mixed-1k": {
+    "bytes": 1344,
+    "utf16Units": 1344
+   },
+   "mixed-10k": {
+    "bytes": 11956,
+    "utf16Units": 11956
+   },
+   "mixed-100k": {
+    "bytes": 101484,
+    "utf16Units": 100014
+   },
+   "mixed-1m": {
+    "bytes": 1022808,
+    "utf16Units": 1003588
+   },
+   "real-docs": {
+    "bytes": 696780,
+    "utf16Units": 695298
+   },
+   "real-rust-releases": {
+    "bytes": 753227,
+    "utf16Units": 753066
+   },
+   "real-spec": {
+    "bytes": 205025,
+    "utf16Units": 204706
+   },
+   "syn-cjk": {
+    "bytes": 274902,
+    "utf16Units": 100070
+   },
+   "syn-code": {
+    "bytes": 100485,
+    "utf16Units": 100485
+   },
+   "syn-directives": {
+    "bytes": 100202,
+    "utf16Units": 100202
+   },
+   "syn-emphasis": {
+    "bytes": 100035,
+    "utf16Units": 100035
+   },
+   "syn-headings": {
+    "bytes": 100011,
+    "utf16Units": 100011
+   },
+   "syn-html": {
+    "bytes": 100278,
+    "utf16Units": 100278
+   },
+   "syn-lists": {
+    "bytes": 101258,
+    "utf16Units": 101258
+   },
+   "syn-paragraphs": {
+    "bytes": 100006,
+    "utf16Units": 100006
+   },
+   "syn-quotes": {
+    "bytes": 100693,
+    "utf16Units": 100693
+   },
+   "syn-references": {
+    "bytes": 100276,
+    "utf16Units": 100276
+   },
+   "syn-tables": {
+    "bytes": 100121,
+    "utf16Units": 100121
+   }
+  }
+ },
+ "cases": {
+  "parse/mixed-1k/ours": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "ours",
+   "bytes": 1344,
+   "mbps": 55.840787279148685,
+   "median": 0.024068428571419127,
+   "min": 0.021377999999994506,
+   "p90": 0.025726214285717624,
+   "mean": 0.024517075105192146,
+   "n": 3497,
+   "batch": 14,
+   "roundMedians": [
+    0.024482142857144545,
+    0.024006000000002,
+    0.023761928571421516
+   ],
+   "spread": 0.029923610658083084,
+   "ratioVsFastestTreePeer": 1.7732160275766313
+  },
+  "parse/mixed-1k/markdown-it": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "markdown-it",
+   "bytes": 1344,
+   "mbps": 26.892490067608893,
+   "median": 0.0499767777777783,
+   "min": 0.04356944444442787,
+   "p90": 0.05890277777780284,
+   "mean": 0.052684370502018456,
+   "n": 2532,
+   "batch": 9,
+   "roundMedians": [
+    0.05084722222222303,
+    0.050041666666705474,
+    0.048662111111096036
+   ],
+   "spread": 0.043722528908187876,
+   "ratioVsFastestTreePeer": 3.681986262594081
+  },
+  "parse/mixed-1k/marked": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "marked",
+   "bytes": 1344,
+   "mbps": 28.477928193076444,
+   "median": 0.04719444444440847,
+   "min": 0.04225000000001779,
+   "p90": 0.04989344444442799,
+   "mean": 0.04763522146798409,
+   "n": 2799,
+   "batch": 9,
+   "roundMedians": [
+    0.04720833333335071,
+    0.047222222222191905,
+    0.04710644444442854
+   ],
+   "spread": 0.0024532077689725248,
+   "ratioVsFastestTreePeer": 3.4770007960044276
+  },
+  "parse/mixed-1k/commonmark": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "commonmark",
+   "bytes": 1344,
+   "mbps": 99.01777899588373,
+   "median": 0.013573319999995875,
+   "min": 0.0122099999999773,
+   "p90": 0.01522000000000844,
+   "mean": 0.013910047485515319,
+   "n": 3452,
+   "batch": 25,
+   "roundMedians": [
+    0.013658360000008543,
+    0.013576680000005581,
+    0.013500000000021828
+   ],
+   "spread": 0.011667005565827915,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/mixed-1k/mdast": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "mdast",
+   "bytes": 1344,
+   "mbps": 2.9997187763648046,
+   "median": 0.44804199999998673,
+   "min": 0.4177499999996144,
+   "p90": 0.5508749999999054,
+   "mean": 0.47947243148221635,
+   "n": 2503,
+   "batch": 1,
+   "roundMedians": [
+    0.44916700000067067,
+    0.44529099999999744,
+    0.4500000000007276
+   ],
+   "spread": 0.010510175386973311,
+   "ratioVsFastestTreePeer": 33.00902063755389
+  },
+  "parse/mixed-1k/lezer": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "lezer",
+   "bytes": 1344,
+   "mbps": 17.309364099817046,
+   "median": 0.0776458333333115,
+   "min": 0.07113883333340709,
+   "p90": 0.0873263333334459,
+   "mean": 0.08145770724755888,
+   "n": 2456,
+   "batch": 6,
+   "roundMedians": [
+    0.07847916666666303,
+    0.07786116666663172,
+    0.07605550000001433
+   ],
+   "spread": 0.03121438153989007,
+   "ratioVsFastestTreePeer": 5.720474676301384
+  },
+  "parse/mixed-1k/markdown-wasm": {
+   "group": "parse",
+   "file": "mixed-1k",
+   "subject": "markdown-wasm",
+   "bytes": 1344,
+   "mbps": 207.65665236035937,
+   "median": 0.006472222222227073,
+   "min": 0.005910200000006524,
+   "p90": 0.006739822222233569,
+   "mean": 0.0065268386414316535,
+   "n": 4086,
+   "batch": 45,
+   "roundMedians": [
+    0.006524999999965075,
+    0.006500933333316223,
+    0.006419444444448649
+   ],
+   "spread": 0.016309012869478563,
+   "ratioVsFastestTreePeer": 0.47683412917613677
+  },
+  "parse/mixed-10k/ours": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "ours",
+   "bytes": 11956,
+   "mbps": 57.77399075122547,
+   "median": 0.20694433333301276,
+   "min": 0.19736100000045553,
+   "p90": 0.2223613333335379,
+   "mean": 0.21167668271604217,
+   "n": 1890,
+   "batch": 3,
+   "roundMedians": [
+    0.2073470000001786,
+    0.20677800000036464,
+    0.20661133333366402
+   ],
+   "spread": 0.0035549012368015025,
+   "ratioVsFastestTreePeer": 1.7245361111100082
+  },
+  "parse/mixed-10k/markdown-it": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "markdown-it",
+   "bytes": 11956,
+   "mbps": 29.606260996209837,
+   "median": 0.4038334999995641,
+   "min": 0.366479000000254,
+   "p90": 0.4664789999997083,
+   "mean": 0.42559070425530676,
+   "n": 1410,
+   "batch": 2,
+   "roundMedians": [
+    0.4047499999996944,
+    0.4040000000004511,
+    0.4024790000003122
+   ],
+   "spread": 0.005623604776187799,
+   "ratioVsFastestTreePeer": 3.365279166666095
+  },
+  "parse/mixed-10k/marked": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "marked",
+   "bytes": 11956,
+   "mbps": 25.537922939818365,
+   "median": 0.46816649999982474,
+   "min": 0.43618750000041473,
+   "p90": 0.4938750000001164,
+   "mean": 0.4736054570527983,
+   "n": 1269,
+   "batch": 2,
+   "roundMedians": [
+    0.46858350000002247,
+    0.4656875000000582,
+    0.4697500000002037
+   ],
+   "spread": 0.008677468379619302,
+   "ratioVsFastestTreePeer": 3.901387500002088
+  },
+  "parse/mixed-10k/commonmark": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "commonmark",
+   "bytes": 11956,
+   "mbps": 99.63333333342395,
+   "median": 0.11999999999989086,
+   "min": 0.1133230000000367,
+   "p90": 0.12577074999990145,
+   "mean": 0.1215428557108204,
+   "n": 2469,
+   "batch": 4,
+   "roundMedians": [
+    0.1203542500002186,
+    0.12035424999976385,
+    0.11951050000016039
+   ],
+   "spread": 0.007031250000491459,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/mixed-10k/mdast": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "mdast",
+   "bytes": 11956,
+   "mbps": 2.585290699245673,
+   "median": 4.624625000000378,
+   "min": 4.182749999999942,
+   "p90": 5.147708000000421,
+   "mean": 4.836086508000037,
+   "n": 250,
+   "batch": 1,
+   "roundMedians": [
+    4.639666999999463,
+    4.670625000002474,
+    4.541540999998688
+   ],
+   "spread": 0.027912317215725707,
+   "ratioVsFastestTreePeer": 38.53854166670487
+  },
+  "parse/mixed-10k/lezer": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "lezer",
+   "bytes": 11956,
+   "mbps": 15.780019454422025,
+   "median": 0.7576670000016748,
+   "min": 0.7295840000006137,
+   "p90": 0.8433329999970738,
+   "mean": 0.7951959755129111,
+   "n": 1511,
+   "batch": 1,
+   "roundMedians": [
+    0.7639170000002196,
+    0.7560000000012224,
+    0.7553340000013122
+   ],
+   "spread": 0.011328195630650871,
+   "ratioVsFastestTreePeer": 6.313891666686366
+  },
+  "parse/mixed-10k/markdown-wasm": {
+   "group": "parse",
+   "file": "mixed-10k",
+   "subject": "markdown-wasm",
+   "bytes": 11956,
+   "mbps": 232.757798338857,
+   "median": 0.051366700000289714,
+   "min": 0.0465875000001688,
+   "p90": 0.054333299999780135,
+   "mean": 0.051928380103803254,
+   "n": 2312,
+   "batch": 10,
+   "roundMedians": [
+    0.05163329999995767,
+    0.05108330000002752,
+    0.051304200000231504
+   ],
+   "spread": 0.01070732595099652,
+   "ratioVsFastestTreePeer": 0.42805583333613695
+  },
+  "parse/mixed-100k/ours": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "ours",
+   "bytes": 101484,
+   "mbps": 43.51955922960416,
+   "median": 2.331916999999521,
+   "min": 2.235625000001164,
+   "p90": 2.5191669999985606,
+   "mean": 2.386577041666781,
+   "n": 504,
+   "batch": 1,
+   "roundMedians": [
+    2.414375000000291,
+    2.305832999998529,
+    2.3205420000012964
+   ],
+   "spread": 0.04654625357668577,
+   "ratioVsFastestTreePeer": 2.0374984709502364
+  },
+  "parse/mixed-100k/markdown-it": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "markdown-it",
+   "bytes": 101484,
+   "mbps": 24.538233694001953,
+   "median": 4.135750000001281,
+   "min": 3.8685420000001614,
+   "p90": 4.779458999997587,
+   "mean": 4.366587234657109,
+   "n": 277,
+   "batch": 1,
+   "roundMedians": [
+    4.1446670000004815,
+    4.113416000000143,
+    4.152249999999185
+   ],
+   "spread": 0.00938983255734271,
+   "ratioVsFastestTreePeer": 3.6135867190971114
+  },
+  "parse/mixed-100k/marked": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "marked",
+   "bytes": 101484,
+   "mbps": 24.302696012980427,
+   "median": 4.175833000001148,
+   "min": 4.0257500000006985,
+   "p90": 4.353166999997484,
+   "mean": 4.213465758741324,
+   "n": 286,
+   "batch": 1,
+   "roundMedians": [
+    4.254124999999476,
+    4.16083300000173,
+    4.146749999999884
+   ],
+   "spread": 0.02571343250545772,
+   "ratioVsFastestTreePeer": 3.648608999568863
+  },
+  "parse/mixed-100k/commonmark": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "commonmark",
+   "bytes": 101484,
+   "mbps": 88.67103538674672,
+   "median": 1.1444999999985157,
+   "min": 1.063333000001876,
+   "p90": 1.2533750000002328,
+   "mean": 1.1818442568897973,
+   "n": 1016,
+   "batch": 1,
+   "roundMedians": [
+    1.140917000000627,
+    1.148417000000336,
+    1.1437500000029104
+   ],
+   "spread": 0.006553079947329566,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/mixed-100k/mdast": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "mdast",
+   "bytes": 101484,
+   "mbps": 2.0252497661365765,
+   "median": 50.109375,
+   "min": 45.956584000003204,
+   "p90": 64.72008300000016,
+   "mean": 51.60228479999981,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    50.809166999999434,
+    49.18662499999846,
+    50.109375
+   ],
+   "spread": 0.03238000873092064,
+   "ratioVsFastestTreePeer": 43.782765399794656
+  },
+  "parse/mixed-100k/lezer": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "lezer",
+   "bytes": 101484,
+   "mbps": 15.415973344849522,
+   "median": 6.583041999998386,
+   "min": 6.219750000000204,
+   "p90": 7.456125000000611,
+   "mean": 6.915453365714181,
+   "n": 175,
+   "batch": 1,
+   "roundMedians": [
+    6.497833000001265,
+    6.585915999999997,
+    6.620749999998225
+   ],
+   "spread": 0.01867176299300385,
+   "ratioVsFastestTreePeer": 5.751893403238902
+  },
+  "parse/mixed-100k/markdown-wasm": {
+   "group": "parse",
+   "file": "mixed-100k",
+   "subject": "markdown-wasm",
+   "bytes": 101484,
+   "mbps": 136.23549500889757,
+   "median": 0.7449159999996482,
+   "min": 0.6959999999999127,
+   "p90": 0.7750419999974838,
+   "mean": 0.7550433966059733,
+   "n": 1591,
+   "batch": 1,
+   "roundMedians": [
+    0.745083000001614,
+    0.7425419999999576,
+    0.7479999999995925
+   ],
+   "spread": 0.0073270006277721235,
+   "ratioVsFastestTreePeer": 0.6508658802976097
+  },
+  "parse/mixed-1m/ours": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "ours",
+   "bytes": 1022808,
+   "mbps": 41.011225953410495,
+   "median": 24.939707999998063,
+   "min": 24.256499999999505,
+   "p90": 26.277125000000524,
+   "mean": 25.26275689583319,
+   "n": 48,
+   "batch": 1,
+   "roundMedians": [
+    24.939707999998063,
+    24.804500000002008,
+    25.016625000000204
+   ],
+   "spread": 0.008505512574494138,
+   "ratioVsFastestTreePeer": 1.5983790426594504
+  },
+  "parse/mixed-1m/markdown-it": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "markdown-it",
+   "bytes": 1022808,
+   "mbps": 22.4779588942267,
+   "median": 45.502707999999984,
+   "min": 43.014415999998164,
+   "p90": 59.152916999999434,
+   "mean": 46.978519466667784,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    44.73620900000242,
+    45.46120900000096,
+    47.306750000003376
+   ],
+   "spread": 0.056492044385599176,
+   "ratioVsFastestTreePeer": 2.916256070498425
+  },
+  "parse/mixed-1m/marked": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "marked",
+   "bytes": 1022808,
+   "mbps": 23.051575106901517,
+   "median": 44.37041699999827,
+   "min": 42.72500000000582,
+   "p90": 45.8504580000008,
+   "mean": 44.48692086666657,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    44.91570800000045,
+    45.08187499999622,
+    44.12875000000349
+   ],
+   "spread": 0.021481091782228713,
+   "ratioVsFastestTreePeer": 2.843687850991012
+  },
+  "parse/mixed-1m/commonmark": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "commonmark",
+   "bytes": 1022808,
+   "mbps": 65.55148407770268,
+   "median": 15.603125000001455,
+   "min": 12.68741699999373,
+   "p90": 16.778999999994994,
+   "mean": 15.076595036585342,
+   "n": 82,
+   "batch": 1,
+   "roundMedians": [
+    15.625833000005514,
+    15.603125000001455,
+    14.965416999999434
+   ],
+   "spread": 0.042325880232710986,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/mixed-1m/mdast": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "mdast",
+   "bytes": 1022808,
+   "mbps": 1.615762140011999,
+   "median": 633.0189170000012,
+   "min": 606.8794160000034,
+   "p90": 658.825499999999,
+   "mean": 635.952547066667,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    638.1471660000025,
+    621.244875000004,
+    633.0189170000012
+   ],
+   "spread": 0.026701083563350256,
+   "ratioVsFastestTreePeer": 40.57000870017655
+  },
+  "parse/mixed-1m/lezer": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "lezer",
+   "bytes": 1022808,
+   "mbps": 15.539362920577084,
+   "median": 65.8204590000023,
+   "min": 63.781042000002344,
+   "p90": 82.40316699999676,
+   "mean": 68.06037526666647,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    66.55245900000591,
+    66.42050000000017,
+    65.77599999999802
+   ],
+   "spread": 0.011796620865373524,
+   "ratioVsFastestTreePeer": 4.218415157219862
+  },
+  "parse/mixed-1m/markdown-wasm": {
+   "group": "parse",
+   "file": "mixed-1m",
+   "subject": "markdown-wasm",
+   "bytes": 1022808,
+   "mbps": 126.73022953258777,
+   "median": 8.070749999998952,
+   "min": 7.8851250000006985,
+   "p90": 8.335875000004307,
+   "mean": 8.173543067567103,
+   "n": 148,
+   "batch": 1,
+   "roundMedians": [
+    8.07733300000109,
+    8.092666000004101,
+    8.037040999995952
+   ],
+   "spread": 0.0068921723517834516,
+   "ratioVsFastestTreePeer": 0.5172521530141045
+  },
+  "parse/real-docs/ours": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "ours",
+   "bytes": 696780,
+   "mbps": 47.100683168781266,
+   "median": 14.793416000000434,
+   "min": 14.329791999996814,
+   "p90": 16.941165999996883,
+   "mean": 15.177419765432093,
+   "n": 81,
+   "batch": 1,
+   "roundMedians": [
+    14.80516599999828,
+    14.611999999993714,
+    15.025458999996772
+   ],
+   "spread": 0.027948852381562604,
+   "ratioVsFastestTreePeer": 1.6565975363941716
+  },
+  "parse/real-docs/markdown-it": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "markdown-it",
+   "bytes": 696780,
+   "mbps": 32.467204177102204,
+   "median": 21.46104099999502,
+   "min": 20.766749999995227,
+   "p90": 25.09408400000393,
+   "mean": 22.58595996296208,
+   "n": 54,
+   "batch": 1,
+   "roundMedians": [
+    21.310083999997005,
+    21.663791999999376,
+    21.774833000003127
+   ],
+   "spread": 0.021655473283249883,
+   "ratioVsFastestTreePeer": 2.403252071667897
+  },
+  "parse/real-docs/marked": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "marked",
+   "bytes": 696780,
+   "mbps": 25.493117374185154,
+   "median": 27.33208300000115,
+   "min": 26.67883399999846,
+   "p90": 27.958707999998296,
+   "mean": 27.404806377777682,
+   "n": 45,
+   "batch": 1,
+   "roundMedians": [
+    27.31070799999725,
+    27.196165999994264,
+    27.79033399999753
+   ],
+   "spread": 0.02173884807840075,
+   "ratioVsFastestTreePeer": 3.0607035834266805
+  },
+  "parse/real-docs/commonmark": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "commonmark",
+   "bytes": 696780,
+   "mbps": 78.02687569988547,
+   "median": 8.930000000000291,
+   "min": 7.764125000001513,
+   "p90": 9.859041999996407,
+   "mean": 8.857268255474926,
+   "n": 137,
+   "batch": 1,
+   "roundMedians": [
+    9.394249999997555,
+    8.186541999995825,
+    8.21916699999565
+   ],
+   "spread": 0.13524165733501578,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/real-docs/mdast": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "mdast",
+   "bytes": 696780,
+   "mbps": 1.7631137920544002,
+   "median": 395.19854200000555,
+   "min": 378.77666699999827,
+   "p90": 425.1573750000025,
+   "mean": 400.306152800002,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    396.0353749999995,
+    395.19854200000555,
+    393.39537500000006
+   ],
+   "spread": 0.00668018658833863,
+   "ratioVsFastestTreePeer": 44.25515587905853
+  },
+  "parse/real-docs/lezer": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "lezer",
+   "bytes": 696780,
+   "mbps": 12.906769163087118,
+   "median": 53.985625000001164,
+   "min": 52.236833999995724,
+   "p90": 71.03683299999102,
+   "mean": 55.99258469999962,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    53.908416999998735,
+    54.29441699999734,
+    53.697832999998354
+   ],
+   "spread": 0.011050793614021715,
+   "ratioVsFastestTreePeer": 6.045422732362756
+  },
+  "parse/real-docs/markdown-wasm": {
+   "group": "parse",
+   "file": "real-docs",
+   "subject": "markdown-wasm",
+   "bytes": 696780,
+   "mbps": 154.69960151719576,
+   "median": 4.504084000000148,
+   "min": 4.356832999998005,
+   "p90": 4.691915999996127,
+   "mean": 4.546560369811421,
+   "n": 265,
+   "batch": 1,
+   "roundMedians": [
+    4.416792000003625,
+    4.513166999997338,
+    4.55487500000163
+   ],
+   "spread": 0.03065728791869791,
+   "ratioVsFastestTreePeer": 0.5043767077267639
+  },
+  "parse/real-rust-releases/ours": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "ours",
+   "bytes": 753227,
+   "mbps": 41.91318017097712,
+   "median": 17.97112499999639,
+   "min": 17.23187499999767,
+   "p90": 18.977624999999534,
+   "mean": 18.260215791045045,
+   "n": 67,
+   "batch": 1,
+   "roundMedians": [
+    18.183749999996508,
+    18.092208000001847,
+    17.54862499999581
+   ],
+   "spread": 0.03534141574335641,
+   "ratioVsFastestTreePeer": 1.0505539088940254
+  },
+  "parse/real-rust-releases/markdown-it": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "markdown-it",
+   "bytes": 753227,
+   "mbps": 21.640230446975238,
+   "median": 34.80679200000304,
+   "min": 31.55458299999009,
+   "p90": 38.8327500000014,
+   "mean": 36.20101835294105,
+   "n": 34,
+   "batch": 1,
+   "roundMedians": [
+    34.3762080000015,
+    35.36733300000196,
+    35.33308299999044
+   ],
+   "spread": 0.028475045904844634,
+   "ratioVsFastestTreePeer": 2.034731347740992
+  },
+  "parse/real-rust-releases/marked": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "marked",
+   "bytes": 753227,
+   "mbps": 25.880087271726598,
+   "median": 29.10450000000128,
+   "min": 27.915374999996857,
+   "p90": 30.973582999999053,
+   "mean": 29.303185476189746,
+   "n": 42,
+   "batch": 1,
+   "roundMedians": [
+    29.43104100000346,
+    29.296916999999667,
+    28.39724999999453
+   ],
+   "spread": 0.03551997113878908,
+   "ratioVsFastestTreePeer": 1.7013874335309365
+  },
+  "parse/real-rust-releases/commonmark": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "commonmark",
+   "bytes": 753227,
+   "mbps": 44.032055262799574,
+   "median": 17.10633300000336,
+   "min": 15.10975000000326,
+   "p90": 19.0367499999993,
+   "mean": 17.286441873239877,
+   "n": 71,
+   "batch": 1,
+   "roundMedians": [
+    17.039667000004556,
+    17.18612500000745,
+    17.106291999996756
+   ],
+   "spread": 0.008561624516655077,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/real-rust-releases/mdast": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "mdast",
+   "bytes": 753227,
+   "mbps": 1.526110300672671,
+   "median": 493.5599999999977,
+   "min": 455.5286250000063,
+   "p90": 513.8592500000086,
+   "mean": 491.3870471333338,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    485.88808300001256,
+    491.7314580000093,
+    495.17937499999243
+   ],
+   "spread": 0.018825050652362264,
+   "ratioVsFastestTreePeer": 28.8524723562847
+  },
+  "parse/real-rust-releases/lezer": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "lezer",
+   "bytes": 753227,
+   "mbps": 20.083911049487618,
+   "median": 37.504000000000815,
+   "min": 35.58587500000431,
+   "p90": 42.528624999991735,
+   "mean": 40.03600267742173,
+   "n": 31,
+   "batch": 1,
+   "roundMedians": [
+    37.95833300000231,
+    38.45629099999496,
+    36.57845800000359
+   ],
+   "spread": 0.05007020584447869,
+   "ratioVsFastestTreePeer": 2.1924044153702287
+  },
+  "parse/real-rust-releases/markdown-wasm": {
+   "group": "parse",
+   "file": "real-rust-releases",
+   "subject": "markdown-wasm",
+   "bytes": 753227,
+   "mbps": 102.55892501629387,
+   "median": 7.344333999993978,
+   "min": 7.178541999994195,
+   "p90": 7.478584000011324,
+   "mean": 7.369964237804308,
+   "n": 164,
+   "batch": 1,
+   "roundMedians": [
+    7.354957999996259,
+    7.294959000006202,
+    7.369542000000365
+   ],
+   "spread": 0.010155175403818039,
+   "ratioVsFastestTreePeer": 0.42933421207178274
+  },
+  "parse/real-spec/ours": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "ours",
+   "bytes": 205025,
+   "mbps": 84.95072215898807,
+   "median": 2.413457999995444,
+   "min": 2.3130419999943115,
+   "p90": 2.6010829999868292,
+   "mean": 2.4584410204499143,
+   "n": 489,
+   "batch": 1,
+   "roundMedians": [
+    2.4791670000122394,
+    2.4101249999948777,
+    2.387291000006371
+   ],
+   "spread": 0.03806819924193489,
+   "ratioVsFastestTreePeer": 1.2258834285691145
+  },
+  "parse/real-spec/markdown-it": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "markdown-it",
+   "bytes": 205025,
+   "mbps": 57.1836976607132,
+   "median": 3.5853749999951106,
+   "min": 3.255125000010594,
+   "p90": 4.015374999988126,
+   "mean": 3.741514034056162,
+   "n": 323,
+   "batch": 1,
+   "roundMedians": [
+    3.5858750000043074,
+    3.5576250000012806,
+    3.625040999992052
+   ],
+   "spread": 0.01880305407129337,
+   "ratioVsFastestTreePeer": 1.8211428571403736
+  },
+  "parse/real-spec/marked": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "marked",
+   "bytes": 205025,
+   "mbps": 57.65607424077088,
+   "median": 3.555999999996857,
+   "min": 3.4622089999902528,
+   "p90": 3.7458330000081332,
+   "mean": 3.5959786407183856,
+   "n": 334,
+   "batch": 1,
+   "roundMedians": [
+    3.6247499999881256,
+    3.5283329999947455,
+    3.544167000000016
+   ],
+   "spread": 0.02711389201166068,
+   "ratioVsFastestTreePeer": 1.8062222222206257
+  },
+  "parse/real-spec/commonmark": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "commonmark",
+   "bytes": 205025,
+   "mbps": 104.13968253968254,
+   "median": 1.96875,
+   "min": 1.8930830000026617,
+   "p90": 2.1188340000080643,
+   "mean": 2.0206063781518386,
+   "n": 595,
+   "batch": 1,
+   "roundMedians": [
+    1.9539589999913005,
+    1.9806660000031115,
+    1.9772910000028787
+   ],
+   "spread": 0.013565460323459573,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/real-spec/mdast": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "mdast",
+   "bytes": 205025,
+   "mbps": 2.572268254563858,
+   "median": 79.70591699999932,
+   "min": 74.52979099999357,
+   "p90": 94.10445800000161,
+   "mean": 81.8286777333337,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    78.79745800000092,
+    79.70591699999932,
+    82.21062500000698
+   ],
+   "spread": 0.04282200278815058,
+   "ratioVsFastestTreePeer": 40.48554514285679
+  },
+  "parse/real-spec/lezer": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "lezer",
+   "bytes": 205025,
+   "mbps": 21.513641133266006,
+   "median": 9.529999999998836,
+   "min": 9.139750000002095,
+   "p90": 11.060041999997338,
+   "mean": 10.102869433333156,
+   "n": 120,
+   "batch": 1,
+   "roundMedians": [
+    9.647042000011425,
+    9.367333000001963,
+    9.375499999994645
+   ],
+   "spread": 0.029350367262276546,
+   "ratioVsFastestTreePeer": 4.840634920634329
+  },
+  "parse/real-spec/markdown-wasm": {
+   "group": "parse",
+   "file": "real-spec",
+   "subject": "markdown-wasm",
+   "bytes": 205025,
+   "mbps": 175.9934692933721,
+   "median": 1.1649579999939306,
+   "min": 1.1081669999985024,
+   "p90": 1.2370419999933802,
+   "mean": 1.1842191380671252,
+   "n": 1014,
+   "batch": 1,
+   "roundMedians": [
+    1.153082999997423,
+    1.1681249999965075,
+    1.1726249999919673
+   ],
+   "spread": 0.01677485368111651,
+   "ratioVsFastestTreePeer": 0.5917246984096155
+  },
+  "parse/syn-cjk/ours": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "ours",
+   "bytes": 274902,
+   "mbps": 91.43588890771434,
+   "median": 3.0064999999885913,
+   "min": 2.8742499999934807,
+   "p90": 3.1477500000037253,
+   "mean": 3.0439741367088113,
+   "n": 395,
+   "batch": 1,
+   "roundMedians": [
+    3.061083000007784,
+    2.996000000013737,
+    2.992540999999619
+   ],
+   "spread": 0.022797937804232497,
+   "ratioVsFastestTreePeer": 2.773523985222775
+  },
+  "parse/syn-cjk/markdown-it": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "markdown-it",
+   "bytes": 274902,
+   "mbps": 71.0172809183207,
+   "median": 3.8709169999929145,
+   "min": 3.6524999999965075,
+   "p90": 4.190833000000566,
+   "mean": 4.004216481726959,
+   "n": 301,
+   "batch": 1,
+   "roundMedians": [
+    3.886832999996841,
+    3.8615419999987353,
+    3.8405000000057044
+   ],
+   "spread": 0.011969515231461024,
+   "ratioVsFastestTreePeer": 3.5709566420514474
+  },
+  "parse/syn-cjk/marked": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "marked",
+   "bytes": 274902,
+   "mbps": 73.88764160906214,
+   "median": 3.720541000002413,
+   "min": 3.6110420000040904,
+   "p90": 3.856541000001016,
+   "mean": 3.7474293707169277,
+   "n": 321,
+   "batch": 1,
+   "roundMedians": [
+    3.7592920000024606,
+    3.6936249999998836,
+    3.7185829999943962
+   ],
+   "spread": 0.017649852535567914,
+   "ratioVsFastestTreePeer": 3.432233394828065
+  },
+  "parse/syn-cjk/commonmark": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "commonmark",
+   "bytes": 274902,
+   "mbps": 253.59963099571075,
+   "median": 1.0840000000025611,
+   "min": 1.0372500000084983,
+   "p90": 1.1655419999879086,
+   "mean": 1.109621780961269,
+   "n": 1082,
+   "batch": 1,
+   "roundMedians": [
+    1.0867920000018785,
+    1.0791250000038417,
+    1.0874579999945126
+   ],
+   "spread": 0.007687269364069422,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-cjk/mdast": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "mdast",
+   "bytes": 274902,
+   "mbps": 9.257531194355181,
+   "median": 29.694957999992766,
+   "min": 28.671916000006604,
+   "p90": 35.40083300000697,
+   "mean": 31.174602099999902,
+   "n": 40,
+   "batch": 1,
+   "roundMedians": [
+    31.354833000004874,
+    29.26241700000537,
+    29.571916999993846
+   ],
+   "spread": 0.07046367938961262,
+   "ratioVsFastestTreePeer": 27.393872693655542
+  },
+  "parse/syn-cjk/lezer": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "lezer",
+   "bytes": 274902,
+   "mbps": 35.72340539170384,
+   "median": 7.6952909999963595,
+   "min": 7.40016600000672,
+   "p90": 8.197874999998021,
+   "mean": 7.927544908496773,
+   "n": 153,
+   "batch": 1,
+   "roundMedians": [
+    7.688708000001498,
+    7.665750000000116,
+    7.728375000006054
+   ],
+   "spread": 0.008138093803855736,
+   "ratioVsFastestTreePeer": 7.098976937249241
+  },
+  "parse/syn-cjk/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-cjk",
+   "subject": "markdown-wasm",
+   "bytes": 274902,
+   "mbps": 275.3262777954844,
+   "median": 0.9984589999949094,
+   "min": 0.9528339999960735,
+   "p90": 1.0347080000065034,
+   "mean": 1.0085573442485118,
+   "n": 1191,
+   "batch": 1,
+   "roundMedians": [
+    1.0047919999924488,
+    0.9963750000024447,
+    0.9916659999871626
+   ],
+   "spread": 0.013146258389531377,
+   "ratioVsFastestTreePeer": 0.9210876383695114
+  },
+  "parse/syn-code/ours": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "ours",
+   "bytes": 100485,
+   "mbps": 509.07092087607333,
+   "median": 0.19738899999841428,
+   "min": 0.1894860000029439,
+   "p90": 0.20950000000205668,
+   "mean": 0.2006210349205639,
+   "n": 1995,
+   "batch": 3,
+   "roundMedians": [
+    0.19729166666608458,
+    0.1976250000006985,
+    0.19729166666608458
+   ],
+   "spread": 0.00168871281893413,
+   "ratioVsFastestTreePeer": 1.1004264808143034
+  },
+  "parse/syn-code/markdown-it": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "markdown-it",
+   "bytes": 100485,
+   "mbps": 292.55021042065886,
+   "median": 0.34347949999937555,
+   "min": 0.30891649999830406,
+   "p90": 0.3657709999970393,
+   "mean": 0.3504877641564609,
+   "n": 1713,
+   "batch": 2,
+   "roundMedians": [
+    0.3457704999964335,
+    0.34654150000278605,
+    0.3416460000007646
+   ],
+   "spread": 0.014252670107037933,
+   "ratioVsFastestTreePeer": 1.9148682926566618
+  },
+  "parse/syn-code/marked": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "marked",
+   "bytes": 100485,
+   "mbps": 560.1951219445541,
+   "median": 0.17937500000213427,
+   "min": 0.16111133332985142,
+   "p90": 0.18884733333349382,
+   "mean": 0.1804392320409336,
+   "n": 2218,
+   "batch": 3,
+   "roundMedians": [
+    0.1790693333314266,
+    0.17933333333348855,
+    0.17990266667038668
+   ],
+   "spread": 0.00464576077463503,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-code/commonmark": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "commonmark",
+   "bytes": 100485,
+   "mbps": 209.82656968104166,
+   "median": 0.47889549999672454,
+   "min": 0.4686664999971981,
+   "p90": 0.4954375000015716,
+   "mean": 0.48271010642559536,
+   "n": 1245,
+   "batch": 2,
+   "roundMedians": [
+    0.4775000000008731,
+    0.4795830000002752,
+    0.4789794999960577
+   ],
+   "spread": 0.004349591924368339,
+   "ratioVsFastestTreePeer": 2.6698006968140846
+  },
+  "parse/syn-code/mdast": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "mdast",
+   "bytes": 100485,
+   "mbps": 7.9543515135442915,
+   "median": 12.63270800000464,
+   "min": 12.088208000001032,
+   "p90": 14.374582999997074,
+   "mean": 13.303984630435203,
+   "n": 92,
+   "batch": 1,
+   "roundMedians": [
+    12.60137499999837,
+    12.562374999994063,
+    12.7153330000001
+   ],
+   "spread": 0.01210809273878424,
+   "ratioVsFastestTreePeer": 70.42624668908338
+  },
+  "parse/syn-code/lezer": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "lezer",
+   "bytes": 100485,
+   "mbps": 307.9018489152839,
+   "median": 0.3263539999970817,
+   "min": 0.3094375000000582,
+   "p90": 0.3486459999985527,
+   "mean": 0.3358495528523734,
+   "n": 1788,
+   "batch": 2,
+   "roundMedians": [
+    0.3290209999977378,
+    0.32277049999538576,
+    0.3235209999984363
+   ],
+   "spread": 0.01915251537412732,
+   "ratioVsFastestTreePeer": 1.8193951219133024
+  },
+  "parse/syn-code/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-code",
+   "subject": "markdown-wasm",
+   "bytes": 100485,
+   "mbps": 440.9925349190868,
+   "median": 0.22786100000181855,
+   "min": 0.21669466666450413,
+   "p90": 0.23924999999871943,
+   "mean": 0.22978664485265304,
+   "n": 1742,
+   "batch": 3,
+   "roundMedians": [
+    0.22926399999899635,
+    0.2273056666648093,
+    0.22655533333211983
+   ],
+   "spread": 0.011887364080974397,
+   "ratioVsFastestTreePeer": 1.2703052264758599
+  },
+  "parse/syn-directives/ours": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "ours",
+   "bytes": 100202,
+   "mbps": 52.59489199375119,
+   "median": 1.9051659999968251,
+   "min": 1.8369169999932637,
+   "p90": 2.0383750000037253,
+   "mean": 1.94378978352168,
+   "n": 619,
+   "batch": 1,
+   "roundMedians": [
+    1.8804999999993015,
+    1.8902079999970738,
+    1.9471670000057202
+   ],
+   "spread": 0.03499275129124169,
+   "ratioVsFastestTreePeer": 2.1857633730071235
+  },
+  "parse/syn-directives/markdown-it": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "markdown-it",
+   "bytes": 100202,
+   "mbps": 28.247463135235932,
+   "median": 3.547292000002926,
+   "min": 3.3581669999985024,
+   "p90": 3.9455420000012964,
+   "mean": 3.720825009258943,
+   "n": 324,
+   "batch": 1,
+   "roundMedians": [
+    3.547292000002926,
+    3.5339999999996508,
+    3.571665999988909
+   ],
+   "spread": 0.01061824061544047,
+   "ratioVsFastestTreePeer": 4.069745590137816
+  },
+  "parse/syn-directives/marked": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "marked",
+   "bytes": 100202,
+   "mbps": 36.09472912206385,
+   "median": 2.776083999997354,
+   "min": 2.632708000004641,
+   "p90": 2.8514169999980368,
+   "mean": 2.7833180023146133,
+   "n": 432,
+   "batch": 1,
+   "roundMedians": [
+    2.7786250000062864,
+    2.7473749999917345,
+    2.788417000003392
+   ],
+   "spread": 0.014784134778233109,
+   "ratioVsFastestTreePeer": 3.184952244368961
+  },
+  "parse/syn-directives/commonmark": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "commonmark",
+   "bytes": 100202,
+   "mbps": 114.95998852720696,
+   "median": 0.8716249999997672,
+   "min": 0.8259589999943273,
+   "p90": 0.9467079999885755,
+   "mean": 0.9063708469079983,
+   "n": 1326,
+   "batch": 1,
+   "roundMedians": [
+    0.8681669999932637,
+    0.874082999987877,
+    0.8742500000080327
+   ],
+   "spread": 0.006978918703307659,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-directives/mdast": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "mdast",
+   "bytes": 100202,
+   "mbps": 2.4974509435777583,
+   "median": 40.1217089999991,
+   "min": 37.915832999991835,
+   "p90": 52.97604200000933,
+   "mean": 41.85260139999931,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    39.10370800000965,
+    39.844458999999915,
+    41.29649999999674
+   ],
+   "spread": 0.05465350441545606,
+   "ratioVsFastestTreePeer": 46.030929585555505
+  },
+  "parse/syn-directives/lezer": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "lezer",
+   "bytes": 100202,
+   "mbps": 13.49855122483285,
+   "median": 7.423167000000831,
+   "min": 7.046375000005355,
+   "p90": 8.055457999987993,
+   "mean": 7.666452569619121,
+   "n": 158,
+   "batch": 1,
+   "roundMedians": [
+    7.4632500000006985,
+    7.4181249999965075,
+    7.414916999987327
+   ],
+   "spread": 0.006511102338579547,
+   "ratioVsFastestTreePeer": 8.516468664853365
+  },
+  "parse/syn-directives/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-directives",
+   "subject": "markdown-wasm",
+   "bytes": 100202,
+   "mbps": 200.97355907498795,
+   "median": 0.49858299997868016,
+   "min": 0.4547080000047572,
+   "p90": 0.5187079999886919,
+   "mean": 0.5024769146085358,
+   "n": 2389,
+   "batch": 1,
+   "roundMedians": [
+    0.5013750000216532,
+    0.4990000000107102,
+    0.4961250000051223
+   ],
+   "spread": 0.01052984160461843,
+   "ratioVsFastestTreePeer": 0.5720154882877537
+  },
+  "parse/syn-emphasis/ours": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "ours",
+   "bytes": 100035,
+   "mbps": 13.764152854129206,
+   "median": 7.267791999998735,
+   "min": 7.02424999998766,
+   "p90": 8.50800000000163,
+   "mean": 7.4935187716055,
+   "n": 162,
+   "batch": 1,
+   "roundMedians": [
+    7.250708000006853,
+    7.274332999979379,
+    7.291707999975188
+   ],
+   "spread": 0.005641328200964222,
+   "ratioVsFastestTreePeer": 1.4820006602710636
+  },
+  "parse/syn-emphasis/markdown-it": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "markdown-it",
+   "bytes": 100035,
+   "mbps": 4.384639407407651,
+   "median": 22.81487499998184,
+   "min": 21.920917000010377,
+   "p90": 23.339375000010477,
+   "mean": 23.182766962966223,
+   "n": 54,
+   "batch": 1,
+   "roundMedians": [
+    22.603500000026543,
+    22.852416000008816,
+    22.938458999997238
+   ],
+   "spread": 0.014681605749361398,
+   "ratioVsFastestTreePeer": 4.6522602482268
+  },
+  "parse/syn-emphasis/marked": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "marked",
+   "bytes": 100035,
+   "mbps": 5.3756608070142695,
+   "median": 18.60887499997625,
+   "min": 18.119000000006054,
+   "p90": 19.690125000022817,
+   "mean": 18.811016393940946,
+   "n": 66,
+   "batch": 1,
+   "roundMedians": [
+    18.663375000003725,
+    18.537666000018362,
+    18.688083000015467
+   ],
+   "spread": 0.00808307863840761,
+   "ratioVsFastestTreePeer": 3.7946002082711354
+  },
+  "parse/syn-emphasis/commonmark": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "commonmark",
+   "bytes": 100035,
+   "mbps": 20.398483617891326,
+   "median": 4.904041000001598,
+   "min": 4.379207999998471,
+   "p90": 5.981125000020256,
+   "mean": 5.162052905982391,
+   "n": 234,
+   "batch": 1,
+   "roundMedians": [
+    4.578958000027342,
+    5.001499999983935,
+    4.675875000015367
+   ],
+   "spread": 0.08616200393847752,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-emphasis/mdast": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "mdast",
+   "bytes": 100035,
+   "mbps": 0.7724630911714668,
+   "median": 129.50133299999288,
+   "min": 120.77737500000512,
+   "p90": 151.2712500000198,
+   "mean": 134.61885286666413,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    130.15170899999794,
+    124.09191699998337,
+    129.50133299999288
+   ],
+   "spread": 0.046793278954239806,
+   "ratioVsFastestTreePeer": 26.40706572395106
+  },
+  "parse/syn-emphasis/lezer": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "lezer",
+   "bytes": 100035,
+   "mbps": 8.818706748344697,
+   "median": 11.34350000001723,
+   "min": 10.932792000006884,
+   "p90": 11.776249999995343,
+   "mean": 11.599284542857813,
+   "n": 105,
+   "batch": 1,
+   "roundMedians": [
+    11.293375000008382,
+    11.346541000006255,
+    11.421167000022251
+   ],
+   "spread": 0.011265658748505766,
+   "ratioVsFastestTreePeer": 2.3130924068566174
+  },
+  "parse/syn-emphasis/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-emphasis",
+   "subject": "markdown-wasm",
+   "bytes": 100035,
+   "mbps": 41.3952091052309,
+   "median": 2.416583999991417,
+   "min": 2.335624999977881,
+   "p90": 2.4874999999883585,
+   "mean": 2.4291320725803796,
+   "n": 496,
+   "batch": 1,
+   "roundMedians": [
+    2.413541999994777,
+    2.4181249999965075,
+    2.42887500001234
+   ],
+   "spread": 0.006344906702029534,
+   "ratioVsFastestTreePeer": 0.49277402044367685
+  },
+  "parse/syn-headings/ours": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "ours",
+   "bytes": 100011,
+   "mbps": 51.77335290792115,
+   "median": 1.9317080000182614,
+   "min": 1.8661670000001322,
+   "p90": 2.0453750000160653,
+   "mean": 1.9710658625213722,
+   "n": 611,
+   "batch": 1,
+   "roundMedians": [
+    1.927957999985665,
+    1.9370830000261776,
+    1.9287089999997988
+   ],
+   "spread": 0.0047237988559483465,
+   "ratioVsFastestTreePeer": 1.1318599352000864
+  },
+  "parse/syn-headings/markdown-it": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "markdown-it",
+   "bytes": 100011,
+   "mbps": 22.758002995562258,
+   "median": 4.394541999994544,
+   "min": 4.215749999973923,
+   "p90": 4.695792000013171,
+   "mean": 4.5172999475654025,
+   "n": 267,
+   "batch": 1,
+   "roundMedians": [
+    4.361541999998735,
+    4.346292000001995,
+    4.504791999992449
+   ],
+   "spread": 0.03606746732438801,
+   "ratioVsFastestTreePeer": 2.57492645021963
+  },
+  "parse/syn-headings/marked": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "marked",
+   "bytes": 100011,
+   "mbps": 39.5059767947644,
+   "median": 2.5315409999748226,
+   "min": 2.388290999981109,
+   "p90": 2.672791999997571,
+   "mean": 2.553424186440433,
+   "n": 472,
+   "batch": 1,
+   "roundMedians": [
+    2.522832999995444,
+    2.5359170000010636,
+    2.551291999989189
+   ],
+   "spread": 0.011241769338923712,
+   "ratioVsFastestTreePeer": 1.483324514968503
+  },
+  "parse/syn-headings/commonmark": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "commonmark",
+   "bytes": 100011,
+   "mbps": 58.60018386745084,
+   "median": 1.7066669999912847,
+   "min": 1.6419580000219867,
+   "p90": 1.9343329999828711,
+   "mean": 1.7681816705879208,
+   "n": 680,
+   "batch": 1,
+   "roundMedians": [
+    1.691625000006752,
+    1.6994169999961741,
+    1.7623749999911524
+   ],
+   "spread": 0.04145507001937791,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-headings/mdast": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "mdast",
+   "bytes": 100011,
+   "mbps": 2.0466132848572705,
+   "median": 48.86658400000306,
+   "min": 44.938374999997905,
+   "p90": 66.7110410000023,
+   "mean": 51.0150707333339,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    50.275874999992084,
+    49.00520799998776,
+    47.367417000001296
+   ],
+   "spread": 0.059518340794818096,
+   "ratioVsFastestTreePeer": 28.63275847031237
+  },
+  "parse/syn-headings/lezer": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "lezer",
+   "bytes": 100011,
+   "mbps": 13.756277674583202,
+   "median": 7.27020800000173,
+   "min": 7.031334000028437,
+   "p90": 7.780999999988126,
+   "mean": 7.525192819875579,
+   "n": 161,
+   "batch": 1,
+   "roundMedians": [
+    7.358290999982273,
+    7.258499999996275,
+    7.221625000005588
+   ],
+   "spread": 0.0187980866540067,
+   "ratioVsFastestTreePeer": 4.259886668013653
+  },
+  "parse/syn-headings/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-headings",
+   "subject": "markdown-wasm",
+   "bytes": 100011,
+   "mbps": 102.1520038503194,
+   "median": 0.9790409999841359,
+   "min": 0.9452499999897555,
+   "p90": 1.0181250000023283,
+   "mean": 0.9909687904294908,
+   "n": 1212,
+   "batch": 1,
+   "roundMedians": [
+    0.9847500000032596,
+    0.987583000009181,
+    0.9731249999895226
+   ],
+   "spread": 0.01476751231040644,
+   "ratioVsFastestTreePeer": 0.5736567238888052
+  },
+  "parse/syn-html/ours": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "ours",
+   "bytes": 100278,
+   "mbps": 72.07327643905411,
+   "median": 1.3913339999853633,
+   "min": 1.333042000012938,
+   "p90": 1.4984580000163987,
+   "mean": 1.4212957372784218,
+   "n": 845,
+   "batch": 1,
+   "roundMedians": [
+    1.3678329999966081,
+    1.394124999991618,
+    1.4192080000066198
+   ],
+   "spread": 0.036924994293643494,
+   "ratioVsFastestTreePeer": 1.761831256867023
+  },
+  "parse/syn-html/markdown-it": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "markdown-it",
+   "bytes": 100278,
+   "mbps": 28.66382137958458,
+   "median": 3.4984170000243466,
+   "min": 3.286791999998968,
+   "p90": 3.843332999997074,
+   "mean": 3.6288100090362616,
+   "n": 332,
+   "batch": 1,
+   "roundMedians": [
+    3.5110829999903217,
+    3.5228749999951106,
+    3.4102079999865964
+   ],
+   "spread": 0.03220513735433199,
+   "ratioVsFastestTreePeer": 4.430007762523373
+  },
+  "parse/syn-html/marked": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "marked",
+   "bytes": 100278,
+   "mbps": 54.23974140939895,
+   "median": 1.8487920000043232,
+   "min": 1.788457999995444,
+   "p90": 1.9321670000208542,
+   "mean": 1.8673919068330986,
+   "n": 644,
+   "batch": 1,
+   "roundMedians": [
+    1.8380419999884907,
+    1.8556669999961741,
+    1.861084000003757
+   ],
+   "spread": 0.012463273323993374,
+   "ratioVsFastestTreePeer": 2.341105394597976
+  },
+  "parse/syn-html/commonmark": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "commonmark",
+   "bytes": 100278,
+   "mbps": 126.98095121514311,
+   "median": 0.7897089999751188,
+   "min": 0.757207999995444,
+   "p90": 0.8842090000107419,
+   "mean": 0.8563547141835722,
+   "n": 1403,
+   "batch": 1,
+   "roundMedians": [
+    0.800083000009181,
+    0.8063330000150017,
+    0.7775829999882262
+   ],
+   "spread": 0.03640581534170352,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-html/mdast": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "mdast",
+   "bytes": 100278,
+   "mbps": 3.4235916801352677,
+   "median": 29.29029200001969,
+   "min": 28.352624999999534,
+   "p90": 34.842250000016065,
+   "mean": 30.86523857500215,
+   "n": 40,
+   "batch": 1,
+   "roundMedians": [
+    29.155457999993814,
+    29.44700000001467,
+    29.19333299997379
+   ],
+   "spread": 0.009953536824441975,
+   "ratioVsFastestTreePeer": 37.089981247450055
+  },
+  "parse/syn-html/lezer": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "lezer",
+   "bytes": 100278,
+   "mbps": 22.564806480558218,
+   "median": 4.444000000017695,
+   "min": 4.279999999998836,
+   "p90": 4.8622079999768175,
+   "mean": 4.614271532568432,
+   "n": 261,
+   "batch": 1,
+   "roundMedians": [
+    4.491708000015933,
+    4.443667000014102,
+    4.394041999999899
+   ],
+   "spread": 0.0219770477082909,
+   "ratioVsFastestTreePeer": 5.627389329686899
+  },
+  "parse/syn-html/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-html",
+   "subject": "markdown-wasm",
+   "bytes": 100278,
+   "mbps": 257.16428914644524,
+   "median": 0.3899375000037253,
+   "min": 0.36874999999417923,
+   "p90": 0.4084375000093132,
+   "mean": 0.3936295913557039,
+   "n": 1527,
+   "batch": 2,
+   "roundMedians": [
+    0.3887084999878425,
+    0.3914165000023786,
+    0.38966650000656955
+   ],
+   "spread": 0.0069447027139226455,
+   "ratioVsFastestTreePeer": 0.49377365588591615
+  },
+  "parse/syn-lists/ours": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "ours",
+   "bytes": 101258,
+   "mbps": 49.6109340229861,
+   "median": 2.0410419999971054,
+   "min": 1.9469999999855645,
+   "p90": 2.205792000022484,
+   "mean": 2.0886144461798923,
+   "n": 576,
+   "batch": 1,
+   "roundMedians": [
+    2.0923750000074506,
+    2.0208329999877606,
+    2.017874999990454
+   ],
+   "spread": 0.03650096373181066,
+   "ratioVsFastestTreePeer": 1.6313653711888352
+  },
+  "parse/syn-lists/markdown-it": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "markdown-it",
+   "bytes": 101258,
+   "mbps": 26.79550781356197,
+   "median": 3.7789169999887235,
+   "min": 3.5665830000070855,
+   "p90": 4.388292000017827,
+   "mean": 3.9716680624996545,
+   "n": 304,
+   "batch": 1,
+   "roundMedians": [
+    3.7956669999985024,
+    3.7627919999940787,
+    3.8047499999811407
+   ],
+   "spread": 0.01110318114612924,
+   "ratioVsFastestTreePeer": 3.0204152263339736
+  },
+  "parse/syn-lists/marked": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "marked",
+   "bytes": 101258,
+   "mbps": 22.671390003539347,
+   "median": 4.466333999997005,
+   "min": 4.304416999977548,
+   "p90": 4.714582999993581,
+   "mean": 4.509685335820823,
+   "n": 268,
+   "batch": 1,
+   "roundMedians": [
+    4.556125000002794,
+    4.4401660000148695,
+    4.420917000010377
+   ],
+   "spread": 0.03027270239809827,
+   "ratioVsFastestTreePeer": 3.5698543311547546
+  },
+  "parse/syn-lists/commonmark": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "commonmark",
+   "bytes": 101258,
+   "mbps": 80.93355979743355,
+   "median": 1.251124999980675,
+   "min": 1.183958999987226,
+   "p90": 1.3860419999982696,
+   "mean": 1.293676831001121,
+   "n": 929,
+   "batch": 1,
+   "roundMedians": [
+    1.2536250000121072,
+    1.261499999993248,
+    1.2385409999988042
+   ],
+   "spread": 0.018350684379896776,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-lists/mdast": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "mdast",
+   "bytes": 101258,
+   "mbps": 1.965080913115573,
+   "median": 51.52866700000595,
+   "min": 48.05120899999747,
+   "p90": 64.91474999999627,
+   "mean": 52.82803206666722,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    51.957666000002064,
+    50.70274999999674,
+    51.52866700000595
+   ],
+   "spread": 0.02435374468361812,
+   "ratioVsFastestTreePeer": 41.185866320952634
+  },
+  "parse/syn-lists/lezer": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "lezer",
+   "bytes": 101258,
+   "mbps": 13.616197974750671,
+   "median": 7.436584000010043,
+   "min": 7.197750000021188,
+   "p90": 7.984583000012208,
+   "mean": 7.7357886987174895,
+   "n": 156,
+   "batch": 1,
+   "roundMedians": [
+    7.444832999986829,
+    7.43154200000572,
+    7.459458000026643
+   ],
+   "spread": 0.003753874093385537,
+   "ratioVsFastestTreePeer": 5.943917674193154
+  },
+  "parse/syn-lists/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-lists",
+   "subject": "markdown-wasm",
+   "bytes": 101258,
+   "mbps": 191.82192753974837,
+   "median": 0.5278749999997672,
+   "min": 0.4963749999878928,
+   "p90": 0.5472909999953117,
+   "mean": 0.5350823680925201,
+   "n": 2244,
+   "batch": 1,
+   "roundMedians": [
+    0.5252920000057202,
+    0.5287919999973383,
+    0.5311669999791775
+   ],
+   "spread": 0.011129528720738618,
+   "ratioVsFastestTreePeer": 0.421920271761751
+  },
+  "parse/syn-paragraphs/ours": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "ours",
+   "bytes": 100006,
+   "mbps": 54.73033246675896,
+   "median": 1.8272500000020955,
+   "min": 1.7240830000082497,
+   "p90": 1.9572079999779817,
+   "mean": 1.8564100478393408,
+   "n": 648,
+   "batch": 1,
+   "roundMedians": [
+    1.8316670000203885,
+    1.8160830000124406,
+    1.8275829999765847
+   ],
+   "spread": 0.008528663296171862,
+   "ratioVsFastestTreePeer": 2.3671586452806532
+  },
+  "parse/syn-paragraphs/markdown-it": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "markdown-it",
+   "bytes": 100006,
+   "mbps": 32.510382380511125,
+   "median": 3.0761249999923166,
+   "min": 2.929208000015933,
+   "p90": 3.459499999997206,
+   "mean": 3.207041480000131,
+   "n": 375,
+   "batch": 1,
+   "roundMedians": [
+    3.062833000003593,
+    3.036667000007583,
+    3.1250419999996666
+   ],
+   "spread": 0.028729326666603112,
+   "ratioVsFastestTreePeer": 3.98504631970853
+  },
+  "parse/syn-paragraphs/marked": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "marked",
+   "bytes": 100006,
+   "mbps": 36.10542585060371,
+   "median": 2.7698329999984708,
+   "min": 2.657082999998238,
+   "p90": 2.855582999996841,
+   "mean": 2.780206780599935,
+   "n": 433,
+   "batch": 1,
+   "roundMedians": [
+    2.768624999996973,
+    2.761999999987893,
+    2.779833000007784
+   ],
+   "spread": 0.006438294301461869,
+   "ratioVsFastestTreePeer": 3.588252363892466
+  },
+  "parse/syn-paragraphs/commonmark": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "commonmark",
+   "bytes": 100006,
+   "mbps": 129.5553796577729,
+   "median": 0.7719170000054874,
+   "min": 0.7483749999955762,
+   "p90": 0.8278750000172295,
+   "mean": 0.8035474678713747,
+   "n": 1494,
+   "batch": 1,
+   "roundMedians": [
+    0.7684170000138693,
+    0.7712919999903534,
+    0.7831660000083502
+   ],
+   "spread": 0.019106976519983544,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-paragraphs/mdast": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "mdast",
+   "bytes": 100006,
+   "mbps": 2.5115592602508605,
+   "median": 39.81829200001084,
+   "min": 38.438082999986364,
+   "p90": 53.65579200000502,
+   "mean": 41.41984300000089,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    39.81829200001084,
+    39.8912920000148,
+    39.78670800002874
+   ],
+   "spread": 0.002626531544498025,
+   "ratioVsFastestTreePeer": 51.58364435519335
+  },
+  "parse/syn-paragraphs/lezer": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "lezer",
+   "bytes": 100006,
+   "mbps": 13.744010891224717,
+   "median": 7.276332999987062,
+   "min": 6.938874999992549,
+   "p90": 7.76954099998693,
+   "mean": 7.455224530863357,
+   "n": 162,
+   "batch": 1,
+   "roundMedians": [
+    7.260249999992084,
+    7.33079199999338,
+    7.280542000022251
+   ],
+   "spread": 0.00969471847995712,
+   "ratioVsFastestTreePeer": 9.426315264381191
+  },
+  "parse/syn-paragraphs/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-paragraphs",
+   "subject": "markdown-wasm",
+   "bytes": 100006,
+   "mbps": 205.1754452567092,
+   "median": 0.4874169999966398,
+   "min": 0.4404999999969732,
+   "p90": 0.5172919999749865,
+   "mean": 0.493436611339209,
+   "n": 2434,
+   "batch": 1,
+   "roundMedians": [
+    0.482958000007784,
+    0.49516700001549907,
+    0.4844169999996666
+   ],
+   "spread": 0.025048367225187558,
+   "ratioVsFastestTreePeer": 0.6314370586386553
+  },
+  "parse/syn-quotes/ours": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "ours",
+   "bytes": 100693,
+   "mbps": 44.39891071837613,
+   "median": 2.267915999982506,
+   "min": 2.166125000017928,
+   "p90": 2.399250000016764,
+   "mean": 2.3014586730399964,
+   "n": 523,
+   "batch": 1,
+   "roundMedians": [
+    2.237083000014536,
+    2.276958000002196,
+    2.2981670000008307
+   ],
+   "spread": 0.02693397814855834,
+   "ratioVsFastestTreePeer": 2.634685266595199
+  },
+  "parse/syn-quotes/markdown-it": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "markdown-it",
+   "bytes": 100693,
+   "mbps": 30.443839758168338,
+   "median": 3.3074999999953434,
+   "min": 3.078125,
+   "p90": 3.6765829999931157,
+   "mean": 3.4606561206904076,
+   "n": 348,
+   "batch": 1,
+   "roundMedians": [
+    3.3360000000102445,
+    3.2966249999881256,
+    3.296082999993814
+   ],
+   "spread": 0.012068631902187934,
+   "ratioVsFastestTreePeer": 3.842391657944373
+  },
+  "parse/syn-quotes/marked": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "marked",
+   "bytes": 100693,
+   "mbps": 27.15469408411633,
+   "median": 3.708124999975553,
+   "min": 3.548207999992883,
+   "p90": 3.8598329999949783,
+   "mean": 3.726923570987254,
+   "n": 324,
+   "batch": 1,
+   "roundMedians": [
+    3.681624999997439,
+    3.715374999999767,
+    3.7433749999909196
+   ],
+   "spread": 0.016652620932112012,
+   "ratioVsFastestTreePeer": 4.307806066981437
+  },
+  "parse/syn-quotes/commonmark": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "commonmark",
+   "bytes": 100693,
+   "mbps": 116.97715592258123,
+   "median": 0.860791999992216,
+   "min": 0.8292500000097789,
+   "p90": 0.9320829999924172,
+   "mean": 0.8777763976605982,
+   "n": 1368,
+   "batch": 1,
+   "roundMedians": [
+    0.8632079999952111,
+    0.8644999999960419,
+    0.855375000013737
+   ],
+   "spread": 0.010600702588299364,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-quotes/mdast": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "mdast",
+   "bytes": 100693,
+   "mbps": 2.0016018301040286,
+   "median": 50.30620900000213,
+   "min": 45.09658300000592,
+   "p90": 63.96395799997845,
+   "mean": 51.40953476666764,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    48.06654200001503,
+    50.689125000004424,
+    50.66654199999175
+   ],
+   "spread": 0.05213239184827621,
+   "ratioVsFastestTreePeer": 58.44177106717655
+  },
+  "parse/syn-quotes/lezer": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "lezer",
+   "bytes": 100693,
+   "mbps": 13.246246690656841,
+   "median": 7.6016250000102445,
+   "min": 7.173167000000831,
+   "p90": 8.192207999993116,
+   "mean": 7.820478422077964,
+   "n": 154,
+   "batch": 1,
+   "roundMedians": [
+    7.6636250000156,
+    7.681749999988824,
+    7.526249999995343
+   ],
+   "spread": 0.02045615246651488,
+   "ratioVsFastestTreePeer": 8.83096613360601
+  },
+  "parse/syn-quotes/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-quotes",
+   "subject": "markdown-wasm",
+   "bytes": 100693,
+   "mbps": 198.88364596728573,
+   "median": 0.5062909999978729,
+   "min": 0.46358300000429153,
+   "p90": 0.5362499999755528,
+   "mean": 0.5119377114238617,
+   "n": 2346,
+   "batch": 1,
+   "roundMedians": [
+    0.5079580000019632,
+    0.5034579999919515,
+    0.5062500000058208
+   ],
+   "spread": 0.008888169076737734,
+   "ratioVsFastestTreePeer": 0.5881688026868874
+  },
+  "parse/syn-references/ours": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "ours",
+   "bytes": 100276,
+   "mbps": 52.460450368144244,
+   "median": 1.911458999995375,
+   "min": 1.7966669999877922,
+   "p90": 2.0674160000053234,
+   "mean": 1.9691108006537832,
+   "n": 612,
+   "batch": 1,
+   "roundMedians": [
+    1.9281250000058208,
+    1.9535000000032596,
+    1.856415999995079
+   ],
+   "spread": 0.0507905217995341,
+   "ratioVsFastestTreePeer": 1.101203428281563
+  },
+  "parse/syn-references/markdown-it": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "markdown-it",
+   "bytes": 100276,
+   "mbps": 30.42623921788198,
+   "median": 3.2957079999905545,
+   "min": 3.049834000004921,
+   "p90": 3.580500000010943,
+   "mean": 3.420018184135791,
+   "n": 353,
+   "batch": 1,
+   "roundMedians": [
+    3.3656250000058208,
+    3.2438749999855645,
+    3.240457999985665
+   ],
+   "spread": 0.037978789389264585,
+   "ratioVsFastestTreePeer": 1.898677893804342
+  },
+  "parse/syn-references/marked": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "marked",
+   "bytes": 100276,
+   "mbps": 34.41328128353347,
+   "median": 2.91387499999837,
+   "min": 2.8224589999881573,
+   "p90": 3.0340410000062548,
+   "mean": 2.939227534146346,
+   "n": 410,
+   "batch": 1,
+   "roundMedians": [
+    2.9452499999897555,
+    2.929042000003392,
+    2.897166999988258
+   ],
+   "spread": 0.016501394192106545,
+   "ratioVsFastestTreePeer": 1.6787015256879216
+  },
+  "parse/syn-references/commonmark": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "commonmark",
+   "bytes": 100276,
+   "mbps": 57.76962779459523,
+   "median": 1.7357910000137053,
+   "min": 1.668999999994412,
+   "p90": 2.0452080000250135,
+   "mean": 1.80078469161596,
+   "n": 668,
+   "batch": 1,
+   "roundMedians": [
+    1.7261250000155997,
+    1.7349170000234153,
+    1.749666999996407
+   ],
+   "spread": 0.013562692732374705,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-references/mdast": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "mdast",
+   "bytes": 100276,
+   "mbps": 1.812507556558439,
+   "median": 55.32445899999584,
+   "min": 52.11462499998743,
+   "p90": 68.4369590000133,
+   "mean": 57.3543363000014,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    56.41633399997954,
+    54.89816700000665,
+    55.17058299999917
+   ],
+   "spread": 0.027441154010615906,
+   "ratioVsFastestTreePeer": 31.872765211686783
+  },
+  "parse/syn-references/lezer": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "lezer",
+   "bytes": 100276,
+   "mbps": 19.91727288526859,
+   "median": 5.034625000000233,
+   "min": 4.785957999993116,
+   "p90": 5.720459000003757,
+   "mean": 5.25512806550225,
+   "n": 229,
+   "batch": 1,
+   "roundMedians": [
+    4.983917000005022,
+    5.031124999979511,
+    5.067333999992115
+   ],
+   "spread": 0.016568662012978103,
+   "ratioVsFastestTreePeer": 2.9004788018606393
+  },
+  "parse/syn-references/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-references",
+   "subject": "markdown-wasm",
+   "bytes": 100276,
+   "mbps": 130.85873270485885,
+   "median": 0.7662919999856967,
+   "min": 0.7317500000062864,
+   "p90": 0.7869580000115093,
+   "mean": 0.7693335080077186,
+   "n": 1561,
+   "batch": 1,
+   "roundMedians": [
+    0.7626250000030268,
+    0.7674169999954756,
+    0.7685829999973066
+   ],
+   "spread": 0.007775104000030049,
+   "ratioVsFastestTreePeer": 0.44146559117984036
+  },
+  "parse/syn-tables/ours": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "ours",
+   "bytes": 100121,
+   "mbps": 31.73701020806983,
+   "median": 3.1547080000163987,
+   "min": 3.0037499999743886,
+   "p90": 3.4010419999831356,
+   "mean": 3.235940266128392,
+   "n": 372,
+   "batch": 1,
+   "roundMedians": [
+    3.174249999981839,
+    3.16220799999428,
+    3.140625
+   ],
+   "spread": 0.010658672682753657,
+   "ratioVsFastestTreePeer": 4.110818643429769
+  },
+  "parse/syn-tables/markdown-it": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "markdown-it",
+   "bytes": 100121,
+   "mbps": 11.258089000092292,
+   "median": 8.893249999993714,
+   "min": 8.44245800000499,
+   "p90": 9.876958000008017,
+   "mean": 9.151272757576601,
+   "n": 132,
+   "batch": 1,
+   "roundMedians": [
+    8.82341699997778,
+    8.752207999990787,
+    8.9877919999999
+   ],
+   "spread": 0.026490203245076727,
+   "ratioVsFastestTreePeer": 11.588564742114297
+  },
+  "parse/syn-tables/marked": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "marked",
+   "bytes": 100121,
+   "mbps": 25.7722790143822,
+   "median": 3.8848329999891575,
+   "min": 3.75800000000163,
+   "p90": 4.058832999988226,
+   "mean": 3.908650418831653,
+   "n": 308,
+   "batch": 1,
+   "roundMedians": [
+    3.8697080000129063,
+    3.8843329999945126,
+    3.9044580000045244
+   ],
+   "spread": 0.008945043452759767,
+   "ratioVsFastestTreePeer": 5.0622257029441755
+  },
+  "parse/syn-tables/commonmark": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "commonmark",
+   "bytes": 100121,
+   "mbps": 130.46509325005434,
+   "median": 0.7674159999878611,
+   "min": 0.7362909999792464,
+   "p90": 0.8179159999999683,
+   "mean": 0.7927723280527428,
+   "n": 1515,
+   "batch": 1,
+   "roundMedians": [
+    0.7647919999726582,
+    0.7670839999918826,
+    0.7731670000066515
+   ],
+   "spread": 0.010913246575684828,
+   "ratioVsFastestTreePeer": 1
+  },
+  "parse/syn-tables/mdast": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "mdast",
+   "bytes": 100121,
+   "mbps": 1.2579022503375838,
+   "median": 79.59362499997951,
+   "min": 74.40408399997978,
+   "p90": 98.44462500000373,
+   "mean": 82.74447786666376,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    81.07941700000083,
+    79.86699999999837,
+    79.57479099999182
+   ],
+   "spread": 0.018903850653986407,
+   "ratioVsFastestTreePeer": 103.71640023303985
+  },
+  "parse/syn-tables/lezer": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "lezer",
+   "bytes": 100121,
+   "mbps": 15.698790694043423,
+   "median": 6.377624999993714,
+   "min": 6.114457999996375,
+   "p90": 6.863792000018293,
+   "mean": 6.571247760869681,
+   "n": 184,
+   "batch": 1,
+   "roundMedians": [
+    6.345291999983601,
+    6.470040999993216,
+    6.373958999989554
+   ],
+   "spread": 0.01956041630069782,
+   "ratioVsFastestTreePeer": 8.310518675782879
+  },
+  "parse/syn-tables/markdown-wasm": {
+   "group": "parse",
+   "file": "syn-tables",
+   "subject": "markdown-wasm",
+   "bytes": 100121,
+   "mbps": 74.83354709758198,
+   "median": 1.3379160000185948,
+   "min": 1.296249999984866,
+   "p90": 1.3768749999871943,
+   "mean": 1.3453501175810656,
+   "n": 893,
+   "batch": 1,
+   "roundMedians": [
+    1.335625000006985,
+    1.336291000014171,
+    1.3480839999974705
+   ],
+   "spread": 0.009312243810756767,
+   "ratioVsFastestTreePeer": 1.7434038383872081
+  },
+  "write/mixed-10k/ours-untouched": {
+   "group": "write",
+   "file": "mixed-10k",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 11956,
+   "mbps": 91.78548329210736,
+   "median": 0.13026024999999208,
+   "min": 0.12314600000536302,
+   "p90": 0.13986474999546772,
+   "mean": 0.1350256444644511,
+   "n": 2222,
+   "batch": 4,
+   "roundMedians": [
+    0.12934374999895226,
+    0.13122899999871152,
+    0.13132300000143005
+   ],
+   "spread": 0.015194581635440619
+  },
+  "write/mixed-10k/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "mixed-10k",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 11956,
+   "mbps": 38.1549302069659,
+   "median": 0.31335399999807123,
+   "min": 0.3020830000023125,
+   "p90": 0.3347500000090804,
+   "mean": 0.3206050835557725,
+   "n": 1873,
+   "batch": 2,
+   "roundMedians": [
+    0.3156039999885252,
+    0.31489549999241717,
+    0.31064550000883173
+   ],
+   "spread": 0.01582395622753807
+  },
+  "write/mixed-10k/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "mixed-10k",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 11956,
+   "mbps": 49.776361641366535,
+   "median": 0.24019433332917592,
+   "min": 0.2290140000016739,
+   "p90": 0.2565969999996014,
+   "mean": 0.2444875610501244,
+   "n": 1638,
+   "batch": 3,
+   "roundMedians": [
+    0.23851399999693967,
+    0.24162499999511056,
+    0.24162499999511056
+   ],
+   "spread": 0.012952012460291443
+  },
+  "write/mixed-10k/mdast-to-markdown": {
+   "group": "write",
+   "file": "mixed-10k",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 11956,
+   "mbps": 5.455208295842275,
+   "median": 2.191666999977315,
+   "min": 2.075791000010213,
+   "p90": 2.382500000006985,
+   "mean": 2.230330101851831,
+   "n": 540,
+   "batch": 1,
+   "roundMedians": [
+    2.216167000005953,
+    2.207457999989856,
+    2.1569580000068527
+   ],
+   "spread": 0.027015509199031236
+  },
+  "write/mixed-100k/ours-untouched": {
+   "group": "write",
+   "file": "mixed-100k",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 101484,
+   "mbps": 77.76301452410658,
+   "median": 1.3050419999926817,
+   "min": 1.238374999986263,
+   "p90": 1.4222920000029262,
+   "mean": 1.3571894232506398,
+   "n": 886,
+   "batch": 1,
+   "roundMedians": [
+    1.2966249999881256,
+    1.3117910000146367,
+    1.3073330000042915
+   ],
+   "spread": 0.011621081947244668
+  },
+  "write/mixed-100k/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "mixed-100k",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 101484,
+   "mbps": 38.32538129358145,
+   "median": 2.647958000015933,
+   "min": 2.5271669999929145,
+   "p90": 2.819500000041444,
+   "mean": 2.7140113693691617,
+   "n": 444,
+   "batch": 1,
+   "roundMedians": [
+    2.6803749999962747,
+    2.6631660000421107,
+    2.6000840000342578
+   ],
+   "spread": 0.030321855543605232
+  },
+  "write/mixed-100k/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "mixed-100k",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 101484,
+   "mbps": 26.1040876185974,
+   "median": 3.8876670000026934,
+   "min": 3.6480410000076517,
+   "p90": 4.095458000025246,
+   "mean": 3.9182017152116657,
+   "n": 309,
+   "batch": 1,
+   "roundMedians": [
+    3.8897909999941476,
+    3.8827499999897555,
+    3.8891660000081174
+   ],
+   "spread": 0.001811111909633011
+  },
+  "write/mixed-100k/mdast-to-markdown": {
+   "group": "write",
+   "file": "mixed-100k",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 101484,
+   "mbps": 4.5308811939771525,
+   "median": 22.398291999998037,
+   "min": 21.48325000004843,
+   "p90": 23.402749999950174,
+   "mean": 22.554140963637142,
+   "n": 55,
+   "batch": 1,
+   "roundMedians": [
+    22.563125000044238,
+    22.455000000016298,
+    21.99770800000988
+   ],
+   "spread": 0.025243755195012544
+  },
+  "write/mixed-1m/ours-untouched": {
+   "group": "write",
+   "file": "mixed-1m",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 1022808,
+   "mbps": 70.27394738816297,
+   "median": 14.554583000019193,
+   "min": 13.405749999976251,
+   "p90": 20.64466699998593,
+   "mean": 15.665081253168438,
+   "n": 79,
+   "batch": 1,
+   "roundMedians": [
+    14.806250000023283,
+    14.547709000005852,
+    14.10787500004517
+   ],
+   "spread": 0.04798316791193489
+  },
+  "write/mixed-1m/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "mixed-1m",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 1022808,
+   "mbps": 36.4248939909297,
+   "median": 28.07991700002458,
+   "min": 26.56108299997868,
+   "p90": 33.15295899997,
+   "mean": 28.9971259534914,
+   "n": 43,
+   "batch": 1,
+   "roundMedians": [
+    27.664999999979045,
+    28.09995900001377,
+    28.65716699999757
+   ],
+   "spread": 0.03533368706245312
+  },
+  "write/mixed-1m/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "mixed-1m",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 1022808,
+   "mbps": 26.013293533422225,
+   "median": 39.318665999977384,
+   "min": 38.16862500004936,
+   "p90": 40.632999999972526,
+   "mean": 39.662141937500564,
+   "n": 32,
+   "batch": 1,
+   "roundMedians": [
+    39.73616599995876,
+    39.39845899998909,
+    38.63845900003798
+   ],
+   "spread": 0.02791821573807732
+  },
+  "write/mixed-1m/mdast-to-markdown": {
+   "group": "write",
+   "file": "mixed-1m",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 1022808,
+   "mbps": 4.752559360746463,
+   "median": 215.2120410000207,
+   "min": 212.4709589999984,
+   "p90": 223.3878750000149,
+   "mean": 216.8219556666639,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    214.78924999997253,
+    217.22775000002002,
+    215.2120410000207
+   ],
+   "spread": 0.011330685721470682
+  },
+  "write/real-docs/ours-untouched": {
+   "group": "write",
+   "file": "real-docs",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 696780,
+   "mbps": 89.25115262563317,
+   "median": 7.806958000001032,
+   "min": 7.500833000056446,
+   "p90": 8.339542000030633,
+   "mean": 9.096972238805854,
+   "n": 134,
+   "batch": 1,
+   "roundMedians": [
+    7.956417000037618,
+    7.7412919999915175,
+    7.806958000001032
+   ],
+   "spread": 0.027555547249783083
+  },
+  "write/real-docs/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "real-docs",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 696780,
+   "mbps": 47.39019313143549,
+   "median": 14.703042000008281,
+   "min": 14.105334000021685,
+   "p90": 15.193208000040613,
+   "mean": 15.963408558445003,
+   "n": 77,
+   "batch": 1,
+   "roundMedians": [
+    14.739041000022553,
+    14.71833299996797,
+    14.677792000002228
+   ],
+   "spread": 0.004165736588407398
+  },
+  "write/real-docs/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "real-docs",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 696780,
+   "mbps": 42.884707113190586,
+   "median": 16.24775000003865,
+   "min": 15.736291999986861,
+   "p90": 16.841917000012472,
+   "mean": 16.399932972971992,
+   "n": 74,
+   "batch": 1,
+   "roundMedians": [
+    15.965041999996174,
+    16.01266599999508,
+    16.531500000040978
+   ],
+   "spread": 0.03486378114160155
+  },
+  "write/real-docs/mdast-to-markdown": {
+   "group": "write",
+   "file": "real-docs",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 696780,
+   "mbps": 5.095289586203402,
+   "median": 136.74983300000895,
+   "min": 133.66683300002478,
+   "p90": 142.39420799998334,
+   "mean": 137.8928775999928,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    137.36062500003027,
+    139.05274999997346,
+    134.98133300000336
+   ],
+   "spread": 0.029772738369412348
+  },
+  "write/real-spec/ours-untouched": {
+   "group": "write",
+   "file": "real-spec",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 205025,
+   "mbps": 152.33120046554617,
+   "median": 1.345915999962017,
+   "min": 1.2752080000354908,
+   "p90": 1.4267080000136048,
+   "mean": 1.3827007517244014,
+   "n": 870,
+   "batch": 1,
+   "roundMedians": [
+    1.342917000001762,
+    1.3453330000047572,
+    1.3495839999523014
+   ],
+   "spread": 0.004953503748174084
+  },
+  "write/real-spec/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "real-spec",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 205025,
+   "mbps": 78.09979326882932,
+   "median": 2.6251670000492595,
+   "min": 2.538291999953799,
+   "p90": 2.8181249999906868,
+   "mean": 2.6899612192412206,
+   "n": 447,
+   "batch": 1,
+   "roundMedians": [
+    2.6077499999664724,
+    2.604583000007551,
+    2.6853750000009313
+   ],
+   "spread": 0.030775946822378976
+  },
+  "write/real-spec/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "real-spec",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 205025,
+   "mbps": 77.63034438756831,
+   "median": 2.6410419999738224,
+   "min": 2.5015419999836013,
+   "p90": 2.824625000008382,
+   "mean": 2.6849022700884495,
+   "n": 448,
+   "batch": 1,
+   "roundMedians": [
+    2.6216249999706633,
+    2.632792000018526,
+    2.680125000013504
+   ],
+   "spread": 0.022150348250206047
+  },
+  "write/real-spec/mdast-to-markdown": {
+   "group": "write",
+   "file": "real-spec",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 205025,
+   "mbps": 11.144227474994064,
+   "median": 18.39741699997103,
+   "min": 17.453833999985363,
+   "p90": 19.022042000025976,
+   "mean": 18.516101621217484,
+   "n": 66,
+   "batch": 1,
+   "roundMedians": [
+    18.32070899999235,
+    18.492957999987993,
+    18.536625000007916
+   ],
+   "spread": 0.011736212752904825
+  },
+  "write/syn-lists/ours-untouched": {
+   "group": "write",
+   "file": "syn-lists",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 101258,
+   "mbps": 83.84304496925695,
+   "median": 1.2077090000384487,
+   "min": 1.1585000000195578,
+   "p90": 1.3193750000209548,
+   "mean": 1.258552847120238,
+   "n": 955,
+   "batch": 1,
+   "roundMedians": [
+    1.211249999993015,
+    1.212915999989491,
+    1.1963339999783784
+   ],
+   "spread": 0.013730128706985404
+  },
+  "write/syn-lists/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "syn-lists",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 101258,
+   "mbps": 39.46014216935331,
+   "median": 2.5660830000415444,
+   "min": 2.4374170000082813,
+   "p90": 2.769750000035856,
+   "mean": 2.6354502975932808,
+   "n": 457,
+   "batch": 1,
+   "roundMedians": [
+    2.4885420000064187,
+    2.59474999998929,
+    2.6281249999883585
+   ],
+   "spread": 0.054395356650459074
+  },
+  "write/syn-lists/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "syn-lists",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 101258,
+   "mbps": 37.40714525318357,
+   "median": 2.7069159999955446,
+   "min": 2.5866669999668375,
+   "p90": 2.8830420000012964,
+   "mean": 2.7401446560364597,
+   "n": 439,
+   "batch": 1,
+   "roundMedians": [
+    2.71916700003203,
+    2.7220410000300035,
+    2.6749999999883585
+   ],
+   "spread": 0.017378078980552943
+  },
+  "write/syn-lists/mdast-to-markdown": {
+   "group": "write",
+   "file": "syn-lists",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 101258,
+   "mbps": 4.556732462183775,
+   "median": 22.221625000005588,
+   "min": 21.500208000012208,
+   "p90": 22.863540999998804,
+   "mean": 22.34433479999954,
+   "n": 55,
+   "batch": 1,
+   "roundMedians": [
+    21.90858299995307,
+    22.305082999984734,
+    22.221625000005588
+   ],
+   "spread": 0.017842979531495346
+  },
+  "write/syn-tables/ours-untouched": {
+   "group": "write",
+   "file": "syn-tables",
+   "subject": "ours-untouched",
+   "label": "ours: untouched tree",
+   "bytes": 100121,
+   "mbps": 49.4709790767695,
+   "median": 2.0238330000429414,
+   "min": 1.9696249999688007,
+   "p90": 2.161249999946449,
+   "mean": 2.1273784141587835,
+   "n": 565,
+   "batch": 1,
+   "roundMedians": [
+    2.054958999971859,
+    2.021500000031665,
+    2.0056249999906868
+   ],
+   "spread": 0.024376517222579937
+  },
+  "write/syn-tables/ours-edit-one-paragraph": {
+   "group": "write",
+   "file": "syn-tables",
+   "subject": "ours-edit-one-paragraph",
+   "label": "ours: one leaf's text edited (middle paragraph, or cell)",
+   "bytes": 100121,
+   "mbps": 27.250297689781117,
+   "median": 3.6741250000195578,
+   "min": 3.537458000006154,
+   "p90": 3.885208000021521,
+   "mean": 3.7790613667721944,
+   "n": 319,
+   "batch": 1,
+   "roundMedians": [
+    3.6653329999535345,
+    3.6921659999643452,
+    3.67454199999338
+   ],
+   "spread": 0.007303235467129713
+  },
+  "write/syn-tables/ours-every-leaf-as-source": {
+   "group": "write",
+   "file": "syn-tables",
+   "subject": "ours-every-leaf-as-source",
+   "label": "ours: every leaf given as source",
+   "bytes": 100121,
+   "mbps": 19.903287528372648,
+   "median": 5.030374999972992,
+   "min": 4.890292000025511,
+   "p90": 5.2079999999841675,
+   "mean": 5.139103944679633,
+   "n": 235,
+   "batch": 1,
+   "roundMedians": [
+    5.0940410000039265,
+    4.98475000000326,
+    4.992874999996275
+   ],
+   "spread": 0.02172621325472825
+  },
+  "write/syn-tables/mdast-to-markdown": {
+   "group": "write",
+   "file": "syn-tables",
+   "subject": "mdast-to-markdown",
+   "label": "mdast-util-to-markdown + gfm (canonical)",
+   "bytes": 100121,
+   "mbps": 3.5229734668774153,
+   "median": 28.419458999997005,
+   "min": 27.864417000033427,
+   "p90": 29.022208000009414,
+   "mean": 28.64475867442305,
+   "n": 43,
+   "batch": 1,
+   "roundMedians": [
+    28.60583299997961,
+    28.144832999969367,
+    28.40120800002478
+   ],
+   "spread": 0.01622127993394572
+  },
+  "key/10k/ours-full": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "ours-full",
+   "label": "ours: full parse (tree+leafSources) + free",
+   "bytes": 11956,
+   "frameShare": 0.012327500000828875,
+   "median": 0.20545833334714794,
+   "min": 0.20091666667334115,
+   "p90": 0.21441666667427248,
+   "mean": 0.2088726737994047,
+   "n": 1916,
+   "batch": 3,
+   "roundMedians": [
+    0.20647199999075383,
+    0.2050556666799821,
+    0.20499999999689558
+   ],
+   "spread": 0.007164469651231505
+  },
+  "key/10k/ours-parseInline": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "ours-parseInline",
+   "label": "ours: parseInline of the edited paragraph (336 chars)",
+   "bytes": 11956,
+   "frameShare": 0.0004921499999938532,
+   "median": 0.008202499999897554,
+   "min": 0.0076774999999906866,
+   "p90": 0.008860000000568106,
+   "mean": 0.0084202207578967,
+   "n": 2850,
+   "batch": 50,
+   "roundMedians": [
+    0.008253340000519528,
+    0.008191660000011324,
+    0.008175000000046567
+   ],
+   "spread": 0.00955074678133984
+  },
+  "key/10k/ours-parseInline-no-definitions": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "ours-parseInline-no-definitions",
+   "label": "ours: parseInline of the edited paragraph, no definitions passed",
+   "bytes": 11956,
+   "frameShare": 0.0004905319148971837,
+   "median": 0.008175531914953063,
+   "min": 0.007581574468318611,
+   "p90": 0.008750000000099076,
+   "mean": 0.008349948193092635,
+   "n": 3058,
+   "batch": 47,
+   "roundMedians": [
+    0.008174659574077404,
+    0.008222510638161306,
+    0.008140063829759651
+   ],
+   "spread": 0.010084580337929963
+  },
+  "key/10k/lezer-incremental": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "lezer-incremental",
+   "label": "@lezer/markdown incremental (TreeFragment)",
+   "bytes": 11956,
+   "frameShare": 0.0058680000000167635,
+   "median": 0.0978000000002794,
+   "min": 0.09221679999027402,
+   "p90": 0.11450000000186264,
+   "mean": 0.10312448582467729,
+   "n": 2328,
+   "batch": 5,
+   "roundMedians": [
+    0.09623319999082014,
+    0.09770000000717119,
+    0.09936679999809712
+   ],
+   "spread": 0.032040899869816286
+  },
+  "key/10k/lezer-full": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "lezer-full",
+   "label": "@lezer/markdown full parse",
+   "bytes": 11956,
+   "frameShare": 0.055197479997295885,
+   "median": 0.9199579999549314,
+   "min": 0.8651669999817386,
+   "p90": 1.0480419999803416,
+   "mean": 0.9601360975218814,
+   "n": 1251,
+   "batch": 1,
+   "roundMedians": [
+    0.9327500000363216,
+    0.9298330000019632,
+    0.9020419999724254
+   ],
+   "spread": 0.03337978480039367
+  },
+  "key/10k/markdown-it-full": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "markdown-it-full",
+   "label": "markdown-it full parse",
+   "bytes": 11956,
+   "frameShare": 0.025431269999826325,
+   "median": 0.42385449999710545,
+   "min": 0.39997900000889786,
+   "p90": 0.4981039999984205,
+   "mean": 0.44581692501863773,
+   "n": 1347,
+   "batch": 2,
+   "roundMedians": [
+    0.4218125000188593,
+    0.4224584999901708,
+    0.4277705000131391
+   ],
+   "spread": 0.01405671048513229
+  },
+  "key/10k/mdast-full": {
+   "group": "keystroke",
+   "file": "mixed-10k",
+   "subject": "mdast-full",
+   "label": "mdast-util-from-markdown + gfm full parse",
+   "bytes": 11956,
+   "frameShare": 0.3112274999998044,
+   "median": 5.18712499999674,
+   "min": 4.531332999991719,
+   "p90": 5.871666999999434,
+   "mean": 5.358253502223589,
+   "n": 225,
+   "batch": 1,
+   "roundMedians": [
+    5.251875000016298,
+    5.293958000023849,
+    4.853042000031564
+   ],
+   "spread": 0.08500200014315483
+  },
+  "key/100k/ours-full": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "ours-full",
+   "label": "ours: full parse (tree+leafSources) + free",
+   "bytes": 101484,
+   "frameShare": 0.1473850199987646,
+   "median": 2.4564169999794103,
+   "min": 2.2812079999712296,
+   "p90": 2.6376250000321306,
+   "mean": 2.4929922830574656,
+   "n": 484,
+   "batch": 1,
+   "roundMedians": [
+    2.4621659999829717,
+    2.4415419999859296,
+    2.458708000020124
+   ],
+   "spread": 0.008395968598660158
+  },
+  "key/100k/ours-parseInline": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "ours-parseInline",
+   "label": "ours: parseInline of the edited paragraph (197 chars)",
+   "bytes": 101484,
+   "frameShare": 0.00013532473281815022,
+   "median": 0.002255412213635837,
+   "min": 0.0021157709922541984,
+   "p90": 0.0025200381677754164,
+   "mean": 0.0023387805416571405,
+   "n": 3917,
+   "batch": 131,
+   "roundMedians": [
+    0.0022560381677129682,
+    0.0022732213740272603,
+    0.002240770992303964
+   ],
+   "spread": 0.014387783096636176
+  },
+  "key/100k/ours-parseInline-no-definitions": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "ours-parseInline-no-definitions",
+   "label": "ours: parseInline of the edited paragraph, no definitions passed",
+   "bytes": 101484,
+   "frameShare": 0.00012544628571153484,
+   "median": 0.002090771428525581,
+   "min": 0.001993749999590883,
+   "p90": 0.002271428571215698,
+   "mean": 0.0021475346708633948,
+   "n": 3991,
+   "batch": 140,
+   "roundMedians": [
+    0.0020791642858447243,
+    0.0020839285716647282,
+    0.002128278571347307
+   ],
+   "spread": 0.023490987504654372
+  },
+  "key/100k/lezer-incremental": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "lezer-incremental",
+   "label": "@lezer/markdown incremental (TreeFragment)",
+   "bytes": 101484,
+   "frameShare": 0.0018453830770718362,
+   "median": 0.03075638461786394,
+   "min": 0.028733999996732634,
+   "p90": 0.03441992308048961,
+   "mean": 0.0320591856727006,
+   "n": 2881,
+   "batch": 13,
+   "roundMedians": [
+    0.030897384616904534,
+    0.030602538461187996,
+    0.030859000000278823
+   ],
+   "spread": 0.009586502424777377
+  },
+  "key/100k/lezer-full": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "lezer-full",
+   "label": "@lezer/markdown full parse",
+   "bytes": 101484,
+   "frameShare": 0.43266503999708217,
+   "median": 7.21108399995137,
+   "min": 6.864540999988094,
+   "p90": 8.350875000003725,
+   "mean": 7.524968751556868,
+   "n": 161,
+   "batch": 1,
+   "roundMedians": [
+    7.258582999987993,
+    7.129583000030834,
+    7.337750000006054
+   ],
+   "spread": 0.02886764319714251
+  },
+  "key/100k/markdown-it-full": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "markdown-it-full",
+   "label": "markdown-it full parse",
+   "bytes": 101484,
+   "frameShare": 0.254419980001403,
+   "median": 4.240333000023384,
+   "min": 3.9641659999615513,
+   "p90": 5.052792000002228,
+   "mean": 4.4754671375483595,
+   "n": 269,
+   "batch": 1,
+   "roundMedians": [
+    4.23195799998939,
+    4.251166000030935,
+    4.212166999990586
+   ],
+   "spread": 0.009197155044222602
+  },
+  "key/100k/mdast-full": {
+   "group": "keystroke",
+   "file": "mixed-100k",
+   "subject": "mdast-full",
+   "label": "mdast-util-from-markdown + gfm full parse",
+   "bytes": 101484,
+   "frameShare": 3.168729959997581,
+   "median": 52.81216599995969,
+   "min": 49.049540999985766,
+   "p90": 69.12237499997718,
+   "mean": 54.96183890000102,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    52.05349999997998,
+    52.8741250000312,
+    55.62770900002215
+   ],
+   "spread": 0.06767775819012806
+  },
+  "key/1m/ours-full": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "ours-full",
+   "label": "ours: full parse (tree+leafSources) + free",
+   "bytes": 1022808,
+   "frameShare": 1.4925325199996586,
+   "median": 24.87554199999431,
+   "min": 23.521542000002228,
+   "p90": 26.77929099998437,
+   "mean": 25.03234610203487,
+   "n": 49,
+   "batch": 1,
+   "roundMedians": [
+    25.08895800000755,
+    24.90487500000745,
+    23.98120800004108
+   ],
+   "spread": 0.04453169301664767
+  },
+  "key/1m/ours-parseInline": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "ours-parseInline",
+   "label": "ours: parseInline of the edited paragraph (276 chars)",
+   "bytes": 1022808,
+   "frameShare": 0.00041609127269211135,
+   "median": 0.006934854544868523,
+   "min": 0.006431072727057405,
+   "p90": 0.008572727272456343,
+   "mean": 0.007364178290997826,
+   "n": 2964,
+   "batch": 55,
+   "roundMedians": [
+    0.007012127273165705,
+    0.006921218181113628,
+    0.006900745454582979
+   ],
+   "spread": 0.016061161465188056
+  },
+  "key/1m/ours-parseInline-no-definitions": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "ours-parseInline-no-definitions",
+   "label": "ours: parseInline of the edited paragraph, no definitions passed",
+   "bytes": 1022808,
+   "frameShare": 0.00021508349999203343,
+   "median": 0.0035847249998672242,
+   "min": 0.0034010416668024844,
+   "p90": 0.003845483333376857,
+   "mean": 0.003654087752618795,
+   "n": 2738,
+   "batch": 120,
+   "roundMedians": [
+    0.0035954833331440267,
+    0.003592358333116863,
+    0.003573608333438945
+   ],
+   "spread": 0.006102281125021257
+  },
+  "key/1m/lezer-incremental": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "lezer-incremental",
+   "label": "@lezer/markdown incremental (TreeFragment)",
+   "bytes": 1022808,
+   "frameShare": 0.011058339999290182,
+   "median": 0.1843056666548364,
+   "min": 0.1738333333438883,
+   "p90": 0.20377766666933894,
+   "mean": 0.1926041072628091,
+   "n": 2079,
+   "batch": 3,
+   "roundMedians": [
+    0.18145833333255723,
+    0.18620833333504075,
+    0.18608333333395422
+   ],
+   "spread": 0.02577240346808877
+  },
+  "key/1m/lezer-full": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "lezer-full",
+   "label": "@lezer/markdown full parse",
+   "bytes": 1022808,
+   "frameShare": 4.392064979999558,
+   "median": 73.20108299999265,
+   "min": 70.68845799996052,
+   "p90": 88.18329100002302,
+   "mean": 74.72735119999076,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    73.45549999998184,
+    71.87358299997868,
+    73.48779100005049
+   ],
+   "spread": 0.022051695602262805
+  },
+  "key/1m/markdown-it-full": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "markdown-it-full",
+   "label": "markdown-it full parse",
+   "bytes": 1022808,
+   "frameShare": 2.8662874800001736,
+   "median": 47.771458000002895,
+   "min": 44.55995800002711,
+   "p90": 67.06220899999607,
+   "mean": 49.60360703333863,
+   "n": 30,
+   "batch": 1,
+   "roundMedians": [
+    48.09450000000652,
+    48.2891660000314,
+    47.08212500001537
+   ],
+   "spread": 0.025266991014089638
+  },
+  "key/1m/mdast-full": {
+   "group": "keystroke",
+   "file": "mixed-1m",
+   "subject": "mdast-full",
+   "label": "mdast-util-from-markdown + gfm full parse",
+   "bytes": 1022808,
+   "frameShare": 39.9853075200005,
+   "median": 666.4217920000083,
+   "min": 637.1973749999888,
+   "p90": 694.5335419999901,
+   "mean": 670.0862140666654,
+   "n": 15,
+   "batch": 1,
+   "roundMedians": [
+    680.5991250000079,
+    666.4217920000083,
+    659.961874999979
+   ],
+   "spread": 0.030967249642443587
+  }
+ },
+ "breakdown": {
+  "mixed-1k": {
+   "bytes": 1344,
+   "wire": {
+    "bytes": 5037,
+    "words": 529,
+    "strings": 69,
+    "textBytes": 2361,
+    "leafSources": 9
+   },
+   "total": {
+    "n": 15000,
+    "min": 0.021582999994279817,
+    "median": 0.02449999999953434,
+    "p90": 0.027166000014403835,
+    "mean": 0.025516407733472687,
+    "roundMedians": [
+     0.024583999998867512,
+     0.024416000000201166,
+     0.024459000007482246
+    ],
+    "spread": 0.006857142802838334
+   },
+   "stages": {
+    "encode": {
+     "n": 15000,
+     "min": 0.00033299997448921204,
+     "median": 0.0004579999949783087,
+     "p90": 0.0006250000151339918,
+     "mean": 0.0004981944666127674
+    },
+    "copyIn": {
+     "n": 15000,
+     "min": 0.00008299999171867967,
+     "median": 0.00012500002048909664,
+     "p90": 0.00016700002015568316,
+     "mean": 0.00014832606678634572
+    },
+    "wasm": {
+     "n": 15000,
+     "min": 0.015875000011874363,
+     "median": 0.01791700001922436,
+     "p90": 0.0187500000174623,
+     "mean": 0.018368095933374327
+    },
+    "view": {
+     "n": 15000,
+     "min": 0.00008299999171867967,
+     "median": 0.0001669999910518527,
+     "p90": 0.00020799998310394585,
+     "mean": 0.00016393839993397705
+    },
+    "readerInit": {
+     "n": 15000,
+     "min": 0.0007499999774154276,
+     "median": 0.0009999999892897904,
+     "p90": 0.0011670000094454736,
+     "mean": 0.0011067421333418072
+    },
+    "tree": {
+     "n": 15000,
+     "min": 0.002291000011609867,
+     "median": 0.0027079999854322523,
+     "p90": 0.003124999988358468,
+     "mean": 0.0030101412000192794
+    },
+    "diagnosticsLeaves": {
+     "n": 15000,
+     "min": 0.00037499997415579855,
+     "median": 0.0005830000154674053,
+     "p90": 0.0007909999985713512,
+     "mean": 0.0006924305332320121
+    },
+    "wrap": {
+     "n": 15000,
+     "min": 0.00008299999171867967,
+     "median": 0.0002080000122077763,
+     "p90": 0.0002500000118743628,
+     "mean": 0.00023146993350043582
+    },
+    "free": {
+     "n": 15000,
+     "min": 0.0010409999813418835,
+     "median": 0.0012500000011641532,
+     "p90": 0.0013340000004973263,
+     "mean": 0.0012970690666717322
+    }
+   }
+  },
+  "mixed-10k": {
+   "bytes": 11956,
+   "wire": {
+    "bytes": 46022,
+    "words": 4817,
+    "strings": 639,
+    "textBytes": 21634,
+    "leafSources": 81
+   },
+   "total": {
+    "n": 5670,
+    "min": 0.1925420000043232,
+    "median": 0.20604200000525452,
+    "p90": 0.2211669999815058,
+    "mean": 0.2114035495591025,
+    "roundMedians": [
+     0.20737500002724119,
+     0.20650000000023283,
+     0.20495899999514222
+    ],
+    "spread": 0.011725764805415161
+   },
+   "stages": {
+    "encode": {
+     "n": 5670,
+     "min": 0.0017909999878611416,
+     "median": 0.0021249999990686774,
+     "p90": 0.00245800000266172,
+     "mean": 0.0022255126984202346
+    },
+    "copyIn": {
+     "n": 5670,
+     "min": 0.00024999998277053237,
+     "median": 0.0003339999821037054,
+     "p90": 0.00041699997382238507,
+     "mean": 0.00036510105832640864
+    },
+    "wasm": {
+     "n": 5670,
+     "min": 0.15012500001466833,
+     "median": 0.16295800000079907,
+     "p90": 0.1744159999943804,
+     "mean": 0.16640547231023797
+    },
+    "view": {
+     "n": 5670,
+     "min": 0.00008299999171867967,
+     "median": 0.00012499999138526618,
+     "p90": 0.00016700002015568316,
+     "mean": 0.00014637777783741232
+    },
+    "readerInit": {
+     "n": 5670,
+     "min": 0.0047079999931156635,
+     "median": 0.005541999998968095,
+     "p90": 0.0062089999846648425,
+     "mean": 0.006455763491902113
+    },
+    "tree": {
+     "n": 5670,
+     "min": 0.019709000014699996,
+     "median": 0.0221249999885913,
+     "p90": 0.02383299998473376,
+     "mean": 0.022920259964883137
+    },
+    "diagnosticsLeaves": {
+     "n": 5670,
+     "min": 0.0022080000198911875,
+     "median": 0.002833000005921349,
+     "p90": 0.003292000008514151,
+     "mean": 0.0030296155203312857
+    },
+    "wrap": {
+     "n": 5670,
+     "min": 0.00008299999171867967,
+     "median": 0.0002080000122077763,
+     "p90": 0.0002909999748226255,
+     "mean": 0.00025722804245546403
+    },
+    "free": {
+     "n": 5670,
+     "min": 0.008165999985067174,
+     "median": 0.009250000002793968,
+     "p90": 0.009874999988824129,
+     "mean": 0.009598218694708484
+    }
+   }
+  },
+  "mixed-100k": {
+   "bytes": 101484,
+   "wire": {
+    "bytes": 409692,
+    "words": 44941,
+    "strings": 6226,
+    "textBytes": 180112,
+    "leafSources": 991
+   },
+   "total": {
+    "n": 499,
+    "min": 2.233249999990221,
+    "median": 2.377999999996973,
+    "p90": 2.5328329999756534,
+    "mean": 2.411842635270772,
+    "roundMedians": [
+     2.3170830000017304,
+     2.3988330000138376,
+     2.409625000000233
+    ],
+    "spread": 0.03891589571010102
+   },
+   "stages": {
+    "encode": {
+     "n": 499,
+     "min": 0.11424999998416752,
+     "median": 0.12616700000944547,
+     "p90": 0.13433300002361648,
+     "mean": 0.128004523045661
+    },
+    "copyIn": {
+     "n": 499,
+     "min": 0.0016659999964758754,
+     "median": 0.0018339999951422215,
+     "p90": 0.0022089999984018505,
+     "mean": 0.0019986833669576524
+    },
+    "wasm": {
+     "n": 499,
+     "min": 1.6671670000068843,
+     "median": 1.759583000006387,
+     "p90": 1.8687910000153352,
+     "mean": 1.7692284629260164
+    },
+    "view": {
+     "n": 499,
+     "min": 0.00008299999171867967,
+     "median": 0.00024999998277053237,
+     "p90": 0.00041700000292621553,
+     "mean": 0.0002693747496185731
+    },
+    "readerInit": {
+     "n": 499,
+     "min": 0.0705829999933485,
+     "median": 0.08704200002830476,
+     "p90": 0.10362499998882413,
+     "mean": 0.0907752885769461
+    },
+    "tree": {
+     "n": 499,
+     "min": 0.19566599998506717,
+     "median": 0.21145799997611903,
+     "p90": 0.23062499999650754,
+     "mean": 0.2350025751503984
+    },
+    "diagnosticsLeaves": {
+     "n": 499,
+     "min": 0.02354100000229664,
+     "median": 0.02716700002201833,
+     "p90": 0.030375000002095476,
+     "mean": 0.029212855711417882
+    },
+    "wrap": {
+     "n": 499,
+     "min": 0.00016599998343735933,
+     "median": 0.000375000003259629,
+     "p90": 0.0009999999892897904,
+     "mean": 0.0005519438875239074
+    },
+    "free": {
+     "n": 499,
+     "min": 0.1224999999976717,
+     "median": 0.15474999998696148,
+     "p90": 0.17837500001769513,
+     "mean": 0.15679892785623223
+    }
+   }
+  },
+  "mixed-1m": {
+   "bytes": 1022808,
+   "wire": {
+    "bytes": 3954816,
+    "words": 420900,
+    "strings": 58146,
+    "textBytes": 1806040,
+    "leafSources": 8892
+   },
+   "total": {
+    "n": 49,
+    "min": 23.685834000003524,
+    "median": 24.622915999992983,
+    "p90": 26.497791000001598,
+    "mean": 24.985129265305325,
+    "roundMedians": [
+     24.995166000007885,
+     24.649833999981638,
+     24.16150000001653
+    ],
+    "spread": 0.03385732217872128
+   },
+   "stages": {
+    "encode": {
+     "n": 49,
+     "min": 1.236917000001995,
+     "median": 1.2892080000019632,
+     "p90": 1.3265830000163987,
+     "mean": 1.291406469386337
+    },
+    "copyIn": {
+     "n": 49,
+     "min": 0.0200829999812413,
+     "median": 0.02304199998616241,
+     "p90": 0.04562499999883585,
+     "mean": 0.026824897958787765
+    },
+    "wasm": {
+     "n": 49,
+     "min": 17.539833000017097,
+     "median": 18.17533299999195,
+     "p90": 18.671000000002095,
+     "mean": 18.197685244900047
+    },
+    "view": {
+     "n": 49,
+     "min": 0.0002500000118743628,
+     "median": 0.0027500000142026693,
+     "p90": 0.004583000001730397,
+     "mean": 0.0028299795919839218
+    },
+    "readerInit": {
+     "n": 49,
+     "min": 0.742792000004556,
+     "median": 0.8063339999935124,
+     "p90": 1.0054170000075828,
+     "mean": 0.8576148571416841
+    },
+    "tree": {
+     "n": 49,
+     "min": 1.9973330000066198,
+     "median": 2.0612079999991693,
+     "p90": 3.452332999993814,
+     "mean": 2.4874285510200673
+    },
+    "diagnosticsLeaves": {
+     "n": 49,
+     "min": 0.2272909999883268,
+     "median": 0.23770800000056624,
+     "p90": 0.2686660000181291,
+     "mean": 0.3106888163263425
+    },
+    "wrap": {
+     "n": 49,
+     "min": 0.001584000012371689,
+     "median": 0.004500000010011718,
+     "p90": 0.006374999997206032,
+     "mean": 0.004664938776321443
+    },
+    "free": {
+     "n": 49,
+     "min": 1.7352499999979045,
+     "median": 1.7821249999979045,
+     "p90": 1.8945000000239816,
+     "mean": 1.8059855102037545
+    }
+   }
+  },
+  "real-docs": {
+   "bytes": 696780,
+   "wire": {
+    "bytes": 2526983,
+    "words": 244660,
+    "strings": 30375,
+    "textBytes": 1305335,
+    "leafSources": 5366
+   },
+   "total": {
+    "n": 78,
+    "min": 14.522875000024214,
+    "median": 14.995499999989988,
+    "p90": 16.00875000000815,
+    "mean": 15.562285320510572,
+    "roundMedians": [
+     14.777791999978945,
+     15.134290999994846,
+     14.959291999984998
+    ],
+    "spread": 0.023773732120712175
+   },
+   "stages": {
+    "encode": {
+     "n": 78,
+     "min": 0.8619999999937136,
+     "median": 0.8900410000060219,
+     "p90": 0.9263330000103451,
+     "mean": 0.9024978974357976
+    },
+    "copyIn": {
+     "n": 78,
+     "min": 0.011041999998269603,
+     "median": 0.013624999992316589,
+     "p90": 0.01800000001094304,
+     "mean": 0.014439076922523478
+    },
+    "wasm": {
+     "n": 78,
+     "min": 11.204208999988623,
+     "median": 11.505833000002895,
+     "p90": 11.858166999998502,
+     "mean": 11.543454564102248
+    },
+    "view": {
+     "n": 78,
+     "min": 0.00020799998310394585,
+     "median": 0.0027500000142026693,
+     "p90": 0.0047079999931156635,
+     "mean": 0.0028713205135248313
+    },
+    "readerInit": {
+     "n": 78,
+     "min": 0.3897080000024289,
+     "median": 0.43583299999590963,
+     "p90": 0.9008329999924172,
+     "mean": 0.5163536794854549
+    },
+    "tree": {
+     "n": 78,
+     "min": 0.9671669999952428,
+     "median": 1.002875000005588,
+     "p90": 2.2728749999951106,
+     "mean": 1.524059256411886
+    },
+    "diagnosticsLeaves": {
+     "n": 78,
+     "min": 0.11483299999963492,
+     "median": 0.12483300000894815,
+     "p90": 0.14904099999694154,
+     "mean": 0.1677729743585074
+    },
+    "wrap": {
+     "n": 78,
+     "min": 0.0008329999982379377,
+     "median": 0.003583000012440607,
+     "p90": 0.005624999990686774,
+     "mean": 0.00378207692455572
+    },
+    "free": {
+     "n": 78,
+     "min": 0.8278749999881256,
+     "median": 0.8794999999809079,
+     "p90": 0.9321249999920838,
+     "mean": 0.8870544743560738
+    }
+   }
+  },
+  "real-rust-releases": {
+   "bytes": 753227,
+   "wire": {
+    "bytes": 2700690,
+    "words": 280501,
+    "strings": 40813,
+    "textBytes": 1252174,
+    "leafSources": 6111
+   },
+   "total": {
+    "n": 68,
+    "min": 17.246291999996174,
+    "median": 17.873292000003858,
+    "p90": 18.937624999991385,
+    "mean": 18.06726966176468,
+    "roundMedians": [
+     18.04520899997442,
+     17.815375000005588,
+     17.457917000021553
+    ],
+    "spread": 0.03285863622396707
+   },
+   "stages": {
+    "encode": {
+     "n": 68,
+     "min": 0.9202919999952428,
+     "median": 0.9463749999995343,
+     "p90": 0.9862500000162981,
+     "mean": 0.9508259999993778
+    },
+    "copyIn": {
+     "n": 68,
+     "min": 0.014209000015398487,
+     "median": 0.018208000023150817,
+     "p90": 0.024166999995941296,
+     "mean": 0.019656911765410127
+    },
+    "wasm": {
+     "n": 68,
+     "min": 13.289500000013504,
+     "median": 13.684249999991152,
+     "p90": 14,
+     "mean": 13.68531798529062
+    },
+    "view": {
+     "n": 68,
+     "min": 0.0002080000122077763,
+     "median": 0.0020409999997355044,
+     "p90": 0.004500000010011718,
+     "mean": 0.0022977794120807257
+    },
+    "readerInit": {
+     "n": 68,
+     "min": 0.42562500000349246,
+     "median": 0.45949999999720603,
+     "p90": 0.5131659999897238,
+     "mean": 0.48820161764931125
+    },
+    "tree": {
+     "n": 68,
+     "min": 1.252875000005588,
+     "median": 1.3024999999906868,
+     "p90": 2.4500410000036936,
+     "mean": 1.559095617647793
+    },
+    "diagnosticsLeaves": {
+     "n": 68,
+     "min": 0.13550000000395812,
+     "median": 0.14416699999128468,
+     "p90": 0.16020800001570024,
+     "mean": 0.17821688235049163
+    },
+    "wrap": {
+     "n": 68,
+     "min": 0.0009170000266749412,
+     "median": 0.003292000008514151,
+     "p90": 0.005166999995708466,
+     "mean": 0.003342485297574004
+    },
+    "free": {
+     "n": 68,
+     "min": 1.0892499999899883,
+     "median": 1.1653340000193566,
+     "p90": 1.2445409999927506,
+     "mean": 1.1803143823520206
+    }
+   }
+  },
+  "real-spec": {
+   "bytes": 205025,
+   "wire": {
+    "bytes": 425376,
+    "words": 34805,
+    "strings": 4975,
+    "textBytes": 246348,
+    "leafSources": 724
+   },
+   "total": {
+    "n": 483,
+    "min": 2.3043330000073183,
+    "median": 2.451375000004191,
+    "p90": 2.6235840000153985,
+    "mean": 2.492168397516375,
+    "roundMedians": [
+     2.4784579999977723,
+     2.4404579999973066,
+     2.4389999999839347
+    ],
+    "spread": 0.016096272505744788
+   },
+   "stages": {
+    "encode": {
+     "n": 483,
+     "min": 0.23520799999823794,
+     "median": 0.2575420000066515,
+     "p90": 0.2756250000093132,
+     "mean": 0.26133564596362535
+    },
+    "copyIn": {
+     "n": 483,
+     "min": 0.0028340000135358423,
+     "median": 0.003292000008514151,
+     "p90": 0.004207999998470768,
+     "mean": 0.00358318633534396
+    },
+    "wasm": {
+     "n": 483,
+     "min": 1.733458000002429,
+     "median": 1.8377920000057202,
+     "p90": 1.9604579999868292,
+     "mean": 1.852720635609897
+    },
+    "view": {
+     "n": 483,
+     "min": 0.00008299999171867967,
+     "median": 0.0002500000118743628,
+     "p90": 0.0005839999939780682,
+     "mean": 0.0003232795041460374
+    },
+    "readerInit": {
+     "n": 483,
+     "min": 0.0700829999987036,
+     "median": 0.08391600000322796,
+     "p90": 0.10070900002028793,
+     "mean": 0.09369216977232271
+    },
+    "tree": {
+     "n": 483,
+     "min": 0.12737500001094304,
+     "median": 0.14104199997382239,
+     "p90": 0.15783399998326786,
+     "mean": 0.15346060041362308
+    },
+    "diagnosticsLeaves": {
+     "n": 483,
+     "min": 0.01333300000987947,
+     "median": 0.015000000013969839,
+     "p90": 0.0206670000043232,
+     "mean": 0.02047755279422566
+    },
+    "wrap": {
+     "n": 483,
+     "min": 0.00012500002048909664,
+     "median": 0.0003330000035930425,
+     "p90": 0.0009160000190604478,
+     "mean": 0.0005629648049926004
+    },
+    "free": {
+     "n": 483,
+     "min": 0.08604200000991113,
+     "median": 0.1043329999956768,
+     "p90": 0.12337499999557622,
+     "mean": 0.10601236231819829
+    }
+   }
+  },
+  "syn-cjk": {
+   "bytes": 274902,
+   "wire": {
+    "bytes": 731664,
+    "words": 36278,
+    "strings": 5657,
+    "textBytes": 541288,
+    "leafSources": 793
+   },
+   "total": {
+    "n": 396,
+    "min": 2.8865419999929145,
+    "median": 2.992792000004556,
+    "p90": 3.1202079999784473,
+    "mean": 3.036193623736964,
+    "roundMedians": [
+     3.051000000006752,
+     2.9712080000026617,
+     2.976457999990089
+    ],
+    "spread": 0.026661391771953712
+   },
+   "stages": {
+    "encode": {
+     "n": 396,
+     "min": 0.2242919999989681,
+     "median": 0.25841600002604537,
+     "p90": 0.2697500000067521,
+     "mean": 0.25534846212078743
+    },
+    "copyIn": {
+     "n": 396,
+     "min": 0.00358399999095127,
+     "median": 0.004207999998470768,
+     "p90": 0.005417000007582828,
+     "mean": 0.004517368686848762
+    },
+    "wasm": {
+     "n": 396,
+     "min": 2.195917000004556,
+     "median": 2.260167000000365,
+     "p90": 2.3335839999781456,
+     "mean": 2.272326941919208
+    },
+    "view": {
+     "n": 396,
+     "min": 0.00008299999171867967,
+     "median": 0.00012500002048909664,
+     "p90": 0.00041700000292621553,
+     "mean": 0.00022768686845077841
+    },
+    "readerInit": {
+     "n": 396,
+     "min": 0.1547089999949094,
+     "median": 0.16812499999650754,
+     "p90": 0.18674999999348074,
+     "mean": 0.17335899747492725
+    },
+    "tree": {
+     "n": 396,
+     "min": 0.16449999998440035,
+     "median": 0.1712919999845326,
+     "p90": 0.1865420000103768,
+     "mean": 0.1893261186877028
+    },
+    "diagnosticsLeaves": {
+     "n": 396,
+     "min": 0.012791000015567988,
+     "median": 0.014041999995242804,
+     "p90": 0.01600000000325963,
+     "mean": 0.024634858585333784
+    },
+    "wrap": {
+     "n": 396,
+     "min": 0.00012499999138526618,
+     "median": 0.00024999998277053237,
+     "p90": 0.0007919999770820141,
+     "mean": 0.00043969191910670787
+    },
+    "free": {
+     "n": 396,
+     "min": 0.09508299999288283,
+     "median": 0.11166600001160987,
+     "p90": 0.13587500000721775,
+     "mean": 0.11601349747459865
+    }
+   }
+  },
+  "syn-code": {
+   "bytes": 100485,
+   "wire": {
+    "bytes": 108025,
+    "words": 1609,
+    "strings": 362,
+    "textBytes": 98685,
+    "leafSources": 0
+   },
+   "total": {
+    "n": 5968,
+    "min": 0.17570799999521114,
+    "median": 0.19637499999953434,
+    "p90": 0.21120800002245232,
+    "mean": 0.2006672912198192,
+    "roundMedians": [
+     0.19645799999125302,
+     0.19633400000748225,
+     0.19633299999986775
+    ],
+    "spread": 0.0006365371935611081
+   },
+   "stages": {
+    "encode": {
+     "n": 5968,
+     "min": 0.013374999980442226,
+     "median": 0.014750000002095476,
+     "p90": 0.015291999996406958,
+     "mean": 0.015016704423652268
+    },
+    "copyIn": {
+     "n": 5968,
+     "min": 0.0015410000050906092,
+     "median": 0.0018339999951422215,
+     "p90": 0.0022499999904539436,
+     "mean": 0.0019714403485642257
+    },
+    "wasm": {
+     "n": 5968,
+     "min": 0.14495899999747053,
+     "median": 0.16162500000791624,
+     "p90": 0.17324999999254942,
+     "mean": 0.16461122201736486
+    },
+    "view": {
+     "n": 5968,
+     "min": 0.00008299999171867967,
+     "median": 0.00012499999138526618,
+     "p90": 0.0001669999910518527,
+     "mean": 0.00013695442374047715
+    },
+    "readerInit": {
+     "n": 5968,
+     "min": 0.004541000002063811,
+     "median": 0.005459000007249415,
+     "p90": 0.006584000017028302,
+     "mean": 0.006233071883366819
+    },
+    "tree": {
+     "n": 5968,
+     "min": 0.006999999983236194,
+     "median": 0.007917000009911135,
+     "p90": 0.00829100000555627,
+     "mean": 0.008270076910107869
+    },
+    "diagnosticsLeaves": {
+     "n": 5968,
+     "min": 0.00004099999205209315,
+     "median": 0.00020799998310394585,
+     "p90": 0.00020900001982226968,
+     "mean": 0.00019750653473847926
+    },
+    "wrap": {
+     "n": 5968,
+     "min": 0.00008299999171867967,
+     "median": 0.0001669999910518527,
+     "p90": 0.00024999998277053237,
+     "mean": 0.00021846179632257313
+    },
+    "free": {
+     "n": 5968,
+     "min": 0.003333000000566244,
+     "median": 0.003917000023648143,
+     "p90": 0.004165999998804182,
+     "mean": 0.004011852881961596
+    }
+   }
+  },
+  "syn-directives": {
+   "bytes": 100202,
+   "wire": {
+    "bytes": 368797,
+    "words": 31391,
+    "strings": 6946,
+    "textBytes": 187657,
+    "leafSources": 285
+   },
+   "total": {
+    "n": 616,
+    "min": 1.8523339999956079,
+    "median": 1.9132920000120066,
+    "p90": 2.053124999976717,
+    "mean": 1.9509269188306757,
+    "roundMedians": [
+     1.9515839999949094,
+     1.9021659999853,
+     1.8960000000079162
+    ],
+    "spread": 0.029051498666510047
+   },
+   "stages": {
+    "encode": {
+     "n": 616,
+     "min": 0.01324999998905696,
+     "median": 0.014457999990554526,
+     "p90": 0.015000000013969839,
+     "mean": 0.014645269480445075
+    },
+    "copyIn": {
+     "n": 616,
+     "min": 0.0016659999964758754,
+     "median": 0.0017920000245794654,
+     "p90": 0.0021249999990686774,
+     "mean": 0.0019392597403259367
+    },
+    "wasm": {
+     "n": 616,
+     "min": 1.4572920000064187,
+     "median": 1.494583000021521,
+     "p90": 1.5785000000032596,
+     "mean": 1.5111127597405616
+    },
+    "view": {
+     "n": 616,
+     "min": 0.00008299999171867967,
+     "median": 0.00012500002048909664,
+     "p90": 0.00029200001154094934,
+     "mean": 0.000191970778277292
+    },
+    "readerInit": {
+     "n": 616,
+     "min": 0.07304200000362471,
+     "median": 0.08495799999218434,
+     "p90": 0.10404200002085418,
+     "mean": 0.09677495292219516
+    },
+    "tree": {
+     "n": 616,
+     "min": 0.16754200001014397,
+     "median": 0.17195799999171868,
+     "p90": 0.18862499998067506,
+     "mean": 0.18130715422125537
+    },
+    "diagnosticsLeaves": {
+     "n": 616,
+     "min": 0.005249999987427145,
+     "median": 0.005958000023383647,
+     "p90": 0.007083000004058704,
+     "mean": 0.006539501623698819
+    },
+    "wrap": {
+     "n": 616,
+     "min": 0.00008299999171867967,
+     "median": 0.0002080000122077763,
+     "p90": 0.0006249999860301614,
+     "mean": 0.00034666396071794203
+    },
+    "free": {
+     "n": 616,
+     "min": 0.11879199999384582,
+     "median": 0.13324999998440035,
+     "p90": 0.16012499999487773,
+     "mean": 0.13806938636319843
+    }
+   }
+  },
+  "syn-emphasis": {
+   "bytes": 100035,
+   "wire": {
+    "bytes": 1390844,
+    "words": 241790,
+    "strings": 35251,
+    "textBytes": 141668,
+    "leafSources": 743
+   },
+   "total": {
+    "n": 162,
+    "min": 7.021624999993946,
+    "median": 7.247917000000598,
+    "p90": 8.53354199999012,
+    "mean": 7.494232740740789,
+    "roundMedians": [
+     7.230167000001529,
+     7.251292000000831,
+     7.256374999997206
+    ],
+    "spread": 0.003615935446787627
+   },
+   "stages": {
+    "encode": {
+     "n": 162,
+     "min": 0.014666000002762303,
+     "median": 0.0167080000101123,
+     "p90": 0.019459000002825633,
+     "mean": 0.017382956790108303
+    },
+    "copyIn": {
+     "n": 162,
+     "min": 0.0020420000073499978,
+     "median": 0.0030420000257436186,
+     "p90": 0.0044169999891892076,
+     "mean": 0.003406401234247756
+    },
+    "wasm": {
+     "n": 162,
+     "min": 4.589624999993248,
+     "median": 4.753958999994211,
+     "p90": 4.840457999991486,
+     "mean": 4.753390191357337
+    },
+    "view": {
+     "n": 162,
+     "min": 0.0001669999910518527,
+     "median": 0.0009999999892897904,
+     "p90": 0.002082999999402091,
+     "mean": 0.001134549382747795
+    },
+    "readerInit": {
+     "n": 162,
+     "min": 0.18866600000183098,
+     "median": 0.20141700000385754,
+     "p90": 0.21908300000359304,
+     "mean": 0.21329546913599456
+    },
+    "tree": {
+     "n": 162,
+     "min": 1.24504199999501,
+     "median": 1.320624999993015,
+     "p90": 2.5820419999945443,
+     "mean": 1.5575089814817966
+    },
+    "diagnosticsLeaves": {
+     "n": 162,
+     "min": 0.013957999995909631,
+     "median": 0.01679100000183098,
+     "p90": 0.019542000023648143,
+     "mean": 0.020055092592906196
+    },
+    "wrap": {
+     "n": 162,
+     "min": 0.0004579999949783087,
+     "median": 0.0018749999871943146,
+     "p90": 0.003000000026077032,
+     "mean": 0.0021178024681931776
+    },
+    "free": {
+     "n": 162,
+     "min": 0.8489169999957085,
+     "median": 0.9187499999825377,
+     "p90": 0.9946249999920838,
+     "mean": 0.9259412962974575
+    }
+   }
+  },
+  "syn-headings": {
+   "bytes": 100011,
+   "wire": {
+    "bytes": 480580,
+    "words": 67516,
+    "strings": 7106,
+    "textBytes": 153660,
+    "leafSources": 3553
+   },
+   "total": {
+    "n": 621,
+    "min": 1.8671249999897555,
+    "median": 1.8984999999811407,
+    "p90": 1.9837080000143033,
+    "mean": 1.9383760128822534,
+    "roundMedians": [
+     1.9222089999821037,
+     1.8942080000124406,
+     1.896374999982072
+    ],
+    "spread": 0.014749012362360418
+   },
+   "stages": {
+    "encode": {
+     "n": 621,
+     "min": 0.013542000000597909,
+     "median": 0.014790999994147569,
+     "p90": 0.015333000017562881,
+     "mean": 0.015015421900148361
+    },
+    "copyIn": {
+     "n": 621,
+     "min": 0.0016659999964758754,
+     "median": 0.001832999987527728,
+     "p90": 0.0022080000198911875,
+     "mean": 0.0019547359084042355
+    },
+    "wasm": {
+     "n": 621,
+     "min": 1.5039160000160336,
+     "median": 1.5281250000116415,
+     "p90": 1.5797500000044238,
+     "mean": 1.5396041095015165
+    },
+    "view": {
+     "n": 621,
+     "min": 0.00008299999171867967,
+     "median": 0.00012499999138526618,
+     "p90": 0.000291000003926456,
+     "mean": 0.0001770000000377058
+    },
+    "readerInit": {
+     "n": 621,
+     "min": 0.04070900002261624,
+     "median": 0.045375000016065314,
+     "p90": 0.052666000003227964,
+     "mean": 0.048175718196654234
+    },
+    "tree": {
+     "n": 621,
+     "min": 0.16358399999444373,
+     "median": 0.17258300000685267,
+     "p90": 0.18045800001709722,
+     "mean": 0.1792123864730389
+    },
+    "diagnosticsLeaves": {
+     "n": 621,
+     "min": 0.054582999990088865,
+     "median": 0.05766699998639524,
+     "p90": 0.0651250000228174,
+     "mean": 0.07776065700595236
+    },
+    "wrap": {
+     "n": 621,
+     "min": 0.00008299999171867967,
+     "median": 0.0002080000122077763,
+     "p90": 0.0005419999943114817,
+     "mean": 0.00033596296235694043
+    },
+    "free": {
+     "n": 621,
+     "min": 0.06970799999544397,
+     "median": 0.07604200000059791,
+     "p90": 0.07979200000409037,
+     "mean": 0.07614002093414426
+    }
+   }
+  },
+  "syn-html": {
+   "bytes": 100278,
+   "wire": {
+    "bytes": 292851,
+    "words": 23296,
+    "strings": 5228,
+    "textBytes": 157835,
+    "leafSources": 177
+   },
+   "total": {
+    "n": 832,
+    "min": 1.3432920000050217,
+    "median": 1.4139580000191927,
+    "p90": 1.5279169999994338,
+    "mean": 1.4443329771632727,
+    "roundMedians": [
+     1.4077909999759868,
+     1.420125000004191,
+     1.4176250000018626
+    ],
+    "spread": 0.008723031396998182
+   },
+   "stages": {
+    "encode": {
+     "n": 832,
+     "min": 0.0130840000056196,
+     "median": 0.014583999989554286,
+     "p90": 0.015750000020489097,
+     "mean": 0.015143587740007765
+    },
+    "copyIn": {
+     "n": 832,
+     "min": 0.0016250000044237822,
+     "median": 0.0018330000166315585,
+     "p90": 0.0022080000198911875,
+     "mean": 0.0019471526446488076
+    },
+    "wasm": {
+     "n": 832,
+     "min": 1.055292000004556,
+     "median": 1.1076670000038575,
+     "p90": 1.1765840000007302,
+     "mean": 1.1189976634609944
+    },
+    "view": {
+     "n": 832,
+     "min": 0.00008299999171867967,
+     "median": 0.00020799998310394585,
+     "p90": 0.0004579999949783087,
+     "mean": 0.0002604495196884762
+    },
+    "readerInit": {
+     "n": 832,
+     "min": 0.05845800001407042,
+     "median": 0.06791599999996834,
+     "p90": 0.08308300000499003,
+     "mean": 0.07897457331731718
+    },
+    "tree": {
+     "n": 832,
+     "min": 0.11179200001060963,
+     "median": 0.12316599997575395,
+     "p90": 0.1359169999777805,
+     "mean": 0.13006409134557265
+    },
+    "diagnosticsLeaves": {
+     "n": 832,
+     "min": 0.0034160000213887542,
+     "median": 0.004292000026907772,
+     "p90": 0.006166999984998256,
+     "mean": 0.005069516827321562
+    },
+    "wrap": {
+     "n": 832,
+     "min": 0.00012499999138526618,
+     "median": 0.0002500000118743628,
+     "p90": 0.0005419999943114817,
+     "mean": 0.00037043028851257986
+    },
+    "free": {
+     "n": 832,
+     "min": 0.07370799998170696,
+     "median": 0.08929199998965487,
+     "p90": 0.11395899998024106,
+     "mean": 0.09350551201920937
+    }
+   }
+  },
+  "syn-lists": {
+   "bytes": 101258,
+   "wire": {
+    "bytes": 401654,
+    "words": 43547,
+    "strings": 5638,
+    "textBytes": 182354,
+    "leafSources": 736
+   },
+   "total": {
+    "n": 576,
+    "min": 1.9677089999895543,
+    "median": 2.0392080000019632,
+    "p90": 2.1824590000032913,
+    "mean": 2.084821105902898,
+    "roundMedians": [
+     2.0553749999962747,
+     2.029624999995576,
+     2.037958000000799
+    ],
+    "spread": 0.012627451442262731
+   },
+   "stages": {
+    "encode": {
+     "n": 576,
+     "min": 0.013291999988723546,
+     "median": 0.014666999981272966,
+     "p90": 0.015249999996740371,
+     "mean": 0.014857567708026586
+    },
+    "copyIn": {
+     "n": 576,
+     "min": 0.0017089999746531248,
+     "median": 0.0018339999951422215,
+     "p90": 0.0021249999990686774,
+     "mean": 0.00193213194385559
+    },
+    "wasm": {
+     "n": 576,
+     "min": 1.519417000003159,
+     "median": 1.5651249999937136,
+     "p90": 1.65129199999501,
+     "mean": 1.5814260225703138
+    },
+    "view": {
+     "n": 576,
+     "min": 0.00008299999171867967,
+     "median": 0.00012500002048909664,
+     "p90": 0.00029200001154094934,
+     "mean": 0.00019123784709841452
+    },
+    "readerInit": {
+     "n": 576,
+     "min": 0.0665830000070855,
+     "median": 0.07741699999314733,
+     "p90": 0.09141599998110905,
+     "mean": 0.08131093055559784
+    },
+    "tree": {
+     "n": 576,
+     "min": 0.20583299998543225,
+     "median": 0.21129199999268167,
+     "p90": 0.22808299999451265,
+     "mean": 0.23362884027766187
+    },
+    "diagnosticsLeaves": {
+     "n": 576,
+     "min": 0.020790999988093972,
+     "median": 0.02283299999544397,
+     "p90": 0.02549999998882413,
+     "mean": 0.024847552083176398
+    },
+    "wrap": {
+     "n": 576,
+     "min": 0.00008299999171867967,
+     "median": 0.0002080000122077763,
+     "p90": 0.0005000000237487257,
+     "mean": 0.0003359670138504751
+    },
+    "free": {
+     "n": 576,
+     "min": 0.11458399999537505,
+     "median": 0.14329099998576567,
+     "p90": 0.16712500000721775,
+     "mean": 0.1462908559033167
+    }
+   }
+  },
+  "syn-paragraphs": {
+   "bytes": 100006,
+   "wire": {
+    "bytes": 358937,
+    "words": 29203,
+    "strings": 5850,
+    "textBytes": 195317,
+    "leafSources": 315
+   },
+   "total": {
+    "n": 645,
+    "min": 1.7228330000070855,
+    "median": 1.827208000002429,
+    "p90": 1.9674579999991693,
+    "mean": 1.8627956713182499,
+    "roundMedians": [
+     1.8338329999824055,
+     1.8271249999816064,
+     1.8232499999867287
+    ],
+    "spread": 0.0057918967056091765
+   },
+   "stages": {
+    "encode": {
+     "n": 645,
+     "min": 0.013000000006286427,
+     "median": 0.01462500001071021,
+     "p90": 0.015791999991051853,
+     "mean": 0.015015452713507061
+    },
+    "copyIn": {
+     "n": 645,
+     "min": 0.0016249999753199518,
+     "median": 0.001875000016298145,
+     "p90": 0.00229199999012053,
+     "mean": 0.0019939860464849818
+    },
+    "wasm": {
+     "n": 645,
+     "min": 1.374167000001762,
+     "median": 1.4451249999983702,
+     "p90": 1.5345420000085142,
+     "mean": 1.4580704279069774
+    },
+    "view": {
+     "n": 645,
+     "min": 0.00008299999171867967,
+     "median": 0.00016700002015568316,
+     "p90": 0.00045900000259280205,
+     "mean": 0.00024934883731193554
+    },
+    "readerInit": {
+     "n": 645,
+     "min": 0.06745800000499003,
+     "median": 0.08187500000349246,
+     "p90": 0.09975000002305023,
+     "mean": 0.09218158759727223
+    },
+    "tree": {
+     "n": 645,
+     "min": 0.14783299999544397,
+     "median": 0.16075000001001172,
+     "p90": 0.17920799998682924,
+     "mean": 0.1718483798444549
+    },
+    "diagnosticsLeaves": {
+     "n": 645,
+     "min": 0.005582999991020188,
+     "median": 0.006458000018028542,
+     "p90": 0.008000000001629815,
+     "mean": 0.009307238759785211
+    },
+    "wrap": {
+     "n": 645,
+     "min": 0.00008299999171867967,
+     "median": 0.0002500000118743628,
+     "p90": 0.000666000007186085,
+     "mean": 0.0004074186048300778
+    },
+    "free": {
+     "n": 645,
+     "min": 0.08974999998463318,
+     "median": 0.11075000002165325,
+     "p90": 0.13483299998915754,
+     "mean": 0.11372183100762596
+    }
+   }
+  },
+  "syn-quotes": {
+   "bytes": 100693,
+   "wire": {
+    "bytes": 366879,
+    "words": 32527,
+    "strings": 5868,
+    "textBytes": 189819,
+    "leafSources": 306
+   },
+   "total": {
+    "n": 523,
+    "min": 2.177750000002561,
+    "median": 2.264041999995243,
+    "p90": 2.4173749999899883,
+    "mean": 2.3031131548748704,
+    "roundMedians": [
+     2.2666250000183936,
+     2.2712089999986347,
+     2.2568750000209548
+    ],
+    "spread": 0.006331154624211937
+   },
+   "stages": {
+    "encode": {
+     "n": 523,
+     "min": 0.013458999979775399,
+     "median": 0.014583000011043623,
+     "p90": 0.01533299998845905,
+     "mean": 0.014873833651910402
+    },
+    "copyIn": {
+     "n": 523,
+     "min": 0.001707999996142462,
+     "median": 0.0018339999951422215,
+     "p90": 0.002166999998735264,
+     "mean": 0.0019358355628974722
+    },
+    "wasm": {
+     "n": 523,
+     "min": 1.786167000012938,
+     "median": 1.8523329999879934,
+     "p90": 1.947041999985231,
+     "mean": 1.864758862333081
+    },
+    "view": {
+     "n": 523,
+     "min": 0.00008299999171867967,
+     "median": 0.0001669999910518527,
+     "p90": 0.000375000003259629,
+     "mean": 0.00022662141504804344
+    },
+    "readerInit": {
+     "n": 523,
+     "min": 0.06650000001536682,
+     "median": 0.08008300000801682,
+     "p90": 0.09762499999487773,
+     "mean": 0.08612558891023794
+    },
+    "tree": {
+     "n": 523,
+     "min": 0.15975000002072193,
+     "median": 0.16879100000369363,
+     "p90": 0.1863749999902211,
+     "mean": 0.18630704206486196
+    },
+    "diagnosticsLeaves": {
+     "n": 523,
+     "min": 0.00741700001526624,
+     "median": 0.00841700000455603,
+     "p90": 0.009667000005720183,
+     "mean": 0.010318195028297325
+    },
+    "wrap": {
+     "n": 523,
+     "min": 0.00008299999171867967,
+     "median": 0.00020900001982226968,
+     "p90": 0.0005839999939780682,
+     "mean": 0.00036200382438466937
+    },
+    "free": {
+     "n": 523,
+     "min": 0.11520900001050904,
+     "median": 0.1350830000010319,
+     "p90": 0.15991700001177378,
+     "mean": 0.1382051720841517
+    }
+   }
+  },
+  "syn-references": {
+   "bytes": 100276,
+   "wire": {
+    "bytes": 276648,
+    "words": 18401,
+    "strings": 5468,
+    "textBytes": 159292,
+    "leafSources": 233
+   },
+   "total": {
+    "n": 627,
+    "min": 1.8015840000007302,
+    "median": 1.8869169999961741,
+    "p90": 2.01624999998603,
+    "mean": 1.9167122057414587,
+    "roundMedians": [
+     1.8837080000084825,
+     1.886666000005789,
+     1.8929169999901205
+    ],
+    "spread": 0.004880447831916675
+   },
+   "stages": {
+    "encode": {
+     "n": 627,
+     "min": 0.013666999991983175,
+     "median": 0.014916999993147328,
+     "p90": 0.015832999983103946,
+     "mean": 0.015365122806734258
+    },
+    "copyIn": {
+     "n": 627,
+     "min": 0.0017499999958090484,
+     "median": 0.0019579999789129943,
+     "p90": 0.0024590000102762133,
+     "mean": 0.0021103572564484013
+    },
+    "wasm": {
+     "n": 627,
+     "min": 1.5595000000030268,
+     "median": 1.6242500000225846,
+     "p90": 1.7245000000111759,
+     "mean": 1.6407668452949986
+    },
+    "view": {
+     "n": 627,
+     "min": 0.00008299999171867967,
+     "median": 0.0001660000125411898,
+     "p90": 0.00045800002408213913,
+     "mean": 0.00024393460989233101
+    },
+    "readerInit": {
+     "n": 627,
+     "min": 0.04175000000395812,
+     "median": 0.047375000023748726,
+     "p90": 0.05737499997485429,
+     "mean": 0.05293594896358897
+    },
+    "tree": {
+     "n": 627,
+     "min": 0.09391699999105185,
+     "median": 0.10116699998616241,
+     "p90": 0.11016700000618584,
+     "mean": 0.1106481881974398
+    },
+    "diagnosticsLeaves": {
+     "n": 627,
+     "min": 0.0042910000192932785,
+     "median": 0.005124999996041879,
+     "p90": 0.006333999976050109,
+     "mean": 0.005648650717615199
+    },
+    "wrap": {
+     "n": 627,
+     "min": 0.00008299999171867967,
+     "median": 0.0002500000118743628,
+     "p90": 0.0006250000151339918,
+     "mean": 0.0003785964913767996
+    },
+    "free": {
+     "n": 627,
+     "min": 0.0756249999976717,
+     "median": 0.08562500000698492,
+     "p90": 0.10199999998440035,
+     "mean": 0.08861456140336443
+    }
+   }
+  },
+  "syn-tables": {
+   "bytes": 100121,
+   "wire": {
+    "bytes": 751840,
+    "words": 124653,
+    "strings": 12543,
+    "textBytes": 152876,
+    "leafSources": 5576
+   },
+   "total": {
+    "n": 378,
+    "min": 3.0105840000032913,
+    "median": 3.087375000002794,
+    "p90": 3.3314580000005662,
+    "mean": 3.179758351851854,
+    "roundMedians": [
+     3.073708000010811,
+     3.083375000016531,
+     3.1011250000155997
+    ],
+    "spread": 0.008880359530268934
+   },
+   "stages": {
+    "encode": {
+     "n": 378,
+     "min": 0.013833000004524365,
+     "median": 0.014958000014303252,
+     "p90": 0.015749999991385266,
+     "mean": 0.015276994708791208
+    },
+    "copyIn": {
+     "n": 378,
+     "min": 0.0017499999958090484,
+     "median": 0.0019580000080168247,
+     "p90": 0.0025000000023283064,
+     "mean": 0.0021278571441249736
+    },
+    "wasm": {
+     "n": 378,
+     "min": 2.205708000023151,
+     "median": 2.2595000000146683,
+     "p90": 2.3296250000130385,
+     "mean": 2.271939830686996
+    },
+    "view": {
+     "n": 378,
+     "min": 0.00008299999171867967,
+     "median": 0.00012500002048909664,
+     "p90": 0.000375000003259629,
+     "mean": 0.00021637830773624714
+    },
+    "readerInit": {
+     "n": 378,
+     "min": 0.1128749999916181,
+     "median": 0.1314589999965392,
+     "p90": 0.16295800000079907,
+     "mean": 0.13949061111045358
+    },
+    "tree": {
+     "n": 378,
+     "min": 0.32387500000186265,
+     "median": 0.33491700000013225,
+     "p90": 0.35491699998965487,
+     "mean": 0.3584771931228239
+    },
+    "diagnosticsLeaves": {
+     "n": 378,
+     "min": 0.10387500000069849,
+     "median": 0.10879200001363643,
+     "p90": 0.12541700000292622,
+     "mean": 0.15662511375604293
+    },
+    "wrap": {
+     "n": 378,
+     "min": 0.00008299999171867967,
+     "median": 0.0002500000118743628,
+     "p90": 0.0011670000094454736,
+     "mean": 0.0005039735440818948
+    },
+    "free": {
+     "n": 378,
+     "min": 0.21241700000246055,
+     "median": 0.2277499999909196,
+     "p90": 0.2628330000152346,
+     "mean": 0.2351003994708037
+    }
+   }
+  },
+  "write:mixed-10k:untouched": {
+   "total": {
+    "n": 9228,
+    "min": 0.11229199997615069,
+    "median": 0.12400000001071021,
+    "p90": 0.13587500000721775,
+    "mean": 0.129850490680683,
+    "roundMedians": [
+     0.12362500000745058,
+     0.12391600001137704,
+     0.12470799998845905
+    ],
+    "spread": 0.008733870813830069
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 9228,
+     "min": 0.0574579999956768,
+     "median": 0.06412499997531995,
+     "p90": 0.07079200001317076,
+     "mean": 0.06859034947987533
+    },
+    "copyIn": {
+     "n": 9228,
+     "min": 0.00041599999531172216,
+     "median": 0.0005410000158008188,
+     "p90": 0.0005839999939780682,
+     "mean": 0.0005547330949863635
+    },
+    "wasm": {
+     "n": 9228,
+     "min": 0.05199999999604188,
+     "median": 0.05783399997744709,
+     "p90": 0.06258399999933317,
+     "mean": 0.059191617143475164
+    },
+    "copyOut": {
+     "n": 9228,
+     "min": 0.0005829999863635749,
+     "median": 0.0007920000061858445,
+     "p90": 0.0010839999886229634,
+     "mean": 0.0009414107066387004
+    },
+    "utf8Decode": {
+     "n": 9228,
+     "min": 0.000375000003259629,
+     "median": 0.0004999999946448952,
+     "p90": 0.0006250000151339918,
+     "mean": 0.0005723802557074407
+    }
+   }
+  },
+  "write:mixed-10k:edit-one-paragraph": {
+   "total": {
+    "n": 3785,
+    "min": 0.292875000013737,
+    "median": 0.30879099998855963,
+    "p90": 0.3307090000016615,
+    "mean": 0.3168135384410879,
+    "roundMedians": [
+     0.3113749999902211,
+     0.31087500002468005,
+     0.3059580000117421
+    ],
+    "spread": 0.017542609657275283
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 3785,
+     "min": 0.064457999978913,
+     "median": 0.0725840000086464,
+     "p90": 0.07879200001480058,
+     "mean": 0.07592484517815884
+    },
+    "copyIn": {
+     "n": 3785,
+     "min": 0.000375000003259629,
+     "median": 0.0005409999866969883,
+     "p90": 0.0005839999939780682,
+     "mean": 0.0005385941876479285
+    },
+    "wasm": {
+     "n": 3785,
+     "min": 0.22054199999547563,
+     "median": 0.23358400000142865,
+     "p90": 0.25062499998603016,
+     "mean": 0.23873356697493284
+    },
+    "copyOut": {
+     "n": 3785,
+     "min": 0.0006249999860301614,
+     "median": 0.0009169999975711107,
+     "p90": 0.0012500000011641532,
+     "mean": 0.0010193101717731233
+    },
+    "utf8Decode": {
+     "n": 3785,
+     "min": 0.000375000003259629,
+     "median": 0.0005419999943114817,
+     "p90": 0.0007090000144671649,
+     "mean": 0.0005972219285751414
+    }
+   }
+  },
+  "write:mixed-100k:untouched": {
+   "total": {
+    "n": 869,
+    "min": 1.238415999978315,
+    "median": 1.3208750000339933,
+    "p90": 1.4326669999863952,
+    "mean": 1.3827757905635922,
+    "roundMedians": [
+     1.3198750000447035,
+     1.3184580000233836,
+     1.3238330000313
+    ],
+    "spread": 0.004069272268593102
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 869,
+     "min": 0.6312499999767169,
+     "median": 0.6702079999959096,
+     "p90": 0.7259999999660067,
+     "mean": 0.7108265788254051
+    },
+    "copyIn": {
+     "n": 869,
+     "min": 0.003708000003825873,
+     "median": 0.0040840000146999955,
+     "p90": 0.005416999978478998,
+     "mean": 0.00447579171488188
+    },
+    "wasm": {
+     "n": 869,
+     "min": 0.5712910000002012,
+     "median": 0.6088339999550954,
+     "p90": 0.6750000000465661,
+     "mean": 0.6220064879178983
+    },
+    "copyOut": {
+     "n": 869,
+     "min": 0.003499999991618097,
+     "median": 0.0043750000186264515,
+     "p90": 0.006792000029236078,
+     "mean": 0.004942347525465715
+    },
+    "utf8Decode": {
+     "n": 869,
+     "min": 0.020917000016197562,
+     "median": 0.02383299998473376,
+     "p90": 0.03183399996487424,
+     "mean": 0.04052458457994115
+    }
+   }
+  },
+  "write:mixed-100k:edit-one-paragraph": {
+   "total": {
+    "n": 447,
+    "min": 2.50162499997532,
+    "median": 2.6223750000353903,
+    "p90": 2.833374999987427,
+    "mean": 2.697276651007264,
+    "roundMedians": [
+     2.685916999995243,
+     2.5860419999808073,
+     2.5891669999691658
+    ],
+    "spread": 0.03808570475736218
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 447,
+     "min": 0.6732499999925494,
+     "median": 0.7017079999786802,
+     "p90": 0.7718749999767169,
+     "mean": 0.7363601767323116
+    },
+    "copyIn": {
+     "n": 447,
+     "min": 0.003749999974388629,
+     "median": 0.0040420000441372395,
+     "p90": 0.00491600000532344,
+     "mean": 0.004301543625293537
+    },
+    "wasm": {
+     "n": 447,
+     "min": 1.7860840000212193,
+     "median": 1.877541999972891,
+     "p90": 2.0397079999675043,
+     "mean": 1.901400085012543
+    },
+    "copyOut": {
+     "n": 447,
+     "min": 0.0036250000121071935,
+     "median": 0.0044169999891892076,
+     "p90": 0.006624999979976565,
+     "mean": 0.004929525726000826
+    },
+    "utf8Decode": {
+     "n": 447,
+     "min": 0.020707999996375293,
+     "median": 0.024750000040512532,
+     "p90": 0.03229200001806021,
+     "mean": 0.05028531991111498
+    }
+   }
+  },
+  "write:mixed-1m:untouched": {
+   "total": {
+    "n": 73,
+    "min": 13.714957999996841,
+    "median": 14.550125000008848,
+    "p90": 30.778374999994412,
+    "mean": 16.803885342463953,
+    "roundMedians": [
+     14.616082999971695,
+     14.558667000033893,
+     14.317416000005323
+    ],
+    "spread": 0.020526765231651974
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 73,
+     "min": 6.6766670000506565,
+     "median": 7.165582999994513,
+     "p90": 7.465916999964975,
+     "mean": 7.345652410957471
+    },
+    "copyIn": {
+     "n": 73,
+     "min": 0.051583000051323324,
+     "median": 0.06137499999022111,
+     "p90": 0.06987499998649582,
+     "mean": 0.06364209589003011
+    },
+    "wasm": {
+     "n": 73,
+     "min": 6.724749999993946,
+     "median": 7.043667000019923,
+     "p90": 7.230207999993581,
+     "mean": 7.047535986300679
+    },
+    "copyOut": {
+     "n": 73,
+     "min": 0.03729200002271682,
+     "median": 0.04716700001154095,
+     "p90": 0.09445799997774884,
+     "mean": 1.6669691780857958
+    },
+    "utf8Decode": {
+     "n": 73,
+     "min": 0.18566599994665012,
+     "median": 0.20887500001117587,
+     "p90": 0.2681670000310987,
+     "mean": 0.6800856712299769
+    }
+   }
+  },
+  "write:mixed-1m:edit-one-paragraph": {
+   "total": {
+    "n": 42,
+    "min": 26.578708000015467,
+    "median": 27.99991700000828,
+    "p90": 33.01825000002282,
+    "mean": 29.39170235714465,
+    "roundMedians": [
+     27.17174999997951,
+     28.185916999995243,
+     28.04858299996704
+    ],
+    "spread": 0.03622035736803905
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 42,
+     "min": 7.432040999992751,
+     "median": 7.888708000013139,
+     "p90": 8.287499999976717,
+     "mean": 8.243490119051698
+    },
+    "copyIn": {
+     "n": 42,
+     "min": 0.049750000005587935,
+     "median": 0.06258399999933317,
+     "p90": 0.06841700000222772,
+     "mean": 0.06291761904278592
+    },
+    "wasm": {
+     "n": 42,
+     "min": 18.86858300003223,
+     "median": 19.66570899996441,
+     "p90": 19.976709000009578,
+     "mean": 19.597596238097008
+    },
+    "copyOut": {
+     "n": 42,
+     "min": 0.03904199996031821,
+     "median": 0.048749999958090484,
+     "p90": 0.08466599998064339,
+     "mean": 1.2581756190504945
+    },
+    "utf8Decode": {
+     "n": 42,
+     "min": 0.18825000000651926,
+     "median": 0.2307499999878928,
+     "p90": 0.2612500000395812,
+     "mean": 0.22952276190266102
+    }
+   }
+  },
+  "write:real-docs:untouched": {
+   "total": {
+    "n": 134,
+    "min": 7.894792000006419,
+    "median": 8.198000000033062,
+    "p90": 8.929500000027474,
+    "mean": 9.037995022389717,
+    "roundMedians": [
+     8.267792000027839,
+     8.158791999972891,
+     8.147666000004392
+    ],
+    "spread": 0.014653086121366494
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 134,
+     "min": 3.758124999993015,
+     "median": 3.9984580000163987,
+     "p90": 4.491500000003725,
+     "mean": 4.757323656716373
+    },
+    "copyIn": {
+     "n": 134,
+     "min": 0.029624999966472387,
+     "median": 0.03437499998835847,
+     "p90": 0.04312499996740371,
+     "mean": 0.03696238806118508
+    },
+    "wasm": {
+     "n": 134,
+     "min": 3.7597919999971054,
+     "median": 3.957583000010345,
+     "p90": 4.1234999999869615,
+     "mean": 3.9791103656713873
+    },
+    "copyOut": {
+     "n": 134,
+     "min": 0.02441700000781566,
+     "median": 0.02833300002384931,
+     "p90": 0.045291999995242804,
+     "mean": 0.10851467910323487
+    },
+    "utf8Decode": {
+     "n": 134,
+     "min": 0.1273749999818392,
+     "median": 0.15133399999467656,
+     "p90": 0.18129199999384582,
+     "mean": 0.15608393283753738
+    }
+   }
+  },
+  "write:real-docs:edit-one-paragraph": {
+   "total": {
+    "n": 82,
+    "min": 13.902292000013404,
+    "median": 14.370000000053551,
+    "p90": 15.054165999987163,
+    "mean": 15.02278712195225,
+    "roundMedians": [
+     14.542750000022352,
+     14.16925000003539,
+     14.386499999964144
+    ],
+    "spread": 0.02599164926830686
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 82,
+     "min": 3.921875,
+     "median": 4.179125000024214,
+     "p90": 4.520041000039782,
+     "mean": 4.836430378047403
+    },
+    "copyIn": {
+     "n": 82,
+     "min": 0.029917000036220998,
+     "median": 0.03537500003585592,
+     "p90": 0.04020899999886751,
+     "mean": 0.03688668293123156
+    },
+    "wasm": {
+     "n": 82,
+     "min": 9.651374999957625,
+     "median": 9.916958999994677,
+     "p90": 10.201084000000264,
+     "mean": 9.957475109752012
+    },
+    "copyOut": {
+     "n": 82,
+     "min": 0.02058399998350069,
+     "median": 0.027375000005122274,
+     "p90": 0.03416700003435835,
+     "mean": 0.028015231709393514
+    },
+    "utf8Decode": {
+     "n": 82,
+     "min": 0.13866700005019084,
+     "median": 0.15687499998603016,
+     "p90": 0.18316600000252947,
+     "mean": 0.16397971951221002
+    }
+   }
+  },
+  "write:real-spec:untouched": {
+   "total": {
+    "n": 847,
+    "min": 1.2876670000259764,
+    "median": 1.3620419999933802,
+    "p90": 1.4605419999570586,
+    "mean": 1.4192914191255903,
+    "roundMedians": [
+     1.3552079999935813,
+     1.3742079999647103,
+     1.3570829999516718
+    ],
+    "spread": 0.013949643235099464
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 847,
+     "min": 0.6080410000286065,
+     "median": 0.6463750000111759,
+     "p90": 0.6945420000120066,
+     "mean": 0.687063305784284
+    },
+    "copyIn": {
+     "n": 847,
+     "min": 0.0039579999865964055,
+     "median": 0.00458399998024106,
+     "p90": 0.006166999984998256,
+     "mean": 0.005066972845434645
+    },
+    "wasm": {
+     "n": 847,
+     "min": 0.6020419999840669,
+     "median": 0.650833000021521,
+     "p90": 0.7009580000303686,
+     "mean": 0.6606318146392259
+    },
+    "copyOut": {
+     "n": 847,
+     "min": 0.005874999973457307,
+     "median": 0.007458000036422163,
+     "p90": 0.011958999966736883,
+     "mean": 0.009166466353137878
+    },
+    "utf8Decode": {
+     "n": 847,
+     "min": 0.0372499999939464,
+     "median": 0.044082999986130744,
+     "p90": 0.05645899998489767,
+     "mean": 0.0573628595035079
+    }
+   }
+  },
+  "write:real-spec:edit-one-paragraph": {
+   "total": {
+    "n": 438,
+    "min": 2.553708999999799,
+    "median": 2.6644589999923483,
+    "p90": 2.8537080000387505,
+    "mean": 2.751109942923152,
+    "roundMedians": [
+     2.6153330000233836,
+     2.646707999985665,
+     2.7352500000270084
+    ],
+    "spread": 0.04500613445505038
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 438,
+     "min": 0.6485840000095777,
+     "median": 0.689249999995809,
+     "p90": 0.7699159999610856,
+     "mean": 0.7223975433804282
+    },
+    "copyIn": {
+     "n": 438,
+     "min": 0.0040419999859295785,
+     "median": 0.004584000038448721,
+     "p90": 0.006249999976716936,
+     "mean": 0.00512368264703769
+    },
+    "wasm": {
+     "n": 438,
+     "min": 1.8331250000046566,
+     "median": 1.9070830000564456,
+     "p90": 2.0360409999848343,
+     "mean": 1.9277473082209111
+    },
+    "copyOut": {
+     "n": 438,
+     "min": 0.005667000019457191,
+     "median": 0.006833999999798834,
+     "p90": 0.008792000007815659,
+     "mean": 0.008699002283142633
+    },
+    "utf8Decode": {
+     "n": 438,
+     "min": 0.03816599998390302,
+     "median": 0.04454099998110905,
+     "p90": 0.057415999996010214,
+     "mean": 0.08714240639163266
+    }
+   }
+  },
+  "write:syn-lists:untouched": {
+   "total": {
+    "n": 939,
+    "min": 1.1824999999953434,
+    "median": 1.2272920000250451,
+    "p90": 1.3427089999895543,
+    "mean": 1.2802728775289125,
+    "roundMedians": [
+     1.235917000041809,
+     1.2432920000283048,
+     1.209082999965176
+    ],
+    "spread": 0.0278735623327054
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 939,
+     "min": 0.6090409999596886,
+     "median": 0.63900000002468,
+     "p90": 0.6852080000098795,
+     "mean": 0.6660701224713808
+    },
+    "copyIn": {
+     "n": 939,
+     "min": 0.0036250000121071935,
+     "median": 0.0039579999865964055,
+     "p90": 0.0047500000218860805,
+     "mean": 0.004251879658210324
+    },
+    "wasm": {
+     "n": 939,
+     "min": 0.5413330000010319,
+     "median": 0.5700000000069849,
+     "p90": 0.6295829999726266,
+     "mean": 0.5831207699672775
+    },
+    "copyOut": {
+     "n": 939,
+     "min": 0.003375000029336661,
+     "median": 0.004167000006418675,
+     "p90": 0.006667000008746982,
+     "mean": 0.007067386582652474
+    },
+    "utf8Decode": {
+     "n": 939,
+     "min": 0.0032090000458993018,
+     "median": 0.003874999994877726,
+     "p90": 0.0047920000506564975,
+     "mean": 0.019762718849391424
+    }
+   }
+  },
+  "write:syn-lists:edit-one-paragraph": {
+   "total": {
+    "n": 460,
+    "min": 2.426833000034094,
+    "median": 2.5630410000449046,
+    "p90": 2.742249999952037,
+    "mean": 2.615239830436337,
+    "roundMedians": [
+     2.5223750000004657,
+     2.571875000023283,
+     2.5880420000175945
+    ],
+    "spread": 0.025620737247659477
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 460,
+     "min": 0.6469170000054874,
+     "median": 0.6757499999948777,
+     "p90": 0.7423330000019632,
+     "mean": 0.7046139173915752
+    },
+    "copyIn": {
+     "n": 460,
+     "min": 0.003665999975055456,
+     "median": 0.0040000000153668225,
+     "p90": 0.005124999966938049,
+     "mean": 0.004301089130762114
+    },
+    "wasm": {
+     "n": 460,
+     "min": 1.7567079999716952,
+     "median": 1.8611669999663718,
+     "p90": 2.0007500000065193,
+     "mean": 1.881392952173938
+    },
+    "copyOut": {
+     "n": 460,
+     "min": 0.0035830000415444374,
+     "median": 0.004625000001396984,
+     "p90": 0.006541999988257885,
+     "mean": 0.005036745653563665
+    },
+    "utf8Decode": {
+     "n": 460,
+     "min": 0.0032499999506399035,
+     "median": 0.003958999994210899,
+     "p90": 0.0047919999924488366,
+     "mean": 0.01989512608649776
+    }
+   }
+  },
+  "write:syn-tables:untouched": {
+   "total": {
+    "n": 566,
+    "min": 1.9727500000153668,
+    "median": 2.0155420000082813,
+    "p90": 2.146500000031665,
+    "mean": 2.1220283462898806,
+    "roundMedians": [
+     2.057708000007551,
+     2.0026659999857657,
+     2.006374999997206
+    ],
+    "spread": 0.02730878345455433
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 566,
+     "min": 0.9539170000352897,
+     "median": 0.9820830000098795,
+     "p90": 1.0500420000171289,
+     "mean": 1.0684156378085499
+    },
+    "copyIn": {
+     "n": 566,
+     "min": 0.005375000007916242,
+     "median": 0.005707999982405454,
+     "p90": 0.007041000004392117,
+     "mean": 0.0061765371044553066
+    },
+    "wasm": {
+     "n": 566,
+     "min": 0.9987079999991693,
+     "median": 1.0182500000228174,
+     "p90": 1.0734579999698326,
+     "mean": 1.030361667844136
+    },
+    "copyOut": {
+     "n": 566,
+     "min": 0.003333000000566244,
+     "median": 0.004291999968700111,
+     "p90": 0.006750000000465661,
+     "mean": 0.005047342756453757
+    },
+    "utf8Decode": {
+     "n": 566,
+     "min": 0.0031250000465661287,
+     "median": 0.003416999999899417,
+     "p90": 0.004249999998137355,
+     "mean": 0.012027160776285422
+    }
+   }
+  },
+  "write:syn-tables:edit-one-paragraph": {
+   "total": {
+    "n": 317,
+    "min": 3.5461249999934807,
+    "median": 3.68425000004936,
+    "p90": 3.8832909999764524,
+    "mean": 3.798837018926769,
+    "roundMedians": [
+     3.702333000022918,
+     3.6854159999638796,
+     3.665374999982305
+    ],
+    "spread": 0.010031349674999787
+   },
+   "stages": {
+    "jsEncode": {
+     "n": 317,
+     "min": 1.021874999976717,
+     "median": 1.088333000021521,
+     "p90": 1.18587500002468,
+     "mean": 1.1386455141969336
+    },
+    "copyIn": {
+     "n": 317,
+     "min": 0.00566699996124953,
+     "median": 0.007166000024881214,
+     "p90": 0.009000000020023435,
+     "mean": 0.007551280755185366
+    },
+    "wasm": {
+     "n": 317,
+     "min": 2.474207999999635,
+     "median": 2.57874999998603,
+     "p90": 2.6930829999619164,
+     "mean": 2.5924798895914125
+    },
+    "copyOut": {
+     "n": 317,
+     "min": 0.003874999994877726,
+     "median": 0.005375000007916242,
+     "p90": 0.007666999998036772,
+     "mean": 0.005884842269382607
+    },
+    "utf8Decode": {
+     "n": 317,
+     "min": 0.0032079999800771475,
+     "median": 0.003916999965440482,
+     "p90": 0.004874999984167516,
+     "mean": 0.05427549211385481
+    }
+   }
+  }
+ },
+ "wasmSplit": {
+  "mixed-1m": {
+   "iterations": 29,
+   "parseShare": {
+    "core parse (read_source)": 0.6111568502128674,
+    "wire: leaf source maps (write_inline_source)": 0.2607327404101353,
+    "wire: tree + diagnostics (Writer)": 0.09583726027595123,
+    "other (allocator, glue)": 0.0239967790043079,
+    "wire: UTF-16 offset table (OffsetTable)": 0.0082763700967382
+   },
+   "freeVsParse": 0.09380788855066027
+  },
+  "real-docs": {
+   "iterations": 43,
+   "parseShare": {
+    "core parse (read_source)": 0.4685872370066649,
+    "wire: leaf source maps (write_inline_source)": 0.4193566260864059,
+    "wire: tree + diagnostics (Writer)": 0.07362823942881568,
+    "other (allocator, glue)": 0.02919443696867035,
+    "wire: UTF-16 offset table (OffsetTable)": 0.009233460509443223
+   },
+   "freeVsParse": 0.07544089477100385
+  },
+  "syn-cjk": {
+   "iterations": 109,
+   "parseShare": {
+    "core parse (read_source)": 0.4417442601921908,
+    "wire: leaf source maps (write_inline_source)": 0.2862017145776389,
+    "wire: tree + diagnostics (Writer)": 0.10458625280138419,
+    "other (allocator, glue)": 0.10144273616461139,
+    "wire: UTF-16 offset table (OffsetTable)": 0.06602503626417472
+   },
+   "freeVsParse": 0.03572720391093742
+  },
+  "syn-paragraphs": {
+   "iterations": 300,
+   "parseShare": {
+    "core parse (read_source)": 0.5665871868037369,
+    "wire: leaf source maps (write_inline_source)": 0.30122944694431736,
+    "wire: tree + diagnostics (Writer)": 0.09854889851026992,
+    "other (allocator, glue)": 0.028651839111910254,
+    "wire: UTF-16 offset table (OffsetTable)": 0.0049826286297656305
+   },
+   "freeVsParse": 0.0654340773169683
+  }
+ },
+ "sizes": {
+  "ours: .wasm as built": {
+   "raw": 841166,
+   "gzip": 307277,
+   "brotli": 235289
+  },
+  "ours: .wasm without custom sections (name, producers)": {
+   "raw": 797738,
+   "gzip": 292883,
+   "brotli": 224059
+  },
+  "ours: index.js wrapper, minified": {
+   "raw": 15078,
+   "gzip": 5166,
+   "brotli": 4683
+  },
+  "markdown-it (bundled, minified)": {
+   "raw": 99602,
+   "gzip": 41663,
+   "brotli": 36754
+  },
+  "marked (bundled, minified)": {
+   "raw": 47728,
+   "gzip": 14291,
+   "brotli": 13070
+  },
+  "commonmark.js (bundled, minified)": {
+   "raw": 159554,
+   "gzip": 48027,
+   "brotli": 39722
+  },
+  "mdast-util-from-markdown + micromark gfm (bundled, minified)": {
+   "raw": 82507,
+   "gzip": 23653,
+   "brotli": 20726
+  },
+  "mdast-util-to-markdown + gfm (bundled, minified)": {
+   "raw": 35877,
+   "gzip": 11687,
+   "brotli": 10574
+  },
+  "@lezer/markdown + @lezer/common (bundled, minified)": {
+   "raw": 61528,
+   "gzip": 20492,
+   "brotli": 18655
+  },
+  "markdown-wasm: markdown.wasm": {
+   "raw": 56655,
+   "gzip": 25999,
+   "brotli": 22651
+  },
+  "markdown-wasm: markdown.es.js": {
+   "raw": 9569,
+   "gzip": 4109,
+   "brotli": 3652
+  },
+  "load": {
+   "compile": {
+    "n": 15,
+    "min": 1.2169170000124723,
+    "median": 1.4978339999797754,
+    "p90": 1.599291999998968,
+    "mean": 1.437836266673791
+   },
+   "load": {
+    "n": 15,
+    "min": 0.6072500000009313,
+    "median": 0.7743330000084825,
+    "p90": 0.9578749999636784,
+    "mean": 0.7931832000031136
+   },
+   "firstParse100k": {
+    "n": 15,
+    "min": 10.836666999966837,
+    "median": 12.1917919999687,
+    "p90": 15.706624999991618,
+    "mean": 12.817600200003168
+   },
+   "secondParse100k": {
+    "n": 15,
+    "min": 4.524000000033993,
+    "median": 6.129666000022553,
+    "p90": 7.878583000041544,
+    "mean": 6.201680600002874
+   },
+   "steadyParse100k": 2.355749999987893
+  }
+ },
+ "cold": {
+  "ours": {
+   "load": {
+    "n": 5,
+    "min": 10.459958,
+    "median": 11.057500000000001,
+    "p90": 11.276875,
+    "mean": 10.9759332
+   },
+   "first": {
+    "n": 5,
+    "min": 17.578500000000002,
+    "median": 18.614125,
+    "p90": 22.267166,
+    "mean": 19.2428166
+   },
+   "second": {
+    "n": 5,
+    "min": 4.787084,
+    "median": 7.412292000000001,
+    "p90": 8.552542000000003,
+    "mean": 7.125400400000001
+   }
+  },
+  "markdown-it": {
+   "load": {
+    "n": 5,
+    "min": 7.356916999999999,
+    "median": 7.393541000000001,
+    "p90": 7.469874999999998,
+    "mean": 7.406475
+   },
+   "first": {
+    "n": 5,
+    "min": 15.168582999999998,
+    "median": 15.756916,
+    "p90": 16.188916999999996,
+    "mean": 15.659308199999998
+   },
+   "second": {
+    "n": 5,
+    "min": 6.996292000000004,
+    "median": 7.087334000000006,
+    "p90": 7.329915999999997,
+    "mean": 7.137450000000001
+   }
+  },
+  "marked": {
+   "load": {
+    "n": 5,
+    "min": 5.516375,
+    "median": 5.742457999999999,
+    "p90": 5.758042,
+    "mean": 5.7006
+   },
+   "first": {
+    "n": 5,
+    "min": 29.056749999999997,
+    "median": 29.211249999999996,
+    "p90": 31.091834000000002,
+    "mean": 29.701416799999997
+   },
+   "second": {
+    "n": 5,
+    "min": 7.131750000000004,
+    "median": 7.494500000000002,
+    "p90": 7.795708000000005,
+    "mean": 7.536841600000001
+   }
+  },
+  "commonmark": {
+   "load": {
+    "n": 5,
+    "min": 6.571915999999998,
+    "median": 6.623583999999999,
+    "p90": 6.731834000000001,
+    "mean": 6.636133599999999
+   },
+   "first": {
+    "n": 5,
+    "min": 8.428791,
+    "median": 8.707083,
+    "p90": 8.718167000000001,
+    "mean": 8.6200664
+   },
+   "second": {
+    "n": 5,
+    "min": 4.254042000000002,
+    "median": 4.438917,
+    "p90": 4.586125000000003,
+    "mean": 4.420458600000001
+   }
+  },
+  "mdast": {
+   "load": {
+    "n": 5,
+    "min": 21.02375,
+    "median": 22.787582999999998,
+    "p90": 23.412667,
+    "mean": 22.459825000000002
+   },
+   "first": {
+    "n": 5,
+    "min": 79.43375,
+    "median": 85.348625,
+    "p90": 89.310125,
+    "mean": 84.2202084
+   },
+   "second": {
+    "n": 5,
+    "min": 55.928625,
+    "median": 59.567042000000015,
+    "p90": 62.281000000000006,
+    "mean": 58.738716800000006
+   }
+  },
+  "lezer": {
+   "load": {
+    "n": 5,
+    "min": 4.405291,
+    "median": 4.486542,
+    "p90": 4.830333999999999,
+    "mean": 4.5377168
+   },
+   "first": {
+    "n": 5,
+    "min": 16.58525,
+    "median": 16.851166999999997,
+    "p90": 17.101125,
+    "mean": 16.853975199999997
+   },
+   "second": {
+    "n": 5,
+    "min": 9.363750000000003,
+    "median": 9.395916,
+    "p90": 9.561791,
+    "mean": 9.439858000000001
+   }
+  },
+  "markdown-wasm": {
+   "load": {
+    "n": 5,
+    "min": 1.8822500000000009,
+    "median": 2.0863330000000015,
+    "p90": 2.1658750000000015,
+    "mean": 2.047816600000001
+   },
+   "first": {
+    "n": 5,
+    "min": 3.6622079999999997,
+    "median": 3.9512909999999994,
+    "p90": 4.684332999999999,
+    "mean": 4.044091399999999
+   },
+   "second": {
+    "n": 5,
+    "min": 2.0074170000000002,
+    "median": 2.299249999999997,
+    "p90": 2.8149590000000018,
+    "mean": 2.2958169999999996
+   }
+  }
+ },
+ "memory": {
+  "ours": {
+   "heapUsed": 16037680,
+   "external": 30150260,
+   "arrayBuffers": 471536,
+   "rss": 86917120,
+   "wasmBefore": 1245184,
+   "wasmAfter": 27394048,
+   "heapWithoutLeafSources": 12071056,
+   "wasmAfterSecondParse": 27394048,
+   "wasmAfter20Parses": 27394048,
+   "runs": [
+    {
+     "heapUsed": 15556648,
+     "external": 30150260,
+     "arrayBuffers": 471536,
+     "rss": 86392832,
+     "wasmBefore": 1245184,
+     "wasmAfter": 27394048,
+     "heapWithoutLeafSources": 12071008,
+     "wasmAfterSecondParse": 27394048,
+     "wasmAfter20Parses": 27394048
+    },
+    {
+     "heapUsed": 16037680,
+     "external": 30150260,
+     "arrayBuffers": 471536,
+     "rss": 86917120,
+     "wasmBefore": 1245184,
+     "wasmAfter": 27394048,
+     "heapWithoutLeafSources": 12071056,
+     "wasmAfterSecondParse": 27394048,
+     "wasmAfter20Parses": 27394048
+    },
+    {
+     "heapUsed": 16038024,
+     "external": 30150260,
+     "arrayBuffers": 471536,
+     "rss": 87425024,
+     "wasmBefore": 1245184,
+     "wasmAfter": 27394048,
+     "heapWithoutLeafSources": 12071400,
+     "wasmAfterSecondParse": 27394048,
+     "wasmAfter20Parses": 27394048
+    }
+   ]
+  },
+  "markdown-it": {
+   "heapUsed": 18866872,
+   "external": 40,
+   "arrayBuffers": 0,
+   "rss": 49545216,
+   "runs": [
+    {
+     "heapUsed": 18867192,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 49725440
+    },
+    {
+     "heapUsed": 18866872,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 48807936
+    },
+    {
+     "heapUsed": 18866872,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 49545216
+    }
+   ]
+  },
+  "marked": {
+   "heapUsed": 16360920,
+   "external": 40,
+   "arrayBuffers": 0,
+   "rss": 45793280,
+   "runs": [
+    {
+     "heapUsed": 16360848,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 45793280
+    },
+    {
+     "heapUsed": 16370536,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 45547520
+    },
+    {
+     "heapUsed": 16360920,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 46170112
+    }
+   ]
+  },
+  "commonmark": {
+   "heapUsed": 22928992,
+   "external": 40,
+   "arrayBuffers": 0,
+   "rss": 48693248,
+   "runs": [
+    {
+     "heapUsed": 22928992,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 48693248
+    },
+    {
+     "heapUsed": 22928992,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 48021504
+    },
+    {
+     "heapUsed": 22928992,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 48873472
+    }
+   ]
+  },
+  "mdast": {
+   "heapUsed": 17337800,
+   "external": 40,
+   "arrayBuffers": 0,
+   "rss": 312950784,
+   "runs": [
+    {
+     "heapUsed": 17337800,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 312950784
+    },
+    {
+     "heapUsed": 17330352,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 315211776
+    },
+    {
+     "heapUsed": 17340824,
+     "external": 40,
+     "arrayBuffers": 0,
+     "rss": 306495488
+    }
+   ]
+  },
+  "lezer": {
+   "heapUsed": 15161424,
+   "external": 385936,
+   "arrayBuffers": 385896,
+   "rss": 43712512,
+   "runs": [
+    {
+     "heapUsed": 15161424,
+     "external": 385936,
+     "arrayBuffers": 385896,
+     "rss": 44072960
+    },
+    {
+     "heapUsed": 15161304,
+     "external": 385936,
+     "arrayBuffers": 385896,
+     "rss": 43696128
+    },
+    {
+     "heapUsed": 15161448,
+     "external": 385936,
+     "arrayBuffers": 385896,
+     "rss": 43712512
+    }
+   ]
+  },
+  "markdown-wasm": {
+   "heapUsed": -13616,
+   "external": 2663544,
+   "arrayBuffers": 0,
+   "rss": 20037632,
+   "runs": [
+    {
+     "heapUsed": -13616,
+     "external": 2663544,
+     "arrayBuffers": 0,
+     "rss": 20037632
+    },
+    {
+     "heapUsed": -13616,
+     "external": 2663544,
+     "arrayBuffers": 0,
+     "rss": 20905984
+    },
+    {
+     "heapUsed": -13616,
+     "external": 2663544,
+     "arrayBuffers": 0,
+     "rss": 19873792
+    }
+   ]
+  }
+ },
+ "keystroke": {}
+}

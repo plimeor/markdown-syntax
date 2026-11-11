@@ -577,6 +577,73 @@ fn literal_autolinks_in_open_labels_grow_linearly() {
 
 // untrusted-input-cost: Linear time
 #[test]
+fn a_backtick_run_in_an_open_label_grows_linearly() {
+    let _serial = one_at_a_time();
+    // A run that opens no code span is stepped over whole by the walk to a
+    // label's `]`: no shorter run inside it asks again where a code span of
+    // its length closes.
+    for opener in [":t[", "::x[", ":::x["] {
+        assert_linear_growth(
+            &format!("{opener} before a backtick run"),
+            4_000,
+            |n| format!("{opener}{}{}", "`".repeat(n), "a".repeat(n)),
+            parse_input,
+        );
+    }
+}
+
+// untrusted-input-cost: Linear time
+#[test]
+fn backtick_runs_before_long_text_in_an_open_label_grow_linearly() {
+    let _serial = one_at_a_time();
+    // Every run of a new length inside a directive's label left open asks
+    // where a code span of its length closes; the text after the runs must
+    // not be read again for each one. The runs, each shorter than the one
+    // before so none closes, grow in number as the square root of the text,
+    // so a cost of the runs times the text grows as the input to the power
+    // 1.5: sixteen times the input takes sixty-four times as long, where a
+    // linear cost takes sixteen.
+    for opener in [":t[", "::x[", ":::x["] {
+        let setup = |n: usize| {
+            let runs: String = (1..=(n as f64).sqrt() as usize)
+                .rev()
+                .map(|len| "`".repeat(len) + "a")
+                .collect();
+            format!("{opener}{runs}{}", "a".repeat(n))
+        };
+        let n = 16_000;
+        let linear = |[small, large]: &[Duration; 2]| *large <= *small * 32;
+        let samples = growth_samples(&[setup(n), setup(16 * n)], parse_input, linear);
+        let [small, large] = samples;
+        assert!(
+            linear(&samples),
+            "{opener} backticks before text in an open label: {small:?} at {n}, {large:?} at {} per sample",
+            16 * n
+        );
+    }
+}
+
+// untrusted-input-cost: Linear time
+#[test]
+fn angle_brackets_in_an_open_block_directive_label_grow_linearly() {
+    let _serial = one_at_a_time();
+    // Every `<` in a leaf or container directive's label asks where an
+    // autolink or raw HTML opening there ends; the rest of the line must not
+    // be read again for each one.
+    for opener in ["::x[", ":::x["] {
+        for unit in ["<", "<!--", "<?", "<![CDATA[", "<!A", "<a b=\""] {
+            assert_linear_growth(
+                &format!("{opener} before {unit} repeated"),
+                1_000,
+                |n| format!("{opener}{}", unit.repeat(n)),
+                parse_input,
+            );
+        }
+    }
+}
+
+// untrusted-input-cost: Linear time
+#[test]
 fn tags_grow_linearly() {
     let _serial = one_at_a_time();
     for unit in [" #a", "#a/b-c_d ", "*#a* ", "[x #a](u) ", " #a#b"] {

@@ -1520,6 +1520,35 @@ mod footnotes_and_directives {
         }
     }
 
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_backtick_run_in_a_block_directive_label_is_text_whole() {
+        // The run opens no code span, so no shorter run inside it pairs with
+        // the later backtick: the `]` after the run closes the leaf label,
+        // which text then follows, and the `[` after it stays open.
+        for (source, diagnostics) in [
+            ("::x[a``]b`]", &[][..]),
+            ("::x[``[ `]", &[DiagnosticCode::InvalidDirectiveName][..]),
+            (
+                ":::x[``[ `]\nbody\n:::",
+                &[DiagnosticCode::InvalidDirectiveName][..],
+            ),
+        ] {
+            let output = parse(source);
+            assert!(
+                matches!(output.document.children.as_slice(), [Block::Paragraph(_)]),
+                "{source:?}: {:?}",
+                output.document.children
+            );
+            let codes: Vec<_> = output
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect();
+            assert_eq!(codes, diagnostics, "{source:?}");
+        }
+    }
+
     #[test]
     fn a_digit_in_a_nested_directive_name_leaves_its_lines_as_text() {
         let output = parse(":::outer\n:::inner\n```\n:::\n:::inner2\nx\n:::\n:::\nafter");
@@ -2282,6 +2311,64 @@ mod directive_containers {
             panic!("{blocks:?}");
         };
         assert_eq!(texts(&paragraph.children), ["x", "\n", "::a b"]);
+    }
+
+    #[test]
+    fn text_after_a_container_directive_opener_makes_the_line_paragraph_text() {
+        for opener in [
+            ":::x[a]junk",
+            ":::x[a]{b=c}junk",
+            ":::x{b=c}junk",
+            ":::x junk",
+            ":::x[a]\tjunk",
+            "::::x[a] junk",
+        ] {
+            let output = parse(&format!("{opener}\nbody\n:::"));
+            let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
+                panic!("{opener:?}: {:?}", output.document);
+            };
+            assert_eq!(
+                texts(&paragraph.children),
+                [opener, "\n", "body", "\n", ":::"],
+                "{opener:?}"
+            );
+            assert!(output.diagnostics.is_empty(), "{opener:?}: {output:?}");
+        }
+        // Nor does such a line end a paragraph, or open a directive in one.
+        let blocks = parse("p\n:::x junk\n:::").document.children;
+        let [Block::Paragraph(paragraph)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(
+            texts(&paragraph.children),
+            ["p", "\n", ":::x junk", "\n", ":::"]
+        );
+        let blocks = parse(":::outer\n:::inner junk\n:::\nafter")
+            .document
+            .children;
+        let [Block::ContainerDirective(outer), Block::Paragraph(after)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        let [Block::Paragraph(inner)] = outer.children.as_slice() else {
+            panic!("{outer:?}");
+        };
+        assert_eq!(texts(&inner.children), [":::inner junk"]);
+        assert_eq!(texts(&after.children), ["after"]);
+    }
+
+    #[test]
+    fn spaces_and_tabs_after_a_container_directive_opener_keep_it_open() {
+        let blocks = parse(":::x[a]{b=c} \t\nbody\n:::").document.children;
+        let [Block::ContainerDirective(directive)] = blocks.as_slice() else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(directive.name, "x");
+        assert_eq!(texts(&directive.label), ["a"]);
+        assert_eq!(directive.attributes.len(), 1);
+        assert!(matches!(
+            directive.children.as_slice(),
+            [Block::Paragraph(_)]
+        ));
     }
 
     #[test]

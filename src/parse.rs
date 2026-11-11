@@ -2,13 +2,12 @@
 //! which reads the crate's one syntax. Parsing is tolerant: problems are
 //! collected as [`Diagnostic`]s rather than aborting.
 
-use alloc::{borrow::Cow, collections::BTreeMap, string::String, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, string::String, vec, vec::Vec};
 
 use crate::{
     ast::*,
     decode::{
-        decode_escapes_and_references, decode_selected_escapes_and_references,
-        parse_character_reference,
+        character_reference, decode_escapes_and_references, decode_selected_escapes_and_references,
     },
     diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity},
     memo::{
@@ -31,7 +30,8 @@ mod tokens;
 pub(crate) use blocks::{
     html_block_ends_at_blank_line, html_block_left_open, html_block_opens, interrupts_paragraph,
 };
-use source_map::{DerivedText, Segment, SourceMap};
+pub(crate) use source_map::SourceMap;
+use source_map::{DerivedText, JoinedLines, Segment};
 
 /// The largest ordered-list item number: a marker holds at most 9 digits.
 pub(crate) const MAX_ORDERED_NUMBER: u64 = 999_999_999;
@@ -144,32 +144,120 @@ enum HtmlBlockKind {
 /// Parse `input`. Infallible and tolerant: problems are reported as
 /// diagnostics in the returned [`ParseOutput`].
 pub fn parse(input: &str) -> ParseOutput {
+    read_source(input, false, |_, _| {}).0
+}
+
+/// `parse(input)`, and what `read` makes of it and of the inline content of
+/// each leaf of its document, read in the same pass over the source.
+pub(crate) fn parse_with_leaf_contents<R>(
+    input: &str,
+    read: impl FnOnce(&ParseOutput, LeafContents<'_>) -> R,
+) -> (ParseOutput, R) {
+    read_source(input, true, read)
+}
+
+/// The inline content of each leaf of a parsed document, read with its parse.
+pub(crate) struct LeafContents<'a> {
+    children: &'a [Block],
+    contents: Vec<(Span, DerivedText<'a>)>,
+}
+
+impl LeafContents<'_> {
+    /// Calls `found` with the path, text, and source map of every leaf of the
+    /// document, in document order, each as `leaf_sources` returns it.
+    pub(crate) fn each(self, mut found: impl FnMut(&[usize], &str, &SourceMap)) {
+        find_leaf_sources(self.children, self.contents, |path, _, text| {
+            found(path, text.text(), text.map())
+        });
+    }
+
+    /// Calls `found` as `each` does, and returns the span and inline source
+    /// of every leaf, in document order, as `Document::each_leaf_source`
+    /// gives them for the parsed document.
+    pub(crate) fn each_keeping(
+        self,
+        mut found: impl FnMut(&[usize], &str, &SourceMap),
+    ) -> Vec<(Span, InlineSource)> {
+        let mut kept = Vec::with_capacity(self.contents.len());
+        find_leaf_sources(self.children, self.contents, |path, span, text| {
+            found(path, text.text(), text.map());
+            let (text, map) = text.into_parts();
+            kept.push((span, InlineSource { text, map }));
+        });
+        kept
+    }
+}
+
+/// What `parse(input)` returns, and what `read` makes of it and, when
+/// `keep_leaves`, of the inline content of each leaf as
+/// `blocks::leaf_contents` reads it.
+fn read_source<R>(
+    input: &str,
+    keep_leaves: bool,
+    read: impl FnOnce(&ParseOutput, LeafContents<'_>) -> R,
+) -> (ParseOutput, R) {
     let mut diagnostics = Vec::new();
-    // A leading byte order mark is not content; parsing starts after it while
-    // spans keep counting from the start of `input`.
+    let (source, map) = after_byte_order_mark(input);
+    let lines = collect_lines(source, &map);
+    let (children, contents) = if keep_leaves {
+        blocks::parse_document_with_leaves(input, source, &lines, &mut diagnostics)
+    } else {
+        (
+            blocks::parse_document(input, source, &lines, &mut diagnostics),
+            Vec::new(),
+        )
+    };
+    let reads = top_level_reads(&children, input);
+    let mut document = Document::parsed(
+        NodeMeta::new(Some(Span::new(0, input.len()))),
+        children,
+        input,
+        reads,
+    );
+    if source.contains('\0') {
+        nul_replacement::replace_in_document(&mut document);
+    }
+
+    let output = ParseOutput {
+        document,
+        diagnostics,
+    };
+    let read = read(
+        &output,
+        LeafContents {
+            children: &output.document.children,
+            contents,
+        },
+    );
+    (output, read)
+}
+
+/// `input` after a leading byte order mark, which is not content, and the
+/// source map that reads it verbatim where it lies in `input`: parsing starts
+/// after the mark while spans keep counting from the start of `input`.
+fn after_byte_order_mark(input: &str) -> (&str, SourceMap) {
     let start = if input.starts_with('\u{feff}') {
         '\u{feff}'.len_utf8()
     } else {
         0
     };
     let source = &input[start..];
-    let map = SourceMap::verbatim(source.len(), start);
-    let lines = collect_lines(source, &map);
-    let mut children = blocks::parse_document(&lines, &mut diagnostics);
-    blank_lines::add_blank_lines(input, &mut children);
-    let mut document = Document::parsed(
-        NodeMeta::new(Some(Span::new(0, input.len()))),
-        children,
-        input,
-    );
-    if source.contains('\0') {
-        nul_replacement::replace_in_document(&mut document);
-    }
+    (source, SourceMap::verbatim(source.len(), start))
+}
 
-    ParseOutput {
-        document,
-        diagnostics,
+/// How many top-level blocks `parse(input)` reads, and the ones at
+/// `indices`, ascending, as it reads them. The others are not built, so
+/// their inline content is not read.
+pub(crate) fn parse_top_level_at(input: &str, indices: &[usize]) -> (usize, Vec<Block>) {
+    let (source, map) = after_byte_order_mark(input);
+    let lines = collect_lines(source, &map);
+    let (count, blocks) = blocks::parse_top_level_at(input, source, &lines, indices);
+    if !source.contains('\0') {
+        return (count, blocks);
     }
+    let mut document = Document::new(blocks);
+    nul_replacement::replace_in_document(&mut document);
+    (count, document.children)
 }
 
 /// The link reference definitions an inline parse resolves references
@@ -178,17 +266,57 @@ pub fn parse(input: &str) -> ParseOutput {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Definitions {
     /// Normalized identifiers, sorted and deduplicated.
-    identifiers: Vec<String>,
+    identifiers: Vec<Identifier>,
+}
+
+/// A definition's normalized identifier, and the first eight bytes of it
+/// as a big-endian number, zero-padded. Ordered by that number, then by
+/// their bytes, identifiers are in the order of their bytes alone, so a
+/// lookup compares the numbers, held side by side, and reads the bytes only
+/// where they tie. `prefix` is declared first: the derived order compares
+/// it first.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct Identifier {
+    prefix: u64,
+    text: String,
+}
+
+impl Identifier {
+    fn new(text: String) -> Self {
+        Self {
+            prefix: identifier_prefix(text.as_bytes()),
+            text,
+        }
+    }
+}
+
+/// An identifier reads as its text, so `Definitions` reads as the list of
+/// its identifiers.
+impl core::fmt::Debug for Identifier {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self.text, formatter)
+    }
+}
+
+/// The first eight bytes of `identifier` as a big-endian number,
+/// zero-padded.
+fn identifier_prefix(identifier: &[u8]) -> u64 {
+    let mut word = [0; 8];
+    let len = identifier.len().min(8);
+    word[..len].copy_from_slice(&identifier[..len]);
+    u64::from_be_bytes(word)
 }
 
 impl Definitions {
     /// The definitions of `document`, at every depth, as `parse` reads them
     /// for the document's own references.
     pub fn of(document: &Document) -> Self {
-        fn walk(blocks: &[Block], identifiers: &mut Vec<String>) {
+        fn walk(blocks: &[Block], identifiers: &mut Vec<Identifier>) {
             for block in blocks {
                 match block {
-                    Block::Definition(node) => identifiers.push(node.identifier.clone()),
+                    Block::Definition(node) => {
+                        identifiers.push(Identifier::new(node.identifier.clone()));
+                    }
                     Block::BlockQuote(node) => walk(&node.children, identifiers),
                     Block::Alert(node) => walk(&node.children, identifiers),
                     Block::List(node) => {
@@ -222,12 +350,13 @@ impl Definitions {
         Self::sorted(
             labels
                 .into_iter()
-                .map(|label| identifier(label.as_ref()))
+                .map(|label| Identifier::new(identifier(label.as_ref())))
                 .collect(),
         )
     }
 
-    fn sorted(mut identifiers: Vec<String>) -> Self {
+    /// Definitions with the given identifiers.
+    fn sorted(mut identifiers: Vec<Identifier>) -> Self {
         identifiers.sort_unstable();
         identifiers.dedup();
         Self { identifiers }
@@ -349,6 +478,7 @@ fn read_inline(text: &str, definitions: &Definitions, with_tokens: bool) -> Inli
         Some(definitions.labels()),
         &mut diagnostics,
         with_tokens.then_some(&mut tokens),
+        &mut InlineState::default(),
     );
     if text.contains('\0') {
         nul_replacement::replace_in_inlines(&mut inlines);
@@ -385,6 +515,11 @@ impl InlineSource {
     pub fn span_to_source(&self, span: Span) -> Span {
         source_map::translate_span(&self.map, span)
     }
+
+    /// Where `text` was read from.
+    pub(crate) fn map(&self) -> &SourceMap {
+        &self.map
+    }
 }
 
 /// Maps the spans of `inlines`, read from `source.text`, to the source, as
@@ -400,12 +535,19 @@ impl Document {
     /// paragraph, a heading, a table cell (its table's path, its row's index,
     /// and its own), or the label of a leaf or container directive (its
     /// directive's path), read again from the source of the top-level block
-    /// holding it, so that the cost is linear in that block. `None` for a
-    /// document without a source, or a path that names no such leaf, a
-    /// directive without a label, or a node without a span or one the source
-    /// does not hold.
+    /// holding it and of the paragraphs and link reference definitions that
+    /// ran into that block without a blank line when it was parsed, so that
+    /// the cost is linear in those blocks.
+    ///
+    /// The leaf is found by its span: in an edited document, it is the
+    /// source's leaf at that span, as [`Document::leaf_sources`] gives it for
+    /// the document as parsed, whatever the other top-level blocks now are.
+    /// `None` for a document without a source, or a path that names no such
+    /// leaf, a directive without a label, a node without a span, a top-level
+    /// block whose span is not that of a parsed top-level block, or a node
+    /// whose span is not that of a leaf the source holds in that block.
     pub fn inline_source(&self, path: &NodePath) -> Option<InlineSource> {
-        let source = self.source()?;
+        let (source, reads) = self.source_and_reads()?;
         let (&first, rest) = path.0.split_first()?;
         let top = self.children.get(first)?;
         let mut block = top;
@@ -443,33 +585,23 @@ impl Document {
                 _ => return None,
             };
         };
-        let end = top.span()?.end;
-        // The top-level block is read with the definitions right before it,
-        // which may have opened its paragraph, so that a line reads as a
-        // continuation there and not as indented code; and from the start of
-        // its line, where it reads as it does in the document.
-        let opening = self.children[..first]
-            .iter()
-            .rev()
-            .take_while(|block| matches!(block, Block::Definition(_)))
-            .last()
-            .unwrap_or(top);
-        let start = opening.span()?.start;
-        if end > source.len() || start > end || !source.is_char_boundary(start) {
+        let top = top.span()?;
+        if leaf.start < top.start || leaf.end > top.end {
             return None;
         }
-        let bytes = source.as_bytes();
-        let mut start = start;
-        while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
-            start -= 1;
-        }
-        if start == 0 && source.starts_with('\u{feff}') {
-            start = '\u{feff}'.len_utf8().min(end);
-        }
-        let slice = source.get(start..end)?;
+        let first_at = reads.partition_point(|read| read.span.start < top.start);
+        let read = reads[first_at..]
+            .iter()
+            .take_while(|read| read.span.start == top.start)
+            .find(|read| read.span == top)?;
+        let start = read.read_from;
+        let slice = source.get(start..top.end)?;
         let map = SourceMap::verbatim(slice.len(), start);
         let lines = collect_lines(slice, &map);
-        let (_, text) = blocks::leaf_contents(&lines)
+        // Only a read from the start of the document's content opens
+        // frontmatter, as only the whole document's first line does.
+        let content_start = source.len() - after_byte_order_mark(source).0.len();
+        let (_, text) = blocks::leaf_contents(slice, &lines, start == content_start)
             .into_iter()
             .find(|(span, _)| *span == leaf)?;
         let (text, map) = text.into_parts();
@@ -480,43 +612,155 @@ impl Document {
     /// order, each as [`Document::inline_source`] returns it, read in one
     /// pass over the source. Empty for a document without a source.
     pub fn leaf_sources(&self) -> Vec<(NodePath, InlineSource)> {
-        let mut found = Vec::new();
-        self.each_leaf_source(|path, _, source| found.push((NodePath(path.to_vec()), source)));
-        found
+        self.read_leaf_contents(|contents| leaf_sources_of(&self.children, contents))
+            .unwrap_or_default()
     }
 
     /// Calls `found` with the path, span, and inline source of every leaf of
     /// the document, in document order, as `leaf_sources` returns them.
     pub(crate) fn each_leaf_source(&self, mut found: impl FnMut(&[usize], Span, InlineSource)) {
-        let Some(source) = self.source() else {
-            return;
-        };
-        let start = if source.starts_with('\u{feff}') {
-            '\u{feff}'.len_utf8()
-        } else {
-            0
-        };
-        let map = SourceMap::verbatim(source.len() - start, start);
-        let lines = collect_lines(&source[start..], &map);
-        let mut contents: Vec<(Span, Option<DerivedText>)> = blocks::leaf_contents(&lines)
-            .into_iter()
-            .map(|(span, text)| (span, Some(text)))
-            .collect();
-        // The contents are in document order, so their starts never fall.
-        let mut take = |path: &[usize], span: Option<Span>, _: Option<&str>| {
-            let Some(span) = span else { return };
-            let first = contents.partition_point(|(other, _)| other.start < span.start);
-            let entry = contents[first..]
-                .iter_mut()
-                .take_while(|(other, _)| other.start == span.start)
-                .find(|(other, text)| *other == span && text.is_some());
-            if let Some((_, text)) = entry {
-                let (text, map) = text.take().expect("found unused").into_parts();
-                found(path, span, InlineSource { text, map });
-            }
-        };
-        crate::leaves::visit(&self.children, &mut Vec::new(), &mut take);
+        self.read_leaf_contents(|contents| {
+            find_leaf_sources(&self.children, contents, |path, span, text| {
+                let (text, map) = text.into_parts();
+                found(path, span, InlineSource { text, map })
+            })
+        });
     }
+
+    /// What `read` makes of the leaf contents of the document's source, as
+    /// `parse` reads them; `None` for a document without a source.
+    fn read_leaf_contents<R>(
+        &self,
+        read: impl FnOnce(Vec<(Span, DerivedText<'_>)>) -> R,
+    ) -> Option<R> {
+        let (source, map) = after_byte_order_mark(self.source()?);
+        let lines = collect_lines(source, &map);
+        Some(read(blocks::leaf_contents(source, &lines, true)))
+    }
+}
+
+/// Where `parse` read a top-level block from: the facts `inline_source`
+/// needs to read the block again as it reads in the whole document, recorded
+/// at parse time so that edits to the tree do not change them.
+#[derive(Clone, Copy)]
+pub(crate) struct TopLevelRead {
+    /// The block's span.
+    span: Span,
+    /// The start of the line where reading starts so that the block reads as
+    /// it does in the document.
+    read_from: usize,
+}
+
+/// Where each top-level block of `children`, parsed from `source`, is read
+/// from so that it reads as it does in the whole document: the start of the
+/// line that opens the run of paragraphs and link reference definitions that
+/// runs into it without a blank line, or of its own line. Such a run leaves a
+/// paragraph open, in which the next line is a continuation (one indented
+/// four columns, one opening an item that cannot interrupt a paragraph, one
+/// shaped as a definition or as HTML that cannot interrupt one) or a table's
+/// header row; read alone, that line opens a block of its own. After a blank
+/// line or any other block, the line that opens a top-level block reads as it
+/// would at the start of a document, but for opening frontmatter, which only
+/// the document's first line does.
+fn top_level_reads(children: &[Block], source: &str) -> Vec<TopLevelRead> {
+    let mut reads: Vec<TopLevelRead> = Vec::with_capacity(children.len());
+    let bytes = source.as_bytes();
+    let mut previous: Option<(&Block, Span)> = None;
+    for block in children {
+        let span = block.span().expect("a parsed block has a span");
+        let continues = previous.is_some_and(|(before, before_span)| {
+            matches!(before, Block::Paragraph(_) | Block::Definition(_))
+                && bytes
+                    .get(before_span.end..span.start)
+                    .is_some_and(|gap| line_endings(gap) <= 1)
+        });
+        let read_from = match reads.last() {
+            Some(read) if continues => read.read_from,
+            _ => line_start(source, span.start),
+        };
+        reads.push(TopLevelRead { span, read_from });
+        previous = Some((block, span));
+    }
+    reads
+}
+
+/// How many line endings `gap` holds, `\r\n` counting as one.
+fn line_endings(gap: &[u8]) -> usize {
+    let mut count = 0;
+    for (at, &byte) in gap.iter().enumerate() {
+        if byte == b'\r' || (byte == b'\n' && (at == 0 || gap[at - 1] != b'\r')) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// The start of the line of `source` that holds byte `at`, after a leading
+/// U+FEFF.
+fn line_start(source: &str, at: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut start = at.min(bytes.len());
+    while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
+        start -= 1;
+    }
+    if start == 0 && source.starts_with('\u{feff}') {
+        start = '\u{feff}'.len_utf8().min(at);
+    }
+    start
+}
+
+/// The path and inline source of every leaf of `children` whose content
+/// `contents` holds, as `find_leaf_sources` finds them.
+fn leaf_sources_of(
+    children: &[Block],
+    contents: Vec<(Span, DerivedText<'_>)>,
+) -> Vec<(NodePath, InlineSource)> {
+    let mut found = Vec::with_capacity(contents.len());
+    find_leaf_sources(children, contents, |path, _, text| {
+        let (text, map) = text.into_parts();
+        found.push((NodePath(path.to_vec()), InlineSource { text, map }))
+    });
+    found
+}
+
+/// Calls `found` with the path, span, and inline content of every leaf of
+/// `children` whose content `contents` holds, the leaf contents of the
+/// source `children` were parsed from, in document order.
+fn find_leaf_sources<'a>(
+    children: &[Block],
+    contents: Vec<(Span, DerivedText<'a>)>,
+    mut found: impl FnMut(&[usize], Span, DerivedText<'a>),
+) {
+    // Each content is taken once.
+    let mut contents: Vec<(Span, Option<DerivedText<'_>>)> = contents
+        .into_iter()
+        .map(|(span, text)| (span, Some(text)))
+        .collect();
+    // The contents are in document order, so their starts never fall. The
+    // leaves are too, in a parsed document, so the first content a leaf's
+    // start reaches is most often the one after the last leaf's.
+    debug_assert!(contents
+        .windows(2)
+        .all(|pair| pair[0].0.start <= pair[1].0.start));
+    let mut next = 0;
+    let mut take = |path: &[usize], span: Option<Span>, _: Option<&str>| {
+        let Some(span) = span else { return };
+        let reached = |index: usize| contents[index].0.start >= span.start;
+        let first =
+            if (next == 0 || !reached(next - 1)) && (next == contents.len() || reached(next)) {
+                next
+            } else {
+                contents.partition_point(|(other, _)| other.start < span.start)
+            };
+        let entry = (first..contents.len())
+            .take_while(|&index| contents[index].0.start == span.start)
+            .find(|&index| contents[index].0 == span && contents[index].1.is_some());
+        if let Some(index) = entry {
+            next = index + 1;
+            found(path, span, contents[index].1.take().expect("found unused"));
+        }
+    };
+    crate::leaves::visit(children, &mut Vec::new(), &mut take);
 }
 
 /// CommonMark reads U+0000 as U+FFFD. Character classifications that differ
@@ -547,84 +791,48 @@ fn advance_columns(column: usize, text: &str) -> usize {
     })
 }
 
-/// Splits `input` into lines, with positions translated through `map`, the
-/// source map of `input`.
+/// Splits `input` into lines. `map` is the source map of `input`, which
+/// reads it verbatim (`SourceMap::verbatim`), so each line's input positions
+/// are its offsets in `input` from where `input` starts.
 fn collect_lines<'a>(input: &'a str, map: &'a SourceMap) -> Vec<Line<'a>> {
+    let segments = map.segments();
+    debug_assert!(
+        segments.len() == 1 && segments[0].text_end() == input.len(),
+        "a verbatim map"
+    );
+    let base = segments.first().map_or(0, Segment::source_start);
     let bytes = input.as_bytes();
-    let mut lines = Vec::new();
-    let mut segments = LineSegments {
-        segments: map.segments(),
-        first: 0,
+    let line = |start: usize, end: usize, eol_end: usize| Line {
+        text: &input[start..end],
+        eol: &input[end..eol_end],
+        start: base + start,
+        end: base + end,
+        end_with_eol: base + eol_end,
+        segments,
+        text_offset: start,
+        column: 0,
     };
+    let mut lines = Vec::new();
     let mut start = 0;
     let mut index = 0;
 
     while index < bytes.len() {
-        let eol_end = match bytes[index] {
-            b'\n' => index + 1,
-            b'\r' if bytes.get(index + 1) == Some(&b'\n') => index + 2,
-            b'\r' => index + 1,
-            _ => {
-                index += 1;
-                continue;
-            }
+        index = crate::swar::find_any(bytes, index, [b'\n', b'\r']);
+        let eol_end = match bytes.get(index) {
+            Some(b'\r') if bytes.get(index + 1) == Some(&b'\n') => index + 2,
+            Some(_) => index + 1,
+            None => break,
         };
-        lines.push(segments.line(input, start, index, eol_end));
+        lines.push(line(start, index, eol_end));
         index = eol_end;
         start = index;
     }
 
     if start < bytes.len() || input.is_empty() {
-        lines.push(segments.line(input, start, bytes.len(), bytes.len()));
+        lines.push(line(start, bytes.len(), bytes.len()));
     }
 
     lines
-}
-
-/// Hands each line of a split string the segments that cover it, moving
-/// forward through the map once.
-struct LineSegments<'a> {
-    segments: &'a [Segment],
-    first: usize,
-}
-
-impl<'a> LineSegments<'a> {
-    fn line(&mut self, input: &'a str, start: usize, end: usize, eol_end: usize) -> Line<'a> {
-        let segments = self.segments;
-        while self.first + 1 < segments.len() && segments[self.first].text_end() <= start {
-            self.first += 1;
-        }
-        let mut last = self.first;
-        while last + 1 < segments.len() && segments[last + 1].text_start() < eol_end {
-            last += 1;
-        }
-        let covering = if segments.is_empty() {
-            segments
-        } else {
-            &segments[self.first..=last]
-        };
-        let source_start = source_map::start_of(covering, start);
-        let source_end = if end == start {
-            source_start
-        } else {
-            source_map::end_of(covering, end)
-        };
-        let source_end_with_eol = if eol_end == end {
-            source_end
-        } else {
-            source_map::end_of(covering, eol_end)
-        };
-        Line {
-            text: &input[start..end],
-            eol: &input[end..eol_end],
-            start: source_start,
-            end: source_end,
-            end_with_eol: source_end_with_eol,
-            segments: covering,
-            text_offset: start,
-            column: 0,
-        }
-    }
 }
 
 pub(crate) fn frontmatter_fence_kind(line: &str) -> Option<FrontmatterKind> {
@@ -742,31 +950,35 @@ fn parse_thematic_break(line: Line<'_>) -> Option<Block> {
 
 /// The label of a definition starting paragraph line `index`, followed by
 /// `:`: the text of the lines up to the one the label closes on, joined by
-/// `\n`, the offset of the label's `]` in it, and that line.
+/// `\n`, the offset of the label's `]` in it, and that line. A label that
+/// closes on its own line is that line's text.
 ///
 /// A label may span lines (CommonMark §4.7), up to its length limit. The
 /// walk to its `]` (`find_reference_label_end`) goes on from where the lines
 /// before left it, so that a long label is walked once.
-fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, usize)> {
-    let text = trim_ascii_start(lines[index].text);
+fn definition_label_in<'a>(
+    lines: &[&'a str],
+    index: usize,
+) -> Option<(Cow<'a, str>, usize, usize)> {
+    let text = trim_ascii_start(lines[index]);
     if !text.starts_with('[') {
         return None;
     }
-    let mut accumulated = String::from(text);
+    let mut accumulated = Cow::Borrowed(text);
     let mut label_end_line = index;
     let mut cursor = 1;
     loop {
-        let bytes = accumulated.as_bytes();
         // The walk has run out of text: it goes on at the `\n` the next line
         // is joined with. A `\` that ended the text escapes that `\n`, and
         // both step to the next line's start.
-        if cursor >= bytes.len() {
+        if cursor >= accumulated.len() {
             let next = label_end_line + 1;
             if next >= lines.len() || accumulated.len() > 4 * REFERENCE_LABEL_MAX_CHARS + 2 {
                 return None;
             }
-            accumulated.push('\n');
-            accumulated.push_str(lines[next].text);
+            let joined = accumulated.to_mut();
+            joined.push('\n');
+            joined.push_str(lines[next]);
             label_end_line = next;
             continue;
         }
@@ -774,7 +986,7 @@ fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, 
             Step::Next(next) => cursor = next,
             Step::Done(Some(close)) if reference_label_is_within_limit(&accumulated[1..close]) => {
                 // A closed label not followed by `:` is not a definition.
-                if bytes.get(close + 1) != Some(&b':') {
+                if accumulated.as_bytes().get(close + 1) != Some(&b':') {
                     return None;
                 }
                 return Some((accumulated, close, label_end_line));
@@ -786,17 +998,25 @@ fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, 
     }
 }
 
+/// `definition_label_in` the texts of `lines`, as the scan tests read it.
+#[cfg(test)]
+fn definition_label(lines: &[Line<'_>], index: usize) -> Option<(String, usize, usize)> {
+    let texts: Vec<&str> = lines.iter().map(|line| line.text).collect();
+    definition_label_in(&texts, index).map(|(text, close, line)| (text.into_owned(), close, line))
+}
+
 /// The link reference definition that starts paragraph line `index`, and
-/// the line after it. The lines are a paragraph's, each from where the
-/// containers around it leave it; the definition's span is left to the
-/// caller.
-fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usize)> {
-    let (accumulated, close, label_end_line) = definition_label(lines, index)?;
-    let label = String::from(&accumulated[1..close]);
-    if normalize_label(&label).is_empty() {
+/// the line after it. The lines are the texts of a paragraph's, each from
+/// where the containers around it leave it; the definition's span is left
+/// to the caller.
+fn parse_definition(lines: &[&str], index: usize) -> Option<(Definition, usize)> {
+    let (accumulated, close, label_end_line) = definition_label_in(lines, index)?;
+    let label = &accumulated[1..close];
+    let identifier = normalize_label(label);
+    if identifier.is_empty() {
         return None;
     }
-    let mut source = String::from(&accumulated[close + 2..]);
+    let mut source = Cow::Borrowed(&accumulated[close + 2..]);
     let mut cursor = label_end_line;
     let mut best_without_title = None;
     // The char that closes a title the source leaves open: a line without
@@ -805,17 +1025,16 @@ fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usi
     let mut open_title: Option<char> = None;
 
     loop {
-        let parses =
-            open_title.is_none_or(|closer| line_may_close_title(lines[cursor].text, closer));
+        let parses = open_title.is_none_or(|closer| line_may_close_title(lines[cursor], closer));
         if parses {
             match parse_definition_destination_title(&source) {
                 Some(resource) => {
                     if resource.title.is_some() {
-                        return Some((definition_node(&label, resource), cursor + 1));
+                        return Some((definition_node(label, identifier, resource), cursor + 1));
                     }
                     best_without_title = Some((resource, cursor + 1));
                     let next = cursor + 1;
-                    if next >= lines.len() || !line_can_start_definition_title(lines[next].text) {
+                    if next >= lines.len() || !line_can_start_definition_title(lines[next]) {
                         break;
                     }
                 }
@@ -832,20 +1051,22 @@ fn parse_definition(lines: &[Line<'_>], index: usize) -> Option<(Definition, usi
         if next >= lines.len() {
             break;
         }
+        let source = source.to_mut();
         source.push('\n');
-        source.push_str(lines[next].text);
+        source.push_str(lines[next]);
         cursor = next;
     }
 
     let (resource, next) = best_without_title?;
-    Some((definition_node(&label, resource), next))
+    Some((definition_node(label, identifier, resource), next))
 }
 
-fn definition_node(label: &str, resource: ParsedLinkResource) -> Definition {
+/// The definition of `label`, whose identifier is `identifier`.
+fn definition_node(label: &str, identifier: String, resource: ParsedLinkResource) -> Definition {
     Definition {
         meta: NodeMeta::default(),
         label: label.into(),
-        identifier: normalize_label(label),
+        identifier,
         destination: resource.destination,
         destination_kind: resource.destination_kind,
         title: resource.title,
@@ -1227,9 +1448,11 @@ fn dashes_alone(input: &str) -> bool {
 /// (CommonMark), `~~` strikethrough, and `==` highlight.
 #[derive(Clone, Copy)]
 struct DelimMarker {
-    /// Index of the placeholder text node in the flat node list. The text node
-    /// holds the as-yet-unmatched delimiter characters; matching trims it from
-    /// the appropriate side and matched characters are removed entirely.
+    /// Index of the placeholder text node in the flat node list. The text
+    /// node's span covers the as-yet-unmatched delimiter characters; matching
+    /// trims it from the appropriate side and matched characters are removed
+    /// entirely. Its value stays empty until `process_emphasis` writes what is
+    /// left.
     node_index: usize,
     marker: u8,
     /// Remaining unmatched delimiter characters in this run.
@@ -1286,49 +1509,64 @@ impl Nesting {
 /// linked list in source order, and each live run records the deepest nesting
 /// among the nodes between it and the next live run.
 struct DelimiterLinks {
-    prev: Vec<usize>,
-    next: Vec<usize>,
-    live: Vec<bool>,
-    nesting_after: Vec<Nesting>,
+    runs: Vec<RunLink>,
+}
+
+/// One run's place in `DelimiterLinks`.
+#[derive(Clone, Copy)]
+struct RunLink {
+    prev: usize,
+    next: usize,
+    nesting_after: Nesting,
 }
 
 impl DelimiterLinks {
-    fn new(count: usize) -> Self {
-        Self {
-            prev: (0..count).map(|index| index.wrapping_sub(1)).collect(),
-            next: (1..=count)
-                .map(|index| if index < count { index } else { NIL })
-                .collect(),
-            live: alloc::vec![true; count],
-            nesting_after: alloc::vec![Nesting::default(); count],
-        }
+    /// The links of `count` runs, all live, kept in `runs`, an empty buffer.
+    fn new(count: usize, mut runs: Vec<RunLink>) -> Self {
+        runs.extend((0..count).map(|index| RunLink {
+            prev: index.wrapping_sub(1),
+            next: if index + 1 < count { index + 1 } else { NIL },
+            nesting_after: Nesting::default(),
+        }));
+        Self { runs }
+    }
+
+    fn prev(&self, index: usize) -> usize {
+        self.runs[index].prev
+    }
+
+    fn nesting_after(&mut self, index: usize) -> &mut Nesting {
+        &mut self.runs[index].nesting_after
     }
 
     /// Unlinks `index`; the nodes after it now follow the previous live run.
     fn unlink(&mut self, index: usize) {
-        let (before, after) = (self.prev[index], self.next[index]);
-        self.live[index] = false;
+        let RunLink {
+            prev: before,
+            next: after,
+            nesting_after,
+        } = self.runs[index];
         if before != NIL {
-            self.next[before] = after;
-            self.nesting_after[before] = self.nesting_after[before].max(self.nesting_after[index]);
+            let run = &mut self.runs[before];
+            run.next = after;
+            run.nesting_after = run.nesting_after.max(nesting_after);
         }
         if after != NIL {
-            self.prev[after] = before;
+            self.runs[after].prev = before;
         }
     }
 
     /// Unlinks every run strictly between `opener` and `closer` and returns the
     /// deepest nesting among the nodes between them.
     fn close_span(&mut self, opener: usize, closer: usize) -> Nesting {
-        let mut nesting = self.nesting_after[opener];
-        let mut inner = self.next[opener];
+        let mut nesting = self.runs[opener].nesting_after;
+        let mut inner = self.runs[opener].next;
         while inner != closer {
-            nesting = nesting.max(self.nesting_after[inner]);
-            self.live[inner] = false;
-            inner = self.next[inner];
+            nesting = nesting.max(self.runs[inner].nesting_after);
+            inner = self.runs[inner].next;
         }
-        self.next[opener] = closer;
-        self.prev[closer] = opener;
+        self.runs[opener].next = closer;
+        self.runs[closer].prev = opener;
         nesting
     }
 }
@@ -1337,23 +1575,27 @@ impl DelimiterLinks {
 /// list over stable slots. Wrapping a matched span and dropping a consumed
 /// delimiter run cost time proportional to the wrapped nodes rather than to the
 /// whole list, and delimiter `node_index` values never need re-indexing.
+///
+/// Linked slots are in list order: a wrapped span's node takes the slot of its
+/// first child, so the list never grows and its live slots are its nodes in
+/// order.
 struct InlineList {
     slots: Vec<Option<Inline>>,
-    prev: Vec<usize>,
-    next: Vec<usize>,
-    head: usize,
+    /// Each slot's previous and next linked slot.
+    links: Vec<(usize, usize)>,
 }
 
 impl InlineList {
-    fn new(nodes: Vec<Inline>) -> Self {
+    /// The list of `nodes`, its links kept in `links`, an empty buffer.
+    fn new(nodes: Vec<Inline>, mut links: Vec<(usize, usize)>) -> Self {
         let count = nodes.len();
+        links.extend((0..count).map(|slot| {
+            let next = if slot + 1 < count { slot + 1 } else { NIL };
+            (slot.wrapping_sub(1), next)
+        }));
         Self {
             slots: nodes.into_iter().map(Some).collect(),
-            prev: (0..count).map(|slot| slot.wrapping_sub(1)).collect(),
-            next: (1..=count)
-                .map(|slot| if slot < count { slot } else { NIL })
-                .collect(),
-            head: if count == 0 { NIL } else { 0 },
+            links,
         }
     }
 
@@ -1363,58 +1605,63 @@ impl InlineList {
             .expect("delimiter placeholder slot is live")
     }
 
-    /// Replaces every node strictly between `before` and `after` with the node
-    /// `wrap` builds from them (in order).
+    /// Replaces every node strictly between `before` and `after`, of which
+    /// there is at least one, with the node `wrap` builds from them (in
+    /// order).
     fn wrap_between(
         &mut self,
         before: usize,
         after: usize,
         wrap: impl FnOnce(Vec<Inline>) -> Inline,
     ) {
-        let mut children = Vec::new();
-        let mut cursor = self.next[before];
+        let first = self.links[before].1;
+        assert_ne!(first, after, "a span wraps at least one node");
+        let mut count = 0;
+        let mut cursor = first;
+        while cursor != after {
+            count += 1;
+            cursor = self.links[cursor].1;
+        }
+        let mut children = Vec::with_capacity(count);
+        let mut cursor = first;
         while cursor != after {
             children.push(self.slots[cursor].take().expect("linked slot is live"));
-            cursor = self.next[cursor];
+            cursor = self.links[cursor].1;
         }
-        let slot = self.slots.len();
-        self.slots.push(Some(wrap(children)));
-        self.prev.push(before);
-        self.next.push(after);
-        self.next[before] = slot;
-        self.prev[after] = slot;
+        self.slots[first] = Some(wrap(children));
+        self.links[first] = (before, after);
+        self.links[after].0 = first;
     }
 
     fn remove(&mut self, slot: usize) {
-        let (prev, next) = (self.prev[slot], self.next[slot]);
-        if prev == NIL {
-            self.head = next;
-        } else {
-            self.next[prev] = next;
+        let (prev, next) = self.links[slot];
+        if prev != NIL {
+            self.links[prev].1 = next;
         }
         if next != NIL {
-            self.prev[next] = prev;
+            self.links[next].0 = prev;
         }
         self.slots[slot] = None;
     }
 
-    fn into_vec(mut self) -> Vec<Inline> {
-        let mut nodes = Vec::new();
-        let mut cursor = self.head;
-        while cursor != NIL {
-            nodes.push(self.slots[cursor].take().expect("linked slot is live"));
-            cursor = self.next[cursor];
-        }
-        nodes
+    /// The linked nodes in order, in the slots' allocation: `filter_map`,
+    /// unlike `flatten`, collects in place. The links' buffer comes back
+    /// with them.
+    #[allow(clippy::filter_map_identity)]
+    fn into_vec(self) -> (Vec<Inline>, Vec<(usize, usize)>) {
+        let nodes = self.slots.into_iter().filter_map(|slot| slot).collect();
+        (nodes, self.links)
     }
 }
 
-/// Pushes a literal text node for `value` starting at `start` of the block-level
-/// inline input.
-fn push_text(nodes: &mut Vec<Inline>, start: usize, value: &str) {
+/// Pushes a placeholder text node for the `len` bytes at `start` of the
+/// block-level inline input: its value stays empty until the pass merges its
+/// text, which reads the value from the input (see `placeholder_value`), so a
+/// placeholder the pass drops never holds a string.
+fn push_placeholder(nodes: &mut Vec<Inline>, start: usize, len: usize) {
     nodes.push(Inline::Text(Text {
-        meta: NodeMeta::new(Some(Span::new(start, start + value.len()))),
-        value: value.into(),
+        meta: NodeMeta::new(Some(Span::new(start, start + len))),
+        value: String::new(),
     }));
 }
 
@@ -1433,7 +1680,6 @@ fn close_bracket(
     pass: &mut InlinePass,
 ) -> Option<usize> {
     let mut opener = brackets.openers.pop()?;
-    let depth = pass.state.depth + brackets.openers.len();
     // The opener's own stack slot decides whether it may form a link; later
     // openers pushed into that slot start out able to.
     let link_active = brackets.openers.len() >= brackets.link_floor;
@@ -1441,7 +1687,15 @@ fn close_bracket(
 
     if opener.kind == BracketKind::InlineFootnote {
         if !input[opener.position + 2..close].trim().is_empty() {
-            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(
+                input,
+                base_offset,
+                nodes,
+                delimiters,
+                brackets,
+                &opener,
+                pass.state,
+            );
             nodes.truncate(opener.node_index - 1);
             nodes.push(Inline::InlineFootnote(InlineFootnote {
                 meta: NodeMeta::new(Some(Span::new(
@@ -1467,7 +1721,15 @@ fn close_bracket(
             definitions,
         );
         if let Some((end, target)) = target {
-            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(
+                input,
+                base_offset,
+                nodes,
+                delimiters,
+                brackets,
+                &opener,
+                pass.state,
+            );
             nodes.truncate(opener.node_index - 1);
             let span = Span::new(base_offset + opener.position, base_offset + end);
             nodes.push(link_node(target, true, span, children));
@@ -1488,7 +1750,15 @@ fn close_bracket(
             definitions,
         );
         if let Some((end, target)) = target {
-            let (children, marks) = take_label(input, nodes, delimiters, brackets, &opener, depth);
+            let (children, marks) = take_label(
+                input,
+                base_offset,
+                nodes,
+                delimiters,
+                brackets,
+                &opener,
+                pass.state,
+            );
             nodes.truncate(opener.node_index);
             let span = Span::new(base_offset + opener.position, base_offset + end);
             nodes.push(link_node(target, false, span, children));
@@ -1538,8 +1808,10 @@ fn drop_label(
     brackets.formed.truncate(kept);
 }
 
-/// Pushes the `length`-byte run of `marker` at `index` as a literal text node
-/// plus a delimiter entry, whose roles `assign_emphasis_roles` settles.
+/// Pushes the `length`-byte run of `marker` at `index` as a placeholder text
+/// node plus a delimiter entry, whose roles `assign_emphasis_roles` settles.
+/// The placeholder's value is written once pairing leaves its characters
+/// final, so a run that pairs whole never holds a string.
 fn push_delimiter(
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
@@ -1549,13 +1821,7 @@ fn push_delimiter(
     length: usize,
 ) {
     let node_index = nodes.len();
-    nodes.push(Inline::Text(Text {
-        meta: NodeMeta::new(Some(Span::new(
-            base_offset + index,
-            base_offset + index + length,
-        ))),
-        value: String::from(marker as char).repeat(length),
-    }));
+    push_placeholder(nodes, base_offset + index, length);
     delimiters.push(DelimMarker {
         node_index,
         marker,
@@ -1620,11 +1886,16 @@ fn emphasis_roles(
 /// roles once the `==` spans are known, flanking as the edge of a span's
 /// content where it touches the inner side of the span's delimiter.
 fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
-    let mut opens_span = alloc::vec![false; delimiters.len()];
-    let mut closes_span = alloc::vec![false; delimiters.len()];
+    // Without a `==` run there is no mark span to bound or enclose a run, and
+    // the tables below are left empty: each use of them is at a `==` run,
+    // behind `marks &&`, or after the return taken without marks.
+    let marks = delimiters.iter().any(|run| run.marker == b'=');
+    let spans = if marks { delimiters.len() } else { 0 };
+    let mut opens_span = alloc::vec![false; spans];
+    let mut closes_span = alloc::vec![false; spans];
     let mut open_marks: Vec<usize> = Vec::new();
     // The run each span opened by a run closes at (a run opens at most one).
-    let mut span_close = alloc::vec![NIL; delimiters.len()];
+    let mut span_close = alloc::vec![NIL; spans];
     for (index, run) in delimiters.iter_mut().enumerate() {
         if run.marker != b'=' {
             continue;
@@ -1653,11 +1924,11 @@ fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
         if run.marker == b'=' {
             continue;
         }
-        let bounded_before = index > 0 && {
+        let bounded_before = marks && index > 0 && {
             let before = &delimiters[index - 1];
             before.position + before.length == run.position && opens_span[index - 1]
         };
-        let bounded_after = index + 1 < delimiters.len() && {
+        let bounded_after = marks && index + 1 < delimiters.len() && {
             let after = &delimiters[index + 1];
             after.position == run.position + run.length && closes_span[index + 1]
         };
@@ -1671,6 +1942,9 @@ fn assign_emphasis_roles(input: &str, delimiters: &mut [DelimMarker]) {
         );
         delimiters[index].can_open = can_open;
         delimiters[index].can_close = can_close;
+    }
+    if !marks {
+        return;
     }
 
     // Each run's latest-starting enclosing mark span. Spans are pushed in
@@ -1724,27 +1998,30 @@ fn assign_double_mark_roles(input: &str, run: &mut DelimMarker) {
 /// `depth` counts the nesting levels enclosing these runs: the inline passes
 /// around this one, plus the open brackets around a bracket label.
 fn process_emphasis(
+    input: &str,
+    base_offset: usize,
     nodes: Vec<Inline>,
-    mut delimiters: Vec<DelimMarker>,
+    delimiters: &mut [DelimMarker],
     depth: usize,
     formed: &[(usize, usize)],
+    buffers: &mut InlineBuffers,
 ) -> (Vec<Inline>, usize) {
     let mut deepest = formed.iter().map(|&(_, depth)| depth).max().unwrap_or(0);
-    if delimiters.is_empty() {
+    if !may_pair(delimiters) {
         let mut nodes = nodes;
-        merge_adjacent_text(&mut nodes);
+        merge_pass_text(input, base_offset, &mut nodes);
         return (nodes, deepest);
     }
-    let mut nodes = InlineList::new(nodes);
+    let mut nodes = InlineList::new(nodes, take_buffer(&mut buffers.slot_links));
 
     // A run that is consumed, demoted to plain text, or enclosed by a newly
     // closed span is unlinked, so the opener walk below only ever visits live
     // runs.
-    let mut links = DelimiterLinks::new(delimiters.len());
+    let mut links = DelimiterLinks::new(delimiters.len(), take_buffer(&mut buffers.run_links));
     for &(node, depth) in formed {
         let before = delimiters.partition_point(|run| run.node_index < node);
         if before > 0 {
-            let gap = &mut links.nesting_after[before - 1].total;
+            let gap = &mut links.nesting_after(before - 1).total;
             *gap = (*gap).max(depth);
         }
     }
@@ -1764,7 +2041,7 @@ fn process_emphasis(
 
         let opener = if closer.can_close {
             nested_opener(
-                &delimiters,
+                delimiters,
                 &links,
                 &openers_bottom,
                 &span_bottom,
@@ -1807,15 +2084,8 @@ fn process_emphasis(
         let fits = depth + inner.total < MAX_INLINE_NESTING
             && (wrap.is_mark() || inner.emphasis < MAX_EMPHASIS_NESTING);
         if fits {
-            apply_emphasis(
-                &mut nodes,
-                &mut delimiters,
-                opener_idx,
-                closer_idx,
-                used,
-                wrap,
-            );
-            links.nesting_after[opener_idx] = Nesting {
+            apply_emphasis(&mut nodes, delimiters, opener_idx, closer_idx, used, wrap);
+            *links.nesting_after(opener_idx) = Nesting {
                 emphasis: if wrap.is_mark() {
                     0
                 } else {
@@ -1830,7 +2100,7 @@ fn process_emphasis(
             // at least as deep, so it stays literal too.
             delimiters[opener_idx].length = 0;
             delimiters[closer_idx].length = 0;
-            links.nesting_after[opener_idx] = inner;
+            *links.nesting_after(opener_idx) = inner;
         }
         if closer.marker == b'=' {
             // `==` runs open only with their last two characters, and a long
@@ -1856,13 +2126,60 @@ fn process_emphasis(
     // Adjacent text nodes can appear where unmatched delimiter runs ended up
     // beside literal text (`**foo*bar*` -> `**foo` + emphasis). CommonMark
     // coalesces them as the final step; do the same for the spans we created.
-    let mut nodes = nodes.into_vec();
-    merge_adjacent_text(&mut nodes);
+    let (mut nodes, slot_links) = nodes.into_vec();
+    give_buffer(&mut buffers.slot_links, slot_links);
+    give_buffer(&mut buffers.run_links, links.runs);
+    merge_pass_text(input, base_offset, &mut nodes);
     (nodes, deepest)
+}
+
+/// Whether a run can close with an earlier run of its marker that can open,
+/// the least any pair needs. Without one, every run stays text.
+fn may_pair(delimiters: &[DelimMarker]) -> bool {
+    let mut opening = [false; NESTED_MARKERS];
+    for run in delimiters {
+        let marker = marker_slot(run.marker);
+        if run.can_close && opening[marker] {
+            return true;
+        }
+        opening[marker] |= run.can_open;
+    }
+    false
+}
+
+/// The value of a placeholder text node, which an inline pass leaves empty
+/// until it merges its text: the delimiter characters its span still covers,
+/// or a bracket opener's `^`, `!`, or `[`. No other text node is empty.
+fn placeholder_value<'a>(input: &'a str, base_offset: usize, text: &Text) -> &'a str {
+    let Some(span) = text.meta.span else {
+        return "";
+    };
+    let value = input
+        .get(span.start - base_offset..span.end - base_offset)
+        .unwrap_or_default();
+    debug_assert!(
+        value.bytes().next().is_some_and(|marker| match marker {
+            b'*' | b'_' | b'~' | b'=' => value.bytes().all(|byte| byte == marker),
+            b'^' | b'!' | b'[' => value.len() == 1,
+            _ => false,
+        }),
+        "a placeholder covers a run of one delimiter or one bracket character: {value:?}"
+    );
+    value
 }
 
 /// The markers that pair through nested roles, in `openers_bottom` order.
 const NESTED_MARKERS: usize = 4;
+
+/// The `openers_bottom` order of `marker`.
+fn marker_slot(marker: u8) -> usize {
+    match marker {
+        b'_' => 1,
+        b'~' => 2,
+        b'=' => 3,
+        _ => 0,
+    }
+}
 
 /// The nearest live opener before `closer_idx` that the nested closer there can
 /// pair with, searching no lower than its `openers_bottom` bound.
@@ -1887,7 +2204,7 @@ fn nested_opener(
             .map_or(span + 1, |&(_, bound)| bound);
         bottom = bottom.max(Some(span_floor));
     }
-    let mut search = links.prev[closer_idx];
+    let mut search = links.prev(closer_idx);
     while search != NIL {
         if bottom.is_some_and(|bottom| search < bottom) {
             return None;
@@ -1899,7 +2216,7 @@ fn nested_opener(
         {
             return Some(search);
         }
-        search = links.prev[search];
+        search = links.prev(search);
     }
     None
 }
@@ -1935,49 +2252,93 @@ fn pair_shape(opener: &DelimMarker, closer: &DelimMarker) -> (usize, EmphasisWra
 /// mark nodes produced at this level. Other containers were already finalized
 /// by their own `parse_inlines` pass and are left untouched.
 fn merge_adjacent_text(nodes: &mut Vec<Inline>) {
+    merge_text(nodes, None);
+}
+
+/// `merge_adjacent_text` over the nodes of an inline pass, which writes the
+/// value of each placeholder text node left among them (see
+/// `placeholder_value`).
+fn merge_pass_text(input: &str, base_offset: usize, nodes: &mut Vec<Inline>) {
+    merge_text(nodes, Some((input, base_offset)));
+}
+
+/// Merges consecutive `Text` nodes, each run of them into its first node's
+/// value at once; with `placeholders`, the input and its base offset, an
+/// empty text node is a placeholder whose value is read from the input.
+fn merge_text(nodes: &mut Vec<Inline>, placeholders: Option<(&str, usize)>) {
     let mut write = 0;
-    for read in 0..nodes.len() {
+    let mut read = 0;
+    while read < nodes.len() {
+        let (head, rest) = nodes[read..].split_at_mut(1);
+        let mut merged = 0;
+        if let Inline::Text(first) = &mut head[0] {
+            let run = rest.iter().map_while(|node| match node {
+                Inline::Text(text) => Some(text),
+                _ => None,
+            });
+            // Exact capacity takes the run's length before its first value is
+            // copied, so each value is read twice.
+            let (count, len) = run.clone().fold((0, 0), |(count, len), text| {
+                (count + 1, len + text_value_of(text, placeholders).len())
+            });
+            merged = count;
+            if count > 0 {
+                let mut value = core::mem::take(&mut first.value);
+                if value.is_empty() {
+                    let placeholder = text_value_of(first, placeholders);
+                    value.reserve_exact(placeholder.len() + len);
+                    value.push_str(placeholder);
+                } else {
+                    value.reserve_exact(len);
+                }
+                for current in run {
+                    value.push_str(text_value_of(current, placeholders));
+                    if let (Some(previous_span), Some(current_span)) =
+                        (first.meta.span.as_mut(), current.meta.span)
+                    {
+                        previous_span.end = current_span.end;
+                    }
+                }
+                first.value = value;
+            } else if first.value.is_empty() {
+                first.value = text_value_of(first, placeholders).into();
+            }
+        }
+        let end = read + 1 + merged;
         if read != write {
             nodes.swap(read, write);
         }
-        if write > 0 {
-            let (head, tail) = nodes.split_at_mut(write);
-            if let (Inline::Text(previous), Inline::Text(current)) =
-                (&mut head[write - 1], &tail[0])
-            {
-                previous.value.push_str(&current.value);
-                if let (Some(previous_span), Some(current_span)) =
-                    (previous.meta.span.as_mut(), current.meta.span)
-                {
-                    previous_span.end = current_span.end;
-                }
-                continue;
-            }
-        }
         write += 1;
+        read = end;
     }
     nodes.truncate(write);
 
     for node in nodes.iter_mut() {
         match node {
-            Inline::Emphasis(node) => merge_adjacent_text(&mut node.children),
-            Inline::Strong(node) => merge_adjacent_text(&mut node.children),
-            Inline::Delete(node) => merge_adjacent_text(&mut node.children),
-            Inline::Mark(node) => merge_adjacent_text(&mut node.children),
+            Inline::Emphasis(node) => merge_text(&mut node.children, placeholders),
+            Inline::Strong(node) => merge_text(&mut node.children, placeholders),
+            Inline::Delete(node) => merge_text(&mut node.children, placeholders),
+            Inline::Mark(node) => merge_text(&mut node.children, placeholders),
             _ => {}
         }
+    }
+}
+
+/// The value `merge_text` reads for `text`: with `placeholders`, a
+/// placeholder's is read from the input.
+fn text_value_of<'v>(text: &'v Text, placeholders: Option<(&'v str, usize)>) -> &'v str {
+    match placeholders {
+        Some((input, base_offset)) if text.value.is_empty() => {
+            placeholder_value(input, base_offset, text)
+        }
+        _ => &text.value,
     }
 }
 
 /// Index into `openers_bottom` for a nested closer's (marker, both-flags,
 /// length % 3) key.
 fn openers_bottom_key(closer: &DelimMarker) -> usize {
-    let marker = match closer.marker {
-        b'_' => 1,
-        b'~' => 2,
-        b'=' => 3,
-        _ => 0,
-    };
+    let marker = marker_slot(closer.marker);
     let both = usize::from(closer.can_open && closer.can_close);
     // The key holds what `emphasis_delimiters_match` reads of the closer: the
     // whole run's length for the rule of three on `*` / `_`, and what is left
@@ -2125,6 +2486,8 @@ struct BracketOpener {
 enum LinkTarget {
     Resource(ParsedLinkResource),
     Reference {
+        label: String,
+        /// The definition's identifier `label` resolves to.
         identifier: String,
         kind: ReferenceKind,
     },
@@ -2171,7 +2534,7 @@ fn match_link_target(
         // A present `[...]` second label that resolves to no definition is
         // not a link, and CommonMark does not fall back to treating the first
         // label as a shortcut (`[x][ ]`, `[x][undef]` stay literal).
-        return definition_exists(definitions, identifier).then(|| {
+        return defined_identifier(definitions, identifier).map(|defined| {
             let kind = if reference.is_empty() {
                 ReferenceKind::Collapsed
             } else {
@@ -2180,17 +2543,19 @@ fn match_link_target(
             (
                 reference_close + 1,
                 LinkTarget::Reference {
-                    identifier: identifier.into(),
+                    label: identifier.into(),
+                    identifier: defined,
                     kind,
                 },
             )
         });
     }
-    definition_exists(definitions, label).then(|| {
+    defined_identifier(definitions, label).map(|defined| {
         (
             after,
             LinkTarget::Reference {
-                identifier: label.into(),
+                label: label.into(),
+                identifier: defined,
                 kind: ReferenceKind::Shortcut,
             },
         )
@@ -2218,24 +2583,34 @@ fn link_node(target: LinkTarget, image: bool, span: Span, mut children: Vec<Inli
             title: resource.title,
             alt: children,
         }),
-        (LinkTarget::Reference { identifier, kind }, false) => {
-            Inline::LinkReference(LinkReference {
-                meta,
-                identifier: normalize_label(&identifier),
-                label: identifier,
+        (
+            LinkTarget::Reference {
+                label,
+                identifier,
                 kind,
-                children,
-            })
-        }
-        (LinkTarget::Reference { identifier, kind }, true) => {
-            Inline::ImageReference(ImageReference {
-                meta,
-                identifier: normalize_label(&identifier),
-                label: identifier,
+            },
+            false,
+        ) => Inline::LinkReference(LinkReference {
+            meta,
+            identifier,
+            label,
+            kind,
+            children,
+        }),
+        (
+            LinkTarget::Reference {
+                label,
+                identifier,
                 kind,
-                alt: children,
-            })
-        }
+            },
+            true,
+        ) => Inline::ImageReference(ImageReference {
+            meta,
+            identifier,
+            label,
+            kind,
+            alt: children,
+        }),
     }
 }
 
@@ -2289,13 +2664,18 @@ struct Brackets {
 }
 
 impl Brackets {
-    fn new() -> Self {
+    fn new(buffers: &mut InlineBuffers) -> Self {
         Self {
-            openers: Vec::new(),
+            openers: take_buffer(&mut buffers.openers),
             link_floor: 0,
             overflow: 0,
-            formed: Vec::new(),
+            formed: take_buffer(&mut buffers.formed),
         }
+    }
+
+    fn give_back(self, buffers: &mut InlineBuffers) {
+        give_buffer(&mut buffers.openers, self.openers);
+        give_buffer(&mut buffers.formed, self.formed);
     }
 
     /// Whether a `[` is open: pushed and not yet closed by a `]`, as a link or
@@ -2316,39 +2696,50 @@ impl Brackets {
     }
 }
 
-/// Takes the nodes and runs after `opener` out of the pass, pairs the runs
-/// among themselves, and returns the resolved label content with its nesting
-/// depth.
+/// Takes the nodes and runs after `opener`, popped from `brackets`, out of
+/// the pass, pairs the runs among themselves, and returns the resolved label
+/// content with its nesting depth.
 fn take_label(
     input: &str,
+    base_offset: usize,
     nodes: &mut Vec<Inline>,
     delimiters: &mut Vec<DelimMarker>,
     brackets: &mut Brackets,
     opener: &BracketOpener,
-    depth: usize,
+    state: &mut InlineState,
 ) -> (Vec<Inline>, usize) {
+    // The label nests in the enclosing passes and the brackets still open
+    // around it.
+    let depth = state.depth + brackets.openers.len();
     let first = opener.node_index + 1;
     let children: Vec<Inline> = nodes.drain(first..).collect();
-    let mut runs = delimiters.split_off(opener.delimiter_bottom);
-    for run in &mut runs {
+    let runs = &mut delimiters[opener.delimiter_bottom..];
+    for run in runs.iter_mut() {
         run.node_index -= first;
     }
     let split = brackets.formed.partition_point(|&(node, _)| node < first);
-    let formed: Vec<(usize, usize)> = brackets
-        .formed
-        .split_off(split)
-        .into_iter()
-        .map(|(node, marks)| (node - first, marks))
-        .collect();
-    assign_emphasis_roles(input, &mut runs);
-    process_emphasis(children, runs, depth, &formed)
+    let formed = &mut brackets.formed[split..];
+    for (node, _) in formed.iter_mut() {
+        *node -= first;
+    }
+    assign_emphasis_roles(input, runs);
+    let label = process_emphasis(
+        input,
+        base_offset,
+        children,
+        runs,
+        depth,
+        formed,
+        &mut state.buffers,
+    );
+    delimiters.truncate(opener.delimiter_bottom);
+    brackets.formed.truncate(split);
+    label
 }
 
 /// Removes `count` trailing delimiter characters from a placeholder text node.
 fn trim_delimiter_text_tail(node: &mut Inline, count: usize) {
     if let Inline::Text(text) = node {
-        let new_len = text.value.len().saturating_sub(count);
-        text.value.truncate(new_len);
         if let Some(span) = text.meta.span.as_mut() {
             span.end = span.end.saturating_sub(count);
         }
@@ -2356,12 +2747,8 @@ fn trim_delimiter_text_tail(node: &mut Inline, count: usize) {
 }
 
 /// Removes `count` leading delimiter characters from a placeholder text node.
-/// The node holds one repeated marker byte, so dropping from the front leaves
-/// the same text as truncating the back.
 fn trim_delimiter_text_head(node: &mut Inline, count: usize) {
     if let Inline::Text(text) = node {
-        let count = count.min(text.value.len());
-        text.value.truncate(text.value.len() - count);
         if let Some(span) = text.meta.span.as_mut() {
             span.start += count;
         }
@@ -2370,8 +2757,8 @@ fn trim_delimiter_text_head(node: &mut Inline, count: usize) {
 
 /// Forward lookups the inline scanners ask of one input. `DirectLookups`
 /// answers each with a fresh scan, for callers that ask once; `InlineLookups`
-/// memoizes the answers for the many questions one inline pass asks. Both
-/// answer identically.
+/// memoizes the answers for the many questions one inline pass or one label
+/// walk asks. Both answer identically.
 trait Lookups {
     /// The first occurrence of `pattern` that starts at or after `from`.
     fn find(&mut self, pattern: &'static str, from: usize) -> Option<usize>;
@@ -2413,21 +2800,64 @@ const CACHED_PATTERNS: [&str; 8] = [">", "-->", "?>", "]]>", "\"", "'", "`$", "$
 /// use.
 struct InlineLookups<'a> {
     input: &'a str,
+    tables: Option<Box<LookupTables>>,
+}
+
+/// The tables `InlineLookups` builds, empty between inputs.
+#[derive(Default)]
+struct LookupTables {
     patterns: [Positions; CACHED_PATTERNS.len()],
-    backtick_runs: Option<BTreeMap<usize, Vec<usize>>>,
+    /// `backtick_runs_by_length`, once `backtick_runs_read`.
+    backtick_runs: Vec<(usize, usize)>,
+    backtick_runs_read: bool,
     angle_destination_stops: Positions,
     unescaped_dollars: Positions,
 }
 
-impl<'a> InlineLookups<'a> {
-    fn new(input: &'a str) -> Self {
-        Self {
-            input,
-            patterns: Default::default(),
-            backtick_runs: None,
-            angle_destination_stops: Positions::default(),
-            unescaped_dollars: Positions::default(),
+impl LookupTables {
+    /// Empties every table, keeping its buffer for the next input.
+    fn clear(&mut self) {
+        let Self {
+            patterns,
+            backtick_runs,
+            backtick_runs_read,
+            angle_destination_stops,
+            unescaped_dollars,
+        } = self;
+        for positions in patterns {
+            positions.clear();
         }
+        backtick_runs.clear();
+        *backtick_runs_read = false;
+        angle_destination_stops.clear();
+        unescaped_dollars.clear();
+    }
+
+    fn is_clear(&self) -> bool {
+        let Self {
+            patterns,
+            backtick_runs,
+            backtick_runs_read,
+            angle_destination_stops,
+            unescaped_dollars,
+        } = self;
+        patterns.iter().all(Positions::is_clear)
+            && backtick_runs.is_empty()
+            && !backtick_runs_read
+            && angle_destination_stops.is_clear()
+            && unescaped_dollars.is_clear()
+    }
+}
+
+impl<'a> InlineLookups<'a> {
+    /// The lookups of `input`, which build their tables in `tables`, empty,
+    /// or in new ones on first use.
+    fn new(input: &'a str, tables: Option<Box<LookupTables>>) -> Self {
+        Self { input, tables }
+    }
+
+    fn tables(&mut self) -> &mut LookupTables {
+        self.tables.get_or_insert_with(Box::default)
     }
 }
 
@@ -2437,53 +2867,61 @@ impl Lookups for InlineLookups<'_> {
         let Some(slot) = CACHED_PATTERNS.iter().position(|cached| *cached == pattern) else {
             return DirectLookups { input }.find(pattern, from);
         };
-        self.patterns[slot].first_at_or_after(from, || pattern_starts(input, pattern))
+        self.tables().patterns[slot].first_at_or_after(from, |starts| {
+            pattern_starts(input, pattern, starts);
+        })
     }
 
     fn code_span_close(&mut self, start: usize, len: usize) -> Option<usize> {
         let input = self.input;
-        let runs = self
-            .backtick_runs
-            .get_or_insert_with(|| backtick_runs_by_length(input));
-        let starts = runs.get(&len)?;
-        starts
-            .get(starts.partition_point(|run| *run < start))
-            .copied()
+        let tables = self.tables();
+        if !tables.backtick_runs_read {
+            backtick_runs_by_length(input, &mut tables.backtick_runs);
+            tables.backtick_runs_read = true;
+        }
+        let runs = &tables.backtick_runs;
+        let (run_len, run_start) = *runs.get(runs.partition_point(|run| *run < (len, start)))?;
+        (run_len == len).then_some(run_start)
     }
 
     fn angle_destination_stop(&mut self, from: usize) -> Option<usize> {
         let input = self.input;
-        self.angle_destination_stops.first_at_or_after(from, || {
-            (0..input.len())
-                .filter(|index| is_angle_destination_stop(input, *index))
-                .collect()
-        })
+        self.tables()
+            .angle_destination_stops
+            .first_at_or_after(from, |stops| {
+                crate::swar::each_any(input.as_bytes(), [b'<', b'>', b'\n', b'\r'], |index| {
+                    if is_angle_destination_stop(input, index) {
+                        stops.push(index);
+                    }
+                });
+            })
     }
 
     fn unescaped_dollar(&mut self, from: usize) -> Option<usize> {
         let input = self.input;
-        self.unescaped_dollars.first_at_or_after(from, || {
-            (0..input.len())
-                .filter(|index| is_unescaped_dollar(input, *index))
-                .collect()
-        })
+        self.tables()
+            .unescaped_dollars
+            .first_at_or_after(from, |dollars| {
+                crate::swar::each_any(input.as_bytes(), [b'$'], |index| {
+                    if is_unescaped_dollar(input, index) {
+                        dollars.push(index);
+                    }
+                });
+            })
     }
 }
 
-/// Start offsets of every maximal backtick run, grouped by run length.
-fn backtick_runs_by_length(input: &str) -> BTreeMap<usize, Vec<usize>> {
-    let mut runs: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    let mut index = 0;
-    while index < input.len() {
-        if input.as_bytes()[index] == b'`' {
-            let len = backtick_run_len(input, index);
-            runs.entry(len).or_default().push(index);
-            index += len;
-        } else {
-            index += 1;
-        }
+/// Pushes the length and start offset of every maximal backtick run to
+/// `runs`, an empty buffer, sorted by length and then by start.
+fn backtick_runs_by_length(input: &str, runs: &mut Vec<(usize, usize)>) {
+    let bytes = input.as_bytes();
+    let mut start = crate::swar::find_any(bytes, 0, [b'`']);
+    while start < bytes.len() {
+        let len = backtick_run_len(input, start);
+        runs.push((len, start));
+        start = crate::swar::find_any(bytes, start + len, [b'`']);
     }
-    runs
+    runs.sort_unstable();
 }
 
 fn backtick_run_len(input: &str, index: usize) -> usize {
@@ -2513,24 +2951,117 @@ fn is_angle_destination_stop(input: &str, index: usize) -> bool {
 struct InlineScan<'a> {
     input: &'a str,
     lookups: InlineLookups<'a>,
+    memos: Option<Box<ScanMemos>>,
+    literal_autolinks: LiteralAutolinkScan,
+}
+
+/// The walks `InlineScan` memoizes, empty between inputs.
+#[derive(Default)]
+struct ScanMemos {
     label_ends: BracketMemo,
     reference_label_ends: PathMemo,
     wikilink_closes: PathMemo,
     directive_attribute_closes: PathMemo,
-    literal_autolinks: LiteralAutolinkScan,
+}
+
+impl ScanMemos {
+    /// Forgets every answer, keeping the tables for the next input.
+    fn clear(&mut self) {
+        let Self {
+            label_ends,
+            reference_label_ends,
+            wikilink_closes,
+            directive_attribute_closes,
+        } = self;
+        label_ends.clear();
+        reference_label_ends.clear();
+        wikilink_closes.clear();
+        directive_attribute_closes.clear();
+    }
+
+    fn is_clear(&self) -> bool {
+        let Self {
+            label_ends,
+            reference_label_ends,
+            wikilink_closes,
+            directive_attribute_closes,
+        } = self;
+        label_ends.is_clear()
+            && reference_label_ends.is_clear()
+            && wikilink_closes.is_clear()
+            && directive_attribute_closes.is_clear()
+    }
+}
+
+/// The longest input whose scan tables a pass keeps for the next pass.
+const KEPT_TABLES_INPUT_LEN: usize = 1 << 14;
+
+/// The most nodes a pass returns as a copy that fits them, and the largest
+/// capacity, in nodes, of a node buffer a pass keeps for the next pass.
+const KEPT_NODES_LEN: usize = 1 << 11;
+
+/// The tables an `InlineScan` builds, kept empty from one pass to the next,
+/// boxed so that a pass moves them in and out cheaply; `None` until a pass
+/// uses them.
+#[derive(Default)]
+struct ScanTables {
+    lookups: Option<Box<LookupTables>>,
+    memos: Option<Box<ScanMemos>>,
+}
+
+impl ScanTables {
+    fn is_clear(&self) -> bool {
+        let Self { lookups, memos } = self;
+        lookups.as_deref().is_none_or(LookupTables::is_clear)
+            && memos.as_deref().is_none_or(ScanMemos::is_clear)
+    }
 }
 
 impl<'a> InlineScan<'a> {
+    #[cfg(test)]
     fn new(input: &'a str) -> Self {
+        Self::with_tables(input, ScanTables::default())
+    }
+
+    /// The scans of `input`, which build their tables in `tables`, empty.
+    fn with_tables(input: &'a str, tables: ScanTables) -> Self {
         Self {
             input,
-            lookups: InlineLookups::new(input),
-            label_ends: BracketMemo::default(),
-            reference_label_ends: PathMemo::default(),
-            wikilink_closes: PathMemo::default(),
-            directive_attribute_closes: PathMemo::default(),
+            lookups: InlineLookups::new(input, tables.lookups),
+            memos: tables.memos,
             literal_autolinks: LiteralAutolinkScan::default(),
         }
+    }
+
+    /// The tables the scans built, emptied for the next input, or none for
+    /// an input longer than `KEPT_TABLES_INPUT_LEN`.
+    fn into_tables(self) -> ScanTables {
+        if self.input.len() > KEPT_TABLES_INPUT_LEN {
+            return ScanTables::default();
+        }
+        let mut tables = ScanTables {
+            lookups: self.lookups.tables,
+            memos: self.memos,
+        };
+        if let Some(lookups) = &mut tables.lookups {
+            lookups.clear();
+        }
+        if let Some(memos) = &mut tables.memos {
+            memos.clear();
+        }
+        tables
+    }
+
+    fn memos(&mut self) -> &mut ScanMemos {
+        self.memos_and_lookups().0
+    }
+
+    /// The memos, and the lookups a memoized step reads beside them.
+    fn memos_and_lookups(&mut self) -> (&mut ScanMemos, &mut InlineLookups<'a>) {
+        (
+            self.memos.get_or_insert_with(Box::default),
+            &mut self.lookups,
+        )
     }
 
     /// `find_link_label_end`, memoized.
@@ -2539,32 +3070,38 @@ impl<'a> InlineScan<'a> {
         if input.as_bytes().get(open) != Some(&b'[') {
             return None;
         }
-        let lookups = &mut self.lookups;
-        self.label_ends
+        let (memos, lookups) = self.memos_and_lookups();
+        memos
+            .label_ends
             .resolve(input.len() + 1, open + 1, |cursor| {
                 link_label_step(lookups, input, cursor)
             })
     }
 
-    /// `find_reference_label_end`, memoized.
+    /// `find_reference_label_end`, memoized. Its walk starts right after the
+    /// `[` at `open`, as `reference_label_step` needs for linear time.
     fn reference_label_end(&mut self, open: usize) -> Option<usize> {
         let input = self.input;
         if input.as_bytes().get(open) != Some(&b'[') {
             return None;
         }
-        let close = self
-            .reference_label_ends
-            .resolve(input.len() + 1, open + 1, |cursor| {
-                reference_label_step(input, cursor)
-            })?;
+        let close =
+            self.memos()
+                .reference_label_ends
+                .resolve(input.len() + 1, open + 1, |cursor| {
+                    reference_label_step(input, cursor)
+                })?;
         reference_label_is_within_limit(&input[open + 1..close]).then_some(close)
     }
 
     /// The `]]` closing the wikilink whose content starts at `start`; it must
-    /// be on the same line.
+    /// be on the same line. The inline pass asks it only right after a `[`,
+    /// as `wikilink_close_step` needs for linear time; the scan tests ask it
+    /// at every start of short inputs.
     fn wikilink_close(&mut self, start: usize) -> Option<usize> {
         let input = self.input;
-        self.wikilink_closes
+        self.memos()
+            .wikilink_closes
             .resolve(input.len() + 1, start, |cursor| {
                 wikilink_close_step(input, cursor)
             })
@@ -2576,7 +3113,7 @@ impl<'a> InlineScan<'a> {
         if input.as_bytes().get(open) != Some(&b'{') {
             return None;
         }
-        self.directive_attribute_closes.resolve(
+        self.memos().directive_attribute_closes.resolve(
             (input.len() + 1) * DIRECTIVE_QUOTE_STATES,
             (open + 1) * DIRECTIVE_QUOTE_STATES,
             |node| directive_attributes_step(input, node),
@@ -2593,25 +3130,24 @@ fn parse_inlines(
     definitions: Option<Labels<'_>>,
     diagnostics: &mut Vec<Diagnostic>,
     tokens: Option<&mut Vec<InlineToken>>,
+    state: &mut InlineState,
 ) -> Vec<Inline> {
     // Definitions are collected from the block structure alone.
     if definitions.is_none() {
         return Vec::new();
     }
     let first_diagnostic = diagnostics.len();
-    let mut nodes = parse_inlines_with_context(
-        input,
-        0,
-        definitions,
-        diagnostics,
-        &mut InlineState::default(),
-    );
-    tags::split_tags(input, &mut nodes);
+    let mut nodes = parse_inlines_with_context(input, 0, definitions, diagnostics, state);
+    tags::split_tags(input, &mut nodes, &mut state.buffers.tags);
     if let Some(tokens) = tokens {
         *tokens = tokens::tokens(input, &nodes);
         source_map::translate_tokens(map, tokens);
     }
     source_map::translate_inlines(map, &mut nodes, &mut diagnostics[first_diagnostic..]);
+    debug_assert!(
+        state.is_idle(),
+        "a leaf's inline parse leaves its state idle"
+    );
     nodes
 }
 
@@ -2621,13 +3157,84 @@ fn parse_inlines(
 /// literal text, so recursion and the native stack it uses stay bounded.
 const MAX_INLINE_NESTING: usize = 32;
 
-/// State shared by every inline parse nested under one block-level inline
-/// parse. All nested inputs are slices of that one input, addressed by their
-/// start offset in it; `parse_inlines` maps the result to the original input.
+/// State shared by the inline parses of one document: each block-level inline
+/// parse, and every parse nested under it. All inputs nested under one
+/// block-level parse are slices of its input, addressed by their start offset
+/// in it; `parse_inlines` maps the result to the original input.
 #[derive(Default)]
 struct InlineState {
     /// How many inline parses enclose the current one.
     depth: usize,
+    buffers: InlineBuffers,
+}
+
+impl InlineState {
+    /// Whether no inline parse is under way: no pass is open and every buffer
+    /// is empty, as it is between leaves.
+    fn is_idle(&self) -> bool {
+        let buffers = &self.buffers;
+        self.depth == 0
+            && buffers.nodes.is_empty()
+            && buffers.delimiters.is_empty()
+            && buffers.openers.is_empty()
+            && buffers.formed.is_empty()
+            && buffers.scan.is_clear()
+            && buffers.slot_links.is_empty()
+            && buffers.run_links.is_empty()
+            && buffers.tags.is_empty()
+    }
+}
+
+/// The working buffers of inline passes, kept from one pass to the next so
+/// that a pass allocates for the nodes it returns and little else. A pass
+/// takes each buffer it needs and gives it back, empty, when it is done with
+/// it; a pass nested in it finds the buffer taken and works in a new one.
+///
+/// This is a compromise: it gives up memory for allocations. The buffers
+/// keep the capacity of the largest leaf's working lists, the node buffer's
+/// up to a bound, until the document is parsed, and the copy a pass returns
+/// is made while the node buffer it was built in still holds the nodes.
+/// Over many leaves of ordinary size the peak stays below that of lists
+/// allocated anew in every pass. Two bounds on the node buffer keep a long
+/// leaf from costing more. A pass whose list ends with more than
+/// `KEPT_NODES_LEN` nodes returns the list itself in place of a copy: its
+/// nodes are not held twice, and the list keeps the capacity it grew to
+/// while the pass built its nodes for as long as the document holds it. And
+/// a node buffer that grew past the capacity of `KEPT_NODES_LEN` nodes is
+/// dropped where a pass would give it back, so the buffer kept between
+/// passes stays small. A pass after either grows its buffer anew, a cost
+/// small beside a long pass's own and paid again by each leaf where all are
+/// long.
+#[derive(Default)]
+struct InlineBuffers {
+    nodes: Vec<Inline>,
+    delimiters: Vec<DelimMarker>,
+    openers: Vec<BracketOpener>,
+    formed: Vec<(usize, usize)>,
+    /// The scans' tables, each kept at the size of the largest input of at
+    /// most `KEPT_TABLES_INPUT_LEN` bytes it covered. This is a
+    /// compromise: a pass over a longer input drops its tables, which hold
+    /// several words per byte of that input, so that one long leaf does not
+    /// leave tables of its size behind until the document is parsed. It
+    /// gives up reuse for long leaves only, each of which builds its tables
+    /// anew at a cost small beside its own pass, while short leaves still
+    /// share one set.
+    scan: ScanTables,
+    /// `InlineList` links and `DelimiterLinks` runs.
+    slot_links: Vec<(usize, usize)>,
+    run_links: Vec<RunLink>,
+    tags: tags::TagBuffers,
+}
+
+/// The buffer kept in `slot`, empty, or a new one when it is taken.
+fn take_buffer<T>(slot: &mut Vec<T>) -> Vec<T> {
+    core::mem::take(slot)
+}
+
+/// Empties `buffer` and keeps it in `slot` for the next pass.
+fn give_buffer<T>(slot: &mut Vec<T>, mut buffer: Vec<T>) {
+    buffer.clear();
+    *slot = buffer;
 }
 
 /// What one inline pass threads through its construct parsers: the state it
@@ -2667,33 +3274,31 @@ fn parse_inline_content(
     state: &mut InlineState,
 ) -> Vec<Inline> {
     let bytes = input.as_bytes();
-    let mut nodes = Vec::new();
-    let mut text_start = 0;
-    let mut text = String::new();
+    // The pass builds its nodes in a buffer and returns a copy that fits
+    // them, or, when they are many, the list itself.
+    let mut nodes = take_buffer(&mut state.buffers.nodes);
+    let mut text = PendingText::new(input, base_offset);
     let mut index = 0;
     // Emphasis and mark delimiters are resolved with a delimiter stack after the
     // scan completes. During the scan we emit each candidate delimiter run as a
     // literal text node and record it here so `process_emphasis` can rewrite the
     // flat node list into emphasis and mark nodes (or leave it as text).
-    let mut delimiters: Vec<DelimMarker> = Vec::new();
-    let mut brackets = Brackets::new();
+    let mut delimiters = take_buffer(&mut state.buffers.delimiters);
+    let mut brackets = Brackets::new(&mut state.buffers);
+    let tables = core::mem::take(&mut state.buffers.scan);
     let mut pass = InlinePass {
         state,
-        scan: InlineScan::new(input),
+        scan: InlineScan::with_tables(input, tables),
     };
-    // A literal autolink holds `://`, `www.`, or an email's `@`; content
-    // without any of them is not scanned for one at each position.
-    let literal_autolinks = bytes.contains(&b'@')
-        || input.contains("://")
-        || bytes
-            .windows(4)
-            .any(|window| window.eq_ignore_ascii_case(b"www."));
-
+    // A branch below that starts at a byte needs the byte to be a `Trigger`
+    // or `Colon` in `TEXT_STOPS`, except a literal autolink's, which starts
+    // where `literal_autolink_may_start` holds: `plain_text_end` reads text
+    // past every other position.
     while index < bytes.len() {
         if bytes[index] == b'\\' {
             if let Some((next_index, char)) = next_char(input, index + 1) {
                 if char.is_ascii_punctuation() {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                    flush_text(&mut nodes, &mut text);
                     nodes.push(Inline::Escape(Escape {
                         meta: NodeMeta::new(Some(Span::new(
                             base_offset + index,
@@ -2702,21 +3307,19 @@ fn parse_inline_content(
                         value: char,
                     }));
                     index = next_index;
-                    text_start = index;
                     continue;
                 }
             }
         }
 
         if bytes[index] == b'&' {
-            if let Some((end, _)) = parse_character_reference(input, index) {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            if let Some((end, _)) = character_reference(input, index) {
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::CharacterReference(CharacterReference {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     reference: input[index..end].into(),
                 }));
                 index = end;
-                text_start = index;
                 continue;
             }
         }
@@ -2727,15 +3330,10 @@ fn parse_inline_content(
             if index > 0
                 && bytes[index - 1] == b'\\'
                 && !is_escaped_at(input, index - 1)
-                && text.ends_with('\\')
+                && text.as_str().ends_with('\\')
             {
-                text.pop();
-                flush_text(
-                    &mut nodes,
-                    &mut text,
-                    text_start,
-                    base_offset + index.saturating_sub(1),
-                );
+                text.truncate(text.len() - 1);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::LineBreak(LineBreak {
                     meta: NodeMeta::new(Some(Span::new(
                         base_offset + index.saturating_sub(1),
@@ -2744,19 +3342,13 @@ fn parse_inline_content(
                     kind: LineBreakKind::Backslash,
                 }));
                 index += 1;
-                text_start = index;
                 continue;
             }
             // The spaces and tabs ending the line: a hard break or stripped.
-            let trailing_spaces = trailing_space_count(&text);
-            if is_hard_break_suffix(&text, trailing_spaces) {
+            let trailing_spaces = trailing_space_count(text.as_str());
+            if is_hard_break_suffix(text.as_str(), trailing_spaces) {
                 text.truncate(text.len() - trailing_spaces);
-                flush_text(
-                    &mut nodes,
-                    &mut text,
-                    text_start,
-                    base_offset + index.saturating_sub(trailing_spaces),
-                );
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::LineBreak(LineBreak {
                     meta: NodeMeta::new(Some(Span::new(
                         base_offset + index.saturating_sub(trailing_spaces),
@@ -2765,16 +3357,15 @@ fn parse_inline_content(
                     kind: LineBreakKind::Spaces,
                 }));
                 index += 1;
-                text_start = index;
                 continue;
             }
             // Stripped spaces and tabs that no text holds, as after another
             // inline, are read as part of the soft break.
             let stripped_alone = trailing_spaces > 0 && text.len() == trailing_spaces;
             if trailing_spaces > 0 {
-                text.truncate(text.len() - trailing_spaces);
+                text.strip(text.len() - trailing_spaces);
             }
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            flush_text(&mut nodes, &mut text);
             let start = if stripped_alone {
                 index - trailing_spaces
             } else {
@@ -2787,19 +3378,17 @@ fn parse_inline_content(
                 ))),
             }));
             index += 1;
-            text_start = index;
             continue;
         }
 
         if bytes[index] == b'`' {
             if let Some((end, value)) = parse_code_span_with(&mut pass.scan.lookups, input, index) {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::Code(CodeInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     value,
                 }));
                 index = end;
-                text_start = index;
                 continue;
             } else {
                 // No matching-length close for this opening backtick run:
@@ -2811,12 +3400,7 @@ fn parse_inline_content(
                     .iter()
                     .take_while(|byte| **byte == b'`')
                     .count();
-                if text.is_empty() {
-                    text_start = base_offset + index;
-                }
-                for _ in 0..run {
-                    text.push('`');
-                }
+                text.extend(index, index + run);
                 index += run;
                 continue;
             }
@@ -2824,7 +3408,7 @@ fn parse_inline_content(
 
         if bytes[index] == b'*' && starts_delimiter_run(input, index, b'*') {
             let run_len = delimiter_byte_run_len(input, index, b'*');
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            flush_text(&mut nodes, &mut text);
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
@@ -2834,7 +3418,6 @@ fn parse_inline_content(
                 run_len,
             );
             index += run_len;
-            text_start = index;
             continue;
         }
 
@@ -2845,26 +3428,25 @@ fn parse_inline_content(
             // literal autolink before recording the `_` as an emphasis
             // delimiter, otherwise the `_` would be consumed and the email would
             // wrongly start one char later (where its left boundary fails).
-            if literal_autolinks {
+            if literal_email_may_start(input, index, &mut pass.scan.literal_autolinks) {
                 if let Some((end, _)) = parse_literal_autolink(
                     input,
                     index,
                     &mut pass.scan.literal_autolinks,
                     !brackets.open(),
                 ) {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                    flush_text(&mut nodes, &mut text);
                     nodes.push(autolink_node(
                         AutolinkForm::Literal,
                         Span::new(base_offset + index, base_offset + end),
                         &input[index..end],
                     ));
                     index = end;
-                    text_start = index;
                     continue;
                 }
             }
             let run_len = delimiter_byte_run_len(input, index, b'_');
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            flush_text(&mut nodes, &mut text);
             push_delimiter(
                 &mut nodes,
                 &mut delimiters,
@@ -2874,14 +3456,13 @@ fn parse_inline_content(
                 run_len,
             );
             index += run_len;
-            text_start = index;
             continue;
         }
 
         if bytes[index] == b'=' {
             let run_len = delimiter_byte_run_len(input, index, b'=');
             if run_len >= 2 {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 push_delimiter(
                     &mut nodes,
                     &mut delimiters,
@@ -2891,7 +3472,6 @@ fn parse_inline_content(
                     run_len,
                 );
                 index += run_len;
-                text_start = index;
                 continue;
             }
         }
@@ -2900,9 +3480,9 @@ fn parse_inline_content(
 
         // `^[` opens an inline footnote.
         if bracket_room && bytes[index] == b'^' && bytes.get(index + 1) == Some(&b'[') {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            push_text(&mut nodes, base_offset + index, "^");
-            push_text(&mut nodes, base_offset + index + 1, "[");
+            flush_text(&mut nodes, &mut text);
+            push_placeholder(&mut nodes, base_offset + index, 1);
+            push_placeholder(&mut nodes, base_offset + index + 1, 1);
             brackets.openers.push(BracketOpener {
                 kind: BracketKind::InlineFootnote,
                 node_index: nodes.len() - 1,
@@ -2910,7 +3490,6 @@ fn parse_inline_content(
                 delimiter_bottom: delimiters.len(),
             });
             index += 2;
-            text_start = index;
             continue;
         }
 
@@ -2920,7 +3499,7 @@ fn parse_inline_content(
         if bytes[index] == b'~' && starts_delimiter_run(input, index, b'~') {
             let run_len = delimiter_byte_run_len(input, index, b'~');
             if run_len == 2 {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 push_delimiter(
                     &mut nodes,
                     &mut delimiters,
@@ -2930,7 +3509,6 @@ fn parse_inline_content(
                     run_len,
                 );
                 index += run_len;
-                text_start = index;
                 continue;
             }
         }
@@ -2942,20 +3520,19 @@ fn parse_inline_content(
             if let Some((end, wikilink)) =
                 parse_wikilink(input, index + 1, base_offset, &mut pass.scan)
             {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(embed(wikilink, base_offset + index));
                 // A wikilink is a link: no open bracket forms a link around it.
                 brackets.close_links();
                 index = end;
-                text_start = index;
                 continue;
             }
         }
 
         if bytes[index] == b'!' && bytes.get(index + 1) == Some(&b'[') && bracket_room {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-            push_text(&mut nodes, base_offset + index, "!");
-            push_text(&mut nodes, base_offset + index + 1, "[");
+            flush_text(&mut nodes, &mut text);
+            push_placeholder(&mut nodes, base_offset + index, 1);
+            push_placeholder(&mut nodes, base_offset + index + 1, 1);
             brackets.openers.push(BracketOpener {
                 kind: BracketKind::Image,
                 node_index: nodes.len() - 1,
@@ -2963,23 +3540,21 @@ fn parse_inline_content(
                 delimiter_bottom: delimiters.len(),
             });
             index += 2;
-            text_start = index;
             continue;
         }
 
         if bytes[index] == b'[' {
             if let Some((end, wikilink)) = parse_wikilink(input, index, base_offset, &mut pass.scan)
             {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(wikilink);
                 brackets.close_links();
                 index = end;
-                text_start = index;
                 continue;
             }
             if bracket_room {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
-                push_text(&mut nodes, base_offset + index, "[");
+                flush_text(&mut nodes, &mut text);
+                push_placeholder(&mut nodes, base_offset + index, 1);
                 brackets.openers.push(BracketOpener {
                     kind: BracketKind::Link,
                     node_index: nodes.len() - 1,
@@ -2987,7 +3562,6 @@ fn parse_inline_content(
                     delimiter_bottom: delimiters.len(),
                 });
                 index += 1;
-                text_start = index;
                 continue;
             }
             brackets.overflow += 1;
@@ -2997,7 +3571,7 @@ fn parse_inline_content(
             // Closes a `[` left as text past the nesting limit.
             brackets.overflow -= 1;
         } else if bytes[index] == b']' && !brackets.openers.is_empty() {
-            flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+            flush_text(&mut nodes, &mut text);
             if let Some(end) = close_bracket(
                 input,
                 base_offset,
@@ -3009,7 +3583,6 @@ fn parse_inline_content(
                 &mut pass,
             ) {
                 index = end;
-                text_start = index;
                 continue;
             }
         }
@@ -3018,14 +3591,13 @@ fn parse_inline_content(
             if let Some((end, value, kind)) =
                 parse_math_inline(&mut pass.scan.lookups, input, index)
             {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::Math(MathInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     value,
                     kind,
                 }));
                 index = end;
-                text_start = index;
                 continue;
             }
             // A dollar run that opens but finds no exact-length close is emitted
@@ -3039,10 +3611,7 @@ fn parse_inline_content(
                 .take_while(|byte| **byte == b'$')
                 .count();
             if run > 1 {
-                if text.is_empty() {
-                    text_start = base_offset + index;
-                }
-                text.push_str(&input[index..index + run]);
+                text.extend(index, index + run);
                 index += run;
                 continue;
             }
@@ -3050,21 +3619,20 @@ fn parse_inline_content(
 
         // Inside an open `[` only an email address links; if the bracket
         // forms a link, `demote_links` turns it back into text.
-        if literal_autolinks {
+        if literal_autolink_may_start(input, index, &mut pass.scan.literal_autolinks) {
             if let Some((end, _)) = parse_literal_autolink(
                 input,
                 index,
                 &mut pass.scan.literal_autolinks,
                 !brackets.open(),
             ) {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(autolink_node(
                     AutolinkForm::Literal,
                     Span::new(base_offset + index, base_offset + end),
                     &input[index..end],
                 ));
                 index = end;
-                text_start = index;
                 continue;
             }
         }
@@ -3073,38 +3641,35 @@ fn parse_inline_content(
             if let Some(end) = pass.scan.lookups.find(">", index).map(|close| close + 1) {
                 let uri = &input[index + 1..end - 1];
                 if is_angle_autolink(uri) {
-                    flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                    flush_text(&mut nodes, &mut text);
                     nodes.push(autolink_node(
                         AutolinkForm::Angle,
                         Span::new(base_offset + index, base_offset + end),
                         uri,
                     ));
                     index = end;
-                    text_start = index;
                     continue;
                 }
             }
             if let Some(end) = html_inline_end(&mut pass.scan.lookups, input, index) {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::Html(HtmlInline {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     value: input[index..end].into(),
                 }));
                 index = end;
-                text_start = index;
                 continue;
             }
         }
 
         if bytes[index] == b':' {
             if let Some((end, name)) = parse_shortcode(input, index) {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 nodes.push(Inline::Shortcode(Shortcode {
                     meta: NodeMeta::new(Some(Span::new(base_offset + index, base_offset + end))),
                     name,
                 }));
                 index = end;
-                text_start = index;
                 continue;
             }
         }
@@ -3125,7 +3690,7 @@ fn parse_inline_content(
             );
             pass.state.depth -= brackets.openers.len();
             if let Some((end, directive)) = directive {
-                flush_text(&mut nodes, &mut text, text_start, base_offset + index);
+                flush_text(&mut nodes, &mut text);
                 if let Inline::TextDirective(node) = &directive {
                     // A link inside the directive label keeps open brackets
                     // from forming links around it.
@@ -3137,22 +3702,187 @@ fn parse_inline_content(
                 }
                 nodes.push(directive);
                 index = end;
-                text_start = index;
                 continue;
             }
         }
 
-        let (next_index, char) = next_char(input, index).expect("valid UTF-8 byte index");
-        if text.is_empty() {
-            text_start = base_offset + index;
-        }
-        text.push(char);
-        index = next_index;
+        let (next_index, _) = next_char(input, index).expect("valid UTF-8 byte index");
+        // The char, and the bytes after it that start nothing, go on as text
+        // in one piece.
+        let end = plain_text_end(input, next_index, &mut pass.scan.literal_autolinks);
+        text.extend(index, end);
+        index = end;
     }
 
-    flush_text(&mut nodes, &mut text, text_start, base_offset + input.len());
+    flush_text(&mut nodes, &mut text);
     assign_emphasis_roles(input, &mut delimiters);
-    process_emphasis(nodes, delimiters, pass.state.depth - 1, &brackets.formed).0
+    let depth = pass.state.depth - 1;
+    let buffers = &mut pass.state.buffers;
+    let (mut nodes, _) = process_emphasis(
+        input,
+        base_offset,
+        nodes,
+        &mut delimiters,
+        depth,
+        &brackets.formed,
+        buffers,
+    );
+    let inlines = if nodes.len() > KEPT_NODES_LEN {
+        nodes
+    } else {
+        let mut inlines = Vec::with_capacity(nodes.len());
+        inlines.append(&mut nodes);
+        if nodes.capacity() <= KEPT_NODES_LEN {
+            give_buffer(&mut buffers.nodes, nodes);
+        }
+        inlines
+    };
+    give_buffer(&mut buffers.delimiters, delimiters);
+    brackets.give_back(buffers);
+    buffers.scan = pass.scan.into_tables();
+    inlines
+}
+
+/// What `plain_text_end` does at a byte.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum TextStop {
+    /// Reads on.
+    Text,
+    /// Ends the run at the byte, at which `parse_inline_content` tries a
+    /// construct by the byte alone.
+    Trigger,
+    /// Ends the run at the start of the `http://` or `https://` the byte
+    /// closes, if any, and at the byte otherwise.
+    Colon,
+    /// Ends the run at the start of the `www.` (in any case) the byte closes,
+    /// if any, and reads on otherwise.
+    Dot,
+}
+
+/// The `TextStop` of each byte.
+const TEXT_STOPS: [TextStop; 256] = {
+    let mut table = [TextStop::Text; 256];
+    let triggers = b"\\&\n`*_=^~![]$<";
+    let mut index = 0;
+    while index < triggers.len() {
+        table[triggers[index] as usize] = TextStop::Trigger;
+        index += 1;
+    }
+    table[b':' as usize] = TextStop::Colon;
+    table[b'.' as usize] = TextStop::Dot;
+    table
+};
+
+#[cfg(test)]
+std::thread_local! {
+    /// Set by the scan tests on their thread: `plain_text_end` ends every run
+    /// where it starts and `literal_email_may_start` holds everywhere, so
+    /// `parse_inline_content` tries each char in turn, and a literal autolink
+    /// wherever `literal_autolink_may_start` finds a `http://`, `https://`,
+    /// or `www.`, or an email local-part or scheme byte.
+    static CHAR_BY_CHAR: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// The end of the run of text from `from` on that `parse_inline_content`
+/// reads a char at a time without starting anything: the first `Trigger`
+/// or `Colon` byte, or position at which `literal_autolink_may_start` holds.
+/// The run ends at a char boundary.
+///
+/// A `http://`, `https://`, or `www.` holds no such byte or position after
+/// its first, so the run reaches the `:` or `.` that closes one and ends at
+/// its start, unless it starts before `from`: at the char the run follows,
+/// which was tried, or inside a construct.
+fn plain_text_end(input: &str, from: usize, scan: &mut LiteralAutolinkScan) -> usize {
+    #[cfg(test)]
+    if CHAR_BY_CHAR.with(core::cell::Cell::get) {
+        return from;
+    }
+    let bytes = input.as_bytes();
+    // A run that ends where it starts, as between delimiters, needs no email
+    // start.
+    if bytes
+        .get(from)
+        .is_some_and(|byte| matches!(TEXT_STOPS[usize::from(*byte)], TextStop::Trigger))
+    {
+        return from;
+    }
+    let email = scan.email_starts.first_at_or_after(input, from);
+    let mut index = from;
+    while let Some(offset) = bytes[index..email]
+        .iter()
+        .position(|byte| !matches!(TEXT_STOPS[usize::from(*byte)], TextStop::Text))
+    {
+        index += offset;
+        match TEXT_STOPS[usize::from(bytes[index])] {
+            TextStop::Text => {}
+            TextStop::Trigger => return index,
+            TextStop::Colon => {
+                return url_scheme_start(bytes, index)
+                    .filter(|start| *start >= from)
+                    .unwrap_or(index);
+            }
+            TextStop::Dot => {
+                if let Some(start) = www_start(bytes, index).filter(|start| *start >= from) {
+                    return start;
+                }
+            }
+        }
+        index += 1;
+    }
+    email
+}
+
+/// Whether `parse_literal_autolink` may succeed at `index`: at a `http://`,
+/// `https://`, or `www.` (in any case), or where
+/// `literal_email_may_start` holds.
+#[inline]
+fn literal_autolink_may_start(input: &str, index: usize, scan: &mut LiteralAutolinkScan) -> bool {
+    let rest = &input.as_bytes()[index..];
+    match rest[0] {
+        b'h' if rest.starts_with(b"http://") || rest.starts_with(b"https://") => true,
+        b'w' | b'W'
+            if rest
+                .get(..4)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"www.")) =>
+        {
+            true
+        }
+        byte => is_email_local_or_scheme_byte(byte) && literal_email_may_start(input, index, scan),
+    }
+}
+
+/// Whether `parse_literal_email` may succeed at `index` (`EmailStarts`).
+#[inline]
+fn literal_email_may_start(input: &str, index: usize, scan: &mut LiteralAutolinkScan) -> bool {
+    #[cfg(test)]
+    if CHAR_BY_CHAR.with(core::cell::Cell::get) {
+        return true;
+    }
+    scan.email_starts.first_at_or_after(input, index) == index
+}
+
+/// The start of the `http://` or `https://` whose `:` is at `colon`.
+fn url_scheme_start(bytes: &[u8], colon: usize) -> Option<usize> {
+    if !bytes[colon + 1..].starts_with(b"//") {
+        return None;
+    }
+    let before = &bytes[..colon];
+    if before.ends_with(b"http") {
+        Some(colon - 4)
+    } else if before.ends_with(b"https") {
+        Some(colon - 5)
+    } else {
+        None
+    }
+}
+
+/// The start of the `www.` (in any case) whose `.` is at `dot`.
+fn www_start(bytes: &[u8], dot: usize) -> Option<usize> {
+    let start = dot.checked_sub(3)?;
+    bytes[start..dot]
+        .eq_ignore_ascii_case(b"www")
+        .then_some(start)
 }
 
 /// A `:name:` shortcode at `index`: `name` is in the gemoji table, and the
@@ -3203,8 +3933,12 @@ fn parse_wikilink(
         return None;
     }
 
-    let close = scan.wikilink_close(index + 2)?;
-    let source = &input[index + 2..close];
+    let start = index + 2;
+    // The walk to `]]` starts right after a `[`, as `wikilink_close_step`
+    // needs for linear time.
+    debug_assert!(input.as_bytes()[start - 1] == b'[');
+    let close = scan.wikilink_close(start)?;
+    let source = &input[start..close];
     if source.is_empty() || source.len() > WIKILINK_MAX_BYTES {
         return None;
     }
@@ -3243,7 +3977,16 @@ fn embed(mut wikilink: Inline, bang: usize) -> Inline {
 }
 
 /// One step of the walk to a wikilink's closing `]]`, which must be on the
-/// opener's line. The content holds no unescaped `[` or `]`.
+/// opener's line. The content holds no unescaped `[` or `]`. Text that is
+/// none of the bytes a step reads is passed in one step, to the next of
+/// them: walks from different starts meet there.
+///
+/// A `PathMemo` keeps answers only where a walk lands: at its start, at a
+/// byte the step reads, and after an escape. Memoized walks take linear time
+/// in total only when each starts right after a `[`: every walk then enters
+/// a stretch the step passes at its start, where the first walk to pass it
+/// leaves the answer. Walks started at many places inside one stretch would
+/// each pass the rest of it.
 fn wikilink_close_step(input: &str, cursor: usize) -> Step {
     let bytes = input.as_bytes();
     match bytes.get(cursor) {
@@ -3254,7 +3997,11 @@ fn wikilink_close_step(input: &str, cursor: usize) -> Step {
         }
         Some(b']') if bytes.get(cursor + 1) == Some(&b']') => Step::Done(Some(cursor)),
         Some(b']') => Step::Done(None),
-        Some(_) => Step::Next(next_char(input, cursor).map_or(input.len(), |(next, _)| next)),
+        Some(_) => Step::Next(crate::swar::find_any(
+            bytes,
+            cursor + 1,
+            [b'\n', b'\r', b'[', b'\\', b']'],
+        )),
     }
 }
 
@@ -3309,16 +4056,30 @@ fn find_reference_label_end(input: &str, open: usize) -> Option<usize> {
     reference_label_is_within_limit(&input[open + 1..close]).then_some(close)
 }
 
-/// One step of the walk to a reference label's closing `]`.
+/// One step of the walk to a reference label's closing `]`. Text that is
+/// none of the bytes a step reads is passed in one step, to the next of
+/// them: walks from different starts meet there.
+///
+/// A `PathMemo` keeps answers only where a walk lands: at its start, at a
+/// byte the step reads, and after an escape. Memoized walks take linear time
+/// in total only when each starts right after a `[`: every walk then enters
+/// a stretch the step passes at its start, where the first walk to pass it
+/// leaves the answer. Walks started at many places inside one stretch would
+/// each pass the rest of it.
 fn reference_label_step(input: &str, cursor: usize) -> Step {
-    let Some((next, char)) = next_char(input, cursor) else {
-        return Step::Done(None);
-    };
-    match char {
-        '\\' => Step::Next(next_char(input, next).map_or(next, |(after_escape, _)| after_escape)),
-        '[' => Step::Done(None),
-        ']' => Step::Done(Some(cursor)),
-        _ => Step::Next(next),
+    let bytes = input.as_bytes();
+    match bytes.get(cursor) {
+        None | Some(b'[') => Step::Done(None),
+        Some(b'\\') => {
+            let escaped = cursor + 1;
+            Step::Next(next_char(input, escaped).map_or(escaped, |(after_escape, _)| after_escape))
+        }
+        Some(b']') => Step::Done(Some(cursor)),
+        Some(_) => Step::Next(crate::swar::find_any(
+            bytes,
+            cursor + 1,
+            [b'\\', b'[', b']'],
+        )),
     }
 }
 
@@ -3364,11 +4125,15 @@ fn contains_link_inline(inlines: &[Inline]) -> bool {
     })
 }
 
+/// The `]` closing the link label that opens at `open`, found by one walk.
+/// The walk asks a forward lookup at every code span, autolink, and raw HTML
+/// opener in the label, so its lookups keep tables rather than scan the rest
+/// of `input` for each.
 fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
     if input.as_bytes().get(open) != Some(&b'[') {
         return None;
     }
-    let mut lookups = DirectLookups { input };
+    let mut lookups = InlineLookups::new(input, None);
     bracket_walk(open + 1, |cursor| {
         link_label_step(&mut lookups, input, cursor)
     })
@@ -3376,7 +4141,9 @@ fn find_link_label_end(input: &str, open: usize) -> Option<usize> {
 
 /// One step of the walk to a link label's closing `]`: escapes, code spans,
 /// autolinks, and inline HTML are stepped over whole, so brackets inside them
-/// do not count; other brackets nest.
+/// do not count; other brackets nest. A backtick run that opens no code span
+/// is literal text and is stepped over whole too, as the inline pass reads
+/// it: no shorter run inside it opens one.
 fn link_label_step(lookups: &mut impl Lookups, input: &str, cursor: usize) -> BracketStep {
     let Some((next, char)) = next_char(input, cursor) else {
         return BracketStep::End;
@@ -3385,7 +4152,10 @@ fn link_label_step(lookups: &mut impl Lookups, input: &str, cursor: usize) -> Br
         '\\' => {
             BracketStep::Pass(next_char(input, next).map_or(next, |(after_escape, _)| after_escape))
         }
-        '`' => BracketStep::Pass(code_span_end(lookups, input, cursor).unwrap_or(next)),
+        '`' => BracketStep::Pass(
+            code_span_end(lookups, input, cursor)
+                .unwrap_or_else(|| cursor + backtick_run_len(input, cursor)),
+        ),
         '<' => BracketStep::Pass(
             autolink_end(lookups, input, cursor)
                 .or_else(|| html_inline_end(lookups, input, cursor))
@@ -3830,8 +4600,11 @@ fn find_code_span_close(input: &str, start: usize, marker_len: usize) -> Option<
 
 fn normalize_code_span(input: &str) -> String {
     let (before, after) = code_padding(input);
-    let mut normalized = String::new();
     let content = &input[before..input.len() - after];
+    if !content.contains(['\n', '\r']) {
+        return content.into();
+    }
+    let mut normalized = String::with_capacity(content.len());
     let mut cursor = 0;
     while cursor < content.len() {
         let (next, char) = next_char(content, cursor).expect("valid UTF-8 byte index");
@@ -4510,16 +5283,87 @@ fn ends_with_line_ending(input: &str) -> bool {
     input.ends_with('\n') || input.ends_with('\r')
 }
 
-fn flush_text(nodes: &mut Vec<Inline>, text: &mut String, text_start: usize, end: usize) {
+/// The text `parse_inline_content` has read since its last node: always one
+/// run of its input, so it is copied out once, when it becomes a node.
+struct PendingText<'a> {
+    input: &'a str,
+    /// Where `input` starts in the source spans count in.
+    base_offset: usize,
+    /// The text's run of `input`.
+    start: usize,
+    end: usize,
+    /// Where the text's node ends in `input`: past `end` by the spaces and
+    /// tabs a soft break strips from the text.
+    span_end: usize,
+}
+
+impl<'a> PendingText<'a> {
+    fn new(input: &'a str, base_offset: usize) -> Self {
+        Self {
+            input,
+            base_offset,
+            start: 0,
+            end: 0,
+            span_end: 0,
+        }
+    }
+
+    fn as_str(&self) -> &'a str {
+        &self.input[self.start..self.end]
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    /// Adds the input from `start` to `end`, which starts where the text ends
+    /// unless the text is empty.
+    fn extend(&mut self, start: usize, end: usize) {
+        if self.is_empty() {
+            self.start = start;
+        }
+        debug_assert_eq!(self.end.max(self.start), start, "text is one run");
+        self.end = end;
+        self.span_end = end;
+    }
+
+    /// Keeps the first `len` bytes of the text, and ends its node with them.
+    fn truncate(&mut self, len: usize) {
+        self.end = self.start + len;
+        self.span_end = self.end;
+    }
+
+    /// Keeps the first `len` bytes of the text; its node still ends where
+    /// the text did.
+    fn strip(&mut self, len: usize) {
+        self.end = self.start + len;
+    }
+}
+
+/// Pushes the text read since the last node, if any, as a node of its own.
+fn flush_text(nodes: &mut Vec<Inline>, text: &mut PendingText) {
     if !text.is_empty() {
         nodes.push(Inline::Text(Text {
-            meta: NodeMeta::new(Some(Span::new(text_start, end))),
-            value: core::mem::take(text),
+            meta: NodeMeta::new(Some(Span::new(
+                text.base_offset + text.start,
+                text.base_offset + text.span_end,
+            ))),
+            value: text.as_str().into(),
         }));
+        text.start = text.end;
     }
 }
 
 fn next_char(input: &str, index: usize) -> Option<(usize, char)> {
+    if let Some(&byte) = input.as_bytes().get(index) {
+        if byte.is_ascii() {
+            return Some((index + 1, char::from(byte)));
+        }
+    }
     let char = input[index..].chars().next()?;
     Some((index + char.len_utf8(), char))
 }
@@ -4542,6 +5386,74 @@ fn is_flanking_punctuation(value: char) -> bool {
 /// The serializer's `normalize_reference_label` delegates here so the
 /// Shortcut/Collapsed omission oracle stays in lockstep with this matcher.
 pub(crate) fn normalize_label(label: &str) -> String {
+    if is_plain_ascii_label(label) {
+        normalize_ascii_label(label)
+    } else {
+        casefold_label(label)
+    }
+}
+
+/// Whether `normalize_label(label)` is `identifier`, compared as it is
+/// normalized.
+pub(crate) fn normalizes_to(label: &str, identifier: &str) -> bool {
+    if !is_plain_ascii_label(label) {
+        return casefold_label(label) == identifier;
+    }
+    // ASCII normalization never lengthens a label.
+    if identifier.len() > label.len() {
+        return false;
+    }
+    let mut rest = identifier.as_bytes();
+    let mut equal = true;
+    ascii_label_bytes(label, |byte| match rest.split_first() {
+        Some((&expected, after)) if equal => {
+            equal = expected == byte;
+            rest = after;
+        }
+        _ => equal = false,
+    });
+    equal && rest.is_empty()
+}
+
+/// Whether `normalize_label` reads `label` as `normalize_ascii_label` does:
+/// it is ASCII without U+0000.
+fn is_plain_ascii_label(label: &str) -> bool {
+    label.is_ascii() && !label.contains('\0')
+}
+
+/// `normalize_label` of an ASCII label without U+0000, which case-folds by
+/// ASCII lowercasing, read in one pass.
+fn normalize_ascii_label(label: &str) -> String {
+    let mut identifier = String::with_capacity(label.len());
+    ascii_label_bytes(label, |byte| identifier.push(char::from(byte)));
+    identifier
+}
+
+/// Passes `push` each byte of `normalize_ascii_label(label)`, in order.
+fn ascii_label_bytes(label: &str, mut push: impl FnMut(u8)) {
+    let mut empty = true;
+    let mut space = false;
+    for byte in label.bytes() {
+        if is_label_space(byte) {
+            space = !empty;
+            continue;
+        }
+        if space {
+            push(b' ');
+            space = false;
+        }
+        push(byte.to_ascii_lowercase());
+        empty = false;
+    }
+}
+
+/// Whether `byte` is one of the spaces label normalization collapses.
+fn is_label_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+/// `normalize_label` of any label.
+fn casefold_label(label: &str) -> String {
     label
         // Unicode full casefold maps capital sharp S (ẞ, U+1E9E) to "ss"; Rust's
         // `to_uppercase` leaves it unchanged (it is already uppercase), so without
@@ -4550,7 +5462,7 @@ pub(crate) fn normalize_label(label: &str) -> String {
         // full casefold that matters for label matching.
         .replace('ẞ', "ss")
         .replace('\0', "\u{FFFD}")
-        .split([' ', '\t', '\n', '\r'])
+        .split(|char: char| u8::try_from(char).is_ok_and(is_label_space))
         .filter(|word| !word.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
@@ -4562,17 +5474,52 @@ pub(crate) fn normalize_label(label: &str) -> String {
 /// definitions, sorted and deduplicated so that a lookup is a binary search.
 #[derive(Clone, Copy)]
 pub(crate) struct Labels<'a> {
-    pub(crate) own: &'a [String],
+    own: &'a [Identifier],
 }
 
-fn definition_exists(definitions: Option<Labels<'_>>, label: &str) -> bool {
+/// The identifier of the definition a reference with `label` resolves to, or
+/// `None` when no definition has it.
+fn defined_identifier(definitions: Option<Labels<'_>>, label: &str) -> Option<String> {
     if label.is_empty() || !reference_label_is_within_limit(label) {
-        return false;
+        return None;
     }
-    let Some(definitions) = definitions else {
-        return false;
-    };
-    definitions.own.binary_search(&identifier(label)).is_ok()
+    let definitions = definitions?;
+    // A short plain label is normalized on the stack, and a definition it
+    // matches holds its identifier: most references to no definition then
+    // allocate nothing.
+    if label.len() <= SHORT_LABEL_BYTES && is_plain_ascii_label(label) {
+        let mut buffer = [0; SHORT_LABEL_BYTES];
+        let mut len = 0;
+        ascii_label_bytes(label, |byte| {
+            buffer[len] = byte;
+            len += 1;
+        });
+        return definitions
+            .find(&buffer[..len])
+            .map(|index| definitions.own[index].text.clone());
+    }
+    let identifier = identifier(label);
+    definitions
+        .find(identifier.as_bytes())
+        .is_some()
+        .then_some(identifier)
+}
+
+/// The longest label `defined_identifier` normalizes on the stack.
+const SHORT_LABEL_BYTES: usize = 64;
+
+impl Labels<'_> {
+    /// The index of the identifier `identifier` in `own`.
+    fn find(self, identifier: &[u8]) -> Option<usize> {
+        let prefix = identifier_prefix(identifier);
+        self.own
+            .binary_search_by(|own| {
+                own.prefix
+                    .cmp(&prefix)
+                    .then_with(|| own.text.as_bytes().cmp(identifier))
+            })
+            .ok()
+    }
 }
 
 /// The identifier a reference with `label` resolves to: its normalized form,
@@ -4587,7 +5534,9 @@ fn identifier(label: &str) -> String {
 }
 
 fn reference_label_is_within_limit(label: &str) -> bool {
-    label.chars().take(REFERENCE_LABEL_MAX_CHARS + 1).count() <= REFERENCE_LABEL_MAX_CHARS
+    // A label holds no more chars than bytes.
+    label.len() <= REFERENCE_LABEL_MAX_CHARS
+        || label.chars().take(REFERENCE_LABEL_MAX_CHARS + 1).count() <= REFERENCE_LABEL_MAX_CHARS
 }
 
 /// Whether `[label]` reads back as a link reference label holding `label`:
@@ -4595,22 +5544,44 @@ fn reference_label_is_within_limit(label: &str) -> bool {
 /// bracket and does not escape its close; it is within the length limit, is
 /// not blank, and holds no blank line, which would end its paragraph.
 pub(crate) fn is_reference_label(label: &str) -> bool {
-    let written = alloc::format!("[{label}]");
-    path_walk(1, |cursor| reference_label_step(&written, cursor)) == Some(written.len() - 1)
+    walks_to_close(label)
         && reference_label_is_within_limit(label)
-        && !normalize_label(label).is_empty()
+        // Not blank: it normalizes to an empty identifier only when it holds
+        // nothing but spaces, tabs, and line endings.
+        && label
+            .bytes()
+            .any(|byte| !is_label_space(byte))
         && !holds_blank_line(label)
+}
+
+/// Whether the walk to a reference label's `]`, from just after the `[`
+/// written before `label`, ends at the `]` written after it: the walk
+/// reads all of `label`, and a `\` it ends with does not escape that `]`.
+fn walks_to_close(label: &str) -> bool {
+    let mut cursor = 0;
+    loop {
+        if cursor >= label.len() {
+            return !is_escaped_at(label, label.len());
+        }
+        match reference_label_step(label, cursor) {
+            Step::Next(next) => cursor = next,
+            Step::Done(_) => return false,
+        }
+    }
 }
 
 /// Whether `[^label]` reads back as a footnote label holding `label`: a
 /// footnote label whose `]` it does not escape.
 pub(crate) fn is_written_footnote_label(label: &str) -> bool {
-    is_footnote_label(label) && !is_escaped_at(&alloc::format!("{label}]"), label.len())
+    is_footnote_label(label) && !is_escaped_at(label, label.len())
 }
 
 /// Whether a line of `text` other than its first and its last, which share
 /// their lines with what is written around `text`, is blank.
 fn holds_blank_line(text: &str) -> bool {
+    if crate::swar::find_any(text.as_bytes(), 0, [b'\n', b'\r']) == text.len() {
+        return false;
+    }
     let text = text.replace("\r\n", "\n");
     let lines: Vec<&str> = text.split(['\n', '\r']).collect();
     lines.len() > 2 && lines[1..lines.len() - 1].iter().any(|line| is_blank(line))
@@ -4741,17 +5712,13 @@ fn parse_table_delimiter(input: &str) -> Option<Vec<TableAlignment>> {
     {
         return None;
     }
-    let cells = table_row_cell_ranges(input);
-    if cells.is_empty() {
-        return None;
-    }
     let mut alignments = Vec::new();
-    for (start, end) in cells {
+    for (start, end) in table_row_cell_ranges(input) {
         alignments.push(table_delimiter_alignment(
             input[start..end].trim_matches([' ', '\t']),
         )?);
     }
-    Some(alignments)
+    (!alignments.is_empty()).then_some(alignments)
 }
 
 // A delimiter cell is `:?` `-`+ `:?` once trimmed: colons only at the
@@ -4788,12 +5755,12 @@ fn table_delimiter_alignment(cell: &str) -> Option<TableAlignment> {
 /// The cell-delimiter pipes of a table row, in order: every `|` that is not
 /// escaped by an odd backslash run. The cell's inline content reads an
 /// escaped pipe as `|`.
-fn table_row_delimiters(row: &str) -> Vec<usize> {
+fn table_row_delimiters(row: &str) -> impl Iterator<Item = usize> + '_ {
     let bytes = row.as_bytes();
-    let mut delimiters = Vec::new();
     let mut cursor = 0;
-    while cursor < bytes.len() {
-        match bytes[cursor] {
+    core::iter::from_fn(move || loop {
+        cursor = crate::swar::find_any(bytes, cursor, [b'\\', b'|']);
+        match bytes.get(cursor)? {
             b'\\' => {
                 let backslashes = delimiter_byte_run_len(row, cursor, b'\\');
                 let pipe = cursor + backslashes;
@@ -4804,93 +5771,93 @@ fn table_row_delimiters(row: &str) -> Vec<usize> {
                 };
             }
             b'|' => {
-                delimiters.push(cursor);
                 cursor += 1;
+                return Some(cursor - 1);
             }
             _ => cursor += 1,
         }
-    }
-    delimiters
+    })
 }
 
-/// The byte ranges of `input`'s cells, between the pipes that delimit them.
-fn table_row_cell_ranges(input: &str) -> Vec<(usize, usize)> {
+/// The byte ranges of `input`'s cells, between the pipes that delimit them,
+/// in order.
+fn table_row_cell_ranges(input: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
     let trimmed = input.trim_matches([' ', '\t']);
     let offset = leading_trim_bytes(input);
-    let delimiters = table_row_delimiters(trimmed);
-    let mut cells = Vec::new();
+    let mut pipes = table_row_delimiters(trimmed);
+    // The start of the next cell: past the last delimiter, once there is one.
     let mut start = 0;
-    for &pipe in &delimiters {
-        cells.push((offset + start, offset + pipe));
-        start = pipe + 1;
-    }
-    cells.push((offset + start, offset + trimmed.len()));
-
-    // A delimiter at the very start or end (only whitespace after it) is a
-    // border, not the edge of an empty cell.
-    if delimiters.first() == Some(&0) {
-        cells.remove(0);
-    }
-    if delimiters
-        .last()
-        .is_some_and(|&pipe| is_blank(&trimmed[pipe + 1..]))
-    {
-        cells.pop();
-    }
-    cells
+    let mut ended = false;
+    core::iter::from_fn(move || {
+        while !ended {
+            let Some(pipe) = pipes.next() else {
+                ended = true;
+                // A delimiter at the very end, with only whitespace after it,
+                // is a border, as one at the very start is.
+                if start > 0 && is_blank(&trimmed[start..]) {
+                    return None;
+                }
+                return Some((offset + start, offset + trimmed.len()));
+            };
+            let cell = (offset + start, offset + pipe);
+            start = pipe + 1;
+            // A delimiter at the very start is a border, not the edge of an
+            // empty cell.
+            if pipe > 0 {
+                return Some(cell);
+            }
+        }
+        None
+    })
 }
 
 /// One table cell's inline input (whitespace trimmed, escaped pipes read as
 /// `|`), its source map, and its span.
-struct TableCellSource {
-    text: DerivedText,
+struct TableCellSource<'a> {
+    text: DerivedText<'a>,
     span: Span,
 }
 
 /// The cells of `row`, a slice of `line.text`, as `table_row_cell_ranges`
-/// splits it.
-fn table_row_cells(line: &Line<'_>, row: &str) -> Vec<TableCellSource> {
+/// splits it, in order.
+fn table_row_cells<'a, 'r>(
+    line: &'r Line<'a>,
+    row: &'a str,
+) -> impl Iterator<Item = TableCellSource<'a>> + 'r {
     let row_offset = slice_offset_in(line.text, row).unwrap_or(0);
-    table_row_cell_ranges(row)
-        .into_iter()
-        .map(|(start, end)| {
-            let raw = &row[start..end];
-            let leading = leading_trim_bytes(raw);
-            let content = raw.trim_matches([' ', '\t']);
-            let offset = row_offset + start + leading;
-            let span = Span::new(
-                line.source_start(offset),
-                line.source_end(offset + content.len()),
-            );
-            let mut text = DerivedText::default();
-            // GitHub/cmark-gfm reads an odd backslash run before `|` as a
-            // literal pipe; the run keeps its other backslashes, which the
-            // inline parser resolves as written. The `|` read from `\|` maps
-            // to both of its bytes.
-            let bytes = content.as_bytes();
-            let mut copied = 0;
-            let mut cursor = 0;
-            while cursor < bytes.len() {
-                if bytes[cursor] == b'\\' {
-                    let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
-                    if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
-                        text.append(line, &content[copied..pipe - 1]);
-                        text.append_replacing(
-                            "|",
-                            line.source_start(offset + pipe - 1),
-                            line.source_end(offset + pipe + 1),
-                        );
-                        copied = pipe + 1;
-                    }
-                    cursor = pipe;
-                } else {
-                    cursor += 1;
-                }
+    table_row_cell_ranges(row).map(move |(start, end)| {
+        let raw = &row[start..end];
+        let leading = leading_trim_bytes(raw);
+        let content = raw.trim_matches([' ', '\t']);
+        let offset = row_offset + start + leading;
+        let span = Span::new(
+            line.source_start(offset),
+            line.source_end(offset + content.len()),
+        );
+        let mut text = DerivedText::default();
+        // GitHub/cmark-gfm reads an odd backslash run before `|` as a
+        // literal pipe; the run keeps its other backslashes, which the
+        // inline parser resolves as written. The `|` read from `\|` maps
+        // to both of its bytes.
+        let bytes = content.as_bytes();
+        let mut copied = 0;
+        let mut cursor = crate::swar::find_any(bytes, 0, [b'\\']);
+        while cursor < bytes.len() {
+            let pipe = cursor + delimiter_byte_run_len(content, cursor, b'\\');
+            if bytes.get(pipe) == Some(&b'|') && (pipe - cursor) % 2 == 1 {
+                text.append(line, &content[copied..pipe - 1]);
+                text.append_replacing(
+                    "|",
+                    line.source_start(offset + pipe - 1),
+                    line.source_end(offset + pipe + 1),
+                );
+                copied = pipe + 1;
             }
-            text.append(line, &content[copied..]);
-            TableCellSource { text, span }
-        })
-        .collect()
+            cursor = crate::swar::find_any(bytes, pipe, [b'\\']);
+        }
+        text.append(line, &content[copied..]);
+        TableCellSource { text, span }
+    })
 }
 
 fn table_has_separator(header: &str, delimiter: &str) -> bool {
@@ -4915,7 +5882,7 @@ fn table_has_separator(header: &str, delimiter: &str) -> bool {
 // Still used by `block_quote_table_body_row` to detect a table row appearing as
 // a block-quote continuation line (which DOES require a pipe).
 fn contains_unescaped_pipe(input: &str) -> bool {
-    !table_row_delimiters(input).is_empty()
+    table_row_delimiters(input).next().is_some()
 }
 
 // A GFM footnote definition `[^label]:` is a block boundary: it interrupts a
@@ -5283,31 +6250,44 @@ fn is_valid_hostchar(char: char) -> bool {
 // is required (the `www.` rule). The URL extent past the host is determined by
 // `autolink_url_end`, so only the verdict matters here.
 //
-// cmark walks bytes with `is_valid_hostchar` decoding each char; this walks
-// chars directly (UTF-8 safe) over the host prefix, which yields the same
-// dot/underscore-segment verdict. A `\` escapes the following char, so a host
-// can run on over escaped spaces through later `www.` candidates; the walk
-// stops at the eleventh dot, which settles the verdict, so that the walks
-// from all the candidates of a pass stay linear in total.
+// As in cmark, the walk reads bytes, from the second byte of `data` to the
+// last but one; neither end is counted, so a trailing `_` (`http://a_`) still
+// links. A `\` with at least two bytes after it is skipped, and the byte after
+// it is read by the same rules as any other: an escaped `_` or `.` counts, an
+// escaped `-` goes on, and any other escaped space or punctuation byte ends
+// the host. A non-ASCII byte ends the host: cmark's `is_valid_hostchar`
+// decodes a char at a lead byte, and the byte after it, a continuation byte,
+// decodes to none, so no `_` or `.` after a non-ASCII char is counted
+// (`www.é.x_y.z` links); a continuation byte at the second byte ends it at
+// once. A NUL, which cmark reads as U+FFFD, is read as such a char. A byte is
+// a host char unless it is ASCII punctuation or a whitespace char of the GFM
+// spec (tab, line feed, vertical tab, form feed, carriage return, space):
+// cmark-gfm reads on through a vertical tab, but the GFM spec builds a domain
+// of alphanumerics, `_`, `-`, and `.` only, so a vertical tab, one of its
+// whitespace chars, ends it. A `_` before a `www.` lets a host run on through
+// later `www.` candidates; the walk stops at the eleventh dot, which settles
+// the verdict, so that the walks from all the candidates of a pass stay linear
+// in total.
 fn check_domain(data: &str, allow_short: bool) -> bool {
+    let bytes = data.as_bytes();
     let mut np = 0usize;
     let mut uscore1 = 0usize;
     let mut uscore2 = 0usize;
 
-    let mut chars = data.char_indices().peekable();
-    while let Some((offset, char)) = chars.next() {
-        // cmark's accounting loop runs `for (i = 1; i < size - 1; i++)`: it
-        // never inspects the first char (offset 0) nor the final char of the
-        // chunk. We replicate that — a trailing `_` (e.g. `http://a_`) is not
-        // counted, so the link still forms.
-        let account = offset != 0 && chars.peek().is_some();
-        match char {
-            '\\' => {
-                // Escape: consume the next char as a literal host char.
-                chars.next();
-            }
-            '_' if account => uscore2 += 1,
-            '.' if account => {
+    // A NUL first byte is a three-byte char to cmark: its second byte ends
+    // the host.
+    let mut index = if bytes.first() == Some(&0) {
+        bytes.len()
+    } else {
+        1
+    };
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'\\' && index + 2 < bytes.len() {
+            index += 1;
+        }
+        match bytes[index] {
+            b'_' => uscore2 += 1,
+            b'.' => {
                 uscore1 = uscore2;
                 uscore2 = 0;
                 np += 1;
@@ -5315,13 +6295,12 @@ fn check_domain(data: &str, allow_short: bool) -> bool {
                     return true;
                 }
             }
-            '_' | '.' | '-' => {}
-            _ => {
-                if !is_valid_hostchar(source_char(char)) {
-                    break;
-                }
-            }
+            b'-' => {}
+            0 | 0x80.. | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' | b' ' => break,
+            byte if byte.is_ascii_punctuation() => break,
+            _ => {}
         }
+        index += 1;
     }
 
     if (uscore1 > 0 || uscore2 > 0) && np <= 10 {
@@ -5435,12 +6414,98 @@ fn autolink_delim(input: &str, start: usize, mut end: usize) -> usize {
 /// the bytes already walked for an earlier one instead of rescanning them.
 #[derive(Default)]
 struct LiteralAutolinkScan {
+    /// The positions at which an email may start.
+    email_starts: EmailStarts,
     /// Runs of email local-part bytes (plus `:` for `mailto:`/`xmpp:`).
     email_local: ByteRun,
     /// What every start before one `@` shares: its last `:` and its domain.
     email_at: EmailAt,
     /// The text before a start, for the `+` boundary check.
     email_prefix: EmailPrefix,
+}
+
+/// The positions at which `parse_literal_email` may succeed, found from the
+/// `@` an email needs: each lies in the run of local-part and scheme bytes
+/// (`is_email_local_or_scheme_byte`) that ends at an `@`, and is the first
+/// position of the content, a `+`, or after a byte that is no ASCII letter or
+/// digit. Text without an `@` is searched for one once, and the positions
+/// before an `@` are walked once for queries from non-decreasing positions,
+/// as the inline pass asks.
+struct EmailStarts {
+    /// The first `@` at or after `at_from` is at `at`, or `at` is the input
+    /// length; the run of local-part and scheme bytes that ends at it starts
+    /// at `run_start`, or before `at_from` when `run_start` is `at_from`.
+    at_from: usize,
+    at: usize,
+    run_start: usize,
+    /// The first start at or after `asked` is at `answer`, or `answer` is the
+    /// input length.
+    asked: usize,
+    answer: usize,
+}
+
+impl Default for EmailStarts {
+    /// Nothing found yet: `at_from` is past `at` and `asked` past `answer`.
+    fn default() -> Self {
+        Self {
+            at_from: 1,
+            at: 0,
+            run_start: 0,
+            asked: 1,
+            answer: 0,
+        }
+    }
+}
+
+impl EmailStarts {
+    /// The first position at or after `from` at which an email may start, or
+    /// the input length.
+    #[inline]
+    fn first_at_or_after(&mut self, input: &str, from: usize) -> usize {
+        if self.asked <= from && from <= self.answer {
+            self.answer
+        } else {
+            self.find(input, from)
+        }
+    }
+
+    /// `first_at_or_after`, found from the `@` at or after `from`.
+    #[inline(never)]
+    fn find(&mut self, input: &str, from: usize) -> usize {
+        let bytes = input.as_bytes();
+        let mut cursor = from;
+        let answer = loop {
+            if !(self.at_from <= cursor && cursor <= self.at) {
+                let at = crate::swar::find_any(bytes, cursor, [b'@']);
+                let local = match bytes.get(at) {
+                    Some(_) => bytes[cursor..at]
+                        .iter()
+                        .rev()
+                        .take_while(|byte| is_email_local_or_scheme_byte(**byte))
+                        .count(),
+                    None => 0,
+                };
+                self.at_from = cursor;
+                self.at = at;
+                self.run_start = at - local;
+            }
+            if self.at == bytes.len() {
+                break self.at;
+            }
+            let start = (cursor.max(self.run_start)..self.at).find(|&position| {
+                position == 0
+                    || bytes[position] == b'+'
+                    || !bytes[position - 1].is_ascii_alphanumeric()
+            });
+            if let Some(start) = start {
+                break start;
+            }
+            cursor = self.at + 1;
+        };
+        self.asked = from;
+        self.answer = answer;
+        answer
+    }
 }
 
 /// The facts of one `@` that every email start before it reads: the last `:`
@@ -5590,7 +6655,7 @@ impl ByteRun {
     }
 }
 
-fn is_email_local_or_scheme_byte(byte: u8) -> bool {
+const fn is_email_local_or_scheme_byte(byte: u8) -> bool {
     is_gfm_email_local_byte(byte) || byte == b':'
 }
 
@@ -5743,7 +6808,7 @@ fn email_local_is_valid(local: &str, auto_mailto: bool) -> bool {
 
 // GFM email local-part charset (autolink-1): a narrower set than RFC atext,
 // matching cmark's rewind class `[A-Za-z0-9.+_-]`.
-fn is_gfm_email_local_byte(byte: u8) -> bool {
+const fn is_gfm_email_local_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'_' | b'-')
 }
 
@@ -5900,4 +6965,67 @@ fn find_footnote_reference_label_end(input: &str, mut cursor: usize) -> Option<u
         cursor = next;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::fixture_inputs;
+
+    /// `parse_top_level_at(input, indices)` against the top-level blocks of
+    /// `parse(input)`.
+    fn check_top_level_at(input: &str, indices: &[usize]) {
+        let children = parse(input).document.children;
+        let (count, read) = parse_top_level_at(input, indices);
+        assert_eq!(count, children.len(), "{input:?}");
+        let expected: Vec<&Block> = indices.iter().map(|&index| &children[index]).collect();
+        assert_eq!(
+            read.iter().collect::<Vec<_>>(),
+            expected,
+            "{input:?} at {indices:?}"
+        );
+    }
+
+    #[test]
+    fn top_level_blocks_read_alone_are_the_parses() {
+        let inputs = [
+            "- a\n- b\n\n  c\n\n\n1. d\n2) e\n",
+            "* [ ] task\n* [x] done\n\n---\n\n+ x\n",
+            "| a | b |\n| - | :-: |\n| 1 | 2 \\| 3 |\n\nafter\n",
+            "> quote\nlazy\n> > nested\n\n> [!NOTE]\n> alert\n",
+            "[a]: /url\n[b]: /b 'title'\n\n[a] and [b][] and [c]\n\n[c]: /c\n",
+            "[a]: /url\ncontinued paragraph? [a]\n    indented\n",
+            "<div>\n*html*\n\n</div>\n\n<!-- c -->\n\n<del>\n\n*x*\n\n</del>\n",
+            "```rust\nfn x() {}\n```\n\n~~~\nunclosed\n",
+            "    code\n\n\tcode\n\n# H #\n\nSetext\n===\n",
+            "\u{feff}# T\r\n\r\na\0b\r\n\r\n- c\0\r\n",
+            "a[^1]\n\n[^1]: note\n    more\n\n:::dir{.c}\ninner\n:::\n\n::leaf[label]\n",
+            "$$\nmath\n$$\n\n---\ntitle: x\n---\n\n\n\n",
+            "",
+            "\n\n\n",
+            "--2. \n3) \n|-",
+        ];
+        for input in inputs {
+            let count = parse(input).document.children.len();
+            for index in 0..count {
+                check_top_level_at(input, &[index]);
+            }
+            let every: Vec<usize> = (0..count).collect();
+            check_top_level_at(input, &every);
+            check_top_level_at(input, &[]);
+        }
+    }
+
+    #[test]
+    fn top_level_blocks_of_every_fixture_read_alone_are_the_parses() {
+        for input in fixture_inputs() {
+            for input in [input.replace('\n', "\r\n"), input] {
+                let count = parse(&input).document.children.len();
+                let every: Vec<usize> = (0..count).collect();
+                let odd: Vec<usize> = (1..count).step_by(2).collect();
+                check_top_level_at(&input, &every);
+                check_top_level_at(&input, &odd);
+            }
+        }
+    }
 }

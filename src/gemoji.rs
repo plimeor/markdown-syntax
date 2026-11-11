@@ -27,9 +27,14 @@
 //! FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 //! OTHER DEALINGS IN THE SOFTWARE.
 
-/// Every gemoji name and alias with its emoji, sorted by name.
+use crate::name_table::{name_table, NameTable};
+
+/// Every gemoji name and alias with its emoji, sorted by name. A lookup
+/// reads it as [`TABLE`], built from it at compile time; it is a `const`
+/// that no runtime code names, so it is not kept.
 #[rustfmt::skip]
-static SHORTCODES: [(&str, &str); 1913] = [
+#[allow(clippy::large_const_arrays)]
+const SHORTCODES: [(&str, &str); 1913] = [
     ("+1", "\u{1F44D}"),
     ("-1", "\u{1F44E}"),
     ("100", "\u{1F4AF}"),
@@ -1945,10 +1950,20 @@ static SHORTCODES: [(&str, &str); 1913] = [
     ("zzz", "\u{1F4A4}"),
 ];
 
+/// [`SHORTCODES`] as the lookup reads them.
+static TABLE: NameTable = name_table!(SHORTCODES);
+
 /// The emoji gemoji gives `name`.
 pub(crate) fn glyph(name: &str) -> Option<&'static str> {
-    SHORTCODES
-        .binary_search_by(|(entry, _)| (*entry).cmp(name))
-        .ok()
-        .map(|at| SHORTCODES[at].1)
+    TABLE.get(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_what_the_list_holds() {
+        crate::name_table::assert_finds_what_the_list_holds(&SHORTCODES, glyph);
+    }
 }

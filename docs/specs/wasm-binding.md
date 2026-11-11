@@ -5,7 +5,8 @@ Type: api
 
 The JavaScript surface through which an editor parses Markdown, parses one
 leaf block's inline content, reads a leaf's inline source, and writes an
-edited tree back, all with the core crate's own code compiled to WebAssembly.
+edited tree back, whole or as the top-level blocks it changed, all with the
+core crate's own code compiled to WebAssembly.
 Owned by the `markdown-syntax-wasm` crate and its JS wrapper.
 
 ## Requirements
@@ -77,6 +78,30 @@ core crate's `with_source` and the definitions of `tree`.
 #### Scenario: Leaf given as text
 - **WHEN** `doc` is parsed from `"> a\n\nb\n"` and `toMarkdown` gets its tree with the quote's paragraph replaced by `{type: "paragraph", source: "x `` y ``", span: null}`
 - **THEN** it returns `"> x `` y ``\n\nb\n"`
+
+### Requirement: Write the changed blocks
+`parsedDocument.toMarkdownBlocks(blocks, options)` SHALL return what
+`toMarkdown` returns for the document whose span is the span of this
+document's parse and whose top-level blocks are `blocks`, where an entry of
+`blocks` is a block, sent to WebAssembly as `toMarkdown` sends it, or the
+index of a top-level block of this document's parse, which stands for that
+block as the parse returned it, whatever `tree` holds now, and is not sent.
+An index MAY appear more than once and in any order. An entry that is a
+number but not the index of a top-level block of the parse SHALL make the
+call throw a `TypeError` naming its position; a malformed block SHALL make
+it throw as `toMarkdown` does, and diagnostics SHALL name paths in `blocks`.
+
+#### Scenario: Untouched blocks
+- **WHEN** `doc.toMarkdownBlocks(doc.tree.children.map((block, index) => index))` runs
+- **THEN** it returns the source `doc` was parsed from
+
+#### Scenario: One changed block
+- **WHEN** `doc` is parsed from `"a\n\n> b\n\n  c *d*\n"` and `toMarkdownBlocks` gets `[0, {type: "paragraph", source: "x `` y ``", span: null}, 2]`
+- **THEN** it returns `"a\n\nx `` y ``\n\n  c *d*\n"`
+
+#### Scenario: An index past the parse
+- **WHEN** `doc` is parsed from `"a\n\nb\n"` and `toMarkdownBlocks` gets `[0, 2]`
+- **THEN** it throws a `TypeError` naming `[1]`, and `doc` stays usable
 
 ### Requirement: Malformed trees
 A tree passed to `toMarkdown` that names an unknown `type`, lacks a field

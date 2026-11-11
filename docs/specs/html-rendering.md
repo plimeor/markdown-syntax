@@ -21,7 +21,14 @@ With default options the renderer SHALL escape raw HTML as text;
 `safe_raw_html_form = SafeRawHtmlForm::OmitPlaceholder` SHALL emit the
 `<!-- raw HTML omitted -->` placeholder instead; `allow_dangerous_html = true`
 SHALL emit raw HTML verbatim, filtered by the GFM tagfilter when `gfm_tagfilter`
-is set.
+is set. The tagfilter SHALL end a blocklisted tag name where a browser ends
+it, at ASCII whitespace (tab, line feed, form feed, carriage return, and
+space), `/`, or `>`, and also at the end of the raw HTML; other whitespace,
+a vertical tab among it, continues the name.
+
+#### Scenario: Where the tagfilter ends a tag name
+- **WHEN** `"<div>\n<title\u{a0}x>\n<script/src=x>\n<xmp\n"` is rendered with `allow_dangerous_html` and `gfm_tagfilter`
+- **THEN** the output is `"<div>\n<title\u{a0}x>\n&lt;script/src=x>\n&lt;xmp"`: a lone `/`, which cmark-gfm does not take as ending the name, starts a script element in a browser
 
 ### Requirement: Dangerous protocols are blanked by default
 With default options the renderer SHALL blank the `href` of a link, including

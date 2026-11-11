@@ -32,7 +32,8 @@ fn clear(meta: &mut NodeMeta) {
     meta.span = None;
 }
 
-fn normalize_blocks(blocks: &mut [Block]) {
+/// Normalizes `blocks` in place, as `normalized_blocks` returns them.
+pub(crate) fn normalize_blocks(blocks: &mut [Block]) {
     let inlines = |inlines: &mut Vec<Inline>| normalize_inlines(inlines, false);
     for block in blocks {
         match block {

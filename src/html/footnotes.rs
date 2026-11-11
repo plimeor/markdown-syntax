@@ -6,37 +6,47 @@
 //!   * how many times each id is referenced (drives the backref count and the
 //!     per-reference `id="fnref-{id}{-k}"` suffix);
 //!   * each referenced id's definition body (regular def children, or the
-//!     harvested children of an inline footnote);
-//!   * which ids are actually referenced (unreferenced defs are dropped).
+//!     children of an inline footnote, which render as one paragraph);
+//!   * which ids are actually referenced: those numbered (unreferenced defs
+//!     are dropped).
 //!
 //! The body renderer consumes this read-only context; only the references it
 //! actually emits advance the per-id reference counter, so the suffixes match.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::Cell;
+use core::fmt::Write as _;
 
 use crate::ast::{Block, HtmlContainerContent, Inline};
 
 use super::escape::{attr_escape_gfm, encode_href};
 
+/// A footnote's body, borrowed from the document.
+#[derive(Clone, Copy)]
+pub enum FootnoteBody<'a> {
+    /// A regular definition's children.
+    Blocks(&'a [Block]),
+    /// An inline footnote's children, rendered as one paragraph.
+    Paragraph(&'a [Inline]),
+}
+
 /// Read-only footnote state shared across the body render.
-pub struct FootnoteContext {
-    /// Distinct ids in first-reference order; 1-based index = display number.
+pub struct FootnoteContext<'a> {
+    /// Distinct referenced ids in first-reference order; 1-based index =
+    /// display number. Only these are emitted.
     order: Vec<String>,
     /// Id → display number (1-based).
     numbers: BTreeMap<String, usize>,
-    /// Id → footnote body blocks (def children or harvested inline children).
-    defs: BTreeMap<String, Vec<Block>>,
+    /// Id → footnote body (def children or inline footnote children).
+    defs: BTreeMap<String, FootnoteBody<'a>>,
     /// Id → total number of references (for backref anchors).
     ref_totals: BTreeMap<String, usize>,
-    /// Ids actually referenced (only these are emitted).
-    referenced: BTreeSet<String>,
     /// Folded id → first definition's ORIGINAL-case label, used for the
     /// displayed `fn-`/`fnref-` ids (matching still uses the folded id).
-    display_labels: BTreeMap<String, String>,
+    display_labels: BTreeMap<String, &'a str>,
     /// Running per-id reference counter consumed during the body render,
     /// interior-mutable so the read-only `&Ctx` thread can advance it.
     seen_during_render: BTreeMap<String, Cell<usize>>,
@@ -45,10 +55,10 @@ pub struct FootnoteContext {
     inline_emitted: Cell<usize>,
 }
 
-impl FootnoteContext {
+impl FootnoteContext<'_> {
     /// True when at least one footnote was referenced (gates section output).
     pub fn has_any(&self) -> bool {
-        !self.referenced.is_empty()
+        !self.order.is_empty()
     }
 
     /// 1-based display number for an id (0 if unknown, which never happens for
@@ -65,22 +75,18 @@ impl FootnoteContext {
 
     /// The DISPLAY id for `id`: the first definition's original-case label when
     /// known, else the id itself (covers `__inline_{N}`).
-    fn display_id<'a>(&'a self, id: &'a str) -> &'a str {
-        self.display_labels
-            .get(id)
-            .map(String::as_str)
-            .unwrap_or(id)
+    fn display_id<'s>(&'s self, id: &'s str) -> &'s str {
+        self.display_labels.get(id).copied().unwrap_or(id)
     }
 }
 
 /// Pre-pass: build the footnote context from the whole document.
-pub fn build(blocks: &[Block]) -> FootnoteContext {
-    let mut display_labels: BTreeMap<String, String> = BTreeMap::new();
+pub fn build(blocks: &[Block]) -> FootnoteContext<'_> {
+    let mut display_labels: BTreeMap<String, &str> = BTreeMap::new();
     let mut refs = RefBuilder {
         order: Vec::new(),
         numbers: BTreeMap::new(),
         ref_totals: BTreeMap::new(),
-        referenced: BTreeSet::new(),
         defs: BTreeMap::new(),
         inline_counter: 0,
     };
@@ -102,27 +108,26 @@ pub fn build(blocks: &[Block]) -> FootnoteContext {
         numbers: refs.numbers,
         defs: refs.defs,
         ref_totals: refs.ref_totals,
-        referenced: refs.referenced,
         display_labels,
         seen_during_render,
         inline_emitted: Cell::new(0),
     }
 }
 
-fn collect_defs(
-    blocks: &[Block],
-    defs: &mut BTreeMap<String, Vec<Block>>,
-    display_labels: &mut BTreeMap<String, String>,
+fn collect_defs<'a>(
+    blocks: &'a [Block],
+    defs: &mut BTreeMap<String, FootnoteBody<'a>>,
+    display_labels: &mut BTreeMap<String, &'a str>,
 ) {
     for block in blocks {
         match block {
             Block::FootnoteDefinition(fd) => {
                 defs.entry(fd.identifier.clone())
-                    .or_insert_with(|| fd.children.clone());
+                    .or_insert(FootnoteBody::Blocks(&fd.children));
                 // First definition for a folded id wins the displayed label.
                 display_labels
                     .entry(fd.identifier.clone())
-                    .or_insert_with(|| fd.label.clone());
+                    .or_insert(&fd.label);
             }
             Block::BlockQuote(bq) => collect_defs(&bq.children, defs, display_labels),
             Block::Alert(a) => collect_defs(&a.children, defs, display_labels),
@@ -142,17 +147,16 @@ fn collect_defs(
     }
 }
 
-struct RefBuilder {
+struct RefBuilder<'a> {
     order: Vec<String>,
     numbers: BTreeMap<String, usize>,
-    defs: BTreeMap<String, Vec<Block>>,
+    defs: BTreeMap<String, FootnoteBody<'a>>,
     ref_totals: BTreeMap<String, usize>,
-    referenced: BTreeSet<String>,
     inline_counter: usize,
 }
 
-impl RefBuilder {
-    fn walk_blocks(&mut self, blocks: &[Block]) {
+impl<'a> RefBuilder<'a> {
+    fn walk_blocks(&mut self, blocks: &'a [Block]) {
         for block in blocks {
             match block {
                 Block::Paragraph(p) => self.walk_inlines(&p.children),
@@ -186,7 +190,7 @@ impl RefBuilder {
         }
     }
 
-    fn walk_inlines(&mut self, inlines: &[Inline]) {
+    fn walk_inlines(&mut self, inlines: &'a [Inline]) {
         for inline in inlines {
             match inline {
                 Inline::FootnoteReference(fr) => {
@@ -200,7 +204,7 @@ impl RefBuilder {
                     self.inline_counter += 1;
                     let id = format!("__inline_{}", self.inline_counter);
                     self.defs
-                        .insert(id.clone(), block_wrap_inline(&node.children));
+                        .insert(id.clone(), FootnoteBody::Paragraph(&node.children));
                     self.register_ref(&id);
                     // Inline-footnote children may themselves contain footnotes.
                     self.walk_inlines(&node.children);
@@ -222,14 +226,13 @@ impl RefBuilder {
             self.order.push(String::from(id));
             self.numbers.insert(String::from(id), self.order.len());
         }
-        *self.ref_totals.entry(String::from(id)).or_insert(0) += 1;
-        self.referenced.insert(String::from(id));
+        match self.ref_totals.get_mut(id) {
+            Some(total) => *total += 1,
+            None => {
+                self.ref_totals.insert(String::from(id), 1);
+            }
+        }
     }
-}
-
-fn block_wrap_inline(children: &[Inline]) -> Vec<Block> {
-    use crate::ast::Paragraph;
-    alloc::vec![Block::Paragraph(Paragraph::new(children.iter().cloned()))]
 }
 
 /// Per-reference render hook: advance the running counter for `id` and return
@@ -271,74 +274,78 @@ pub fn next_inline_id(ctx: &FootnoteContext) -> String {
 /// GFM footnote id encoding: houdini href-encode, then attr-escape (so a
 /// literal `'`→`&#x27;`). `__inline_{N}` is ASCII so this is a no-op there.
 pub fn footnote_id_encode(id: &str) -> String {
-    attr_escape_gfm(&encode_href(id))
+    let mut href = String::with_capacity(id.len());
+    encode_href(&mut href, id);
+    let mut out = String::with_capacity(href.len());
+    attr_escape_gfm(&mut out, &href);
+    out
 }
 
-/// Emit the document-end footnote section, or `""` when nothing referenced.
-/// `render_blocks` renders a footnote body's blocks the same way the body
+/// Append the document-end footnote section to `out`, or nothing when nothing
+/// is referenced. `render_body` renders a footnote body the same way the body
 /// renderer renders any block list (joined with `\n`).
-pub fn emit_footnote_section<F>(ctx: &FootnoteContext, render_blocks: F) -> String
+pub fn emit_footnote_section<F>(ctx: &FootnoteContext, out: &mut String, render_body: F)
 where
-    F: Fn(&[Block]) -> String,
+    F: Fn(FootnoteBody, &mut String),
 {
     if !ctx.has_any() {
-        return String::new();
+        return;
     }
-    let mut out = String::from("<section class=\"footnotes\" data-footnotes>\n<ol>\n");
+    out.push_str("<section class=\"footnotes\" data-footnotes>\n<ol>\n");
     for id in &ctx.order {
-        if !ctx.referenced.contains(id) {
-            continue;
-        }
         let number = ctx.number(id);
         let enc = footnote_id_encode(ctx.display_id(id));
-        out.push_str(&format!("<li id=\"fn-{}\">\n", enc));
+        out.push_str("<li id=\"fn-");
+        out.push_str(&enc);
+        out.push_str("\">\n");
 
-        let empty: Vec<Block> = Vec::new();
-        let body = ctx.defs.get(id).unwrap_or(&empty);
-        let rendered = render_blocks(body);
+        let body_start = out.len();
+        if let Some(body) = ctx.defs.get(id) {
+            render_body(*body, out);
+        }
         let total = ctx.ref_totals.get(id).copied().unwrap_or(1);
-        let backrefs = build_backrefs(&enc, number, total);
-
-        out.push_str(&place_backrefs(&rendered, &backrefs));
+        place_backrefs(out, body_start, &enc, number, total);
         out.push('\n');
         out.push_str("</li>\n");
     }
     out.push_str("</ol>\n</section>");
-    out
 }
 
-/// Build the space-joined backref anchors for a footnote referenced `total`
+/// Append the space-joined backref anchors for a footnote referenced `total`
 /// times.
-fn build_backrefs(enc: &str, number: usize, total: usize) -> String {
-    let mut anchors: Vec<String> = Vec::new();
+fn push_backrefs(out: &mut String, enc: &str, number: usize, total: usize) {
     let total = total.max(1);
+    // Writing to a `String` cannot fail.
     for k in 1..=total {
         if k == 1 {
-            anchors.push(format!(
+            let _ = write!(
+                out,
                 "<a href=\"#fnref-{enc}\" class=\"footnote-backref\" data-footnote-backref data-footnote-backref-idx=\"{number}\" aria-label=\"Back to reference {number}\">\u{21a9}</a>",
-            ));
+            );
         } else {
-            anchors.push(format!(
+            out.push(' ');
+            let _ = write!(
+                out,
                 "<a href=\"#fnref-{enc}-{k}\" class=\"footnote-backref\" data-footnote-backref data-footnote-backref-idx=\"{number}-{k}\" aria-label=\"Back to reference {number}-{k}\">\u{21a9}<sup class=\"footnote-ref\">{k}</sup></a>",
-            ));
+            );
         }
     }
-    anchors.join(" ")
 }
 
-/// Place the backref anchors: inside the last paragraph child when the body's
-/// last block rendered as a `<p>…</p>` (append ` {backrefs}` before `</p>`);
-/// otherwise on their own trailing line after the last block.
-fn place_backrefs(rendered: &str, backrefs: &str) -> String {
-    if backrefs.is_empty() {
-        return String::from(rendered);
+/// Place the backref anchors after the body rendered at `out[body_start..]`:
+/// inside the last paragraph child when the body's last block rendered as a
+/// `<p>…</p>` (append ` {backrefs}` before `</p>`); otherwise on their own
+/// trailing line after the last block, or alone when the body is empty.
+fn place_backrefs(out: &mut String, body_start: usize, enc: &str, number: usize, total: usize) {
+    if out.len() == body_start {
+        push_backrefs(out, enc, number, total);
+    } else if out[body_start..].ends_with("</p>") {
+        out.truncate(out.len() - "</p>".len());
+        out.push(' ');
+        push_backrefs(out, enc, number, total);
+        out.push_str("</p>");
+    } else {
+        out.push('\n');
+        push_backrefs(out, enc, number, total);
     }
-    if rendered.is_empty() {
-        return String::from(backrefs);
-    }
-    if rendered.ends_with("</p>") {
-        let head = &rendered[..rendered.len() - "</p>".len()];
-        return format!("{head} {backrefs}</p>");
-    }
-    format!("{rendered}\n{backrefs}")
 }

@@ -1959,7 +1959,7 @@ mod node_paths {
         };
         assert_eq!(diagnostics[0].path, Some(NodePath::from([0, 0, 1])));
 
-        let parsed = parse(":::Bad name\n");
+        let parsed = parse(":::1bad\n");
         assert!(!parsed.diagnostics.is_empty());
         assert!(parsed.diagnostics.iter().all(|d| d.path.is_none()));
     }

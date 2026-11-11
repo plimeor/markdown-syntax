@@ -21,40 +21,71 @@ use crate::unicode_letters::{is_letter, is_tag_name_char};
 /// `#` after it opens no tag.
 const OPAQUE: char = '\u{FFFC}';
 
+/// The pieces split text nodes become while a leaf's inlines are walked,
+/// kept from one leaf to the next.
+#[derive(Default)]
+pub(super) struct TagBuffers {
+    /// The pieces of each split text node, in order.
+    pieces: Vec<Inline>,
+    /// Each split text node: its index in its list, how many pieces it
+    /// splits into, and where the stripped spaces and tabs it leaves in no
+    /// piece start.
+    splits: Vec<(usize, usize, Option<usize>)>,
+}
+
+impl TagBuffers {
+    /// Whether no split is pending: true between leaves.
+    pub(super) fn is_empty(&self) -> bool {
+        self.pieces.is_empty() && self.splits.is_empty()
+    }
+}
+
 /// Splits the text nodes of `inlines`, the inlines of one leaf read from
 /// `input`, around each tag they hold. Spans are in `input`'s coordinates.
-pub(super) fn split_tags(input: &str, inlines: &mut Vec<Inline>) {
+pub(super) fn split_tags(input: &str, inlines: &mut Vec<Inline>, buffers: &mut TagBuffers) {
     if !input.contains('#') {
         return;
     }
     let mut before = None;
-    walk(input, inlines, &mut before);
+    walk(input, inlines, &mut before, buffers);
 }
 
 /// `before` is the last character read, or `None` at the start of the run.
-fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
+fn walk(
+    input: &str,
+    inlines: &mut Vec<Inline>,
+    before: &mut Option<char>,
+    buffers: &mut TagBuffers,
+) {
     // Each split text node and its pieces, applied in one rebuild of the
-    // list, so a leaf with many tags costs no more than its length.
-    let mut splits = Vec::new();
+    // list, so a leaf with many tags costs no more than its length. A list
+    // nested in this one takes its own splits off the buffers before this
+    // one goes on.
+    let (first_split, first_piece) = (buffers.splits.len(), buffers.pieces.len());
     for (index, inline) in inlines.iter_mut().enumerate() {
         match inline {
             Inline::Text(text) => {
-                let (pieces, unheld) = split_text(input, text, before);
-                if !pieces.is_empty() {
-                    splits.push((index, pieces, unheld));
+                let pieces = buffers.pieces.len();
+                let unheld = split_text(input, text, before, &mut buffers.pieces);
+                if buffers.pieces.len() > pieces {
+                    buffers
+                        .splits
+                        .push((index, buffers.pieces.len() - pieces, unheld));
                 }
             }
             Inline::SoftBreak(_) | Inline::LineBreak(_) => *before = Some('\n'),
-            Inline::Emphasis(node) => walk(input, &mut node.children, before),
-            Inline::Strong(node) => walk(input, &mut node.children, before),
-            Inline::Delete(node) => walk(input, &mut node.children, before),
-            Inline::Mark(node) => walk(input, &mut node.children, before),
-            Inline::Link(node) => opaque_edges(input, &mut node.children, before),
-            Inline::LinkReference(node) => opaque_edges(input, &mut node.children, before),
-            Inline::Image(node) => opaque_edges(input, &mut node.alt, before),
-            Inline::ImageReference(node) => opaque_edges(input, &mut node.alt, before),
-            Inline::InlineFootnote(node) => opaque_edges(input, &mut node.children, before),
-            Inline::TextDirective(node) => opaque_edges(input, &mut node.label, before),
+            Inline::Emphasis(node) => walk(input, &mut node.children, before, buffers),
+            Inline::Strong(node) => walk(input, &mut node.children, before, buffers),
+            Inline::Delete(node) => walk(input, &mut node.children, before, buffers),
+            Inline::Mark(node) => walk(input, &mut node.children, before, buffers),
+            Inline::Link(node) => opaque_edges(input, &mut node.children, before, buffers),
+            Inline::LinkReference(node) => opaque_edges(input, &mut node.children, before, buffers),
+            Inline::Image(node) => opaque_edges(input, &mut node.alt, before, buffers),
+            Inline::ImageReference(node) => opaque_edges(input, &mut node.alt, before, buffers),
+            Inline::InlineFootnote(node) => {
+                opaque_edges(input, &mut node.children, before, buffers);
+            }
+            Inline::TextDirective(node) => opaque_edges(input, &mut node.label, before, buffers),
             Inline::Escape(_)
             | Inline::CharacterReference(_)
             | Inline::Shortcode(_)
@@ -67,16 +98,17 @@ fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
             | Inline::Tag(_) => *before = Some(OPAQUE),
         }
     }
-    if splits.is_empty() {
+    if buffers.splits.len() == first_split {
         return;
     }
     let count = inlines.len()
-        + splits
+        + buffers.splits[first_split..]
             .iter()
-            .map(|(_, pieces, _)| pieces.len() - 1)
+            .map(|(_, pieces, _)| pieces - 1)
             .sum::<usize>();
     let nodes = core::mem::replace(inlines, Vec::with_capacity(count));
-    let mut splits = splits.into_iter().peekable();
+    let mut pieces = buffers.pieces.drain(first_piece..);
+    let mut splits = buffers.splits.drain(first_split..).peekable();
     // Where the stripped spaces and tabs a split left in no piece start; the
     // soft break after them reads them, as it does when no text holds them.
     let mut unheld = None;
@@ -90,8 +122,8 @@ fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
             }
         }
         match splits.next_if(|(at, _, _)| *at == index) {
-            Some((_, pieces, start)) => {
-                inlines.extend(pieces);
+            Some((_, count, start)) => {
+                inlines.extend(pieces.by_ref().take(count));
                 unheld = start;
             }
             None => inlines.push(inline),
@@ -99,64 +131,80 @@ fn walk(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
     }
 }
 
-fn opaque_edges(input: &str, inlines: &mut Vec<Inline>, before: &mut Option<char>) {
+fn opaque_edges(
+    input: &str,
+    inlines: &mut Vec<Inline>,
+    before: &mut Option<char>,
+    buffers: &mut TagBuffers,
+) {
     *before = Some(OPAQUE);
-    walk(input, inlines, before);
+    walk(input, inlines, before, buffers);
     *before = Some(OPAQUE);
 }
 
-/// The text and tag nodes `text` splits into, or nothing when it holds no
-/// tag, and where the bytes after its last tag start when they are only the
-/// stripped spaces and tabs its span holds past its value; `before` moves
-/// past its last character either way.
-fn split_text(input: &str, text: &Text, before: &mut Option<char>) -> (Vec<Inline>, Option<usize>) {
+/// Pushes onto `pieces` the text and tag nodes `text` splits into, or
+/// nothing when it holds no tag, and returns where the bytes after its last
+/// tag start when they are only the stripped spaces and tabs its span holds
+/// past its value; `before` moves past its last character either way.
+fn split_text(
+    input: &str,
+    text: &Text,
+    before: &mut Option<char>,
+    pieces: &mut Vec<Inline>,
+) -> Option<usize> {
     let value = text.value.as_str();
-    let mut pieces = Vec::new();
+    let bytes = value.as_bytes();
+    let first_piece = pieces.len();
     let mut offsets = None;
     // The value offset and the input offset where the next text piece starts.
     let mut piece_start = 0;
     let mut cursor = text.meta.span.map(|span| span.start);
-    let mut chars = value.char_indices().peekable();
-    while let Some((index, char)) = chars.next() {
-        let opens = char == '#'
-            && before.is_none_or(char::is_whitespace)
-            && chars.peek().is_some_and(|&(_, next)| is_letter(next));
-        *before = Some(char);
+    let mut hash = crate::swar::find_any(bytes, 0, [b'#']);
+    while hash < bytes.len() {
+        let previous = match hash {
+            0 => *before,
+            _ => value[..hash].chars().next_back(),
+        };
+        let opens = previous.is_none_or(char::is_whitespace)
+            && value[hash + 1..].chars().next().is_some_and(is_letter);
         if !opens {
+            hash = crate::swar::find_any(bytes, hash + 1, [b'#']);
             continue;
         }
         let offsets = offsets.get_or_insert_with(|| Offsets::new(input, text));
         let mut end = value.len();
-        while let Some(&(next_index, next)) = chars.peek() {
+        for (offset, next) in value[hash + 1..].char_indices() {
+            let next_index = hash + 1 + offset;
             if !is_tag_name_char(next) || !offsets.adjacent(next_index) {
                 end = next_index;
                 break;
             }
-            *before = Some(next);
-            chars.next();
         }
-        let tag = offsets.span(index, end);
-        if piece_start < index {
+        let tag = offsets.span(hash, end);
+        if piece_start < hash {
             pieces.push(Inline::Text(Text {
                 meta: NodeMeta::new(cursor.zip(tag).map(|(at, tag)| Span::new(at, tag.start))),
-                value: String::from(&value[piece_start..index]),
+                value: String::from(&value[piece_start..hash]),
             }));
         }
         pieces.push(Inline::Tag(Tag {
             meta: NodeMeta::new(tag),
-            name: String::from(&value[index + 1..end]),
+            name: String::from(&value[hash + 1..end]),
         }));
         piece_start = end;
         cursor = tag.map(|tag| tag.end);
+        hash = crate::swar::find_any(bytes, end, [b'#']);
     }
-    if pieces.is_empty() {
-        return (pieces, None);
+    if let Some(last) = value.chars().next_back() {
+        *before = Some(last);
+    }
+    if pieces.len() == first_piece {
+        return None;
     }
     if piece_start == value.len() {
-        let unheld = cursor
+        return cursor
             .zip(text.meta.span)
             .and_then(|(at, span)| (at < span.end).then_some(at));
-        return (pieces, unheld);
     }
     pieces.push(Inline::Text(Text {
         meta: NodeMeta::new(
@@ -166,7 +214,7 @@ fn split_text(input: &str, text: &Text, before: &mut Option<char>) -> (Vec<Inlin
         ),
         value: String::from(&value[piece_start..]),
     }));
-    (pieces, None)
+    None
 }
 
 /// Where the bytes of a text node's value sit in the input. A value is its

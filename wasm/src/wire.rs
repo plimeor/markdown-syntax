@@ -3,12 +3,27 @@
 //!
 //! A message is a header of two `u32`, the word count and the string count,
 //! then the words, then a `(start, length)` pair of `u32` for each string,
-//! then the strings themselves as one run of UTF-16 code units. A node is its
+//! then the strings themselves as one run of UTF-8, where each string's start
+//! and length count UTF-16 code units, as a JavaScript string's do; the run
+//! may hold text between the strings, which no string covers. A node is its
 //! kind, its span as two UTF-16 offsets (`NO_SPAN` and 0 for none), and then
 //! its fields in the order of its Rust struct; a list of nodes is its length
 //! followed by the nodes. A character reference is followed by its decoded
 //! value and a shortcode by its glyph, each an optional string: written
-//! towards JavaScript, and read past, as none, on the way back.
+//! towards JavaScript, and read past, as none, on the way back. The top-level
+//! blocks of a document written against its parse are a list whose entries
+//! may each be, in place of a block, `kind::BASE_BLOCK` and the index of a
+//! top-level block of the parse.
+//!
+//! A message is written with its strings in the order its words name them,
+//! and a [`Reader`] finds each string in the text from where the string read
+//! before it ends, so that reading a message takes time linear in it. A
+//! string named before the last one read is found again from the start of
+//! the text: a forged message that names its strings out of order may take
+//! time quadratic in its length, never more.
+
+use std::cell::Cell;
+use std::fmt::{self, Write as _};
 
 use markdown_syntax::prelude::*;
 use markdown_syntax::{
@@ -66,20 +81,41 @@ pub mod kind {
     pub const WIKI_LINK: u32 = 60;
     pub const TEXT_DIRECTIVE: u32 = 61;
     pub const TAG: u32 = 62;
+    /// Not a node: in the blocks of a message `Reader::document_against`
+    /// reads, it and the index that follows it stand for the top-level
+    /// block of the parse at that index. It lies outside the range of every
+    /// node kind, each of which fits in a byte; `js/index.js` holds the same
+    /// word.
+    pub const BASE_BLOCK: u32 = 0xFFFF_FFFE;
 }
 
 /// For each byte offset of `text`, its UTF-16 offset; `text.len()` included.
 pub fn utf16_offsets(text: &str) -> Vec<u32> {
-    let mut offsets = vec![0; text.len() + 1];
-    let mut at = 0u32;
-    for (index, char) in text.char_indices() {
-        for offset in &mut offsets[index..index + char.len_utf8()] {
-            *offset = at;
+    let mut offsets = Vec::with_capacity(text.len() + 1);
+    // The bytes of a char share the offset of its first; a char of four bytes
+    // takes two units.
+    let (mut at, mut next) = (0, 0);
+    offsets.extend(text.bytes().map(|byte| {
+        if byte & 0xc0 != 0x80 {
+            at = next;
+            next += 1 + u32::from(byte >= 0xf0);
         }
-        at += char.len_utf16() as u32;
-    }
-    offsets[text.len()] = at;
+        at
+    }));
+    offsets.push(next);
     offsets
+}
+
+/// The length of `text` in UTF-16 code units: a char takes a unit for the
+/// byte that starts it, and a char of four bytes one more.
+fn utf16_len(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.bytes()
+            .map(|byte| usize::from(byte & 0xc0 != 0x80) + usize::from(byte >= 0xf0))
+            .sum()
+    }
 }
 
 /// For each UTF-16 offset of `text`, its byte offset, or `NO_SPAN` between
@@ -96,39 +132,394 @@ pub fn byte_offsets(text: &str) -> Vec<u32> {
     offsets
 }
 
-/// Builds a message.
+/// Where the offsets of a text fall in the unit spans count in on the other
+/// side, as a table of `utf16_offsets` or `byte_offsets` gives them.
+#[derive(Clone, Copy)]
+pub enum Offsets<'t> {
+    /// An ASCII text of this length, whose offsets fall on themselves.
+    Same(usize),
+    /// The offset each offset falls on.
+    Table(&'t [u32]),
+    /// Where the first offset of each block of `BLOCK` falls, and how far
+    /// past that each offset falls, or `GAP` for `NO_SPAN`.
+    Blocks(&'t [u32], &'t [u8]),
+    /// Blocks of `BLOCK` offsets, of which only those that do not step as
+    /// ASCII does keep their steps.
+    Sparse {
+        /// The last offset.
+        len: usize,
+        /// For each block, where its first offset falls when each falls one
+        /// past the one before, or else `STEPPED` and the index of its steps.
+        blocks: &'t [u32],
+        /// For each block with steps, where its first offset falls.
+        bases: &'t [u32],
+        /// For each block with steps, its `BLOCK` steps as `Blocks` holds
+        /// them.
+        steps: &'t [u8],
+    },
+}
+
+const BLOCK: usize = 64;
+const GAP: u8 = u8::MAX;
+/// Marks a block of `Offsets::Sparse` as one with steps.
+const STEPPED: u32 = 1 << 31;
+
+impl Offsets<'_> {
+    // Inlined into each read and write of a span, as a few instructions each
+    // variant takes.
+    #[inline(always)]
+    pub fn get(self, offset: usize) -> Option<u32> {
+        match self {
+            Offsets::Same(len) => (offset <= len).then_some(offset as u32),
+            Offsets::Table(table) => table.get(offset).copied(),
+            Offsets::Blocks(blocks, steps) => Some(match *steps.get(offset)? {
+                GAP => NO_SPAN,
+                step => blocks[offset / BLOCK] + u32::from(step),
+            }),
+            Offsets::Sparse {
+                len,
+                blocks,
+                bases,
+                steps,
+            } => {
+                if offset > len {
+                    return None;
+                }
+                let block = blocks[offset / BLOCK];
+                if block & STEPPED == 0 {
+                    return Some(block + (offset % BLOCK) as u32);
+                }
+                let index = (block & !STEPPED) as usize;
+                Some(match steps[index * BLOCK + offset % BLOCK] {
+                    GAP => NO_SPAN,
+                    step => bases[index] + u32::from(step),
+                })
+            }
+        }
+    }
+}
+
+/// What `Offsets::Sparse` reads, kept with a document in four bytes a block
+/// of offsets and a little over a byte an offset of each block that does not
+/// step as ASCII does; or, where at least half the blocks do not, what
+/// `Offsets::Blocks` reads, a little over a byte an offset, which reads an
+/// offset in one read less. The threshold of half favors that read: at it
+/// the dense table takes about 1.8 times the memory the sparse one would,
+/// and less in proportion the more blocks step. An ASCII text needs none.
+pub struct OffsetTable {
+    /// The last offset.
+    len: usize,
+    /// For each block, where its first offset falls, or for a sparse table
+    /// where it falls when each offset in it falls one past the one before,
+    /// or else `STEPPED` and the index of its steps.
+    blocks: Vec<u32>,
+    /// For each block with steps of a sparse table, where its first offset
+    /// falls; empty for any other table.
+    bases: Vec<u32>,
+    /// How far past where its block's first offset falls each offset falls,
+    /// or `GAP` for `NO_SPAN`: for each offset, or for a sparse table, for
+    /// each offset of each block with steps.
+    steps: Vec<u8>,
+}
+
+/// The steps of a block of ASCII, each offset one past the one before.
+const ASCENDING: [u8; BLOCK] = {
+    let mut steps = [0; BLOCK];
+    let mut step = 0;
+    while step < BLOCK {
+        steps[step] = step as u8;
+        step += 1;
+    }
+    steps
+};
+
+/// The block `OffsetTable::to_bytes` is reading: its steps, how many it
+/// holds, and the byte offset its first offset falls at.
+struct Stepping {
+    steps: [u8; BLOCK],
+    filled: usize,
+    base: usize,
+}
+
+impl Stepping {
+    /// Adds the step of the next offset, which falls at `byte` or, inside a
+    /// surrogate pair, at none, and adds the block to `table` once full. The
+    /// next char starts at `at`, and so does a block that starts inside a
+    /// surrogate pair.
+    fn step(&mut self, table: &mut OffsetTable, at: usize, byte: Option<usize>) {
+        if self.filled == 0 {
+            self.base = at;
+        }
+        self.steps[self.filled] =
+            byte.map_or(GAP, |byte| OffsetTable::step((byte - self.base) as u32));
+        self.filled += 1;
+        if self.filled == BLOCK {
+            table.push_steps(self.base as u32, &self.steps);
+            self.filled = 0;
+        }
+    }
+}
+
+impl OffsetTable {
+    /// The UTF-16 offset of each byte offset of `text`, as `utf16_offsets`
+    /// gives them, read a block at a time: a block of ASCII steps one unit a
+    /// byte.
+    pub fn to_utf16(text: &str) -> Self {
+        let mut table = Self::empty(text.len());
+        if text.is_ascii() {
+            return table;
+        }
+        // The offset of the char the byte before belongs to, and of the next
+        // char.
+        let (mut at, mut next) = (0, 0);
+        for block in text.as_bytes().chunks(BLOCK) {
+            if block.is_ascii() {
+                table.push_ascii(next);
+                next += block.len() as u32;
+                at = next - 1;
+                continue;
+            }
+            // The bytes of a char share the offset of its first; a char of
+            // four bytes takes two units.
+            let starts_char = |byte: u8| byte & 0xc0 != 0x80;
+            let base = if starts_char(block[0]) { next } else { at };
+            // Within the block an offset moves at most a unit a byte; the
+            // end of the text, when it falls in the block, follows its last
+            // byte.
+            let mut steps = [0; BLOCK];
+            for (step, &byte) in steps.iter_mut().zip(block) {
+                if starts_char(byte) {
+                    at = next;
+                    next += 1 + u32::from(byte >= 0xf0);
+                }
+                *step = (at - base) as u8;
+            }
+            if let Some(end) = steps.get_mut(block.len()) {
+                *end = (next - base) as u8;
+            }
+            table.push_steps(base, &steps);
+        }
+        // The end of the text, which may start a block of its own.
+        if text.len() % BLOCK == 0 {
+            table.push_ascii(next);
+        }
+        table.finish()
+    }
+
+    /// The byte offset of each UTF-16 offset of `text`, as `byte_offsets`
+    /// gives them, read a char at a time and a block of ASCII at once.
+    pub fn to_bytes(text: &str) -> Self {
+        let mut table = Self::empty(text.len());
+        if text.is_ascii() {
+            return table;
+        }
+        let bytes = text.as_bytes();
+        let mut block = Stepping {
+            steps: [0; BLOCK],
+            filled: 0,
+            base: 0,
+        };
+        // The byte offset of the next char, and how many UTF-16 offsets come
+        // before it.
+        let (mut at, mut units) = (0, 0);
+        while let Some(&lead) = bytes.get(at) {
+            if block.filled == 0 && bytes.get(at..at + BLOCK).is_some_and(<[u8]>::is_ascii) {
+                // A block of ASCII steps a byte an offset.
+                table.push_ascii(at as u32);
+                at += BLOCK;
+                units += BLOCK;
+                continue;
+            }
+            let width = match lead {
+                0..=0x7f => 1,
+                0x80..=0xdf => 2,
+                0xe0..=0xef => 3,
+                _ => 4,
+            };
+            block.step(&mut table, at, Some(at));
+            units += 1;
+            if width == 4 {
+                // The offset between the two units of the char.
+                block.step(&mut table, at, None);
+                units += 1;
+            }
+            at += width;
+        }
+        block.step(&mut table, at, Some(at));
+        if block.filled > 0 {
+            table.push_steps(block.base as u32, &block.steps);
+        }
+        table.len = units;
+        table.finish()
+    }
+
+    fn empty(len: usize) -> Self {
+        Self {
+            len,
+            blocks: Vec::new(),
+            bases: Vec::new(),
+            steps: Vec::new(),
+        }
+    }
+
+    /// Adds a block whose first offset falls at `base` and each other one
+    /// past the one before, as over ASCII.
+    fn push_ascii(&mut self, base: u32) {
+        if base < STEPPED {
+            self.blocks.push(base);
+        } else {
+            self.push_steps(base, &ASCENDING);
+        }
+    }
+
+    /// Adds a block whose first offset falls at `base` and the rest `steps`
+    /// past it, of which those past the last offset are never read.
+    fn push_steps(&mut self, base: u32, steps: &[u8; BLOCK]) {
+        self.blocks.push(STEPPED | self.bases.len() as u32);
+        self.bases.push(base);
+        self.steps.extend_from_slice(steps);
+    }
+
+    /// The table, sparse where fewer than half its blocks have steps, and
+    /// else with the steps of every offset.
+    fn finish(mut self) -> Self {
+        if 2 * self.bases.len() < self.blocks.len() {
+            self.blocks.shrink_to_fit();
+            self.bases.shrink_to_fit();
+            self.steps.shrink_to_fit();
+            return self;
+        }
+        let mut steps = Vec::with_capacity(self.len + 1);
+        for (block, entry) in self.blocks.iter_mut().enumerate() {
+            let length = (self.len + 1 - block * BLOCK).min(BLOCK);
+            if *entry & STEPPED == 0 {
+                steps.extend_from_slice(&ASCENDING[..length]);
+            } else {
+                let index = (*entry & !STEPPED) as usize;
+                steps.extend_from_slice(&self.steps[index * BLOCK..][..length]);
+                *entry = self.bases[index];
+            }
+        }
+        self.blocks.shrink_to_fit();
+        Self {
+            len: self.len,
+            blocks: self.blocks,
+            bases: Vec::new(),
+            steps,
+        }
+    }
+
+    /// How far past its block's first an offset falls: within a block of 64
+    /// offsets, a byte offset moves at most 3 bytes a unit and a UTF-16
+    /// offset at most a unit a byte, plus one.
+    fn step(step: u32) -> u8 {
+        u8::try_from(step)
+            .ok()
+            .filter(|&step| step != GAP)
+            .expect("a block spans fewer than 255 offsets")
+    }
+
+    pub fn offsets(&self) -> Offsets<'_> {
+        if self.blocks.is_empty() {
+            Offsets::Same(self.len)
+        } else if self.bases.is_empty() {
+            Offsets::Blocks(&self.blocks, &self.steps)
+        } else {
+            Offsets::Sparse {
+                len: self.len,
+                blocks: &self.blocks,
+                bases: &self.bases,
+                steps: &self.steps,
+            }
+        }
+    }
+}
+
+/// Builds a message, each part as the bytes it is sent as.
 pub struct Writer<'t> {
-    words: Vec<u32>,
-    strings: Vec<(u32, u32)>,
-    units: Vec<u16>,
+    /// The header, which `finish` fills in, and the words.
+    head: Vec<u8>,
+    /// The start and length of each string.
+    strings: Vec<u8>,
+    /// The strings, one after another.
+    text: String,
+    /// The length of `text` in UTF-16 code units.
+    units: usize,
     /// The UTF-16 offset of each byte offset spans count in.
-    offsets: &'t [u32],
+    offsets: Offsets<'t>,
 }
 
 impl<'t> Writer<'t> {
     pub fn new(offsets: &'t [u32]) -> Self {
+        Self::with_offsets(Offsets::Table(offsets))
+    }
+
+    pub fn with_offsets(offsets: Offsets<'t>) -> Self {
         Self {
-            words: Vec::new(),
+            head: vec![0; 8],
             strings: Vec::new(),
-            units: Vec::new(),
+            text: String::new(),
+            units: 0,
             offsets,
         }
     }
 
     pub fn word(&mut self, word: u32) {
-        self.words.push(word);
+        self.head.extend_from_slice(&word.to_le_bytes());
+    }
+
+    /// Adds a word for `set_word` to fill in, and returns where it is.
+    pub fn reserve_word(&mut self) -> usize {
+        self.word(0);
+        self.head.len() - 4
+    }
+
+    /// Sets the word `reserve_word` added at `at`.
+    pub fn set_word(&mut self, at: usize, word: u32) {
+        self.head[at..at + 4].copy_from_slice(&word.to_le_bytes());
+    }
+
+    pub fn words(&mut self, words: &[u32]) {
+        for &word in words {
+            self.word(word);
+        }
     }
 
     pub fn bool(&mut self, value: bool) {
         self.word(u32::from(value));
     }
 
+    /// Adds `value` to the strings, and returns its index.
+    fn string(&mut self, value: &str) -> u32 {
+        let at = self.text.len();
+        self.text.push_str(value);
+        self.end_string(at)
+    }
+
+    /// Makes the text from byte `at` on the next string, and returns its
+    /// index.
+    fn end_string(&mut self, at: usize) -> u32 {
+        let units = utf16_len(&self.text[at..]);
+        let index = self.strings.len() / 8;
+        for word in [self.units, units] {
+            self.strings.extend_from_slice(&(word as u32).to_le_bytes());
+        }
+        self.units += units;
+        index as u32
+    }
+
     pub fn str(&mut self, value: &str) {
-        let start = self.units.len() as u32;
-        self.units.extend(value.encode_utf16());
-        let length = self.units.len() as u32 - start;
-        self.word(self.strings.len() as u32);
-        self.strings.push((start, length));
+        let index = self.string(value);
+        self.word(index);
+    }
+
+    /// Writes the `Debug` text of `value`, as a Rust name is written, as a
+    /// string.
+    fn name(&mut self, value: &impl fmt::Debug) {
+        let at = self.text.len();
+        write!(self.text, "{value:?}").expect("a String takes any text");
+        let index = self.end_string(at);
+        self.word(index);
     }
 
     /// 0 for `None`, else the string's index plus one.
@@ -136,16 +527,16 @@ impl<'t> Writer<'t> {
         match value {
             None => self.word(0),
             Some(value) => {
-                self.str(value);
-                *self.words.last_mut().expect("just pushed") += 1;
+                let index = self.string(value);
+                self.word(index + 1);
             }
         }
     }
 
     pub fn span(&mut self, span: Option<Span>) {
         let mapped = span.and_then(|span| {
-            let start = *self.offsets.get(span.start)?;
-            let end = *self.offsets.get(span.end)?;
+            let start = self.offsets.get(span.start)?;
+            let end = self.offsets.get(span.end)?;
             Some((start, end))
         });
         match mapped {
@@ -573,7 +964,7 @@ impl<'t> Writer<'t> {
         for token in tokens {
             self.span(Some(token.span));
             self.word(token.node as u32);
-            self.str(&format!("{:?}", token.role));
+            self.name(&token.role);
         }
     }
 
@@ -582,8 +973,8 @@ impl<'t> Writer<'t> {
     pub fn diagnostics(&mut self, diagnostics: &[Diagnostic]) {
         self.word(diagnostics.len() as u32);
         for diagnostic in diagnostics {
-            self.str(&format!("{:?}", diagnostic.severity));
-            self.str(&format!("{:?}", diagnostic.code));
+            self.name(&diagnostic.severity);
+            self.name(&diagnostic.code);
             self.span(diagnostic.span);
             self.bool(diagnostic.path.is_some());
             if let Some(path) = &diagnostic.path {
@@ -597,21 +988,16 @@ impl<'t> Writer<'t> {
     }
 
     pub fn finish(self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(
-            8 + 4 * self.words.len() + 8 * self.strings.len() + 2 * self.units.len(),
-        );
-        bytes.extend((self.words.len() as u32).to_le_bytes());
-        bytes.extend((self.strings.len() as u32).to_le_bytes());
-        for word in &self.words {
-            bytes.extend(word.to_le_bytes());
-        }
-        for (start, length) in &self.strings {
-            bytes.extend(start.to_le_bytes());
-            bytes.extend(length.to_le_bytes());
-        }
-        for unit in &self.units {
-            bytes.extend(unit.to_le_bytes());
-        }
+        let mut bytes = self.head;
+        let word_count = (bytes.len() - 8) / 4;
+        let string_count = self.strings.len() / 8;
+        bytes[..4].copy_from_slice(&(word_count as u32).to_le_bytes());
+        bytes[4..8].copy_from_slice(&(string_count as u32).to_le_bytes());
+        bytes.reserve_exact(self.strings.len() + self.text.len());
+        bytes.extend_from_slice(&self.strings);
+        bytes.extend_from_slice(self.text.as_bytes());
+        // The message outlives the call as its result.
+        bytes.shrink_to_fit();
         bytes
     }
 }
@@ -626,14 +1012,20 @@ fn malformed<T>(message: impl Into<String>) -> Read<T> {
     Err(Malformed(message.into()))
 }
 
-/// Reads a message.
+/// Reads a message, in place.
 pub struct Reader<'m> {
-    words: Vec<u32>,
+    /// The words, as their bytes.
+    words: &'m [u8],
     at: usize,
-    strings: Vec<(u32, u32)>,
-    units: &'m [u8],
+    /// The start and length of each string, as their bytes.
+    strings: &'m [u8],
+    text: &'m str,
+    /// Where the string read last ends in `text`, in UTF-16 code units and in
+    /// bytes: strings are read mostly in order, and the next is found from
+    /// there.
+    read: Cell<(usize, usize)>,
     /// The byte offset of each UTF-16 offset spans count in.
-    offsets: &'m [u32],
+    offsets: Offsets<'m>,
     /// How many lists of nodes enclose the one being read.
     depth: usize,
     /// Whether a leaf was built from its source, with no definitions yet.
@@ -651,6 +1043,11 @@ enum Leaf {
 /// within the WebAssembly stack.
 pub const MAX_DEPTH: usize = 128;
 
+/// The most a list reserves before reading its items: the lists open at once
+/// in a tree of `MAX_DEPTH` levels reserve a few MiB, however many items a
+/// forged message counts.
+const LIST_RESERVE_BYTES: usize = 16 << 10;
+
 fn le_word(bytes: &[u8], at: usize) -> Read<u32> {
     match bytes.get(at..at + 4) {
         Some(word) => Ok(u32::from_le_bytes([word[0], word[1], word[2], word[3]])),
@@ -658,29 +1055,63 @@ fn le_word(bytes: &[u8], at: usize) -> Read<u32> {
     }
 }
 
+/// The little-endian word at byte `at` of `bytes`, which holds it: one
+/// bounds check for its four bytes.
+#[inline]
+fn le(bytes: &[u8], at: usize) -> u32 {
+    let word: [u8; 4] = bytes[at..at + 4].try_into().expect("four bytes");
+    u32::from_le_bytes(word)
+}
+
+/// The byte offset of UTF-16 offset `to` in `text`, found on from `from`, a
+/// UTF-16 offset and its byte offset; none past the end of `text`, before
+/// `from`, or inside a char.
+fn byte_offset(text: &str, (mut units, mut at): (usize, usize), to: usize) -> Option<usize> {
+    let ahead = to.checked_sub(units)?;
+    let rest = text.get(at..)?;
+    // In ASCII a byte is a unit.
+    if rest.as_bytes().get(..ahead).is_some_and(<[u8]>::is_ascii) {
+        return Some(at + ahead);
+    }
+    for char in rest.chars() {
+        if units >= to {
+            break;
+        }
+        units += char.len_utf16();
+        at += char.len_utf8();
+    }
+    (units == to).then_some(at)
+}
+
 impl<'m> Reader<'m> {
     pub fn new(message: &'m [u8], offsets: &'m [u32]) -> Read<Self> {
+        Self::with_offsets(message, Offsets::Table(offsets))
+    }
+
+    pub fn with_offsets(message: &'m [u8], offsets: Offsets<'m>) -> Read<Self> {
         let word_count = le_word(message, 0)? as usize;
         let string_count = le_word(message, 4)? as usize;
-        let words_end = 8 + 4 * word_count;
-        let strings_end = words_end + 8 * string_count;
-        if message.len() < strings_end {
+        // A forged count may overflow these ends; no message holds what it
+        // counts then, so the message ends early.
+        let ends = word_count
+            .checked_mul(4)
+            .and_then(|words| words.checked_add(8))
+            .and_then(|words_end| {
+                let strings_end = string_count.checked_mul(8)?.checked_add(words_end)?;
+                Some((words_end, strings_end))
+            });
+        let Some((words_end, strings_end)) = ends.filter(|&(_, end)| end <= message.len()) else {
             return malformed("the message ends early");
-        }
-        let words = (0..word_count)
-            .map(|index| le_word(message, 8 + 4 * index))
-            .collect::<Read<_>>()?;
-        let strings = (0..string_count)
-            .map(|index| {
-                let at = words_end + 8 * index;
-                Ok((le_word(message, at)?, le_word(message, at + 4)?))
-            })
-            .collect::<Read<_>>()?;
+        };
+        let Ok(text) = std::str::from_utf8(&message[strings_end..]) else {
+            return malformed("the strings are not UTF-8");
+        };
         Ok(Self {
-            words,
+            words: &message[8..words_end],
             at: 0,
-            strings,
-            units: &message[strings_end..],
+            strings: &message[words_end..strings_end],
+            text,
+            read: Cell::new((0, 0)),
             offsets,
             depth: 0,
             sourced: false,
@@ -688,12 +1119,21 @@ impl<'m> Reader<'m> {
     }
 
     pub fn word(&mut self) -> Read<u32> {
-        let word = *self
-            .words
-            .get(self.at)
-            .ok_or_else(|| Malformed("the tree ends early".into()))?;
+        let word = self.peek()?;
         self.at += 1;
         Ok(word)
+    }
+
+    /// The next word, left to read.
+    fn peek(&self) -> Read<u32> {
+        if self.at == self.word_count() {
+            return malformed("the tree ends early");
+        }
+        Ok(le(self.words, 4 * self.at))
+    }
+
+    fn word_count(&self) -> usize {
+        self.words.len() / 4
     }
 
     fn bool(&mut self) -> Read<bool> {
@@ -705,20 +1145,25 @@ impl<'m> Reader<'m> {
     }
 
     fn string(&self, index: usize) -> Read<String> {
-        let &(start, length) = self
-            .strings
-            .get(index)
-            .ok_or_else(|| Malformed(format!("no string {index}")))?;
-        let (start, end) = (2 * start as usize, 2 * (start as usize + length as usize));
-        let bytes = self
-            .units
-            .get(start..end)
-            .ok_or_else(|| Malformed(format!("string {index} lies outside the message")))?;
-        let units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
-            .collect();
-        Ok(String::from_utf16_lossy(&units))
+        if index >= self.strings.len() / 8 {
+            return malformed(format!("no string {index}"));
+        }
+        let start = le(self.strings, 8 * index) as usize;
+        let length = le(self.strings, 8 * index + 4) as usize;
+        let Some(end) = start.checked_add(length) else {
+            return malformed(format!("string {index} lies outside the message"));
+        };
+        let read = match self.read.get() {
+            read @ (units, _) if units <= start => read,
+            _ => (0, 0),
+        };
+        let range = byte_offset(self.text, read, start)
+            .and_then(|from| Some((from, byte_offset(self.text, (start, from), end)?)));
+        let Some((from, to)) = range else {
+            return malformed(format!("string {index} lies outside the message"));
+        };
+        self.read.set((end, to));
+        Ok(self.text[from..to].to_owned())
     }
 
     fn str(&mut self) -> Read<String> {
@@ -756,7 +1201,7 @@ impl<'m> Reader<'m> {
     fn count(&mut self) -> Read<usize> {
         let count = self.word()? as usize;
         // Every counted item takes at least a word.
-        if count > self.words.len() - self.at {
+        if count > self.word_count() - self.at {
             return malformed(format!("a count of {count} exceeds the message"));
         }
         Ok(count)
@@ -772,7 +1217,6 @@ impl<'m> Reader<'m> {
         let byte = |offset: u32| {
             self.offsets
                 .get(offset as usize)
-                .copied()
                 .filter(|byte| *byte != NO_SPAN)
         };
         Ok(match (byte(start), byte(end)) {
@@ -808,7 +1252,36 @@ impl<'m> Reader<'m> {
         let meta = self.meta()?;
         let mut document = Document::new(self.blocks()?);
         document.meta = meta;
-        if self.at != self.words.len() {
+        self.finish(document)
+    }
+
+    /// The document whose top-level blocks the message lists, each a block or
+    /// `kind::BASE_BLOCK` and the index of a top-level block of `parsed`,
+    /// which stands for that block, and whose span is `parsed`'s: the
+    /// document `document` reads from a message that holds each such block
+    /// in place of its index.
+    pub fn document_against(&mut self, parsed: &Document) -> Read<Document> {
+        let blocks = self.nested(|reader| {
+            reader.list(|reader| {
+                if reader.peek()? != kind::BASE_BLOCK {
+                    return reader.block();
+                }
+                reader.at += 1;
+                let index = reader.word()?;
+                match parsed.children.get(index as usize) {
+                    Some(block) => Ok(block.clone()),
+                    None => malformed(format!("the parse holds no block {index}")),
+                }
+            })
+        })?;
+        let mut document = Document::new(blocks);
+        document.meta = parsed.meta.clone();
+        self.finish(document)
+    }
+
+    /// `document`, read whole from the message.
+    fn finish(&self, mut document: Document) -> Read<Document> {
+        if self.at != self.word_count() {
             return malformed("words follow the tree");
         }
         // A leaf's source reads with the definitions of the whole tree.
@@ -819,17 +1292,25 @@ impl<'m> Reader<'m> {
     }
 
     pub fn blocks(&mut self) -> Read<Vec<Block>> {
-        self.nested(|reader| {
-            let count = reader.count()?;
-            (0..count).map(|_| reader.block()).collect()
-        })
+        self.nested(|reader| reader.list(Self::block))
     }
 
     pub fn inlines(&mut self) -> Read<Vec<Inline>> {
-        self.nested(|reader| {
-            let count = reader.count()?;
-            (0..count).map(|_| reader.inline()).collect()
-        })
+        self.nested(|reader| reader.list(Self::inline))
+    }
+
+    /// A count, then as many items, each read by `read`, into a vector sized
+    /// for them up to `LIST_RESERVE_BYTES`: a forged message counts more
+    /// items than it holds, at every level of a deep tree, and the vector
+    /// grows past the hint only as items are read.
+    fn list<T>(&mut self, mut read: impl FnMut(&mut Self) -> Read<T>) -> Read<Vec<T>> {
+        let count = self.count()?;
+        let hint = count.min(LIST_RESERVE_BYTES / std::mem::size_of::<T>().max(1));
+        let mut items = Vec::with_capacity(hint);
+        for _ in 0..count {
+            items.push(read(self)?);
+        }
+        Ok(items)
     }
 
     /// Reads one more level of nodes, refusing one past `MAX_DEPTH`.
@@ -870,15 +1351,12 @@ impl<'m> Reader<'m> {
     }
 
     fn attributes(&mut self) -> Read<Vec<DirectiveAttribute>> {
-        let count = self.count()?;
-        (0..count)
-            .map(|_| {
-                Ok(DirectiveAttribute {
-                    name: self.str()?,
-                    value: self.opt_str()?,
-                })
+        self.list(|reader| {
+            Ok(DirectiveAttribute {
+                name: reader.str()?,
+                value: reader.opt_str()?,
             })
-            .collect()
+        })
     }
 
     fn destination_kind(&mut self) -> Read<LinkDestinationKind> {
@@ -979,33 +1457,28 @@ impl<'m> Reader<'m> {
                     "list delimiter",
                 )?;
                 let tight = self.bool()?;
-                let count = self.count()?;
-                let children = (0..count)
-                    .map(|_| {
-                        self.expect_kind(kind::LIST_ITEM, "list item")?;
-                        Ok(ListItem {
-                            meta: self.meta()?,
-                            checked: match self.word()? {
-                                0 => None,
-                                1 => Some(false),
-                                2 => Some(true),
-                                other => return malformed(format!("{other} is not a task state")),
-                            },
-                            number: match self.word()? {
-                                0 => None,
-                                1 => {
-                                    let low = u64::from(self.word()?);
-                                    let high = u64::from(self.word()?);
-                                    Some(high << 32 | low)
-                                }
-                                other => {
-                                    return malformed(format!("{other} is not an item number"))
-                                }
-                            },
-                            children: self.blocks()?,
-                        })
+                let children = self.list(|reader| {
+                    reader.expect_kind(kind::LIST_ITEM, "list item")?;
+                    Ok(ListItem {
+                        meta: reader.meta()?,
+                        checked: match reader.word()? {
+                            0 => None,
+                            1 => Some(false),
+                            2 => Some(true),
+                            other => return malformed(format!("{other} is not a task state")),
+                        },
+                        number: match reader.word()? {
+                            0 => None,
+                            1 => {
+                                let low = u64::from(reader.word()?);
+                                let high = u64::from(reader.word()?);
+                                Some(high << 32 | low)
+                            }
+                            other => return malformed(format!("{other} is not an item number")),
+                        },
+                        children: reader.blocks()?,
                     })
-                    .collect::<Read<_>>()?;
+                })?;
                 Block::List(List {
                     meta,
                     ordered,
@@ -1059,43 +1532,34 @@ impl<'m> Reader<'m> {
                 children: self.blocks()?,
             }),
             kind::TABLE => {
-                let count = self.count()?;
-                let alignments = (0..count)
-                    .map(|_| {
-                        self.enumerated(
-                            &[
-                                TableAlignment::None,
-                                TableAlignment::Left,
-                                TableAlignment::Center,
-                                TableAlignment::Right,
-                            ],
-                            "table alignment",
-                        )
-                    })
-                    .collect::<Read<_>>()?;
-                let count = self.count()?;
-                let rows = (0..count)
-                    .map(|_| {
-                        self.expect_kind(kind::TABLE_ROW, "table row")?;
-                        let meta = self.meta()?;
-                        let count = self.count()?;
-                        let cells = (0..count)
-                            .map(|_| {
-                                self.expect_kind(kind::TABLE_CELL, "table cell")?;
-                                let meta = self.meta()?;
-                                let mut cell = match self.leaf()? {
-                                    Leaf::Source(text) => {
-                                        TableCell::with_source(&text, &Definitions::default()).0
-                                    }
-                                    Leaf::Inlines(children) => TableCell::new(children),
-                                };
-                                cell.meta = meta;
-                                Ok(cell)
-                            })
-                            .collect::<Read<_>>()?;
-                        Ok(TableRow { meta, cells })
-                    })
-                    .collect::<Read<_>>()?;
+                let alignments = self.list(|reader| {
+                    reader.enumerated(
+                        &[
+                            TableAlignment::None,
+                            TableAlignment::Left,
+                            TableAlignment::Center,
+                            TableAlignment::Right,
+                        ],
+                        "table alignment",
+                    )
+                })?;
+                let rows = self.list(|reader| {
+                    reader.expect_kind(kind::TABLE_ROW, "table row")?;
+                    let meta = reader.meta()?;
+                    let cells = reader.list(|reader| {
+                        reader.expect_kind(kind::TABLE_CELL, "table cell")?;
+                        let meta = reader.meta()?;
+                        let mut cell = match reader.leaf()? {
+                            Leaf::Source(text) => {
+                                TableCell::with_source(&text, &Definitions::default()).0
+                            }
+                            Leaf::Inlines(children) => TableCell::new(children),
+                        };
+                        cell.meta = meta;
+                        Ok(cell)
+                    })?;
+                    Ok(TableRow { meta, cells })
+                })?;
                 Block::Table(Table {
                     meta,
                     alignments,
@@ -1475,6 +1939,135 @@ mod tests {
     }
 
     #[test]
+    fn base_blocks_read_as_the_blocks_of_the_parse() {
+        let source = "a\n\n> b\n\n- c\n";
+        let parsed = parse(source).document;
+        let to_utf16 = utf16_offsets(source);
+        let to_bytes = byte_offsets(source);
+        let new = parse("*d*\n").document.children;
+        let read = |entries: &[Option<u32>], nested: bool| {
+            let mut writer = Writer::new(&to_utf16);
+            writer.word(entries.len() as u32);
+            for entry in entries {
+                match entry {
+                    Some(index) => writer.words(&[kind::BASE_BLOCK, *index]),
+                    None if nested => {
+                        // A quote holding a base block, which reads as a
+                        // node of no kind with the index as its span.
+                        writer.word(kind::BLOCK_QUOTE);
+                        writer.span(None);
+                        writer.words(&[1, kind::BASE_BLOCK, 0, 0]);
+                    }
+                    None => writer.block(&new[0]),
+                }
+            }
+            let message = writer.finish();
+            Reader::new(&message, &to_bytes).and_then(|mut reader| reader.document_against(&parsed))
+        };
+        let document = read(&[Some(2), None, Some(0), Some(2)], false).unwrap();
+        let children = &parsed.children;
+        let expected = [&children[2], &new[0], &children[0], &children[2]];
+        assert_eq!(document.children.iter().collect::<Vec<_>>(), expected);
+        assert_eq!(document.meta, parsed.meta);
+        assert_eq!(
+            read(&[Some(0), Some(3)], false).unwrap_err(),
+            Malformed("the parse holds no block 3".into())
+        );
+        assert_eq!(
+            read(&[None], true).unwrap_err(),
+            Malformed(format!("kind {} where a block belongs", kind::BASE_BLOCK))
+        );
+    }
+
+    #[test]
+    fn no_node_kind_is_the_base_block() {
+        assert!(kind::BASE_BLOCK > u32::from(u8::MAX));
+        let mut writer = Writer::new(&[0]);
+        writer.words(&[kind::BASE_BLOCK, NO_SPAN, 0]);
+        let message = writer.finish();
+        let read = |what: fn(&mut Reader<'_>) -> Read<()>| {
+            Reader::new(&message, &[0]).and_then(|mut reader| what(&mut reader))
+        };
+        assert_eq!(
+            read(|reader| reader.block().map(drop)).unwrap_err(),
+            Malformed(format!("kind {} where a block belongs", kind::BASE_BLOCK))
+        );
+        assert_eq!(
+            read(|reader| reader.inline().map(drop)).unwrap_err(),
+            Malformed(format!("kind {} where an inline belongs", kind::BASE_BLOCK))
+        );
+    }
+
+    /// A message of `strings`, each a `(start, length)` pair in UTF-16 code
+    /// units, over `text`, with no words.
+    fn strings_message(strings: &[(u32, u32)], text: &str) -> Vec<u8> {
+        let mut message = Vec::new();
+        for word in [0, strings.len() as u32] {
+            message.extend(word.to_le_bytes());
+        }
+        for &(start, length) in strings {
+            message.extend(start.to_le_bytes());
+            message.extend(length.to_le_bytes());
+        }
+        message.extend(text.as_bytes());
+        message
+    }
+
+    #[test]
+    fn strings_are_read_across_the_text_between_them() {
+        // A lone surrogate written by JavaScript arrives as U+FFFD, kept from
+        // the next string's by the `\n` between them; the text holds a gap
+        // no string covers, an astral char of two units, and a BOM.
+        let text = "a\u{FFFD}\n\u{FFFD}b\n--gap--\u{1F600}x\n\u{FEFF}\n";
+        let strings = [(0, 2), (3, 2), (13, 3), (17, 1), (3, 0), (0, 0)];
+        let message = strings_message(&strings, text);
+        let reader = Reader::new(&message, &[]).unwrap();
+        let expected = ["a\u{FFFD}", "\u{FFFD}b", "\u{1F600}x", "\u{FEFF}", "", ""];
+        for index in [0, 1, 2, 3, 4, 5, 3, 0, 2, 1, 5] {
+            assert_eq!(
+                reader.string(index).unwrap(),
+                expected[index],
+                "string {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn strings_outside_the_text_are_refused() {
+        let text = "\u{1F600}ab";
+        // Past the end, inside the astral char, ending inside it, and a
+        // range whose end overflows.
+        for strings in [
+            [(0, 5)],
+            [(5, 0)],
+            [(1, 1)],
+            [(0, 1)],
+            [(u32::MAX, u32::MAX)],
+        ] {
+            let message = strings_message(&strings, text);
+            let reader = Reader::new(&message, &[]).unwrap();
+            assert_eq!(
+                reader.string(0),
+                Err(Malformed("string 0 lies outside the message".into())),
+                "{strings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn counts_past_the_message_are_refused() {
+        for (words, strings) in [(u32::MAX, 0), (0, u32::MAX), (u32::MAX, u32::MAX), (1, 0)] {
+            let mut message = Vec::new();
+            message.extend(words.to_le_bytes());
+            message.extend(strings.to_le_bytes());
+            assert!(
+                matches!(Reader::new(&message, &[]), Err(Malformed(error)) if error == "the message ends early"),
+                "{words} words, {strings} strings"
+            );
+        }
+    }
+
+    #[test]
     fn a_tree_deeper_than_the_limit_is_refused() {
         let nested = |depth: usize| {
             let mut inline = Inline::from(Text::from("x"));
@@ -1501,9 +2094,156 @@ mod tests {
         );
     }
 
+    /// The system allocator, recording the largest request each thread makes.
+    struct Recording;
+
+    std::thread_local! {
+        static LARGEST_REQUEST: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    unsafe impl std::alloc::GlobalAlloc for Recording {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ =
+                LARGEST_REQUEST.try_with(|largest| largest.set(largest.get().max(layout.size())));
+            std::alloc::System.alloc(layout)
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: std::alloc::Layout) {
+            std::alloc::System.dealloc(pointer, layout)
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: Recording = Recording;
+
+    #[test]
+    fn forged_counts_in_a_deep_tree_reserve_little() {
+        // A block quote at every level counts every word after it as one of
+        // its blocks, and the words left over hold no block.
+        const WORDS: usize = 1 << 16;
+        let mut words = vec![kind::DOCUMENT, NO_SPAN, 0];
+        for _ in 0..MAX_DEPTH - 2 {
+            words.push((WORDS - words.len() - 1) as u32);
+            words.extend([kind::BLOCK_QUOTE, NO_SPAN, 0]);
+        }
+        words.push((WORDS - words.len() - 1) as u32);
+        words.resize(WORDS, 0);
+        let mut message = Vec::new();
+        message.extend((WORDS as u32).to_le_bytes());
+        message.extend(0u32.to_le_bytes());
+        message.extend(words.iter().flat_map(|word| word.to_le_bytes()));
+
+        LARGEST_REQUEST.with(|largest| largest.set(0));
+        let read = Reader::new(&message, &[]).and_then(|mut reader| reader.document());
+        let largest = LARGEST_REQUEST.with(std::cell::Cell::get);
+        assert_eq!(
+            read.unwrap_err(),
+            Malformed(format!("kind {} where a block belongs", kind::DOCUMENT))
+        );
+        assert!(
+            largest <= LIST_RESERVE_BYTES,
+            "a request of {largest} bytes"
+        );
+    }
+
     #[test]
     fn a_span_inside_a_surrogate_pair_reads_as_none() {
         let offsets = byte_offsets("😀a");
         assert_eq!(offsets, vec![0, NO_SPAN, 4, 5]);
+    }
+
+    /// Checks that the tables of each of `texts` read every offset, and the
+    /// two past the end, as `utf16_offsets` and `byte_offsets` give them.
+    fn check_offset_tables(texts: &[String]) {
+        for text in texts {
+            for (table, expected) in [
+                (OffsetTable::to_utf16(text), utf16_offsets(text)),
+                (OffsetTable::to_bytes(text), byte_offsets(text)),
+            ] {
+                for offset in 0..expected.len() + 2 {
+                    assert_eq!(
+                        table.offsets().get(offset),
+                        expected.get(offset).copied(),
+                        "{text:?} at {offset}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn offset_tables_read_as_the_offsets() {
+        check_offset_tables(&[
+            String::new(),
+            "ascii only".repeat(30),
+            "é中😀a".repeat(100),
+            "😀".repeat(150),
+            "中".repeat(150),
+            format!("a{}", "😀".repeat(63)),
+            format!("{}😀b", "x".repeat(63)),
+        ]);
+    }
+
+    #[test]
+    fn offset_tables_read_as_the_offsets_across_blocks_of_ascii() {
+        // Runs of ASCII of every length around a block's, between chars of
+        // two, three, and four bytes, so that blocks start at, inside, and
+        // right after each, and blocks of ASCII fall between blocks with
+        // steps.
+        let mut texts = Vec::new();
+        for run in [0, 1, 2, 31, 62, 63, 64, 65, 127, 128, 129, 200] {
+            for char in ["é", "中", "😀"] {
+                let ascii = "x".repeat(run);
+                texts.push(format!("{ascii}{char}"));
+                texts.push(format!("{char}{ascii}"));
+                texts.push(format!("{char}{ascii}{char}{ascii}{char}"));
+                texts.push(format!("{ascii}{char}{ascii}{char}{ascii}"));
+                texts.push(format!("{}{ascii}", char.repeat(run % 7 + 1)));
+                texts.push(format!("{ascii}{}", char.repeat(run)));
+            }
+        }
+        check_offset_tables(&texts);
+    }
+
+    #[test]
+    fn offset_tables_read_as_the_offsets_of_mixed_texts() {
+        // Seeded texts of chars of every width in runs of every length, up to
+        // a few thousand bytes each, so that blocks fall across chars and
+        // runs every way.
+        let long = "q".repeat(70);
+        let pieces = ["a", "é", "中", "😀", "xyz ", "中文", "😀😀", "\n", &long];
+        let mut seed = 7_u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 16) as usize
+        };
+        let mut texts = Vec::new();
+        for _ in 0..200 {
+            let length = next() % 5000;
+            let mut text = String::new();
+            while text.len() < length {
+                text.push_str(pieces[next() % pieces.len()]);
+            }
+            texts.push(text);
+        }
+        check_offset_tables(&texts);
+    }
+
+    #[test]
+    fn strings_read_back_by_their_utf16_offsets() {
+        let strings = ["", "a", "😀", "é中", "x😀y", "\u{feff}z", ""];
+        let mut writer = Writer::new(&[]);
+        for string in strings {
+            writer.str(string);
+        }
+        let message = writer.finish();
+        let reader = Reader::new(&message, &[]).unwrap();
+        for index in (0..strings.len()).chain([3, 1, 5]) {
+            assert_eq!(reader.string(index).unwrap(), strings[index]);
+        }
+        assert_eq!(
+            reader.string(strings.len()),
+            Err(Malformed(format!("no string {}", strings.len())))
+        );
     }
 }

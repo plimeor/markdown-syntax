@@ -226,9 +226,21 @@ cell's text SHALL read each `\|` as `|`. It SHALL return `None` for a document
 without a source, and when `path` names no such leaf, a directive written
 without a label, or a node without a span.
 
+The node SHALL be read by its span, from what `parse` read and not from the
+document's other top-level blocks, so that editing `children` changes no
+other node's result: in a document whose tree was edited, it SHALL return the
+inline source that `leaf_sources` gives, for `parse(source)`, the leaf at the
+node's span, when the top-level block at the path's first index carries the
+span of a top-level block of `parse(source)` and the node's span is that of a
+leaf in it, and `None` otherwise.
+
 #### Scenario: Paragraph in a block quote
 - **WHEN** `inline_source(&NodePath::from([0, 0]))` runs on the document parsed from `source = "> a *b*\n> c"`
 - **THEN** the text is `"a *b*\nc"`, and offset 6 maps to source byte 10
+
+#### Scenario: Definition removed before a table
+- **WHEN** the document parsed from `"[d]: /u\n    a\n2) b | c\n--|--"` has its first top-level block removed and `inline_source(&NodePath::from([1, 0, 0]))` runs
+- **THEN** the text is `"2) b"`, as path `[2, 0, 0]` gave before the edit
 
 ### Requirement: Parsed documents keep their source
 The document `parse(input)` returns SHALL hold `input` as its source, which
@@ -244,8 +256,11 @@ without one, and no other way to give a document a source SHALL exist.
 For a document with a source, `Document::leaf_sources()` SHALL return, in
 document order, the path and the inline source of every leaf the document
 holds (paragraphs, headings, table cells, and the labels of leaf and
-container directives), each equal to what `inline_source` returns for that
-path, in time linear in the source.
+container directives) at the span of a leaf of `parse(source)`, read from the
+whole source in time linear in it, each leaf of the source going to the
+first leaf in document order that carries its span. For a document as
+`parse` returned it, each SHALL equal what `inline_source` returns for that
+path.
 
 ### Requirement: Leaves built from their source
 `Paragraph::with_source`, `Heading::with_source`, `TableCell::with_source`,

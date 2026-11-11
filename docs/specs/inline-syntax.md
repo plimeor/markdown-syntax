@@ -64,6 +64,18 @@ non-empty label or attribute braces holding a non-whitespace char.
 - **WHEN** `"Inside :badge[ok]{flag}."` and `"(:e[x])"` are parsed with `parse`
 - **THEN** each paragraph holds one `TextDirective`
 
+### Requirement: Directive labels close at their balancing bracket
+The label of a text, leaf, or container directive SHALL end at the first `]`
+that balances its opening `[`, with the brackets in it nesting as pairs and
+those in a backslash escape, a code span, an autolink, or raw HTML not
+counted. A backtick run that opens no code span SHALL be literal text as a
+whole, as CommonMark reads a backtick string, so no shorter run inside it
+opens a code span.
+
+#### Scenario: A backtick run that opens no code span in a label
+- **WHEN** ``":t[a``] b`] c"`` and ``":t[``[ `] c"`` are parsed with `parse`
+- **THEN** the first paragraph holds a `TextDirective` whose label is `Text("a``")`, then ``Text(" b`] c")``, and the second holds only text: its label's `[` is left open
+
 ### Requirement: Wikilinks
 The parser SHALL read `[[target|label]]` on one line as a `WikiLink`, with the
 target before the first `|` and the label after it, or both equal to the
@@ -111,6 +123,14 @@ no link text, so a URL in its content links.
 #### Scenario: URL after an open bracket
 - **WHEN** `"[https://foo.com]"` and `"[a [b](c) https://x.y]"` are parsed with `parse`
 - **THEN** neither holds an `Autolink`: each URL is text
+
+#### Scenario: An escaped char in a host
+- **WHEN** `"www.a\\_b"`, `" www.a_\\"` repeated 11 times, and `"www.a_b.c\\.d"` are parsed with `parse`
+- **THEN** the first two hold no `Autolink`, since an escaped `_` counts in its segment and an escaped space ends the host; the third is one `Autolink` to `http://www.a_b.c\.d`, since an escaped `.` is a dot
+
+#### Scenario: A non-ASCII char in a host
+- **WHEN** `"www.é.x_y.z"`, `"http://é_a.b_c"`, `"www.a_b.c_dé"`, and `"www.a_b.c\u{b}.d.e"` are parsed with `parse`
+- **THEN** the first two are each one `Autolink`, to `http://www.é.x_y.z` and `http://é_a.b_c`, since, as in cmark-gfm, the host check reads bytes and ends inside the first non-ASCII char, so no `_` after it counts; the third holds no `Autolink`, since its `_` comes before the `é`; nor does the fourth, since a GFM domain holds only alphanumerics, `_`, `-`, and `.`, so the vertical tab ends it after `c`, where cmark-gfm reads on through it
 
 ### Requirement: Marks pair in closing order
 The parser SHALL pair every emphasis-like mark (`*`, `_`, `~~`, and `==`) on

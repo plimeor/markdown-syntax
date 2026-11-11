@@ -1,48 +1,64 @@
 //! Escaping + URL-encoding helpers shared by the inline/block renderers.
 //!
 //! Inputs are already-decoded Rust strings; the renderer never re-decodes or
-//! re-trims them.
+//! re-trims them. Every helper appends to the caller's output buffer.
 
 use alloc::string::String;
 
 /// CommonMark text escaper: replace, IN ORDER, `&`→`&amp;`, `<`→`&lt;`,
 /// `>`→`&gt;`, `"`→`&quot;`. The single quote is left literal.
-pub fn escape_text(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(ch),
-        }
+///
+/// The escaped characters are ASCII, so the runs between them are copied whole.
+pub fn escape_text(out: &mut String, s: &str) {
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut i = next_text_special(bytes, 0);
+    while i < bytes.len() {
+        let replacement = match bytes[i] {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            _ => "&quot;",
+        };
+        out.push_str(&s[start..i]);
+        out.push_str(replacement);
+        start = i + 1;
+        i = next_text_special(bytes, start);
     }
-    out
+    out.push_str(&s[start..]);
+}
+
+/// Index of the first `&`, `<`, `>`, or `"` at or after `from`, or
+/// `bytes.len()`.
+fn next_text_special(bytes: &[u8], from: usize) -> usize {
+    crate::swar::find_any(bytes, from, [b'&', b'<', b'>', b'"'])
 }
 
 /// Attribute escaper for the CommonMark / link-title context: identical to
 /// [`escape_text`] (`&` `<` `>` `"`), with `'` left literal because the
 /// attribute is always emitted double-quoted.
-pub fn attr_escape(s: &str) -> String {
-    escape_text(s)
+pub fn attr_escape(out: &mut String, s: &str) {
+    escape_text(out, s);
 }
 
 /// Attribute escaper for the GFM directive / wikilink context: same as
 /// [`attr_escape`] but additionally maps `'`→`&#x27;`.
-pub fn attr_escape_gfm(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            _ => out.push(ch),
-        }
+pub fn attr_escape_gfm(out: &mut String, s: &str) {
+    let mut start = 0;
+    for (i, &b) in s.as_bytes().iter().enumerate() {
+        let replacement = match b {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'"' => "&quot;",
+            b'\'' => "&#x27;",
+            _ => continue,
+        };
+        out.push_str(&s[start..i]);
+        out.push_str(replacement);
+        start = i + 1;
     }
-    out
+    out.push_str(&s[start..]);
 }
 
 /// True for the cmark "href-safe" byte set kept literal by the houdini
@@ -62,31 +78,39 @@ fn is_ascii_hex(b: u8) -> bool {
 /// cmark houdini href encoder over the UTF-8 bytes of the (already-decoded)
 /// destination. `&`→`&amp;`; `%`+2hex preserved else `%25`; href-safe bytes
 /// literal; everything else `%XX` uppercase. (See `misc_url.rs:141`.)
-pub fn encode_href(s: &str) -> String {
+///
+/// Runs of href-safe bytes are copied whole. They are ASCII, so a non-empty
+/// run starts and ends on a char boundary.
+pub fn encode_href(out: &mut String, s: &str) {
     let bytes = s.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut start = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
+        if is_href_safe(b) {
+            i += 1;
+            continue;
+        }
+        if start < i {
+            out.push_str(&s[start..i]);
+        }
         if b == b'&' {
             out.push_str("&amp;");
-            i += 1;
         } else if b == b'%' {
             if i + 2 < bytes.len() && is_ascii_hex(bytes[i + 1]) && is_ascii_hex(bytes[i + 2]) {
                 out.push('%');
             } else {
                 out.push_str("%25");
             }
-            i += 1;
-        } else if is_href_safe(b) {
-            out.push(b as char);
-            i += 1;
         } else {
-            push_percent(&mut out, b);
-            i += 1;
+            push_percent(out, b);
         }
+        i += 1;
+        start = i;
     }
-    out
+    if start < i {
+        out.push_str(&s[start..i]);
+    }
 }
 
 fn push_percent(out: &mut String, b: u8) {
@@ -96,18 +120,23 @@ fn push_percent(out: &mut String, b: u8) {
     out.push(HEX[(b & 0x0f) as usize] as char);
 }
 
-/// Lowercase ASCII scheme of `dest`: the chars before the first `:` that
-/// occurs before any of `/ ? #`. `None` when there is no such scheme.
-fn url_scheme(dest: &str) -> Option<String> {
-    let mut scheme = String::new();
-    for ch in dest.chars() {
-        match ch {
-            ':' => return Some(scheme.to_ascii_lowercase()),
-            '/' | '?' | '#' => return None,
-            _ => scheme.push(ch),
+/// ASCII scheme of `dest`: the chars before the first `:` that occurs before
+/// any of `/ ? #`. `None` when there is no such scheme. Schemes compare
+/// ASCII-case-insensitively.
+fn url_scheme(dest: &str) -> Option<&str> {
+    for (i, &b) in dest.as_bytes().iter().enumerate() {
+        match b {
+            b':' => return Some(&dest[..i]),
+            b'/' | b'?' | b'#' => return None,
+            _ => {}
         }
     }
     None
+}
+
+/// True when `scheme` is one of `names` (lowercase), ignoring ASCII case.
+fn scheme_is(scheme: &str, names: &[&str]) -> bool {
+    names.iter().any(|name| scheme.eq_ignore_ascii_case(name))
 }
 
 /// Link href scheme DENYLIST — cmark-gfm's `scan_dangerous_url` policy (used for
@@ -117,7 +146,7 @@ fn url_scheme(dest: &str) -> Option<String> {
 /// separately by `is_allowed_data_image`. Every other scheme (`http`, `ftp`,
 /// `smb`, `irc`, `rdar`, …, and the empty scheme from a leading `://`) is kept.
 fn is_dangerous_scheme(scheme: &str) -> bool {
-    matches!(scheme, "javascript" | "vbscript" | "file" | "data")
+    scheme_is(scheme, &["javascript", "vbscript", "file", "data"])
 }
 
 /// Link href scheme ALLOWLIST — micromark's policy (used for the CommonMark
@@ -127,57 +156,63 @@ fn is_dangerous_scheme(scheme: &str) -> bool {
 /// suites genuinely disagree here (cmark-gfm keeps `smb:`; micromark blanks
 /// `made-up-scheme:`), so the policy is selected per suite category.
 fn is_allowed_link_scheme(scheme: &str) -> bool {
-    matches!(
-        scheme,
-        "http" | "https" | "irc" | "ircs" | "mailto" | "xmpp"
-    )
+    scheme_is(scheme, &["http", "https", "irc", "ircs", "mailto", "xmpp"])
 }
 
 /// Image src scheme allowlist (only http/https; irc/mailto are NOT allowed for
 /// images).
 fn is_allowed_img_scheme(scheme: &str) -> bool {
-    matches!(scheme, "http" | "https")
+    scheme_is(scheme, &["http", "https"])
 }
 
-/// The four `data:image/*` URI prefixes the GFM sanitizer allows.
+/// The four `data:image/*` URI prefixes the GFM sanitizer allows, ignoring
+/// ASCII case.
 fn is_allowed_data_image(dest: &str) -> bool {
-    let lower = dest.to_ascii_lowercase();
-    lower.starts_with("data:image/png")
-        || lower.starts_with("data:image/gif")
-        || lower.starts_with("data:image/jpeg")
-        || lower.starts_with("data:image/webp")
+    let dest = dest.as_bytes();
+    [
+        "data:image/png",
+        "data:image/gif",
+        "data:image/jpeg",
+        "data:image/webp",
+    ]
+    .iter()
+    .any(|prefix| {
+        dest.len() >= prefix.len() && dest[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    })
 }
 
-/// Link href protocol filter. `gfm_denylist` selects the suite's policy: the
+/// Link href protocol filter: `dest`, or `""` when it is blanked.
+/// `gfm_denylist` selects the suite's policy: the
 /// GFM (cmark-gfm) suite blanks only dangerous schemes; the CommonMark
 /// (micromark) suite blanks any non-allowlisted scheme. `allow_dangerous_protocol`
 /// bypasses both (keeps everything). The two oracles genuinely differ (cmark-gfm
 /// keeps `smb:`; micromark blanks `made-up-scheme:`), so this is category-keyed
 /// alongside the other category-divergent oracle conventions.
-pub fn filter_protocol(dest: &str, allow_dangerous_protocol: bool, gfm_denylist: bool) -> String {
+pub fn filter_protocol(dest: &str, allow_dangerous_protocol: bool, gfm_denylist: bool) -> &str {
     if allow_dangerous_protocol {
-        return String::from(dest);
+        return dest;
     }
     match url_scheme(dest) {
-        None => String::from(dest),
+        None => dest,
         Some(scheme) if gfm_denylist => {
-            if is_dangerous_scheme(&scheme) && !is_allowed_data_image(dest) {
-                String::new()
+            if is_dangerous_scheme(scheme) && !is_allowed_data_image(dest) {
+                ""
             } else {
-                String::from(dest)
+                dest
             }
         }
         Some(scheme) => {
-            if is_allowed_link_scheme(&scheme) || is_allowed_data_image(dest) {
-                String::from(dest)
+            if is_allowed_link_scheme(scheme) || is_allowed_data_image(dest) {
+                dest
             } else {
-                String::new()
+                ""
             }
         }
     }
 }
 
-/// Image src protocol filter (ALLOWLIST). `allow_dangerous_protocol` and
+/// Image src protocol filter (ALLOWLIST): `dest`, or `""` when it is blanked.
+/// `allow_dangerous_protocol` and
 /// `allow_any_img_src` both bypass the filter (mirroring the link href path and
 /// upstream micromark `allowDangerousProtocol` semantics, which apply to image
 /// src as well); otherwise a scheme-less destination passes, a schemed
@@ -187,14 +222,14 @@ pub fn filter_img_protocol(
     dest: &str,
     allow_dangerous_protocol: bool,
     allow_any_img_src: bool,
-) -> String {
+) -> &str {
     if allow_dangerous_protocol || allow_any_img_src {
-        return String::from(dest);
+        return dest;
     }
     match url_scheme(dest) {
-        None => String::from(dest),
-        Some(scheme) if is_allowed_img_scheme(&scheme) => String::from(dest),
-        Some(_) if is_allowed_data_image(dest) => String::from(dest),
-        Some(_) => String::new(),
+        None => dest,
+        Some(scheme) if is_allowed_img_scheme(scheme) => dest,
+        Some(_) if is_allowed_data_image(dest) => dest,
+        Some(_) => "",
     }
 }

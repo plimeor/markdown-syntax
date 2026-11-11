@@ -7,7 +7,7 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 
 use crate::diagnostic::Diagnostic;
-use crate::parse::Definitions;
+use crate::parse::{Definitions, TopLevelRead};
 use crate::span::Span;
 
 /// Metadata attached to every AST node; currently just the source span.
@@ -38,8 +38,32 @@ pub struct Document {
     pub meta: NodeMeta,
     /// The document's top-level blocks, in source order.
     pub children: Vec<Block>,
-    /// The input `parse` read, shared by clones.
-    source: Option<Arc<str>>,
+    /// The input `parse` read and where it read each top-level block from.
+    source: Option<Source>,
+}
+
+/// A parsed document's input and where `parse` read each of its top-level
+/// blocks from, both shared by clones: facts of the input, which edits to the
+/// tree do not change. The reads are what parsing the text gives, so a source
+/// equals and prints as its text.
+#[derive(Clone)]
+struct Source {
+    text: Arc<str>,
+    reads: Arc<[TopLevelRead]>,
+}
+
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+    }
+}
+
+impl Eq for Source {}
+
+impl core::fmt::Debug for Source {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&*self.text, f)
+    }
 }
 
 impl Document {
@@ -52,19 +76,37 @@ impl Document {
         }
     }
 
-    /// The document `parse` returns: `children` read from `source`.
-    pub(crate) fn parsed(meta: NodeMeta, children: Vec<Block>, source: &str) -> Self {
+    /// The document `parse` returns: `children` read from `source`, each
+    /// top-level block read as `reads` records.
+    pub(crate) fn parsed(
+        meta: NodeMeta,
+        children: Vec<Block>,
+        source: &str,
+        reads: Vec<TopLevelRead>,
+    ) -> Self {
+        debug_assert_eq!(reads.len(), children.len(), "one read per top-level block");
         Self {
             meta,
             children,
-            source: Some(Arc::from(source)),
+            source: Some(Source {
+                text: Arc::from(source),
+                reads: Arc::from(reads),
+            }),
         }
     }
 
     /// The input this document was parsed from, or `None` for a document
     /// built by hand or returned by [`Document::without_source`].
     pub fn source(&self) -> Option<&str> {
-        self.source.as_deref()
+        self.source.as_ref().map(|source| &*source.text)
+    }
+
+    /// The input this document was parsed from and where `parse` read each
+    /// of its top-level blocks from, in source order.
+    pub(crate) fn source_and_reads(&self) -> Option<(&str, &[TopLevelRead])> {
+        self.source
+            .as_ref()
+            .map(|source| (&*source.text, &*source.reads))
     }
 
     /// This document without its source; writing it gives canonical

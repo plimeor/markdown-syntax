@@ -23,11 +23,18 @@ opens a block quote, which SHALL be written `> `. An empty heading, list
 item, or block quote SHALL be written as its marker followed by one space:
 `# `, `- `, `1. `, `> ` (decision 0019). A fenced code block's info string
 SHALL follow its opening fence directly, after one space only where it
-opens with the fence's char.
+opens with the fence's char. A `SoftBreak` outside a heading SHALL be
+written as a line ending, or as its source where it is copied, after one
+space where the text written before it ends with a backslash that no
+backslash escapes, which the line ending would otherwise make a hard break.
 
 #### Scenario: Empty blocks
 - **WHEN** a hand-built document holding a `Heading` of depth 1 with no children, a list of one item with no blocks, or a `BlockQuote` holding a `BlankLine` and a paragraph `a` is serialized
 - **THEN** `to_markdown()` returns `"# \n"`, `"- \n"`, or `"> \n> a\n"`, each of which reads back as the document
+
+#### Scenario: A backslash before a soft break
+- **WHEN** the document parsed from `"a\\\t\nb"`, a paragraph holding `Text("a\\")`, a `SoftBreak`, and `Text("b")`, is serialized without its source
+- **THEN** `to_markdown()` returns `"a\\ \nb\n"`, which reads back as the document
 
 ### Requirement: Round-trip stability
 For a parsed document without its source, parsing the Markdown that
@@ -116,7 +123,9 @@ inlines. The writer SHALL write:
   its delimiter row's place, the colons of each changed column around that
   cell's dashes in the source row, and renders that row where the number
   of columns changed, the header row is rendered, or the row would not read
-  as a delimiter row, with its rows by these rules;
+  as a delimiter row, with its rows by these rules; a list item or a
+  footnote definition whose match holds no blocks has no source around
+  blocks to keep, and is rendered where it holds any;
 - every other node as canonical output, with its children by these rules.
 
 A line written where the base node has a source line keeps that line's
@@ -152,10 +161,13 @@ item is not the base's last item written from the source, only where the
 source's lines are on both sides. Which other boundaries without a blank
 line are kept is unspecified. It SHALL keep the source before the
 document's first block and after its last when that block is written from
-the source there; every other boundary SHALL be canonical. A `---` thematic
-break written from the source that opens the output, wherever it stood in
-the source, SHALL be kept from the source unless a later line of the output
-closes it as frontmatter.
+the source there; every other boundary SHALL be canonical. A block other
+than frontmatter written from the source that opens the output, such as a
+`---` thematic break, wherever it stood in the source, SHALL be kept from
+the source while no later line of the output closes its first line, after
+any byte order mark, as frontmatter. Where one does, the block SHALL be
+written as canonical output if the output then opens with no frontmatter,
+and kept from the source otherwise.
 A node SHALL be written as canonical output even so where its source would
 read differently in its place; which placements make a node's source read
 differently is unspecified, except that a top-level block written partly
@@ -177,9 +189,19 @@ of the same document does.
 - **WHEN** the paragraph of the second item of the document parsed from `"-   a\n-   b\n\n    c\n-   d\n"`, and the paragraph of the item of the one parsed from `"aa\n- b\n"`, are each replaced by a hand-built paragraph `Text("x")`, the item of `"aa\n- b\n"` is separately left with no children, and each document is written
 - **THEN** they return `"-   a\n-   x\n\n    c\n-   d\n"`, `"aa\n- x\n"`, and `"aa\n\n- \n"`: an item keeps its marker, its gap, and its second paragraph at four columns, the other items and the boundary after the paragraph are kept, and the empty item, which cannot interrupt the paragraph, is written after a blank line with the space that opens it
 
+#### Scenario: Blocks in a container that held none
+- **WHEN** a hand-built paragraph `Text("x")` is added to the footnote definition of the document parsed from `"a\n\n[^5]:\n\nb\n"`, and separately to the alert of the one parsed from `"> [!NOTE]\n"`, and each document is written
+- **THEN** they return `"a\n\n[^5]: x\n\nb\n"` and `"> [!NOTE]\n> x\n"`: the definition is rendered between the kept paragraphs, and the alert keeps its opening line
+
 #### Scenario: Edited tables
 - **WHEN** the alignments of the table parsed from `"| a  | b |\n|---|---|\n| c   | e |\n"` are set to center and none, and separately the empty cell of the table parsed from `"| a | b |\n|---|---|\n| c |   |\n"` is given `Text("中文")`, and each document is written
 - **THEN** they return `"| a  | b |\n|:---:|---|\n| c   | e |\n"` and `"| a | b |\n|---|---|\n| c | 中文 |\n"`: the rows keep their source, and the delimiter row its pipes and dashes
+
+#### Scenario: A table whose header row continued a paragraph
+- **WHEN** the paragraph is removed from the document parsed from `"a\n2) b | c\n--|--"`, whose header row `2) b | c`, a list item that cannot interrupt a paragraph, is the table's, and the document is written
+- **THEN** `to_markdown()` returns `"| 2) b | c |\n| --- | --- |\n"`, which reads back as the table, where the source `"2) b | c\n--|--"` reads as a list, as "Parsing the output" requires of a document whose canonical output reads back
+- **WHEN** the paragraph is removed from the document parsed from `"a\n+++\n|--|\n\n+++"` and it is written
+- **THEN** it returns `"| +++ |\n| --- |\n\n+++"`, where the table's source, opening the output, would read as frontmatter that the last line closes
 
 #### Scenario: A break that comes to open the document
 - **WHEN** the two blocks of the document parsed from `"para\n\n---\n"` are swapped and it is written

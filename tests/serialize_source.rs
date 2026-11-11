@@ -91,6 +91,42 @@ mod unchanged_source_is_kept {
     }
 
     #[test]
+    fn unchanged_blocks_beside_edited_ones_keep_their_source_under_options() {
+        use markdown_syntax::{FenceMarker, OrderedDelimiter};
+
+        let source = "*  a\n   b\n\n~~~js\nx\n~~~\n\n1) one\n2) two\n\n> q *e*\n> - c\n\npara\n";
+        let mut document = parse(source).document;
+        let Block::List(list) = &mut document.children[2] else {
+            panic!("{:?}", document.children);
+        };
+        list.children[1].children[0] = paragraph("deux");
+        let Block::BlockQuote(quote) = &mut document.children[3] else {
+            panic!("{:?}", document.children);
+        };
+        let Block::List(list) = &mut quote.children[1] else {
+            panic!("{:?}", quote.children);
+        };
+        list.children
+            .push(ListItem::new([Paragraph::new([Text::from("d")])]));
+        document.children[4] = paragraph("new");
+        let mut fence = parse("~~~rs\ny\n~~~").document.without_source();
+        let Block::CodeBlock(code) = &mut fence.children[0] else {
+            panic!("{:?}", fence.children);
+        };
+        code.meta = NodeMeta::default();
+        document.children.push(fence.children.remove(0));
+        let mut options = crlf();
+        options.bullet = Some(BulletMarker::Plus);
+        options.ordered_delimiter = Some(OrderedDelimiter::Period);
+        options.fence_marker = Some(FenceMarker::Backtick);
+        assert_eq!(
+            document.to_markdown_with(&options).unwrap(),
+            "*  a\n   b\n\n~~~js\nx\n~~~\n\n1) one\n2) deux\n\n> q *e*\n> - c\r\n> - d\r\n\r\n\
+             new\r\n\r\n```rs\r\ny\r\n```\r\n"
+        );
+    }
+
+    #[test]
     fn a_block_with_any_span_changed_is_written_canonically() {
         let mut document = parse("*  x\n\n# T #").document;
         let Block::List(list) = &mut document.children[0] else {
@@ -327,6 +363,67 @@ mod unchanged_source_is_kept {
             parse(&markdown).document.children.as_slice(),
             [Block::Definition(_), Block::Paragraph(_)]
         ));
+    }
+
+    #[test]
+    fn a_table_whose_header_row_reads_otherwise_where_it_moved_is_rewritten() {
+        // `2) b | c` cannot interrupt a paragraph, so after `a` it is the
+        // table's header row, and opening the document it opens a list.
+        for (source, written) in [
+            ("a\n2) b | c\n--|--", "| 2) b | c |\n| --- | --- |\n"),
+            (
+                "a\n2) b | c\n--|--\n| x | y",
+                "| 2) b | c |\n| --- | --- |\n| q | y |\n",
+            ),
+        ] {
+            let mut document = parse(source).document;
+            document.children.remove(0);
+            if let Some(row) = document.children.iter_mut().find_map(|block| match block {
+                Block::Table(table) => table.rows.get_mut(1),
+                _ => None,
+            }) {
+                row.cells[0].children = vec![Text::from("q").into()];
+            }
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, written, "{source:?}");
+            assert_eq!(
+                normalized_blocks(&parse(&markdown).document.children),
+                normalized_blocks(&document.children),
+            );
+            assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
+        }
+        // Opening the document, a `+++` header row opens frontmatter that a
+        // `+++` row or a later block's line closes; elsewhere it does not.
+        for (source, written) in [
+            ("\n+++\n|--|\n+++", "| +++ |\n| --- |\n| +++ |\n"),
+            ("a\n+++\n|--|\n\n+++", "| +++ |\n| --- |\n\n+++"),
+        ] {
+            let mut document = parse(source).document;
+            document.children.remove(0);
+            assert_eq!(document.to_markdown().unwrap(), written, "{source:?}");
+        }
+        // After a byte order mark as well.
+        let mut document = parse("\u{feff}+++\n|--|\n\nx").document;
+        document
+            .children
+            .push(Paragraph::new([Text::from("+++")]).into());
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "| +++ |\n| --- |\n\nx\n\n+++\n"
+        );
+        let mut document = parse("a\n+++\n|--|\n+++\n\nz").document;
+        document.children.swap(0, 2);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "z\n\n+++\n|--|\n+++\n\na\n"
+        );
+        // A header row that opens no block keeps its source anywhere.
+        let mut document = parse("a\n| b | c |\n|--|--|\n\nz").document;
+        document.children.swap(0, 2);
+        assert_eq!(
+            document.to_markdown().unwrap(),
+            "z\n\n| b | c |\n|--|--|\n\na\n"
+        );
     }
 
     #[test]
@@ -861,6 +958,71 @@ mod source_reused_per_node {
         reads_back(&markdown, &document);
     }
 
+    /// The blocks a container holds, a list's first item's.
+    fn held(block: &mut Block) -> &mut Vec<Block> {
+        match block {
+            Block::BlockQuote(node) => &mut node.children,
+            Block::Alert(node) => &mut node.children,
+            Block::FootnoteDefinition(node) => &mut node.children,
+            Block::ContainerDirective(node) => &mut node.children,
+            Block::List(node) => &mut node.children[0].children,
+            Block::HtmlContainer(node) => match &mut node.content {
+                HtmlContainerContent::Blocks(blocks) => blocks,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("not a container: {other:?}"),
+        }
+    }
+
+    // serialization: Unchanged source is kept
+    #[test]
+    fn a_container_that_held_no_blocks_takes_new_ones() {
+        use markdown_syntax::__private::{
+            parse_with_leaf_contents, to_markdown_against, to_markdown_against_with,
+        };
+        // A footnote definition and an item have no source around their
+        // blocks to keep and are rendered; every other container keeps its
+        // own lines.
+        for (source, path, expected) in [
+            ("a\n\n[^5]:\n\nb\n", &[1][..], "a\n\n[^5]: x\n\nb\n"),
+            ("[^5]:   \n", &[0], "[^5]: x\n"),
+            ("> [^5]:\n", &[0, 0], "> [^5]: x\n"),
+            ("- [^5]:\n", &[0, 0], "- [^5]: x\n"),
+            ("- \n\nb\n", &[0], "- x\n\nb\n"),
+            ("> \n\nb\n", &[0], "> \n> x\n\nb\n"),
+            ("> [!NOTE]\n", &[0], "> [!NOTE]\n> x\n"),
+            (":::name\n:::\n", &[0], ":::name\nx\n:::\n"),
+            (
+                "<details>\n</details>\n",
+                &[0],
+                "<details>\nx\n\n</details>\n",
+            ),
+        ] {
+            let (output, kept) =
+                parse_with_leaf_contents(source, |_, contents| contents.each_keeping(|_, _| {}));
+            let parsed = output.document;
+            let mut document = parsed.clone();
+            let mut blocks = &mut document.children;
+            for &index in path {
+                blocks = held(&mut blocks[index]);
+            }
+            blocks.push(paragraph("x"));
+            let options = SerializeOptions::default();
+            let markdown = document.to_markdown().unwrap();
+            assert_eq!(markdown, expected, "{source:?}");
+            reads_back(&markdown, &document);
+            assert_eq!(document.to_markdown_with(&options).as_deref(), Ok(expected));
+            assert_eq!(
+                to_markdown_against(&document, &parsed, &options).as_deref(),
+                Ok(expected)
+            );
+            assert_eq!(
+                to_markdown_against_with(&document, &parsed, &kept, &options).as_deref(),
+                Ok(expected)
+            );
+        }
+    }
+
     /// A blank line that becomes a quote's first line opens the quote with
     /// `> `: its source line, a bare `>`, continues a quote but opens none.
     // serialization: Unchanged source is kept
@@ -946,6 +1108,17 @@ mod source_reused_per_node {
             assert_eq!(markdown, written);
             reads_back(&markdown, &document);
         }
+    }
+
+    // serialization: Canonical output, Unchanged source is kept
+    #[test]
+    fn a_backslash_typed_before_a_kept_soft_break_stays_text() {
+        let mut document = parse("`` a `` x\ny").document;
+        first_text(&mut document.children).value.push('\\');
+        let markdown = document.to_markdown().unwrap();
+        assert_eq!(markdown, "`` a `` x\\ \ny");
+        reads_back(&markdown, &document);
+        assert_eq!(markdown_syntax::__private::rewritten_blocks(&document), 0);
     }
 
     // serialization: Unchanged source is kept

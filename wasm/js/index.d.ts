@@ -344,6 +344,18 @@ export class ParsedDocument {
    * validation refuses it. Throws a TypeError for a malformed tree.
    */
   toMarkdown(tree?: Document, options?: SerializeOptions): string | { diagnostics: Diagnostic[] };
+  /**
+   * What `toMarkdown` writes for the document whose top-level blocks are
+   * `blocks`, with the span of this document's tree. An entry is a block, or
+   * the index of a top-level block of this document's parse, which stands for
+   * that block as the parse returned it, whatever `tree` holds now, and is
+   * not sent to WebAssembly: an editor sends the blocks it changed and the
+   * index of each other one. An index may repeat and come in any order.
+   * Throws a TypeError for a malformed block or a number that is not the
+   * index of a top-level block of the parse; diagnostics name paths in
+   * `blocks`.
+   */
+  toMarkdownBlocks(blocks: readonly (Block | number)[], options?: SerializeOptions): string | { diagnostics: Diagnostic[] };
   /** Releases the document in WebAssembly; later calls on it throw. */
   free(): void;
 }

@@ -12,13 +12,9 @@
 //! rule, with text, escapes, and character references as recorded. The output
 //! is parsed back only to check the blocks written partly from the source.
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::Cow, format, string::String, vec::Vec};
 
-use alloc::collections::BTreeMap;
+use core::cell::OnceCell;
 
 use crate::{
     ast::*, diagnostic::Diagnostic, leaves, parse::Definitions, parse::InlineSource, span::Span,
@@ -106,6 +102,20 @@ pub enum SerializeError {
     InvalidDocument(Vec<Diagnostic>),
 }
 
+/// What the caller of a write vouches for in the leaves that keep the text
+/// they were built from (`with_source`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeptTexts {
+    /// Nothing: each such leaf's text is read again, and a leaf whose
+    /// inlines are not the ones its text reads as is written from them.
+    Check,
+    /// Each such leaf holds the inlines its text reads as with the
+    /// document's definitions, as `reread_kept_sources` leaves them or
+    /// `with_source` builds them given those definitions, unchanged since;
+    /// no text is read again.
+    Trusted,
+}
+
 impl Document {
     /// Write this document as Markdown with default options: the source of
     /// every unchanged node, the source of its own syntax around a node whose
@@ -129,19 +139,72 @@ impl Document {
         &self,
         options: &SerializeOptions,
     ) -> Result<(String, usize), SerializeError> {
+        self.write_from(None, None, KeptTexts::Check, options)
+    }
+
+    /// The text `to_markdown_with` writes for this document's blocks with
+    /// the source of `parsed`, a document `parse` returned that is unchanged
+    /// since, which the write reads as the parse of that source in place of
+    /// parsing it again; and with `sources`, when given, as the inline
+    /// sources of its leaves in place of reading them again, which must be
+    /// the ones read with that parse. Without a source, `parsed` gives
+    /// canonical Markdown. `kept` is what the caller vouches for in the
+    /// leaves that keep their text.
+    pub(crate) fn write_against(
+        &self,
+        parsed: &Document,
+        sources: Option<&KeptSources>,
+        kept: KeptTexts,
+        options: &SerializeOptions,
+    ) -> Result<String, SerializeError> {
+        debug_assert!(parsed
+            .source()
+            .is_none_or(|source| crate::parse(source).document == *parsed));
+        debug_assert!(sources.is_none_or(|sources| *sources == KeptSources::of(parsed)));
+        Ok(self.write_from(Some(parsed), sources, kept, options)?.0)
+    }
+
+    /// The text `to_markdown_with` writes for this document's blocks, and
+    /// how many top-level blocks it wrote canonically, with the source of
+    /// `parsed`, the document `parse` returns for that source, or, when
+    /// `None`, with this document's own source, parsed here; and with
+    /// `sources`, the inline sources of the leaves of `parsed` read with
+    /// it, when given; and with what the caller vouches for in the leaves
+    /// that keep their text (`kept`).
+    fn write_from(
+        &self,
+        parsed: Option<&Document>,
+        sources: Option<&KeptSources>,
+        kept: KeptTexts,
+        options: &SerializeOptions,
+    ) -> Result<(String, usize), SerializeError> {
         let diagnostics = validate_document(self);
         if !diagnostics.is_empty() {
             return Err(SerializeError::InvalidDocument(diagnostics));
         }
         // A leaf keeps its text only while its inlines are the ones the text
-        // reads as.
+        // reads as, which each text is read again for unless `kept` vouches
+        // for it; the blocks are copied only to drop a text.
         let current;
-        let definitions = Definitions::of(self);
-        let blocks = if leaves::any_kept(&self.children) {
+        let definitions = DefinitionsOf::new(self);
+        let mut misread_leaf = |text: Option<&str>, inlines: &[Inline]| {
+            text.is_some_and(|text| {
+                crate::parse::parse_inline_tree(text, definitions.get()).inlines != *inlines
+            })
+        };
+        debug_assert!(
+            kept == KeptTexts::Check || leaves::find(&self.children, &mut misread_leaf).is_none(),
+            "the leaf at {:?} keeps a text that does not read as its inlines",
+            leaves::find(&self.children, &mut misread_leaf).unwrap_or_default()
+        );
+        let blocks = if kept == KeptTexts::Check
+            && leaves::find(&self.children, &mut misread_leaf).is_some()
+        {
             let mut blocks = self.children.clone();
             leaves::visit_mut(&mut blocks, &mut |leaf| {
                 if let Some(text) = leaf.source.as_deref() {
-                    if crate::parse::parse_inline_tree(text, &definitions).inlines != *leaf.inlines
+                    if crate::parse::parse_inline_tree(text, definitions.get()).inlines
+                        != *leaf.inlines
                     {
                         *leaf.source = None;
                     }
@@ -152,23 +215,55 @@ impl Document {
         } else {
             &self.children
         };
-        let Some(source) = self.source() else {
+        let parsed_here;
+        let base = match parsed {
+            Some(parsed) => Some(parsed),
+            None => {
+                parsed_here = self.source().map(crate::parse);
+                parsed_here.as_ref().map(|output| &output.document)
+            }
+        };
+        let Some((base, source)) = base.and_then(|base| Some((base, base.source()?))) else {
             return Ok((write_canonical(blocks, options)?, 0));
         };
         // A block written partly from the source stays so only where the
         // output reads back as it at its place.
-        let base = crate::parse(source).document;
-        let write =
-            |whole: &[bool]| write_reusing(blocks, &base, source, options, &definitions, whole);
-        // A `---` break kept opening the document stays only while no later
-        // line closes it as frontmatter, which every write is checked for.
-        let opens_with_break = matches!(blocks.first(), Some(Block::ThematicBreak(_)));
-        let mut whole = alloc::vec![false; blocks.len()];
-        let (mut output, mut partly) = write(&whole)?;
-        if opens_with_break && opens_frontmatter(&output) {
+        let mut correspondence = Correspondence {
+            base,
+            sources: sources.map(LeafSources::lent),
+        };
+        let base_definitions = DefinitionsOf::new(base);
+        // A first block other than frontmatter that the output opens with
+        // from the source stays so only while no later line closes its
+        // first line as frontmatter, or its canonical output would be
+        // closed as well; every write is checked for it.
+        let opens_with_block = !matches!(blocks.first(), None | Some(Block::Frontmatter(_)));
+        let mut write = |whole: &mut [bool]| {
+            let mut write_once = |whole: &[bool]| {
+                write_reusing(
+                    blocks,
+                    &mut correspondence,
+                    &base_definitions,
+                    source,
+                    options,
+                    &definitions,
+                    whole,
+                )
+            };
+            let written = write_once(whole)?;
+            if !opens_with_block || whole[0] || !opens_frontmatter(&written.0) {
+                return Ok(written);
+            }
             whole[0] = true;
-            (output, partly) = write(&whole)?;
-        }
+            let rewritten = write_once(whole)?;
+            if opens_frontmatter(&rewritten.0) {
+                whole[0] = false;
+                return Ok(written);
+            }
+            Ok(rewritten)
+        };
+        let mut whole = alloc::vec![false; blocks.len()];
+        let (mut output, partly) = write(&mut whole)?;
         if partly.is_empty() {
             return Ok((output, 0));
         }
@@ -179,18 +274,15 @@ impl Document {
         for index in &misread {
             whole[*index] = true;
         }
-        output = write(&whole)?.0;
-        if opens_with_break && !whole[0] && opens_frontmatter(&output) {
-            whole[0] = true;
-            output = write(&whole)?.0;
-        }
+        output = write(&mut whole)?.0;
         Ok((output, misread.len()))
     }
 }
 
-/// Whether `output` opens with frontmatter: its first line is a fence that
-/// a later line closes.
+/// Whether `output` opens with frontmatter: its first line, after any byte
+/// order mark, is a fence that a later line closes.
 fn opens_frontmatter(output: &str) -> bool {
+    let output = output.strip_prefix('\u{feff}').unwrap_or(output);
     let mut lines = output.split(['\n', '\r']);
     let opening = lines.next().and_then(crate::parse::frontmatter_fence_kind);
     opening.is_some() && lines.any(|line| crate::parse::frontmatter_fence_kind(line) == opening)
@@ -216,7 +308,8 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
     Ok(output)
 }
 
-/// Writes `blocks` against `base_document`, the parse of `source`: each
+/// Writes `blocks` against the base of `correspondence`, the parse of
+/// `source` whose definitions are `base_definitions`: each
 /// block matched to the base block at its span as its source when it
 /// corresponds to it, partly from the source when only what it holds
 /// changed (`reuse`), and canonically otherwise; returns the output and the
@@ -231,46 +324,67 @@ fn write_canonical(blocks: &[Block], options: &SerializeOptions) -> Result<Strin
 /// differently in its new place: one a blank line and a paragraph after it
 /// would change, as they extend an unclosed fence, when it comes before a
 /// block other than its successor in the source; one the block before it
-/// would take in (`moves_into_previous`); and a `---` break that opens the
-/// document where a later line closes it as frontmatter, which `whole`
-/// marks.
-fn write_reusing(
+/// would take in (`moves_into_previous`); one away from its predecessor
+/// that followed a line holding text (`follows_a_text_line`), whose text
+/// read alone is not one block of its kind where its canonical output is
+/// (`misreads_unlike_its_rendering`); and a first block whose first line a
+/// later line closes as frontmatter, which `whole` marks.
+fn write_reusing<'a>(
     blocks: &[Block],
-    base_document: &Document,
-    source: &str,
-    options: &SerializeOptions,
-    definitions: &Definitions,
+    correspondence: &mut Correspondence<'a>,
+    base_definitions: &'a DefinitionsOf<'a>,
+    source: &'a str,
+    options: &'a SerializeOptions,
+    definitions: &'a DefinitionsOf<'a>,
     whole: &[bool],
 ) -> Result<(String, Vec<usize>), SerializeError> {
-    let base = &base_document.children;
-    let mut correspondence = Correspondence {
-        base: base_document,
-        sources: None,
-    };
-    let base_definitions = Definitions::of(base_document);
+    let base = &correspondence.base.children[..];
     let mut reuse = reuse::Reuse {
         source,
         options,
-        correspondence: &mut correspondence,
+        correspondence,
         definitions,
-        base_definitions: &base_definitions,
+        base_definitions,
     };
     let span_of = |block: &Block| block.span().expect("a reused block has a span");
     let mut outs = Vec::with_capacity(blocks.len());
     // Whether each block written partly from the source is an open list.
     let mut open_lists = alloc::vec![false; blocks.len()];
+    let start_of = |base: &Block| base.span().map_or(usize::MAX, |span| span.start);
+    // Blocks most often follow their base blocks' order, so the base block
+    // after the one matched last is tried first. Base blocks are sorted by
+    // start, so one whose neighbours start elsewhere is the only one that
+    // starts there, the one the binary search finds.
+    let mut next = 0;
     for (index, block) in blocks.iter().enumerate() {
         let found = block.span().and_then(|span| {
-            let at = base
-                .binary_search_by_key(&span.start, |base| {
-                    base.span().map_or(usize::MAX, |span| span.start)
-                })
-                .ok()?;
+            let starts_at = |at: Option<usize>| {
+                at.and_then(|at| base.get(at))
+                    .is_some_and(|base| start_of(base) == span.start)
+            };
+            let at = if starts_at(Some(next))
+                && !starts_at(next.checked_sub(1))
+                && !starts_at(Some(next + 1))
+            {
+                next
+            } else {
+                base.binary_search_by_key(&span.start, start_of).ok()?
+            };
             (base[at].span() == Some(span)
                 && core::mem::discriminant(&base[at]) == core::mem::discriminant(block))
             .then_some(at)
         });
+        if let Some(at) = found {
+            next = at + 1;
+        }
         outs.push(match found {
+            // A block equal to its base block, spans included, is kept, as
+            // `reuse.block` keeps it: its leaves hold their base inlines, and
+            // the spans of the base's siblings stand apart, so each of its
+            // nodes matches the base node in its place. Only a top-level
+            // block is compared whole, so no node is compared more than
+            // twice.
+            Some(at) if *block == base[at] => (Some(at), None),
             Some(at) => match reuse.block(block, &base[at])? {
                 reuse::Out::Kept(_) => (Some(at), None),
                 reuse::Out::Lines(_) | reuse::Out::OpenList(_) if whole[index] => (None, None),
@@ -400,22 +514,32 @@ fn write_reusing(
         // A block whose source the block before it could take in stays only
         // after its predecessor in the source, written as it was there.
         let taken_in = |text: &str| placement.takes_in(block, text, follows_run);
-        if let Some((_, lines)) = &partly[index] {
-            if taken_in(&lines[0].body) {
+        // A block whose first line the source read where it opens no block,
+        // after a line holding text, stays away from that line where its
+        // text reads alone as a block of its kind, or its canonical output
+        // does not either.
+        let moved_out_of_context = |position: usize| {
+            !follows_predecessor && follows_a_text_line(source, span_of(&base[position]).start)
+        };
+        if let Some((position, lines)) = &partly[index] {
+            if taken_in(&lines[0].body)
+                || (moved_out_of_context(*position)
+                    && misreads_unlike_its_rendering(block, &reuse::join(lines, "\n"), options))
+            {
                 partly[index] = None;
             }
         }
         let mut at = reused[index];
-        if at.is_some() {
-            let start = span_of(block).start;
-            // A `---` break that opens the document stays a break while no
-            // later line closes it as frontmatter (`Document::write`), which
+        if let Some(position) = at {
+            let span = span_of(block);
+            let start = span.start;
+            // A first block whose first line a later line would close as
+            // frontmatter is written canonically (`Document::write`), which
             // `whole` marks, wherever it stood in the source.
-            let rewritten = matches!(block, Block::ThematicBreak(_))
-                && index == 0
-                && whole[0]
-                && source[start..].starts_with("---")
-                || taken_in(&source[start..]);
+            let rewritten = whole[index]
+                || taken_in(&source[start..])
+                || (moved_out_of_context(position)
+                    && misreads_unlike_its_rendering(block, &source[start..span.end], options));
             if rewritten {
                 at = None;
             }
@@ -530,28 +654,30 @@ fn write_reusing(
 /// The blocks among `partly`, indices of `blocks` written partly from the
 /// source, that `output` reads back as something else in their place: each
 /// one that differs, or every one when the output holds a different number
-/// of top-level blocks.
+/// of top-level blocks. Only the blocks among `partly` are read whole.
 fn misread(blocks: &[Block], output: &str, partly: &[usize]) -> Vec<usize> {
-    let read = crate::parse(output).document.children;
-    if read.len() != blocks.len() {
+    let (count, read) = crate::parse::parse_top_level_at(output, partly);
+    if count != blocks.len() || read.len() != partly.len() {
         return partly.to_vec();
     }
     partly
         .iter()
         .copied()
-        .filter(|index| !reads_as(&read[*index], &blocks[*index]))
+        .zip(read)
+        .filter_map(|(index, read)| (!reads_as(read, &blocks[index])).then_some(index))
         .collect()
 }
 
 /// Whether `read`, a block of the parsed output, reads as `block` as
 /// "Round-trip stability" compares them, an ordered item without a number
 /// reading as the number it is written with.
-fn reads_as(read: &Block, block: &Block) -> bool {
-    let mut read = crate::compare::normalized_blocks(core::slice::from_ref(read));
+fn reads_as(mut read: Block, block: &Block) -> bool {
+    let read = core::slice::from_mut(&mut read);
+    crate::compare::normalize_blocks(read);
+    number_items(read);
     let mut block = crate::compare::normalized_blocks(core::slice::from_ref(block));
-    number_items(&mut read);
     number_items(&mut block);
-    read == block
+    *read == *block
 }
 
 /// Gives each ordered item without a number the one it is written with.
@@ -591,33 +717,49 @@ fn number_items(blocks: &mut [Block]) {
     }
 }
 
+/// The definitions of a document, read the first time they are asked for:
+/// a write reads them only to read a leaf's text or inlines again.
+struct DefinitionsOf<'a> {
+    document: &'a Document,
+    read: OnceCell<Definitions>,
+}
+
+impl<'a> DefinitionsOf<'a> {
+    fn new(document: &'a Document) -> Self {
+        Self {
+            document,
+            read: OnceCell::new(),
+        }
+    }
+
+    fn get(&self) -> &Definitions {
+        self.read.get_or_init(|| Definitions::of(self.document))
+    }
+}
+
 /// Whether a block corresponds to a block of the document its source parses
 /// to: their spans and own fields are equal and their children correspond,
 /// where a leaf that keeps its text corresponds to the leaf at its span whose
 /// inline source is that text.
 struct Correspondence<'a> {
     base: &'a Document,
-    /// The inline source of each leaf of `base`, by span, read once the
-    /// first leaf that keeps its text needs it.
-    sources: Option<BTreeMap<(usize, usize), InlineSource>>,
+    /// The inline source of each leaf of `base` with its span, ordered by
+    /// span: lent by a caller that read them with the parse of `base`, or
+    /// read here once the first leaf that keeps its text needs it.
+    sources: Option<LeafSources<'a>>,
 }
 
-impl Correspondence<'_> {
-    /// The inline source of each leaf of the base, by span.
-    fn sources(&mut self) -> &BTreeMap<(usize, usize), InlineSource> {
+impl<'a> Correspondence<'a> {
+    /// The inline source of each leaf of the base.
+    fn sources(&mut self) -> &mut LeafSources<'a> {
         let base_document = self.base;
-        self.sources.get_or_insert_with(|| {
-            let mut sources = BTreeMap::new();
-            base_document.each_leaf_source(|_, span, source| {
-                sources.insert((span.start, span.end), source);
-            });
-            sources
-        })
+        self.sources
+            .get_or_insert_with(|| LeafSources::owned(KeptSources::of(base_document)))
     }
 
     /// The inline source of the base leaf at `span`.
     fn source_of(&mut self, span: Span) -> Option<&InlineSource> {
-        self.sources().get(&(span.start, span.end))
+        self.sources().get(span)
     }
 
     fn holds(&mut self, block: &Block, base: &Block) -> bool {
@@ -632,15 +774,96 @@ impl Correspondence<'_> {
             let (Some(text), Some(span)) = (leaf.source.as_deref(), leaf.span) else {
                 return;
             };
-            if let Some(source) = sources
-                .get(&(span.start, span.end))
-                .filter(|source| source.text == text)
-            {
+            if let Some(source) = sources.get(span).filter(|source| source.text == text) {
                 crate::parse::inline_spans_to_source(source, leaf.inlines);
                 *leaf.source = None;
             }
         });
         block == *base
+    }
+}
+
+/// The inline source of each leaf of a document with its span, ordered by
+/// span, leaves at one span in document order. Leaves share a span where a
+/// table row is padded with empty cells after its last one: each padding
+/// cell has the empty span at the row's end and an empty inline source.
+#[derive(Debug)]
+pub(crate) struct KeptSources {
+    entries: Vec<(Span, InlineSource)>,
+}
+
+impl KeptSources {
+    /// The sources of `entries`, leaves in document order with their spans.
+    pub(crate) fn new(mut entries: Vec<(Span, InlineSource)>) -> Self {
+        // Spans follow document order, so the entries are most often sorted
+        // already and skip the sort's scratch buffer; a stable sort keeps the
+        // order of leaves at one span otherwise.
+        if !entries.is_sorted_by_key(|(span, _)| (span.start, span.end)) {
+            entries.sort_by_key(|(span, _)| (span.start, span.end));
+        }
+        Self { entries }
+    }
+
+    /// The sources of the leaves of `document`, read from its source.
+    fn of(document: &Document) -> Self {
+        let mut entries = Vec::new();
+        document.each_leaf_source(|_, span, source| entries.push((span, source)));
+        Self::new(entries)
+    }
+}
+
+/// Two sets of sources are equal where they hold the same leaves at the same
+/// spans, each with the same text read from the same source runs.
+impl PartialEq for KeptSources {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries.len() == other.entries.len()
+            && self.entries.iter().zip(&other.entries).all(|(one, other)| {
+                one.0 == other.0 && one.1.text == other.1.text && one.1.map() == other.1.map()
+            })
+    }
+}
+
+/// Kept sources as a write looks leaves up in them, owned or lent.
+struct LeafSources<'a> {
+    entries: Cow<'a, [(Span, InlineSource)]>,
+    /// The entry after the one found last.
+    next: usize,
+}
+
+impl<'a> LeafSources<'a> {
+    fn owned(kept: KeptSources) -> Self {
+        Self {
+            entries: Cow::Owned(kept.entries),
+            next: 0,
+        }
+    }
+
+    fn lent(kept: &'a KeptSources) -> Self {
+        Self {
+            entries: Cow::Borrowed(&kept.entries),
+            next: 0,
+        }
+    }
+
+    /// The inline source of the leaf at `span`: the last of the leaves
+    /// there, each of which takes the place of the one before it. Leaves are
+    /// most often asked for in document order, so the entry after the one
+    /// found last is tried first.
+    fn get(&mut self, span: Span) -> Option<&InlineSource> {
+        let entries = &self.entries;
+        let next = self.next;
+        let last_at = |at: usize| {
+            entries[at].0 == span && entries.get(at + 1).is_none_or(|after| after.0 != span)
+        };
+        let at = if next < entries.len() && last_at(next) {
+            next
+        } else {
+            let key = (span.start, span.end);
+            let after = entries.partition_point(|(other, _)| (other.start, other.end) <= key);
+            after.checked_sub(1).filter(|&at| entries[at].0 == span)?
+        };
+        self.next = at + 1;
+        Some(&entries[at].1)
     }
 }
 
@@ -729,6 +952,38 @@ fn closed_by_a_blank_line(text: &str) -> bool {
         })
 }
 
+/// Whether the line holding `start` in `source` follows a line holding
+/// text, which a block starting there continued where it cannot interrupt
+/// a paragraph: a table's header row, a paragraph after a definition's.
+fn follows_a_text_line(source: &str, start: usize) -> bool {
+    let line_start = source[..start].rfind(['\n', '\r']).map_or(0, |at| at + 1);
+    let before = strip_line_ending(&source[..line_start]);
+    let previous = &before[before.rfind(['\n', '\r']).map_or(0, |at| at + 1)..];
+    !crate::parse::is_blank(previous)
+}
+
+/// Whether `text`, the source of `block`, reads as one block of its kind
+/// where it opens a block after a blank line, where no frontmatter opens: a
+/// first line that opens another block there, as `2) a | b` opens a list
+/// that cannot interrupt a paragraph, does not.
+fn reads_alone_as(block: &Block, text: &str) -> bool {
+    let probe = format!("\n{text}");
+    matches!(
+        crate::parse(&probe).document.children.as_slice(),
+        [Block::BlankLine(_), only]
+            if core::mem::discriminant(only) == core::mem::discriminant(block)
+    )
+}
+
+/// Whether `text`, the source of `block`, does not read alone as one block
+/// of its kind (`reads_alone_as`) while the block's canonical output does: a
+/// paragraph's, written as its text, reads as its source.
+fn misreads_unlike_its_rendering(block: &Block, text: &str, options: &SerializeOptions) -> bool {
+    !reads_alone_as(block, text)
+        && write_blocks(core::slice::from_ref(block), options, Join::Gap, true, None)
+            .is_ok_and(|written| reads_alone_as(block, &written))
+}
+
 /// Pushes the gap between two top-level blocks in the options' line ending.
 fn push_gap(output: &mut String, options: &SerializeOptions) {
     let from = output.len();
@@ -804,6 +1059,27 @@ fn write_blocks(
     previous_list: Option<char>,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
+    write_blocks_into(
+        &mut output,
+        blocks,
+        options,
+        join,
+        document_start,
+        previous_list,
+    )?;
+    Ok(output)
+}
+
+/// Writes what `write_blocks` returns into `output`, which is empty.
+fn write_blocks_into(
+    output: &mut String,
+    blocks: &[Block],
+    options: &SerializeOptions,
+    join: Join,
+    document_start: bool,
+    previous_list: Option<char>,
+) -> Result<(), SerializeError> {
+    debug_assert!(output.is_empty());
     // The marker of the list written right before the current block; ordered
     // and unordered markers never share a char.
     let mut previous_list = previous_list;
@@ -818,28 +1094,27 @@ fn write_blocks(
         }
         if wrote_block {
             match join {
-                Join::Gap => push_block_gap(&mut output),
+                Join::Gap => push_block_gap(output),
                 Join::Line => output.push('\n'),
             }
         }
         output.extend(core::iter::repeat_n('\n', blank_lines));
         blank_lines = 0;
-        let written = match block {
+        match block {
             Block::List(list) => {
                 let marker = list_marker(list, options, previous_list);
                 previous_list = Some(marker);
-                write_list(list, options, marker)?
+                push_list(output, list, options, marker)?;
             }
             Block::ThematicBreak(node) => {
                 previous_list = None;
-                write_thematic_break(node, document_start && index == 0)
+                output.push_str(&write_thematic_break(node, document_start && index == 0));
             }
             _ => {
                 previous_list = None;
-                write_block(block, options)?
+                push_block(output, block, options)?;
             }
-        };
-        output.push_str(&written);
+        }
         wrote_block = true;
     }
     // Trailing blank lines each end the line before them; with no block,
@@ -850,19 +1125,35 @@ fn write_blocks(
         blank_lines.saturating_sub(1)
     };
     output.extend(core::iter::repeat_n('\n', trailing));
+    Ok(())
+}
+
+/// What `push_block` pushes for `block`.
+fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
+    let mut output = String::new();
+    push_block(&mut output, block, options)?;
     Ok(output)
 }
 
-/// Writes `block` as canonical Markdown, and a leaf that keeps its text as
-/// that text: `to_markdown_with` has cleared every kept text its leaf's
-/// inlines no longer read as.
-fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, SerializeError> {
-    match block {
+/// Pushes `block` to `output` as canonical Markdown, and a leaf that keeps
+/// its text as that text: `to_markdown_with` has cleared every kept text its
+/// leaf's inlines no longer read as. A paragraph is written in place.
+fn push_block(
+    output: &mut String,
+    block: &Block,
+    options: &SerializeOptions,
+) -> Result<(), SerializeError> {
+    let written = match block {
+        Block::Paragraph(node) => {
+            return match &node.source {
+                Some(text) => {
+                    output.push_str(text);
+                    Ok(())
+                }
+                None => push_inlines(output, &node.children, Context::BLOCK),
+            };
+        }
         Block::BlankLine(_) => Ok(String::new()),
-        Block::Paragraph(node) => match &node.source {
-            Some(text) => Ok(text.clone()),
-            None => write_inlines(&node.children, Context::BLOCK),
-        },
         Block::Heading(node) => write_heading(node),
         Block::ThematicBreak(node) => Ok(write_thematic_break(node, false)),
         Block::BlockQuote(node) => {
@@ -939,7 +1230,9 @@ fn write_block(block: &Block, options: &SerializeOptions) -> Result<String, Seri
                 write_attributes(&node.attributes)
             ))
         }
-    }
+    };
+    output.push_str(&written?);
+    Ok(())
 }
 
 /// A thematic break. A dash break is written spaced at the document start,
@@ -955,20 +1248,19 @@ fn write_thematic_break(node: &ThematicBreak, at_document_start: bool) -> String
 
 /// An ATX heading. An empty one is its `#` run and a space, which opens it.
 fn write_heading(node: &Heading) -> Result<String, SerializeError> {
-    let content = match one_line(node.source.as_deref(), true) {
-        Some(text) => text.into(),
-        None => write_inlines(&node.children, Context::HEADING)?,
-    };
-    let hashes = "#".repeat(usize::from(node.depth));
-    Ok(if content.is_empty() {
-        format!("{hashes} ")
-    } else if reads_as_closing_sequence(&content) {
-        // Content ending in what would read as the closing sequence keeps it
-        // by a closing sequence of its own.
-        format!("{hashes} {content} #")
-    } else {
-        format!("{hashes} {content}")
-    })
+    let mut output: String = core::iter::repeat_n('#', usize::from(node.depth)).collect();
+    output.push(' ');
+    let content = output.len();
+    match one_line(node.source.as_deref(), true) {
+        Some(text) => output.push_str(text),
+        None => output.push_str(&write_inlines(&node.children, Context::HEADING)?),
+    }
+    // Content ending in what would read as the closing sequence keeps it by
+    // a closing sequence of its own.
+    if reads_as_closing_sequence(&output[content..]) {
+        output.push_str(" #");
+    }
+    Ok(output)
 }
 
 /// Whether written ATX content ends in a `#` run that is all of it or follows
@@ -979,11 +1271,11 @@ fn reads_as_closing_sequence(content: &str) -> bool {
 }
 
 fn write_definition(node: &Definition) -> String {
-    let destination = write_destination(&node.destination, node.destination_kind);
-    let mut output = format!("[{}]: {}", node.label, destination);
+    let mut output = format!("[{}]: ", node.label);
+    push_destination(&mut output, &node.destination, node.destination_kind);
     if let Some(title) = &node.title {
         output.push(' ');
-        output.push_str(&write_title(title));
+        push_title(&mut output, title);
     }
     output
 }
@@ -1123,21 +1415,35 @@ fn write_list(
     marker_char: char,
 ) -> Result<String, SerializeError> {
     let mut output = String::new();
+    push_list(&mut output, node, options, marker_char)?;
+    Ok(output)
+}
+
+/// Pushes `node` as `write_list` writes it.
+fn push_list(
+    output: &mut String,
+    node: &List,
+    options: &SerializeOptions,
+    marker_char: char,
+) -> Result<(), SerializeError> {
     // The number the previous item was written with.
     let mut previous: Option<u64> = None;
+    let mut inner = String::new();
     for (index, item) in node.children.iter().enumerate() {
         if index > 0 {
             output.push_str(if node.tight { "\n" } else { "\n\n" });
         }
-        output.push_str(&write_item(
+        push_item(
+            output,
             node,
             item,
             options,
             marker_char,
             &mut previous,
-        )?);
+            &mut inner,
+        )?;
     }
-    Ok(output)
+    Ok(())
 }
 
 /// The number an ordered item is written with: its own, or else one more than
@@ -1160,10 +1466,14 @@ fn item_number(item: &ListItem, previous: &mut Option<u64>) -> u64 {
 /// with a backtick or a tilde after fewer than four spaces: a line the
 /// parser does not take as a quote's paragraph's lazy line.
 pub(crate) fn written_opens_fence_like(block: &Block) -> bool {
-    write_block(block, &SerializeOptions::default()).is_ok_and(|written| {
-        let content = written.trim_start_matches(' ');
-        written.len() - content.len() < 4 && content.starts_with(['`', '~'])
-    })
+    opens_fence_like(&written_opening(block, &SerializeOptions::default()))
+}
+
+/// Whether `line` opens with a backtick or a tilde after fewer than four
+/// spaces.
+fn opens_fence_like(line: &str) -> bool {
+    let content = line.trim_start_matches(' ');
+    line.len() - content.len() < 4 && content.starts_with(['`', '~'])
 }
 
 /// One item of `list`, written with `marker_char`; `previous` is the number
@@ -1177,49 +1487,87 @@ fn write_item(
     marker_char: char,
     previous: &mut Option<u64>,
 ) -> Result<String, SerializeError> {
-    let marker = if list.ordered {
-        format!("{}{marker_char} ", item_number(item, previous))
+    let mut output = String::new();
+    push_item(
+        &mut output,
+        list,
+        item,
+        options,
+        marker_char,
+        previous,
+        &mut String::new(),
+    )?;
+    Ok(output)
+}
+
+/// Pushes one item of `list` as `write_item` writes it, its blocks written
+/// in `inner` before they are indented.
+fn push_item(
+    output: &mut String,
+    list: &List,
+    item: &ListItem,
+    options: &SerializeOptions,
+    marker_char: char,
+    previous: &mut Option<u64>,
+    inner: &mut String,
+) -> Result<(), SerializeError> {
+    let from = output.len();
+    if list.ordered {
+        let number = item_number(item, previous);
+        // Writing to a `String` cannot fail.
+        let _ = core::fmt::Write::write_fmt(output, format_args!("{number}{marker_char} "));
     } else {
-        format!("{marker_char} ")
-    };
-    let inner = write_item_blocks(&item.children, options, list.tight, item.checked)?;
-    Ok(format!(
-        "{marker}{}",
-        indent_after_first_line(&inner, marker.len())
-    ))
+        output.push(marker_char);
+        output.push(' ');
+    }
+    let width = output.len() - from;
+    inner.clear();
+    write_item_blocks(inner, &item.children, options, list.tight, item.checked)?;
+    push_indented(output, inner, width);
+    Ok(())
 }
 
 /// Whether `item` of `list`, written with `marker_char`, reads back as
-/// something else, `first_line` being the first line its blocks are written
-/// as: where that line would read as padding after the marker, or, after a
-/// bullet, as one thematic break with it (`- --`, or the `- - -` of three
-/// nested empty items). An item's content cannot start below its marker,
-/// since a marker with nothing after it on its line opens an empty item.
-fn misreads_after_marker(
-    list: &List,
-    item: &ListItem,
-    marker_char: char,
-    first_line: &str,
-) -> bool {
-    opens_with_padding(first_line)
+/// something else, `opening` being the opening (`opening`) of the first line
+/// its blocks are written as: where that line would read as padding after
+/// the marker, or, after a bullet, as one thematic break with it (`- --`, or
+/// the `- - -` of three nested empty items). An item's content cannot start
+/// below its marker, since a marker with nothing after it on its line opens
+/// an empty item.
+fn misreads_after_marker(list: &List, item: &ListItem, marker_char: char, opening: &str) -> bool {
+    opens_with_padding(opening)
         || (!list.ordered
             && item.checked.is_none()
-            && reads_as_thematic_break(marker_char, first_line))
+            && reads_as_thematic_break(marker_char, opening))
+}
+
+/// The chars that pad a line's content: spaces and tabs.
+const PADDING: [char; 2] = [' ', '\t'];
+
+/// The chars a thematic break that a bullet can open is made of.
+const BREAK_CHARS: [char; 2] = ['-', '*'];
+
+/// Whether `char` goes on an opening (`opening`): padding, or a char of a
+/// thematic break, which is all `opens_with_padding`,
+/// `reads_as_thematic_break`, and the fence check of
+/// `written_opens_fence_like` read a line through.
+fn continues_opening(char: char) -> bool {
+    PADDING.contains(&char) || BREAK_CHARS.contains(&char)
 }
 
 /// Whether `marker_char`, a space, and `rest` read as a thematic break of
 /// that char: three or more `-` or `*`, with only spaces and tabs between.
 pub(super) fn reads_as_thematic_break(marker_char: char, rest: &str) -> bool {
-    matches!(marker_char, '-' | '*')
+    BREAK_CHARS.contains(&marker_char)
         && rest
             .chars()
-            .all(|char| matches!(char, ' ' | '\t') || char == marker_char)
+            .all(|char| PADDING.contains(&char) || char == marker_char)
         && rest.chars().filter(|char| *char == marker_char).count() >= 2
 }
 
-/// The first line the serializer writes `item` of `list` with, its marker
-/// `marker_char` and `options`' text included.
-fn item_first_line(
+/// The opening (`opening`) of the first line the serializer writes `item` of
+/// `list` with, its marker `marker_char` and `options`' text included.
+fn item_opening(
     list: &List,
     item: &ListItem,
     marker_char: char,
@@ -1230,22 +1578,20 @@ fn item_first_line(
     } else {
         String::from(marker_char)
     };
-    format!("{marker} {}", item_content_first_line(item, options))
+    format!("{marker} {}", item_content_opening(item, options))
 }
 
-/// The first line of `item`'s blocks as the serializer writes them with
-/// `options`: a nested list's first item is followed into, and a leaf block
-/// is written to tell.
-fn item_content_first_line(item: &ListItem, options: &SerializeOptions) -> String {
+/// The opening (`opening`) of the first line of `item`'s blocks as the
+/// serializer writes them with `options`: a nested list's first item is
+/// followed into, and a leaf block is written to tell.
+fn item_content_opening(item: &ListItem, options: &SerializeOptions) -> String {
     if item.checked.is_some() {
         return String::from("[");
     }
     match item.children.first() {
         None => String::new(),
         Some(Block::List(nested)) => match nested.children.first() {
-            Some(first) => {
-                item_first_line(nested, first, list_marker(nested, options, None), options)
-            }
+            Some(first) => item_opening(nested, first, list_marker(nested, options, None), options),
             None => String::new(),
         },
         Some(
@@ -1254,48 +1600,85 @@ fn item_content_first_line(item: &ListItem, options: &SerializeOptions) -> Strin
             | Block::HtmlBlock(_)
             | Block::CodeBlock(_)
             | Block::ThematicBreak(_)),
-        ) => write_block(block, options)
-            .map(|written| String::from(first_line(&written)))
-            .unwrap_or_default(),
+        ) => written_opening(block, options),
         // Every other block opens with syntax of its own.
         Some(_) => String::from(">"),
     }
 }
 
-/// `text` up to its first line ending.
-fn first_line(text: &str) -> &str {
-    text.split(['\n', '\r']).next().unwrap_or_default()
+/// The opening (`opening`) of the first line `push_block` writes `block`
+/// as with `options`, written only as far as that where it can be: a
+/// paragraph's inlines each add to what the ones before them wrote.
+fn written_opening(block: &Block, options: &SerializeOptions) -> String {
+    let written = match block {
+        Block::Paragraph(node) => match &node.source {
+            Some(text) => Ok(String::from(opening(text))),
+            None => write_opening(&node.children, Context::BLOCK),
+        },
+        Block::HtmlBlock(node) => Ok(String::from(opening(&node.value))),
+        _ => write_block(block, options).map(|written| String::from(opening(&written))),
+    };
+    written.unwrap_or_default()
+}
+
+/// The opening of `text`'s first line: up to its line ending, or through
+/// its first char that does not continue an opening (`continues_opening`).
+/// It tells what the whole line does about reading as padding or a thematic
+/// break after a list marker, or as a fence after a quote's lazy line.
+fn opening(text: &str) -> &str {
+    match text
+        .char_indices()
+        .find(|(_, char)| !continues_opening(*char))
+    {
+        Some((at, '\n' | '\r')) => &text[..at],
+        Some((at, char)) => &text[..at + char.len_utf8()],
+        None => text,
+    }
 }
 
 /// Spaces or a tab opening an item's written content would read as padding
 /// after the marker. Four spaces or more open indented code, which the
 /// marker line holds after one space.
 fn opens_with_padding(inner: &str) -> bool {
-    !inner.starts_with("    ") && inner.starts_with([' ', '\t'])
+    !inner.starts_with("    ") && inner.starts_with(PADDING)
 }
 
 /// Whether, with default options, the serializer writes `item` of `list`
 /// so that it reads back as something else (see
-/// [`misreads_after_marker`]). Only the item's first line is written to
-/// tell.
+/// [`misreads_after_marker`]). Only the opening of the item's first line is
+/// written to tell.
 pub(crate) fn item_misreads_after_marker(list: &List, item: &ListItem) -> bool {
+    // An opening of one char that ends it, a checkbox's `[` or the char a
+    // paragraph's first inline opens with, reads as neither.
+    let ends_opening = item.checked.is_some()
+        || match item.children.first() {
+            Some(Block::Paragraph(node)) => {
+                node.source.is_none() && node.children.first().and_then(opening_char).is_some()
+            }
+            _ => false,
+        };
+    if ends_opening {
+        return false;
+    }
     let options = SerializeOptions::default();
-    let content = item_content_first_line(item, &options);
+    let content = item_content_opening(item, &options);
     misreads_after_marker(list, item, written_marker(list), &content)
 }
 
-/// An item's blocks; a task item's, `task` holding whether it is checked,
-/// open with its checkbox: at the start of the first paragraph after the
-/// definitions the item starts with, or else of the item.
+/// Writes an item's blocks into `output`, which is empty; a task item's,
+/// `task` holding whether it is checked, open with its checkbox: at the
+/// start of the first paragraph after the definitions the item starts with,
+/// or else of the item.
 fn write_item_blocks(
+    output: &mut String,
     blocks: &[Block],
     options: &SerializeOptions,
     tight: bool,
     task: Option<bool>,
-) -> Result<String, SerializeError> {
+) -> Result<(), SerializeError> {
     let join = if tight { Join::Line } else { Join::Gap };
     let Some(checked) = task else {
-        return write_blocks(blocks, options, join, false, None);
+        return write_blocks_into(output, blocks, options, join, false, None);
     };
     let checkbox = if checked { "[x]" } else { "[ ]" };
     let definitions = blocks
@@ -1303,26 +1686,26 @@ fn write_item_blocks(
         .take_while(|block| matches!(block, Block::Definition(_)))
         .count();
     if matches!(blocks.get(definitions), Some(Block::Paragraph(_))) {
-        let before = write_blocks(&blocks[..definitions], options, join, false, None)?;
+        write_blocks_into(output, &blocks[..definitions], options, join, false, None)?;
         let rest = write_blocks(&blocks[definitions..], options, join, false, None)?;
-        let mut output = before;
         if !output.is_empty() {
             match join {
-                Join::Gap => push_block_gap(&mut output),
+                Join::Gap => push_block_gap(output),
                 Join::Line => output.push('\n'),
             }
         }
         output.push_str(checkbox);
         output.push(' ');
         output.push_str(&rest);
-        return Ok(output);
+        return Ok(());
     }
     let written = write_blocks(blocks, options, join, false, None)?;
-    Ok(if written.is_empty() {
-        checkbox.into()
-    } else {
-        format!("{checkbox} {written}")
-    })
+    output.push_str(checkbox);
+    if !written.is_empty() {
+        output.push(' ');
+        output.push_str(&written);
+    }
+    Ok(())
 }
 
 fn write_code_block(node: &CodeBlock, options: &SerializeOptions) -> String {
@@ -1420,44 +1803,71 @@ fn char_reference(char: char) -> String {
 
 fn write_table(node: &Table) -> Result<String, SerializeError> {
     let mut output = String::new();
+    let mut written = String::new();
     for (row_index, row) in node.rows.iter().enumerate() {
         if row_index > 0 {
             output.push('\n');
         }
-        output.push_str(&write_row(row)?);
+        push_row(&mut output, row, &mut written)?;
         if row_index == 0 {
             output.push('\n');
-            output.push_str(&write_delimiter_row(&node.alignments));
+            push_delimiter_row(&mut output, &node.alignments);
         }
     }
     Ok(output)
 }
 
 fn write_delimiter_row(alignments: &[TableAlignment]) -> String {
-    let cells = alignments
-        .iter()
-        .map(|alignment| match alignment {
+    let mut output = String::new();
+    push_delimiter_row(&mut output, alignments);
+    output
+}
+
+fn push_delimiter_row(output: &mut String, alignments: &[TableAlignment]) {
+    output.push_str("| ");
+    for (index, alignment) in alignments.iter().enumerate() {
+        if index > 0 {
+            output.push_str(" | ");
+        }
+        output.push_str(match alignment {
             TableAlignment::None => "---",
             TableAlignment::Left => ":---",
             TableAlignment::Center => ":---:",
             TableAlignment::Right => "---:",
-        })
-        .collect::<Vec<_>>();
-    format!("| {} |", cells.join(" | "))
+        });
+    }
+    output.push_str(" |");
 }
 
 fn write_row(row: &TableRow) -> Result<String, SerializeError> {
-    let cells = row
-        .cells
-        .iter()
-        .map(|cell| {
-            Ok(encode_cell(&match one_line(cell.source.as_deref(), true) {
-                Some(text) => text.into(),
-                None => write_inlines(&cell.children, Context::BLOCK)?,
-            }))
-        })
-        .collect::<Result<Vec<_>, SerializeError>>()?;
-    Ok(format!("| {} |", cells.join(" | ")))
+    let mut output = String::new();
+    push_row(&mut output, row, &mut String::new())?;
+    Ok(output)
+}
+
+/// Pushes `row` as `write_row` writes it, each cell's inlines written in
+/// `written` before they are encoded.
+fn push_row(
+    output: &mut String,
+    row: &TableRow,
+    written: &mut String,
+) -> Result<(), SerializeError> {
+    output.push_str("| ");
+    for (index, cell) in row.cells.iter().enumerate() {
+        if index > 0 {
+            output.push_str(" | ");
+        }
+        match one_line(cell.source.as_deref(), true) {
+            Some(text) => push_encoded_cell(output, text),
+            None => {
+                written.clear();
+                push_inlines(written, &cell.children, Context::BLOCK)?;
+                push_encoded_cell(output, written);
+            }
+        }
+    }
+    output.push_str(" |");
+    Ok(())
 }
 
 /// A cell's inline content, written as anywhere else, encoded as cell
@@ -1469,15 +1879,23 @@ fn write_row(row: &TableRow) -> Result<String, SerializeError> {
 /// the cell values whose meaning that would change.
 fn encode_cell(written: &str) -> String {
     let mut output = String::with_capacity(written.len());
-    let mut backslashes = 0usize;
-    for char in written.chars() {
-        if char == '|' && backslashes % 2 == 0 {
-            output.push('\\');
-        }
-        backslashes = if char == '\\' { backslashes + 1 } else { 0 };
-        output.push(char);
-    }
+    push_encoded_cell(&mut output, written);
     output
+}
+
+/// Pushes `written` encoded as cell source, as `encode_cell` returns it.
+fn push_encoded_cell(output: &mut String, written: &str) {
+    let mut backslashes = 0usize;
+    let mut copied = 0;
+    for (at, byte) in written.bytes().enumerate() {
+        if byte == b'|' && backslashes % 2 == 0 {
+            output.push_str(&written[copied..at]);
+            output.push('\\');
+            copied = at;
+        }
+        backslashes = if byte == b'\\' { backslashes + 1 } else { 0 };
+    }
+    output.push_str(&written[copied..]);
 }
 
 /// Where inline content is written, as the value encodings of its nodes read
@@ -1494,11 +1912,85 @@ impl Context {
 }
 
 fn write_inlines(inlines: &[Inline], context: Context) -> Result<String, SerializeError> {
+    let mut output = String::new();
+    push_inlines(&mut output, inlines, context)?;
+    Ok(output)
+}
+
+/// Pushes what `write_inlines` writes for `inlines` to `output`; what
+/// `output` holds already is no part of the content.
+fn push_inlines(
+    output: &mut String,
+    inlines: &[Inline],
+    context: Context,
+) -> Result<(), SerializeError> {
+    let mut out = InlineOut {
+        start: output.len(),
+        scanned: output.len(),
+        text: core::mem::take(output),
+        open_runs: Vec::new(),
+    };
+    let written = inlines
+        .iter()
+        .try_for_each(|inline| write_inline(inline, context, &mut out));
+    *output = out.text;
+    written
+}
+
+/// The opening (`opening`) of what `write_inlines` writes for `inlines`:
+/// each inline adds to what the ones before it wrote, so the writing stops
+/// at the first char that ends the opening, and an inline that opens with
+/// one is not written past it.
+fn write_opening(inlines: &[Inline], context: Context) -> Result<String, SerializeError> {
     let mut output = InlineOut::default();
     for inline in inlines {
+        if let Some(char) = opening_char(inline) {
+            output.push(char);
+            break;
+        }
+        let from = output.len();
         write_inline(inline, context, &mut output)?;
+        if output[from..].contains(|char| !continues_opening(char)) {
+            break;
+        }
     }
+    let end = opening(&output).len();
+    output.truncate(end);
     Ok(output.text)
+}
+
+/// The char `write_inline` writes `inline` with first, where its kind and
+/// fields fix it and it ends an opening (`opening`) other than at a line
+/// ending.
+fn opening_char(inline: &Inline) -> Option<char> {
+    let char = match inline {
+        Inline::Text(node) => node.value.chars().next()?,
+        Inline::Escape(_) => '\\',
+        Inline::CharacterReference(node) => node.reference.chars().next()?,
+        Inline::Emphasis(Emphasis { delimiter, .. }) | Inline::Strong(Strong { delimiter, .. }) => {
+            match delimiter {
+                EmphasisDelimiter::Asterisk => '*',
+                EmphasisDelimiter::Underscore => '_',
+            }
+        }
+        Inline::Delete(_) => '~',
+        Inline::Mark(_) => '=',
+        Inline::InlineFootnote(_) => '^',
+        Inline::Shortcode(_) | Inline::TextDirective(_) => ':',
+        Inline::Tag(_) => '#',
+        Inline::Code(_) => '`',
+        Inline::Link(_) | Inline::LinkReference(_) | Inline::FootnoteReference(_) => '[',
+        Inline::Image(_) | Inline::ImageReference(_) => '!',
+        Inline::WikiLink(node) if node.embed => '!',
+        Inline::WikiLink(_) => '[',
+        Inline::Autolink(node) => match node.form {
+            AutolinkForm::Angle => '<',
+            AutolinkForm::Literal => node.text.chars().next()?,
+        },
+        Inline::Html(node) => node.value.chars().next()?,
+        Inline::Math(_) | Inline::SoftBreak(_) | Inline::LineBreak(_) => return None,
+    };
+    (!continues_opening(char) && !matches!(char, '\n' | '\r')).then_some(char)
 }
 
 /// The Markdown written so far for the inline content of one block, cell, or
@@ -1506,7 +1998,11 @@ fn write_inlines(inlines: &[Inline], context: Context) -> Result<String, Seriali
 /// it that a code span's fence must not close.
 #[derive(Default)]
 struct InlineOut {
+    /// The output the content is written to, which may hold text written
+    /// before it.
     text: String,
+    /// Where the content starts in `text`.
+    start: usize,
     /// `open_runs[n]`: a backtick run of length `n` that opens no code span
     /// was written, outside every code span: a later fence of that length
     /// would close it.
@@ -1520,31 +2016,33 @@ impl InlineOut {
     /// backslash escapes the first backtick of a run, which then opens with
     /// the rest of the run.
     fn scan_open_runs(&mut self) {
-        let mut escaped = false;
-        let mut run = 0;
-        let mut run_escaped = false;
-        for byte in self.text.as_bytes()[self.scanned..]
-            .iter()
-            .copied()
-            .chain(core::iter::once(b' '))
-        {
-            if byte == b'`' {
-                if run == 0 {
-                    run_escaped = escaped;
-                }
-                run += 1;
-                escaped = false;
-                continue;
+        let bytes = self.text.as_bytes();
+        let mut from = self.scanned;
+        loop {
+            let start = crate::swar::find_any(bytes, from, [b'`']);
+            if start == bytes.len() {
+                break;
             }
-            let opening = run - usize::from(run_escaped && run > 0);
+            // Escaped where an odd number of backslashes, read since the
+            // last run or the start of the scan, stand right before it.
+            let backslashes = bytes[from..start]
+                .iter()
+                .rev()
+                .take_while(|byte| **byte == b'\\')
+                .count();
+            let end = start
+                + bytes[start..]
+                    .iter()
+                    .take_while(|byte| **byte == b'`')
+                    .count();
+            let opening = end - start - backslashes % 2;
             if opening > 0 {
                 if self.open_runs.len() <= opening {
                     self.open_runs.resize(opening + 1, false);
                 }
                 self.open_runs[opening] = true;
             }
-            run = 0;
-            escaped = byte == b'\\' && !escaped;
+            from = end;
         }
         self.scanned = self.text.len();
     }
@@ -1593,8 +2091,11 @@ fn write_inline(
             write_span(out, delimiter, &node.children, delimiter, context)?;
         }
         Inline::Strong(node) => {
-            let delimiter = emphasis_delimiter(node.delimiter).repeat(2);
-            write_span(out, &delimiter, &node.children, &delimiter, context)?;
+            let delimiter = match node.delimiter {
+                EmphasisDelimiter::Asterisk => "**",
+                EmphasisDelimiter::Underscore => "__",
+            };
+            write_span(out, delimiter, &node.children, delimiter, context)?;
         }
         Inline::Delete(node) => write_span(out, "~~", &node.children, "~~", context)?,
         Inline::Mark(node) => write_span(out, "==", &node.children, "==", context)?,
@@ -1647,7 +2148,15 @@ fn write_inline(
         }
         Inline::Html(node) => out.push_opaque(|out| out.push_str(&node.value)),
         Inline::SoftBreak(_) if context.heading => out.push(' '),
-        Inline::SoftBreak(_) => out.push('\n'),
+        Inline::SoftBreak(_) => {
+            // A backslash right before the line ending would make it a hard
+            // break; one space between them, which the parser strips, keeps
+            // the backslash text.
+            if ends_with_unescaped_backslash(out) {
+                out.push(' ');
+            }
+            out.push('\n');
+        }
         Inline::LineBreak(node) => match node.kind {
             LineBreakKind::Backslash => out.push_str("\\\n"),
             LineBreakKind::Spaces => out.push_str("  \n"),
@@ -1691,6 +2200,12 @@ fn write_inline(
     Ok(())
 }
 
+/// Whether `text` ends with an odd run of backslashes, whose last one no
+/// backslash escapes.
+fn ends_with_unescaped_backslash(text: &str) -> bool {
+    text.bytes().rev().take_while(|byte| *byte == b'\\').count() % 2 == 1
+}
+
 fn emphasis_delimiter(delimiter: EmphasisDelimiter) -> &'static str {
     match delimiter {
         EmphasisDelimiter::Asterisk => "*",
@@ -1721,10 +2236,10 @@ fn write_resource(
     kind: LinkDestinationKind,
     title: Option<&Title>,
 ) {
-    out.push_str(&write_destination(destination, kind));
+    push_destination(out, destination, kind);
     if let Some(title) = title {
         out.push(' ');
-        out.push_str(&write_title(title));
+        push_title(out, title);
     }
     out.push(')');
 }
@@ -1774,20 +2289,21 @@ fn write_reference_kind(out: &mut String, kind: ReferenceKind, label: &str) {
 fn write_code_span(node: &CodeInline, out: &mut InlineOut) {
     let value = &node.value;
     out.scan_open_runs();
-    let held = backtick_runs(value);
+    let held = BacktickRuns::of(value);
     // An escaped backtick written just before joins the opening fence into
     // one longer run, which an earlier open run of that length would take as
     // its close.
-    let before = out.len() - out.trim_end_matches('`').len();
+    let content = &out[out.start..];
+    let before = content.len() - content.trim_end_matches('`').len();
     let length = (1..)
         .find(|length| {
-            !held.get(*length).copied().unwrap_or(false)
+            !held.holds(*length)
                 && !out.is_open_run(*length)
                 && (before == 0 || !out.is_open_run(before + *length))
         })
         .unwrap_or(1);
-    let fence = "`".repeat(length);
-    out.push_str(&fence);
+    let fence = core::iter::repeat_n('`', length);
+    out.extend(fence.clone());
     if code_span_needs_padding(value) {
         out.push(' ');
         out.push_str(value);
@@ -1795,26 +2311,57 @@ fn write_code_span(node: &CodeInline, out: &mut InlineOut) {
     } else {
         out.push_str(value);
     }
-    out.push_str(&fence);
+    out.extend(fence);
     // The span's own runs are matched; what follows is read afresh.
     out.scanned = out.text.len();
 }
 
-/// `runs[n]`: whether `value` holds a maximal run of `n` backticks.
-fn backtick_runs(value: &str) -> Vec<bool> {
-    // A value of `len` bytes holds runs of at most `len` backticks.
-    let mut runs = alloc::vec![false; value.len() + 1];
-    let mut run = 0;
-    for byte in value.bytes() {
-        if byte == b'`' {
-            run += 1;
+/// The lengths of the maximal backtick runs a value holds.
+struct BacktickRuns {
+    /// Bit `n`: a run of `n` backticks, for `n` below 64.
+    short: u64,
+    /// `long[n]`: a run of `n` backticks, for `n` from 64 on.
+    long: Vec<bool>,
+}
+
+impl BacktickRuns {
+    fn of(value: &str) -> Self {
+        let mut runs = Self {
+            short: 0,
+            long: Vec::new(),
+        };
+        let mut run = 0;
+        for byte in value.bytes() {
+            if byte == b'`' {
+                run += 1;
+            } else {
+                runs.add(run);
+                run = 0;
+            }
+        }
+        runs.add(run);
+        runs
+    }
+
+    fn add(&mut self, run: usize) {
+        if run < 64 {
+            self.short |= 1 << run;
         } else {
-            runs[run] = true;
-            run = 0;
+            if self.long.len() <= run {
+                self.long.resize(run + 1, false);
+            }
+            self.long[run] = true;
         }
     }
-    runs[run] = true;
-    runs
+
+    /// Whether the value holds a maximal run of `length` backticks.
+    fn holds(&self, length: usize) -> bool {
+        if length < 64 {
+            self.short & (1 << length) != 0
+        } else {
+            self.long.get(length).copied().unwrap_or(false)
+        }
+    }
 }
 
 fn code_span_needs_padding(input: &str) -> bool {
@@ -1879,7 +2426,7 @@ fn write_attributes(attributes: &[DirectiveAttribute]) -> String {
             (_, Some(value)) => {
                 output.push_str(&attribute.name);
                 output.push_str("=\"");
-                output.push_str(&escape_title(value, LinkTitleKind::DoubleQuote));
+                push_title_text(&mut output, value, LinkTitleKind::DoubleQuote);
                 output.push('"');
             }
             (_, None) => output.push_str(&attribute.name),
@@ -1896,77 +2443,87 @@ fn is_directive_shorthand_value(input: &str) -> bool {
             .all(|char| char.is_ascii_alphanumeric() || matches!(char, '_' | '-'))
 }
 
-fn write_destination(input: &str, kind: LinkDestinationKind) -> String {
-    match kind {
-        LinkDestinationKind::Omitted if input.is_empty() => String::new(),
-        LinkDestinationKind::Angle => {
-            let mut output = String::from("<");
-            for char in input.chars() {
-                match char {
-                    char if char.is_control() => output.push_str(&char_reference(char)),
-                    '\\' | '<' | '>' => {
-                        output.push('\\');
-                        output.push(char);
-                    }
-                    _ => output.push(char),
-                }
-            }
-            output.push('>');
-            output
+/// How `push_escaped` writes a char.
+#[derive(Clone, Copy)]
+enum Escape {
+    /// As it is.
+    Keep,
+    /// After a backslash.
+    Backslash,
+    /// As a character reference (`char_reference`).
+    Reference,
+}
+
+/// Pushes `input`, each char written as `escape` says, and each run of
+/// chars it keeps as one piece.
+fn push_escaped(output: &mut String, input: &str, escape: impl Fn(char) -> Escape) {
+    output.reserve(input.len());
+    let mut start = 0;
+    for (at, char) in input.char_indices() {
+        let escape = escape(char);
+        if matches!(escape, Escape::Keep) {
+            continue;
         }
-        LinkDestinationKind::Bare | LinkDestinationKind::Omitted if input.is_empty() => "<>".into(),
-        LinkDestinationKind::Bare | LinkDestinationKind::Omitted => {
-            let mut output = String::new();
-            for char in input.chars() {
-                match char {
-                    // A space would end the destination, and `\ ` is no escape.
-                    char if char.is_control() || char == ' ' => {
-                        output.push_str(&char_reference(char));
-                    }
-                    '(' | ')' | '\\' | '<' | '>' | '&' => {
-                        output.push('\\');
-                        output.push(char);
-                    }
-                    _ => output.push(char),
-                }
+        output.push_str(&input[start..at]);
+        match escape {
+            Escape::Keep => {}
+            Escape::Backslash => {
+                output.push('\\');
+                output.push(char);
             }
-            output
+            Escape::Reference => output.push_str(&char_reference(char)),
+        }
+        start = at + char.len_utf8();
+    }
+    output.push_str(&input[start..]);
+}
+
+fn push_destination(output: &mut String, input: &str, kind: LinkDestinationKind) {
+    match kind {
+        LinkDestinationKind::Omitted if input.is_empty() => {}
+        LinkDestinationKind::Angle => {
+            output.push('<');
+            push_escaped(output, input, |char| match char {
+                char if char.is_control() => Escape::Reference,
+                '\\' | '<' | '>' => Escape::Backslash,
+                _ => Escape::Keep,
+            });
+            output.push('>');
+        }
+        LinkDestinationKind::Bare | LinkDestinationKind::Omitted if input.is_empty() => {
+            output.push_str("<>");
+        }
+        LinkDestinationKind::Bare | LinkDestinationKind::Omitted => {
+            push_escaped(output, input, |char| match char {
+                // A space would end the destination, and `\ ` is no escape.
+                char if char.is_control() || char == ' ' => Escape::Reference,
+                '(' | ')' | '\\' | '<' | '>' | '&' => Escape::Backslash,
+                _ => Escape::Keep,
+            });
         }
     }
 }
 
-fn write_title(title: &Title) -> String {
+fn push_title(output: &mut String, title: &Title) {
     let (open, close) = match title.kind {
         LinkTitleKind::DoubleQuote => ('"', '"'),
         LinkTitleKind::SingleQuote => ('\'', '\''),
         LinkTitleKind::Paren => ('(', ')'),
     };
-    let mut output = String::new();
     output.push(open);
-    output.push_str(&escape_title(&title.value, title.kind));
+    push_title_text(output, &title.value, title.kind);
     output.push(close);
-    output
 }
 
-fn escape_title(input: &str, kind: LinkTitleKind) -> String {
-    let mut output = String::new();
-    for char in input.chars() {
-        match char {
-            char if char.is_control() => output.push_str(&char_reference(char)),
-            '\\' | '&' => {
-                output.push('\\');
-                output.push(char);
-            }
-            '"' if kind == LinkTitleKind::DoubleQuote => output.push_str("\\\""),
-            '\'' if kind == LinkTitleKind::SingleQuote => output.push_str("\\'"),
-            '(' | ')' if kind == LinkTitleKind::Paren => {
-                output.push('\\');
-                output.push(char);
-            }
-            _ => output.push(char),
-        }
-    }
-    output
+fn push_title_text(output: &mut String, input: &str, kind: LinkTitleKind) {
+    push_escaped(output, input, |char| match char {
+        char if char.is_control() => Escape::Reference,
+        '\\' | '&' => Escape::Backslash,
+        '"' if kind == LinkTitleKind::DoubleQuote => Escape::Backslash,
+        '\'' if kind == LinkTitleKind::SingleQuote => Escape::Backslash,
+        '(' | ')' if kind == LinkTitleKind::Paren => Escape::Backslash,
+        _ => Escape::Keep,
+    });
 }
 
 /// Prefixes every line of `input` with a container's `prefix`, keeping each
@@ -1988,28 +2545,24 @@ fn prefix_lines_with(input: &str, prefix: &str, empty_prefix: &str) -> String {
         return String::new();
     }
     let bytes = input.as_bytes();
-    let mut output = String::new();
+    let mut output = String::with_capacity(input.len());
     let mut line_start = 0;
-    let mut cursor = 0;
-    while cursor < input.len() {
-        let eol_end = match bytes[cursor] {
-            b'\n' => Some(cursor + 1),
-            b'\r' if bytes.get(cursor + 1) == Some(&b'\n') => Some(cursor + 2),
-            b'\r' => Some(cursor + 1),
-            _ => None,
+    loop {
+        let ending = crate::swar::find_any(bytes, line_start, [b'\n', b'\r']);
+        let Some(&byte) = bytes.get(ending) else {
+            break;
         };
-        if let Some(end) = eol_end {
-            output.push_str(if cursor == line_start {
-                empty_prefix
-            } else {
-                prefix
-            });
-            output.push_str(&input[line_start..end]);
-            cursor = end;
-            line_start = cursor;
+        let end = match byte {
+            b'\r' if bytes.get(ending + 1) == Some(&b'\n') => ending + 2,
+            _ => ending + 1,
+        };
+        output.push_str(if ending == line_start {
+            empty_prefix
         } else {
-            cursor += 1;
-        }
+            prefix
+        });
+        output.push_str(&input[line_start..end]);
+        line_start = end;
     }
     if line_start < input.len() {
         output.push_str(prefix);
@@ -2018,22 +2571,19 @@ fn prefix_lines_with(input: &str, prefix: &str, empty_prefix: &str) -> String {
     output
 }
 
-fn indent_after_first_line(input: &str, width: usize) -> String {
-    indent_lines_of(input, width)
-}
-
 fn indent_continuation(input: &str) -> String {
-    indent_lines_of(input, 4)
+    let mut output = String::with_capacity(input.len());
+    push_indented(&mut output, input, 4);
+    output
 }
 
-/// Indents every line of `input` after its first by `width` spaces, as a
-/// container's continuation; an empty line stays empty. Each line keeps its
-/// line ending, a final one included.
-fn indent_lines_of(input: &str, width: usize) -> String {
-    let mut output = String::with_capacity(input.len());
+/// Pushes `input` with every line after its first indented by `width`
+/// spaces, as a container's continuation; an empty line stays empty. Each
+/// line keeps its line ending, a final one included.
+fn push_indented(output: &mut String, input: &str, width: usize) {
+    output.reserve(input.len());
     let bytes = input.as_bytes();
     let mut line_start = 0;
-    let mut index = 0;
     let push = |output: &mut String, line: &str, number: usize| {
         if number > 0 && !line.starts_with(['\n', '\r']) {
             output.extend(core::iter::repeat_n(' ', width));
@@ -2041,27 +2591,22 @@ fn indent_lines_of(input: &str, width: usize) -> String {
         output.push_str(line);
     };
     let mut number = 0;
-    while index < bytes.len() {
-        let end = match bytes[index] {
-            b'\n' => Some(index + 1),
-            b'\r' if bytes.get(index + 1) == Some(&b'\n') => Some(index + 2),
-            b'\r' => Some(index + 1),
-            _ => None,
+    loop {
+        let ending = crate::swar::find_any(bytes, line_start, [b'\n', b'\r']);
+        let Some(&byte) = bytes.get(ending) else {
+            break;
         };
-        match end {
-            Some(end) => {
-                push(&mut output, &input[line_start..end], number);
-                number += 1;
-                index = end;
-                line_start = end;
-            }
-            None => index += 1,
-        }
+        let end = match byte {
+            b'\r' if bytes.get(ending + 1) == Some(&b'\n') => ending + 2,
+            _ => ending + 1,
+        };
+        push(output, &input[line_start..end], number);
+        number += 1;
+        line_start = end;
     }
     if line_start < input.len() {
-        push(&mut output, &input[line_start..], number);
+        push(output, &input[line_start..], number);
     }
-    output
 }
 
 fn trim_trailing_newline(input: &str) -> &str {
@@ -2096,8 +2641,8 @@ fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> (String
         .map(|(indent, _)| indent)
         .min();
     match least_indent {
-        None => (char.to_string().repeat(min_len), 0),
-        Some(indent) if indent > 0 => (char.to_string().repeat(min_len), 4 - indent),
+        None => (core::iter::repeat_n(char, min_len).collect(), 0),
+        Some(indent) if indent > 0 => (core::iter::repeat_n(char, min_len).collect(), 4 - indent),
         Some(_) => {
             let mut length = min_len;
             for line in lines() {
@@ -2105,7 +2650,7 @@ fn code_block_fence(value: &str, marker: FenceMarker, min_len: usize) -> (String
                     length = run + 1;
                 }
             }
-            (char.to_string().repeat(length), 0)
+            (core::iter::repeat_n(char, length).collect(), 0)
         }
     }
 }
@@ -2162,6 +2707,157 @@ fn trim_up_to_three_indent_columns(input: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{fixture_inputs, Rng};
+
+    /// `LeafSources` finds the last leaf at a span, whether the entry after
+    /// the one found last is that leaf or not, and finds nothing at a span no
+    /// leaf has; `KeptSources` sorts leaves given out of order, keeping the
+    /// order of leaves at one span.
+    #[test]
+    fn leaf_sources_find_the_last_leaf_at_a_span() {
+        let [a, b, c, d]: [InlineSource; 4] = crate::parse("A\n\nB\n\nC\n\nD")
+            .document
+            .leaf_sources()
+            .into_iter()
+            .map(|(_, source)| source)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("four paragraphs");
+        let entries = [
+            (Span::new(0, 3), a),
+            (Span::new(3, 3), b),
+            (Span::new(3, 3), c),
+            (Span::new(5, 9), d),
+        ];
+        let text = |found: Option<&InlineSource>| found.map(|source| source.text.clone());
+        let some = |text: &str| Some(String::from(text));
+
+        // In document order: the entry after the one found last is tried
+        // first, and at (3, 3) it is a leaf that a later one replaces.
+        let mut sources = LeafSources::owned(KeptSources::new(entries.to_vec()));
+        assert_eq!(text(sources.get(Span::new(0, 3))), some("A"));
+        assert_eq!(text(sources.get(Span::new(3, 3))), some("C"));
+        assert_eq!(text(sources.get(Span::new(5, 9))), some("D"));
+        // Out of order, after a later span.
+        assert_eq!(text(sources.get(Span::new(0, 3))), some("A"));
+        assert_eq!(text(sources.get(Span::new(5, 9))), some("D"));
+        assert_eq!(text(sources.get(Span::new(3, 3))), some("C"));
+        // No leaf there, between the spans, after them, and at a span that
+        // shares a leaf's start.
+        assert_eq!(text(sources.get(Span::new(4, 4))), None);
+        assert_eq!(text(sources.get(Span::new(9, 9))), None);
+        assert_eq!(text(sources.get(Span::new(3, 9))), None);
+        assert_eq!(text(sources.get(Span::new(5, 9))), some("D"));
+
+        // Given out of order, the leaves are sorted by span, the ones at
+        // (3, 3) in the order given.
+        let [a, b, c, d] = entries;
+        let mut sources = LeafSources::owned(KeptSources::new(alloc::vec![d, b, a, c]));
+        let order: Vec<_> = sources
+            .entries
+            .iter()
+            .map(|(span, source)| (span.start, span.end, source.text.as_str()))
+            .collect();
+        assert_eq!(order, [(0, 3, "A"), (3, 3, "B"), (3, 3, "C"), (5, 9, "D")]);
+        assert_eq!(text(sources.get(Span::new(3, 3))), some("C"));
+        assert_eq!(text(sources.get(Span::new(0, 3))), some("A"));
+    }
+
+    /// `write_opening`, which stops at the first inline that ends the
+    /// opening and reads some inlines' first char from their kind, writes
+    /// the opening of what `write_inlines` writes: for every leaf of every
+    /// fixture input and its CRLF variant, every suffix of the leaf's inlines,
+    /// and the inlines of every inline container in it.
+    #[test]
+    fn written_openings_are_the_openings_of_the_written_inlines() {
+        fn check(inlines: &[Inline], context: Context) {
+            for start in 0..inlines.len() {
+                let inlines = &inlines[start..];
+                let whole =
+                    write_inlines(inlines, context).map(|text| String::from(opening(&text)));
+                assert_eq!(write_opening(inlines, context), whole, "{inlines:?}");
+            }
+            for inline in inlines {
+                match inline {
+                    Inline::Emphasis(node) => check(&node.children, context),
+                    Inline::Strong(node) => check(&node.children, context),
+                    Inline::Delete(node) => check(&node.children, context),
+                    Inline::Mark(node) => check(&node.children, context),
+                    Inline::Link(node) => check(&node.children, context),
+                    Inline::LinkReference(node) => check(&node.children, context),
+                    Inline::Image(node) => check(&node.alt, context),
+                    Inline::ImageReference(node) => check(&node.alt, context),
+                    Inline::InlineFootnote(node) => check(&node.children, context),
+                    Inline::TextDirective(node) => check(&node.label, context),
+                    _ => {}
+                }
+            }
+        }
+        let mut leaves = 0;
+        for input in fixture_inputs() {
+            for input in [input.replace('\n', "\r\n"), input] {
+                let mut blocks = crate::parse(&input).document.children;
+                leaves::visit_mut(&mut blocks, &mut |leaf| {
+                    leaves += 1;
+                    for context in [Context::BLOCK, Context::HEADING] {
+                        check(leaf.inlines, context);
+                    }
+                });
+            }
+        }
+        assert!(leaves > 10_000, "only {leaves} leaves");
+    }
+
+    /// Each predicate that reads a written line through its opening
+    /// (`opening`) answers for the opening as for the whole first line, and
+    /// does so after a list marker too, as an item's opening is read: over
+    /// every line of up to four chars and seeded random lines of chars these
+    /// predicates or an opening tell apart.
+    #[test]
+    fn line_predicates_read_the_opening_as_the_first_line() {
+        const CHARS: [char; 14] = [
+            ' ', '\t', '-', '*', '+', '`', '~', '_', '#', '1', 'a', '\n', '\r', 'é',
+        ];
+        type Predicate = fn(&str) -> bool;
+        let predicates: [(&str, Predicate); 5] = [
+            ("opens_with_padding", opens_with_padding),
+            ("opens_fence_like", opens_fence_like),
+            ("a `-` break", |line| reads_as_thematic_break('-', line)),
+            ("a `*` break", |line| reads_as_thematic_break('*', line)),
+            ("a `+` break", |line| reads_as_thematic_break('+', line)),
+        ];
+        let mut lines = Vec::from([String::new()]);
+        let mut grown = Vec::from([String::new()]);
+        for _ in 0..4 {
+            grown = grown
+                .iter()
+                .flat_map(|line| CHARS.iter().map(move |char| format!("{line}{char}")))
+                .collect();
+            lines.extend(grown.iter().cloned());
+        }
+        let mut rng = Rng(0x0be1);
+        for _ in 0..50_000 {
+            lines.push(
+                (0..rng.below(16))
+                    .map(|_| CHARS[rng.below(CHARS.len())])
+                    .collect(),
+            );
+        }
+        for text in &lines {
+            let first = text.split(['\n', '\r']).next().unwrap_or_default();
+            for marker in ["", "- ", "* ", "+ ", "1. ", "- - "] {
+                let opening = format!("{marker}{}", opening(text));
+                let first = format!("{marker}{first}");
+                for (name, predicate) in predicates {
+                    assert_eq!(
+                        predicate(&opening),
+                        predicate(&first),
+                        "{name} of {text:?} after {marker:?}"
+                    );
+                }
+            }
+        }
+    }
 
     // serialization: Unchanged source is kept
     #[test]

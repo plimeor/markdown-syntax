@@ -1,166 +1,201 @@
 //! Every `Inline` arm.
 
-use alloc::format;
 use alloc::string::String;
+use core::fmt::Write as _;
 
 use crate::ast::{DirectiveAttribute, Inline, MathInlineKind};
 
 use super::escape::{attr_escape, encode_href, escape_text, filter_img_protocol, filter_protocol};
 use super::footnotes;
-use super::refs::{escaped_alt, flatten_alt};
+use super::refs::escaped_alt;
 use super::{Ctx, SafeRawHtmlForm};
 
-/// Render an inline slice by concatenating each node's HTML.
-pub fn render_inlines(children: &[Inline], ctx: &Ctx) -> String {
-    let mut out = String::new();
+/// Render an inline slice by appending each node's HTML to `out`.
+pub fn render_inlines(children: &[Inline], ctx: &Ctx, out: &mut String) {
     for child in children {
-        out.push_str(&render_inline(child, ctx));
+        render_inline(child, ctx, out);
     }
-    out
 }
 
-/// Render a single inline node. Every `Inline` arm is handled
+/// Render a single inline node into `out`. Every `Inline` arm is handled
 /// explicitly — there is no catch-all.
-pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
+pub fn render_inline(inline: &Inline, ctx: &Ctx, out: &mut String) {
     match inline {
         // 1. Text — escape the parsed text value.
-        Inline::Text(t) => escape_text(&t.value),
+        Inline::Text(t) => escape_text(out, &t.value),
 
         // 2. Escape — the single escaped char, text-escaped.
         Inline::Escape(e) => {
             let mut buf = [0u8; 4];
-            escape_text(e.value.encode_utf8(&mut buf))
+            escape_text(out, e.value.encode_utf8(&mut buf));
         }
 
         // 3. CharacterReference — the decoded scalar(s), re-escaped.
-        Inline::CharacterReference(c) => escape_text(&c.value().unwrap_or_default()),
+        Inline::CharacterReference(c) => escape_text(out, &c.value().unwrap_or_default()),
 
         // 4. Emphasis.
-        Inline::Emphasis(n) => format!("<em>{}</em>", render_inlines(&n.children, ctx)),
+        Inline::Emphasis(n) => wrap_inlines(out, "<em>", &n.children, "</em>", ctx),
 
         // 5. Strong.
-        Inline::Strong(n) => format!("<strong>{}</strong>", render_inlines(&n.children, ctx)),
+        Inline::Strong(n) => wrap_inlines(out, "<strong>", &n.children, "</strong>", ctx),
 
         // 6. Delete.
-        Inline::Delete(n) => format!("<del>{}</del>", render_inlines(&n.children, ctx)),
+        Inline::Delete(n) => wrap_inlines(out, "<del>", &n.children, "</del>", ctx),
 
         // 7. Mark (GFM `==x==`).
-        Inline::Mark(n) => format!("<mark>{}</mark>", render_inlines(&n.children, ctx)),
+        Inline::Mark(n) => wrap_inlines(out, "<mark>", &n.children, "</mark>", ctx),
 
         // 8. Shortcode — its gemoji glyph, text-escaped, no wrapper; a
         // name gemoji does not hold stays as written.
         Inline::Shortcode(s) => match s.glyph() {
-            Some(glyph) => escape_text(glyph),
-            None => escape_text(&format!(":{}:", s.name)),
+            Some(glyph) => escape_text(out, glyph),
+            None => {
+                out.push(':');
+                escape_text(out, &s.name);
+                out.push(':');
+            }
         },
 
         // Tag — its text, `#` and the name, with no element around it.
-        Inline::Tag(t) => escape_text(&format!("#{}", t.name)),
+        Inline::Tag(t) => {
+            out.push('#');
+            escape_text(out, &t.name);
+        }
 
         // 9. Code — `value` already code-span-normalized; text-escape only.
-        Inline::Code(c) => format!("<code>{}</code>", escape_text(&c.value)),
+        Inline::Code(c) => {
+            out.push_str("<code>");
+            escape_text(out, &c.value);
+            out.push_str("</code>");
+        }
 
         // 10. Link.
         Inline::Link(n) => {
-            let href = encode_href(&filter_protocol(
-                &n.destination,
-                ctx.allow_dangerous_protocol,
-                ctx.gfm_url_denylist(),
-            ));
-            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
-            format!(
-                "<a href=\"{href}\"{title}>{}</a>",
-                render_inlines(&n.children, ctx)
-            )
+            out.push_str("<a href=\"");
+            encode_href(
+                out,
+                filter_protocol(
+                    &n.destination,
+                    ctx.allow_dangerous_protocol,
+                    ctx.gfm_url_denylist(),
+                ),
+            );
+            out.push('"');
+            title_attr(out, n.title.as_ref().map(|title| title.value.as_str()));
+            out.push('>');
+            render_inlines(&n.children, ctx, out);
+            out.push_str("</a>");
         }
 
         // 10a. Autolink — its derived destination, its text as the link text.
         Inline::Autolink(n) => {
-            let href = encode_href(&filter_protocol(
-                &n.destination().unwrap_or_default(),
-                ctx.allow_dangerous_protocol,
-                ctx.gfm_url_denylist(),
-            ));
-            format!("<a href=\"{href}\">{}</a>", escape_text(&n.text))
+            out.push_str("<a href=\"");
+            encode_href(
+                out,
+                filter_protocol(
+                    &n.destination().unwrap_or_default(),
+                    ctx.allow_dangerous_protocol,
+                    ctx.gfm_url_denylist(),
+                ),
+            );
+            out.push_str("\">");
+            escape_text(out, &n.text);
+            out.push_str("</a>");
         }
 
         // 11. Image.
         Inline::Image(n) => {
-            let src = encode_href(&filter_img_protocol(
-                &n.destination,
-                ctx.allow_dangerous_protocol,
-                ctx.allow_any_img_src,
-            ));
-            let alt = escaped_alt(&n.alt);
-            let title = title_attr(n.title.as_ref().map(|title| title.value.as_str()));
-            format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
+            out.push_str("<img src=\"");
+            encode_href(
+                out,
+                filter_img_protocol(
+                    &n.destination,
+                    ctx.allow_dangerous_protocol,
+                    ctx.allow_any_img_src,
+                ),
+            );
+            out.push_str("\" alt=\"");
+            escaped_alt(out, &n.alt);
+            out.push('"');
+            title_attr(out, n.title.as_ref().map(|title| title.value.as_str()));
+            out.push_str(" />");
         }
 
         // 12. LinkReference — resolve against the definition map.
         Inline::LinkReference(n) => match ctx.defs.resolve(&n.identifier) {
             Some(def) => {
-                let href = encode_href(&filter_protocol(
-                    &def.destination,
-                    ctx.allow_dangerous_protocol,
-                    ctx.gfm_url_denylist(),
-                ));
-                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
-                format!(
-                    "<a href=\"{href}\"{title}>{}</a>",
-                    render_inlines(&n.children, ctx)
-                )
+                out.push_str("<a href=\"");
+                encode_href(
+                    out,
+                    filter_protocol(
+                        &def.destination,
+                        ctx.allow_dangerous_protocol,
+                        ctx.gfm_url_denylist(),
+                    ),
+                );
+                out.push('"');
+                title_attr(out, def.title.as_ref().map(|title| title.value.as_str()));
+                out.push('>');
+                render_inlines(&n.children, ctx, out);
+                out.push_str("</a>");
             }
-            None => link_reference_fallback(n, ctx),
+            None => link_reference_fallback(n, ctx, out),
         },
 
         // 13. ImageReference — resolve against the definition map.
         Inline::ImageReference(n) => match ctx.defs.resolve(&n.identifier) {
             Some(def) => {
-                let src = encode_href(&filter_img_protocol(
-                    &def.destination,
-                    ctx.allow_dangerous_protocol,
-                    ctx.allow_any_img_src,
-                ));
-                let alt = escaped_alt(&n.alt);
-                let title = title_attr(def.title.as_ref().map(|title| title.value.as_str()));
-                format!("<img src=\"{src}\" alt=\"{alt}\"{title} />")
+                out.push_str("<img src=\"");
+                encode_href(
+                    out,
+                    filter_img_protocol(
+                        &def.destination,
+                        ctx.allow_dangerous_protocol,
+                        ctx.allow_any_img_src,
+                    ),
+                );
+                out.push_str("\" alt=\"");
+                escaped_alt(out, &n.alt);
+                out.push('"');
+                title_attr(out, def.title.as_ref().map(|title| title.value.as_str()));
+                out.push_str(" />");
             }
-            None => image_reference_fallback(n),
+            None => image_reference_fallback(n, out),
         },
 
         // 14. Html — verbatim under danger (with tagfilter), else text-escape.
-        Inline::Html(h) => render_raw_html(&h.value, ctx),
+        Inline::Html(h) => render_raw_html(&h.value, ctx, out),
 
         // 15. SoftBreak.
-        Inline::SoftBreak(_) => String::from("\n"),
+        Inline::SoftBreak(_) => out.push('\n'),
 
         // 16. LineBreak — both kinds identical.
-        Inline::LineBreak(_) => String::from("<br />\n"),
+        Inline::LineBreak(_) => out.push_str("<br />\n"),
 
         // 17. Math (GFM form). A 2+-dollar fence is display, a 1-dollar fence is
         //     inline, and `$`…`$` code-math is an inline `<code>`.
-        Inline::Math(m) => match m.kind {
-            MathInlineKind::Code => format!(
-                "<code data-math-style=\"inline\">{}</code>",
-                escape_text(&m.value)
-            ),
-            MathInlineKind::Dollar { dollars } if dollars >= 2 => format!(
-                "<span data-math-style=\"display\">{}</span>",
-                escape_text(&m.value)
-            ),
-            MathInlineKind::Dollar { .. } => format!(
-                "<span data-math-style=\"inline\">{}</span>",
-                escape_text(&m.value)
-            ),
-        },
+        Inline::Math(m) => {
+            let (open, close) = match m.kind {
+                MathInlineKind::Code => ("<code data-math-style=\"inline\">", "</code>"),
+                MathInlineKind::Dollar { dollars } if dollars >= 2 => {
+                    ("<span data-math-style=\"display\">", "</span>")
+                }
+                MathInlineKind::Dollar { .. } => ("<span data-math-style=\"inline\">", "</span>"),
+            };
+            out.push_str(open);
+            escape_text(out, &m.value);
+            out.push_str(close);
+        }
 
         // 18. FootnoteReference (GFM shape). An undefined reference renders
         //     as its literal `[^label]` source text.
         Inline::FootnoteReference(fr) => {
             if ctx.footnotes.is_defined(&fr.identifier) {
-                footnote_marker(&fr.identifier, ctx)
+                footnote_marker(&fr.identifier, ctx, out);
             } else {
-                format!("[^{}]", escape_text(&fr.label))
+                out.push_str("[^");
+                escape_text(out, &fr.label);
+                out.push(']');
             }
         }
 
@@ -168,89 +203,102 @@ pub fn render_inline(inline: &Inline, ctx: &Ctx) -> String {
         //     harvested into the doc-end section during the pre-pass.
         Inline::InlineFootnote(_) => {
             let id = footnotes::next_inline_id(ctx.footnotes);
-            footnote_marker(&id, ctx)
+            footnote_marker(&id, ctx, out);
         }
 
         // 20. WikiLink — GFM shape. A note name like `Note: x` reads as a
         //     scheme, so the target takes the scheme denylist, never the
         //     allowlist: only a dangerous scheme is blanked.
         Inline::WikiLink(w) => {
-            let target = filter_protocol(&w.decoded_target(), ctx.allow_dangerous_protocol, true);
-            let href = encode_href(&target);
-            let embed = if w.embed {
-                " data-wikilink-embed=\"true\""
-            } else {
-                ""
-            };
-            format!(
-                "<a href=\"{href}\" data-wikilink=\"true\"{embed}>{}</a>",
-                escape_text(&w.decoded_label())
-            )
+            out.push_str("<a href=\"");
+            encode_href(
+                out,
+                filter_protocol(&w.decoded_target(), ctx.allow_dangerous_protocol, true),
+            );
+            out.push_str("\" data-wikilink=\"true\"");
+            if w.embed {
+                out.push_str(" data-wikilink-embed=\"true\"");
+            }
+            out.push('>');
+            escape_text(out, &w.decoded_label());
+            out.push_str("</a>");
         }
 
         // 21. TextDirective [CONV] — classed span carrying name + attrs.
         Inline::TextDirective(d) => {
-            let attrs = directive_attrs(&d.attributes);
-            format!(
-                "<span class=\"directive directive-text\" data-directive-name=\"{}\"{attrs}>{}</span>",
-                attr_escape(&d.name),
-                render_inlines(&d.label, ctx)
-            )
+            out.push_str("<span class=\"directive directive-text\" data-directive-name=\"");
+            attr_escape(out, &d.name);
+            out.push('"');
+            directive_attrs(&d.attributes, out);
+            out.push('>');
+            render_inlines(&d.label, ctx, out);
+            out.push_str("</span>");
         }
     }
+}
+
+/// `{open}{children}{close}`.
+fn wrap_inlines(out: &mut String, open: &str, children: &[Inline], close: &str, ctx: &Ctx) {
+    out.push_str(open);
+    render_inlines(children, ctx, out);
+    out.push_str(close);
 }
 
 /// ` title="…"` when the title is `Some` (including empty `""` → drop, since
 /// the parser only produces `Some("")` for an explicit empty title which the
 /// oracles still drop). CommonMark/GFM both drop an empty title.
-fn title_attr(title: Option<&str>) -> String {
+fn title_attr(out: &mut String, title: Option<&str>) {
     match title {
-        Some(t) if !t.is_empty() => format!(" title=\"{}\"", attr_escape(t)),
-        _ => String::new(),
+        Some(t) if !t.is_empty() => {
+            out.push_str(" title=\"");
+            attr_escape(out, t);
+            out.push('"');
+        }
+        _ => {}
     }
 }
 
 /// The GFM footnote reference marker `<sup class="footnote-ref">…`. The
 /// `#fn-`/`fnref-` ids use the first definition's preserved-case label.
-fn footnote_marker(id: &str, ctx: &Ctx) -> String {
+fn footnote_marker(id: &str, ctx: &Ctx, out: &mut String) {
     let (number, fnref) = footnotes::reference_marker(ctx.footnotes, id);
     let enc = footnotes::reference_fn_target(ctx.footnotes, id);
-    format!(
+    // Writing to a `String` cannot fail.
+    let _ = write!(
+        out,
         "<sup class=\"footnote-ref\"><a href=\"#fn-{enc}\" id=\"{fnref}\" data-footnote-ref>{number}</a></sup>",
-    )
+    );
 }
 
-pub(super) fn render_raw_html(value: &str, ctx: &Ctx) -> String {
-    if ctx.allow_dangerous_html {
-        if ctx.gfm_tagfilter {
-            return apply_tagfilter(value);
-        }
-        return String::from(value);
+pub(super) fn render_raw_html(value: &str, ctx: &Ctx, out: &mut String) {
+    if !ctx.allow_dangerous_html {
+        safe_raw_html(value, ctx, out);
+    } else if ctx.gfm_tagfilter {
+        apply_tagfilter(value, out);
+    } else {
+        out.push_str(value);
     }
-    safe_raw_html(value, ctx)
 }
 
 /// Shared directive data-* attribute serializer.
-pub(super) fn directive_attrs(attributes: &[DirectiveAttribute]) -> String {
-    let mut out = String::new();
+pub(super) fn directive_attrs(attributes: &[DirectiveAttribute], out: &mut String) {
     for attr in attributes {
         let value = attr.value.as_deref().unwrap_or("");
-        out.push_str(&format!(
-            " data-{}=\"{}\"",
-            attr_escape(&attr.name),
-            attr_escape(value)
-        ));
+        out.push_str(" data-");
+        attr_escape(out, &attr.name);
+        out.push_str("=\"");
+        attr_escape(out, value);
+        out.push('"');
     }
-    out
 }
 
 /// Safe-mode raw HTML: the gfm suite replaces it with a fixed placeholder; the
 /// commonmark suite text-escapes it (oracle `html_flow` case 1 →
 /// `&lt;!-- asd --&gt;`). Shared by the inline and block raw-HTML renderers.
-pub(super) fn safe_raw_html(value: &str, ctx: &Ctx) -> String {
+pub(super) fn safe_raw_html(value: &str, ctx: &Ctx, out: &mut String) {
     match ctx.safe_raw_html_form {
-        SafeRawHtmlForm::OmitPlaceholder => String::from(RAW_HTML_OMITTED),
-        SafeRawHtmlForm::EscapeText => escape_text(value),
+        SafeRawHtmlForm::OmitPlaceholder => out.push_str(RAW_HTML_OMITTED),
+        SafeRawHtmlForm::EscapeText => escape_text(out, value),
     }
 }
 
@@ -258,8 +306,9 @@ pub(super) fn safe_raw_html(value: &str, ctx: &Ctx) -> String {
 pub(super) const RAW_HTML_OMITTED: &str = "<!-- raw HTML omitted -->";
 
 /// GFM tagfilter: rewrite the leading `<` of a blocklisted open/close tag to
-/// `&lt;`. Applied only when danger is on.
-pub fn apply_tagfilter(value: &str) -> String {
+/// `&lt;`. Applied only when danger is on. Text between rewritten `<`s is
+/// copied whole.
+pub fn apply_tagfilter(value: &str, out: &mut String) {
     const BLOCKED: [&str; 9] = [
         "title",
         "textarea",
@@ -271,60 +320,73 @@ pub fn apply_tagfilter(value: &str) -> String {
         "script",
         "plaintext",
     ];
-    let bytes = value.as_bytes();
-    let mut out = String::with_capacity(value.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            let after = &value[i + 1..];
-            let tag_body = after.strip_prefix('/').unwrap_or(after);
-            let matched = BLOCKED.iter().find(|tag| {
-                tag_body.len() >= tag.len()
-                    && tag_body[..tag.len()].eq_ignore_ascii_case(tag)
-                    && tag_terminates(&tag_body[tag.len()..])
-            });
-            if matched.is_some() {
-                out.push_str("&lt;");
-                i += 1;
-                continue;
-            }
+    let mut start = 0;
+    for (i, &b) in value.as_bytes().iter().enumerate() {
+        if b != b'<' {
+            continue;
         }
-        // Push one full UTF-8 char starting at i.
-        let ch = value[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+        let after = &value[i + 1..];
+        let tag_body = after.strip_prefix('/').unwrap_or(after);
+        // A head that matches a name is ASCII, so the name ends on a char
+        // boundary of `tag_body`.
+        let matched = BLOCKED.iter().find(|tag| {
+            tag_body
+                .as_bytes()
+                .get(..tag.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(tag.as_bytes()))
+                && tag_terminates(&tag_body[tag.len()..])
+        });
+        if matched.is_some() {
+            out.push_str(&value[start..i]);
+            out.push_str("&lt;");
+            start = i + 1;
+        }
     }
-    out
+    out.push_str(&value[start..]);
 }
 
 /// True when the char after a blocklisted tag name terminates the tag name
 /// (so `<scriptx>` is not filtered but `<script>`/`<script `/`<script/` are).
+/// The terminators are those of a browser's tag name state: ASCII whitespace
+/// (tab, line feed, form feed, carriage return, space), `/`, and `>`. A
+/// browser reads on through other whitespace, as in `<title\u{a0}x>` or
+/// `<style\u{b}>`, which name no blocklisted element.
 fn tag_terminates(rest: &str) -> bool {
-    match rest.chars().next() {
+    match rest.as_bytes().first() {
         None => true,
-        Some(c) => c == '>' || c == '/' || c.is_whitespace(),
+        Some(b) => matches!(b, b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\x0c' | b'\r'),
     }
 }
 
 /// Literal-source fallback for an unresolved link reference: re-emit the
 /// bracketed source text so the surrounding output is not silently dropped.
-fn link_reference_fallback(n: &crate::ast::LinkReference, ctx: &Ctx) -> String {
+fn link_reference_fallback(n: &crate::ast::LinkReference, ctx: &Ctx, out: &mut String) {
     use crate::ast::ReferenceKind;
-    let inner = render_inlines(&n.children, ctx);
+    out.push('[');
+    render_inlines(&n.children, ctx, out);
     match n.kind {
-        ReferenceKind::Shortcut => format!("[{inner}]"),
-        ReferenceKind::Collapsed => format!("[{inner}][]"),
-        ReferenceKind::Full => format!("[{inner}][{}]", escape_text(&n.label)),
+        ReferenceKind::Shortcut => out.push(']'),
+        ReferenceKind::Collapsed => out.push_str("][]"),
+        ReferenceKind::Full => {
+            out.push_str("][");
+            escape_text(out, &n.label);
+            out.push(']');
+        }
     }
 }
 
 /// Literal-source fallback for an unresolved image reference.
-fn image_reference_fallback(n: &crate::ast::ImageReference) -> String {
+fn image_reference_fallback(n: &crate::ast::ImageReference, out: &mut String) {
     use crate::ast::ReferenceKind;
-    let inner = escape_text(&flatten_alt(&n.alt));
+    out.push_str("![");
+    escaped_alt(out, &n.alt);
     match n.kind {
-        ReferenceKind::Shortcut => format!("![{inner}]"),
-        ReferenceKind::Collapsed => format!("![{inner}][]"),
-        ReferenceKind::Full => format!("![{inner}][{}]", escape_text(&n.label)),
+        ReferenceKind::Shortcut => out.push(']'),
+        ReferenceKind::Collapsed => out.push_str("][]"),
+        ReferenceKind::Full => {
+            out.push_str("][");
+            escape_text(out, &n.label);
+            out.push(']');
+        }
     }
 }

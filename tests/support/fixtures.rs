@@ -212,6 +212,66 @@ fn parse_case_header(path: &Path, header: &str) -> (usize, usize) {
     (index, byte_len)
 }
 
+/// Every input of the fixture corpus under `tests/fixtures`, with where it
+/// is: each `.md` file, and the input of each case of each `.cases` file,
+/// whether the file holds inputs alone (`read_derived_cases`) or expected
+/// HTML too (`--- case <i> options <o> label-bytes <l> input-bytes <n>
+/// expected-bytes <e>`). `private_entry_points.rs` reads it.
+#[allow(dead_code)]
+pub(crate) fn every_fixture_input() -> Vec<(String, String)> {
+    let root = Path::new("tests/fixtures");
+    let mut inputs = Vec::new();
+    for path in files_with_extension(root, "md") {
+        inputs.push((path.display().to_string(), read_fixture(&path)));
+    }
+    for path in files_with_extension(root, "cases") {
+        let source = read_fixture(&path);
+        let with_html = source
+            .lines()
+            .find(|line| line.starts_with("--- case "))
+            .is_some_and(|header| header.contains(" input-bytes "));
+        let cases = if with_html {
+            read_cases_with_html(&path, &source)
+        } else {
+            read_derived_cases(&path)
+        };
+        inputs.extend(
+            cases
+                .into_iter()
+                .map(|case| (format!("{}#{}", path.display(), case.index), case.input)),
+        );
+    }
+    assert!(inputs.len() > 3_000, "only {} fixture inputs", inputs.len());
+    inputs
+}
+
+/// The cases of a `.cases` file that holds each input's expected HTML too,
+/// each read by its byte counts.
+fn read_cases_with_html(path: &Path, source: &str) -> Vec<DerivedCase> {
+    let mut cases = Vec::new();
+    let mut cursor = 0;
+    while let Some(offset) = source[cursor..].find("--- case ") {
+        let header_start = cursor + offset;
+        let header_end = header_start
+            + source[header_start..]
+                .find('\n')
+                .unwrap_or_else(|| panic!("{}: a case header line", path.display()));
+        let parts: Vec<&str> = source[header_start..header_end]
+            .split_whitespace()
+            .collect();
+        assert_eq!(parts.len(), 11, "{}: header {parts:?}", path.display());
+        let count = |at: usize| parts[at].parse::<usize>().expect("a byte count");
+        let start = header_end + 1 + count(6) + "\n--- input\n".len();
+        let end = start + count(8);
+        cases.push(DerivedCase {
+            index: count(2),
+            input: source[start..end].to_string(),
+        });
+        cursor = end + "\n--- expected\n".len() + count(10);
+    }
+    cases
+}
+
 pub(crate) fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(root).unwrap_or_else(|error| panic!("{}: {error}", root.display())) {
         let path = entry

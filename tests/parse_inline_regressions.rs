@@ -884,6 +884,7 @@ mod literal_autolink_boundaries {
                     format!("link {}", autolink.destination().unwrap_or_default())
                 }
                 Inline::WikiLink(wiki) => format!("wiki {}", wiki.target),
+                Inline::Escape(escape) => format!("escape {}", escape.value),
                 other => format!("{other:?}"),
             })
             .collect()
@@ -940,6 +941,72 @@ mod literal_autolink_boundaries {
             shape("see https://example.com"),
             ["text see ", "link https://example.com"]
         );
+    }
+
+    // inline-syntax: Literal autolinks
+    #[test]
+    fn the_host_check_reads_an_escaped_char_like_any_other() {
+        // As in cmark-gfm's `check_domain`: an escaped space ends the host,
+        // an escaped `_` counts in its segment, and an escaped `.` is a dot.
+        for count in [1, 10, 11, 12, 25] {
+            let source = " www.a_\\".repeat(count);
+            assert_eq!(shape(&source), [format!("text {}", &source[1..])]);
+            let document = parse(&source).document;
+            assert_eq!(document.validate(), [], "{count}");
+            assert_eq!(document.to_markdown().as_deref(), Ok(source.as_str()));
+        }
+        assert_eq!(shape("www.a\\_b"), ["text www.a", "escape _", "text b"]);
+        assert_eq!(shape("www.a_b.c\\.d"), ["link http://www.a_b.c\\.d"]);
+    }
+
+    // inline-syntax: Literal autolinks
+    #[test]
+    fn the_host_check_ends_at_a_non_ascii_char() {
+        // As in cmark-gfm's `check_domain`, which walks bytes: the byte after
+        // a non-ASCII char's first byte decodes to no char and ends the host,
+        // so a `_` after it is not counted. Outputs observed from cmark-gfm
+        // 0.29.0.gfm.13 with the autolink extension.
+        for source in [
+            "www.é.x_y.z",
+            "www.中.x_y.z",
+            "www.a\\é.b_c.d",
+            "www.éa_b.c_d",
+            "http://é_a.b_c",
+            "http://aé_b.c_d",
+        ] {
+            let destination = if source.starts_with("www.") {
+                format!("http://{source}")
+            } else {
+                source.to_string()
+            };
+            assert_eq!(shape(source), [format!("link {destination}")], "{source:?}");
+            let document = parse(source).document;
+            assert_eq!(document.validate(), [], "{source:?}");
+            assert_eq!(
+                document.without_source().to_markdown(),
+                Ok(format!("{source}\n")),
+                "{source:?}"
+            );
+        }
+        // A `_` before the non-ASCII char still counts, and an ASCII host
+        // checks its last two segments.
+        for source in ["www.a_b.c_dé", "www.a.b_c.d"] {
+            assert_eq!(shape(source), [format!("text {source}")], "{source:?}");
+        }
+        // A vertical tab ends a GFM spec domain, as it ends the URL: no `_`
+        // after it counts, and a `_` before it is in the domain's last
+        // segments.
+        assert_eq!(
+            shape("www.a\u{b}b_c.d"),
+            ["link http://www.a", "text \u{b}b_c.d"]
+        );
+        assert_eq!(
+            shape("www.a\u{b}b.c"),
+            ["link http://www.a", "text \u{b}b.c"]
+        );
+        for source in ["www.a_b.c\u{b}.d.e", "http://a_b.c\u{b}.d.e"] {
+            assert_eq!(shape(source), [format!("text {source}")], "{source:?}");
+        }
     }
 
     #[test]
@@ -1070,6 +1137,73 @@ mod gemoji_shortcodes {
             name: "not_an_emoji_name".into(),
         };
         assert_eq!(unknown.glyph(), None);
+    }
+}
+
+mod backtick_runs_in_directive_labels {
+    //! A backtick run that opens no code span is literal text whole, in the
+    //! walk to a text directive label's `]` as in the label's own content: no
+    //! shorter run inside it opens a code span.
+
+    use markdown_syntax::prelude::*;
+
+    fn paragraph(source: &str) -> (Vec<Inline>, Vec<DiagnosticCode>) {
+        let output = parse(source);
+        let [Block::Paragraph(paragraph)] = output.document.children.as_slice() else {
+            panic!("{source:?}: {:?}", output.document);
+        };
+        let codes = output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        (paragraph.children.clone(), codes)
+    }
+
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_run_ends_no_label_past_its_first_closing_bracket() {
+        let (inlines, codes) = paragraph(":t[a``] b`] c");
+        let [Inline::TextDirective(directive), Inline::Text(after)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert!(
+            matches!(directive.label.as_slice(), [Inline::Text(label)] if label.value == "a``"),
+            "{inlines:?}"
+        );
+        assert_eq!(after.value, " b`] c");
+        assert_eq!(codes, []);
+    }
+
+    // inline-syntax: Directive labels close at their balancing bracket
+    #[test]
+    fn an_unclosed_run_hides_no_open_bracket_in_a_label() {
+        let (inlines, codes) = paragraph(":t[``[ `] c");
+        assert!(
+            matches!(inlines.as_slice(), [Inline::Text(text)] if text.value == ":t[``[ `] c"),
+            "{inlines:?}"
+        );
+        assert_eq!(codes, [DiagnosticCode::InvalidDirectiveName]);
+    }
+
+    #[test]
+    fn a_run_after_an_escaped_backtick_opens_a_code_span_in_a_label() {
+        // The escape takes the run's first backtick; the rest opens a code
+        // span that holds the first `]`.
+        let (inlines, codes) = paragraph(":t[a\\``] b`] c");
+        let [Inline::TextDirective(directive), Inline::Text(after)] = inlines.as_slice() else {
+            panic!("{inlines:?}");
+        };
+        assert!(
+            matches!(
+                directive.label.as_slice(),
+                [Inline::Text(a), Inline::Escape(escape), Inline::Code(code)]
+                    if a.value == "a" && escape.value == '`' && code.value == "] b"
+            ),
+            "{inlines:?}"
+        );
+        assert_eq!(after.value, " c");
+        assert_eq!(codes, []);
     }
 }
 

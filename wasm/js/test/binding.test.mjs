@@ -3,7 +3,7 @@
 // --profile wasm` writes, or the one `MARKDOWN_SYNTAX_WASM` names.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -379,7 +379,7 @@ describe("Write from JavaScript", () => {
   });
 
   test("a parser diagnostic has no path", () => {
-    const { diagnostics } = binding.parse(":::Bad name\n");
+    const { diagnostics } = binding.parse(":::1bad\n");
     assert.ok(diagnostics.length > 0);
     assert.ok(diagnostics.every((diagnostic) => diagnostic.path === null));
   });
@@ -390,6 +390,175 @@ describe("Write from JavaScript", () => {
     const tree = structuredClone(document.tree);
     tree.children.push({ type: "thematicBreak", span: null, marker: "underscore" });
     assert.equal(document.toMarkdown(tree), `${source}\n\n___\n`);
+  });
+});
+
+/** The tree `toMarkdownBlocks(blocks)` writes as, for a document whose tree is untouched. */
+function resolved(document, blocks) {
+  const children = blocks.map((block) => (typeof block === "number" ? document.tree.children[block] : block));
+  return { type: "document", span: document.tree.span, children };
+}
+
+/** Each outcome of `write`: its text or diagnostics, or that it threw a TypeError. */
+function outcome(write) {
+  try {
+    return write();
+  } catch (error) {
+    return error instanceof TypeError ? "TypeError" : error;
+  }
+}
+
+/**
+ * `count` edits of the document's top-level blocks that an editor makes, each
+ * a list of blocks: indices of untouched blocks, some blocks changed, removed,
+ * added, moved, or repeated, by a seeded random choice.
+ */
+function* blockEdits(document, count, seed) {
+  const random = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
+  const pick = (length) => Math.floor(random() * length);
+  const base = document.tree.children;
+  const added = [
+    () => ({ type: "paragraph", span: null, children: [{ type: "text", span: null, value: "added *x*" }] }),
+    () => ({ type: "heading", span: null, depth: 2, source: "added [a] `b`" }),
+    () => ({ type: "thematicBreak", span: null, marker: "dash" }),
+    () => ({ type: "codeBlock", span: null, kind: { type: "fenced", marker: "backtick", length: 3 }, info: null, value: "c" }),
+    () => ({ type: "blankLine", span: null }),
+  ];
+  const changed = (index) => {
+    const block = structuredClone(base[index]);
+    const leaves = document.leafSources.filter(({ path }) => path[0] === index);
+    switch (pick(3)) {
+      case 0:
+        // An edit of its text.
+        for (const [node] of nodes(block)) {
+          if (node.type === "text") {
+            node.value += " edited";
+            return block;
+          }
+        }
+        return block;
+      case 1:
+        // A leaf given as its text, edited or not.
+        if (leaves.length > 0 && leaves[0].path.length === 1) {
+          const text = leaves[0].source.text + (random() < 0.5 ? "" : " typed");
+          return { ...block, children: undefined, label: undefined, source: text };
+        }
+        return block;
+      default:
+        // An equal copy.
+        return block;
+    }
+  };
+  for (let edit = 0; edit < count; edit++) {
+    const blocks = base.map((_, index) => index);
+    for (let step = 1 + pick(4); step > 0; step--) {
+      const at = pick(blocks.length + 1);
+      switch (pick(6)) {
+        case 0:
+          if (at < blocks.length && typeof blocks[at] === "number") blocks[at] = changed(blocks[at]);
+          break;
+        case 1:
+          blocks.splice(at, 1);
+          break;
+        case 2:
+          blocks.splice(at, 0, added[pick(added.length)]());
+          break;
+        case 3:
+          if (base.length > 0) blocks.splice(at, 0, pick(base.length));
+          break;
+        case 4: {
+          const other = pick(blocks.length + 1);
+          if (at < blocks.length && other < blocks.length) [blocks[at], blocks[other]] = [blocks[other], blocks[at]];
+          break;
+        }
+        default:
+          if (base.length > 0) blocks.splice(at, 0, changed(pick(base.length)));
+      }
+    }
+    yield blocks;
+  }
+}
+
+describe("Write the changed blocks", () => {
+  // wasm-binding: Write the changed blocks
+  test("untouched blocks", () => {
+    const source = "# T\n\n> a\n> b\n\n- [ ] c\n\n|x|\n|-|\n";
+    const document = binding.parse(source);
+    assert.equal(document.toMarkdownBlocks(document.tree.children.map((_, index) => index)), source);
+  });
+
+  test("one changed block among untouched ones", () => {
+    const document = binding.parse("a\n\n> b\n\n  c *d*\n");
+    const changed = { type: "paragraph", span: null, source: "x `` y ``" };
+    assert.equal(document.toMarkdownBlocks([0, changed, 2]), "a\n\nx `` y ``\n\n  c *d*\n");
+    assert.equal(document.toMarkdownBlocks([2, 0]), document.toMarkdown(resolved(document, [2, 0])));
+  });
+
+  test("an index stands for the block as parsed, whatever the tree holds now", () => {
+    const document = binding.parse("a\n\nb\n");
+    document.tree.children[1].children[0].value = "changed";
+    assert.equal(document.toMarkdownBlocks([0, 1]), "a\n\nb\n");
+  });
+
+  test("a block given to a footnote definition that held none", () => {
+    const document = binding.parse("a\n\n[^5]:\n\nb\n");
+    const note = structuredClone(document.tree.children[1]);
+    note.children.push({ type: "paragraph", span: null, children: [{ type: "text", span: null, value: "x" }] });
+    assert.equal(document.toMarkdownBlocks([0, note, 2]), "a\n\n[^5]: x\n\nb\n");
+    assert.equal(document.toMarkdown(resolved(document, [0, note, 2])), "a\n\n[^5]: x\n\nb\n");
+    assert.equal(binding.parse("c\n").toMarkdown(), "c\n");
+  });
+
+  test("a refused document returns the diagnostics of the blocks as listed", () => {
+    const document = binding.parse("a\n");
+    const empty = { type: "paragraph", span: null, children: [] };
+    const blocks = [0, 0, empty];
+    const written = document.toMarkdownBlocks(blocks);
+    assert.deepEqual(written, document.toMarkdown(resolved(document, blocks)));
+    assert.deepEqual(written.diagnostics[0].path, [2]);
+  });
+
+  test("an index that names no block of the parse throws a TypeError naming its place", () => {
+    const document = binding.parse("a\n\nb\n");
+    for (const index of [-1, 2, 1.5, NaN, Infinity]) {
+      assert.throws(
+        () => document.toMarkdownBlocks([0, index]),
+        (error) => error instanceof TypeError && /\[1\]: .* is not the index of a top-level block/.test(error.message),
+      );
+    }
+    assert.throws(() => document.toMarkdownBlocks([0, "1"]), TypeError);
+    // A hole is no block.
+    assert.throws(
+      () => document.toMarkdownBlocks([, 0]),
+      (error) => error instanceof TypeError && /\[0\]: a block is not an object/.test(error.message),
+    );
+    assert.throws(() => document.toMarkdownBlocks(null), TypeError);
+    assert.equal(document.toMarkdownBlocks([1]), "b\n");
+    document.free();
+    assert.throws(() => document.toMarkdownBlocks([0]), /freed/);
+  });
+
+  test("blocks write as the tree they stand for, over every fixture", async () => {
+    const root = new URL("../../../tests/fixtures/", import.meta.url);
+    const files = (await readdir(root, { recursive: true })).filter((file) => file.endsWith(".md")).sort();
+    assert.ok(files.length > 100, `only ${files.length} fixture files`);
+    let edits = 0;
+    for (const [number, file] of files.entries()) {
+      const source = await readFile(new URL(file, root), "utf8");
+      const document = binding.parse(source);
+      for (const blocks of blockEdits(document, 8, number + 1)) {
+        const tree = resolved(document, blocks);
+        assert.deepEqual(outcome(() => document.toMarkdownBlocks(blocks)), outcome(() => document.toMarkdown(tree)), file);
+        assert.deepEqual(
+          outcome(() => document.toMarkdownBlocks(blocks, { lineEnding: "crlf", bullet: "plus" })),
+          outcome(() => document.toMarkdown(tree, { lineEnding: "crlf", bullet: "plus" })),
+          file,
+        );
+        edits++;
+      }
+      document.free();
+    }
+    assert.ok(edits > 800);
   });
 });
 
