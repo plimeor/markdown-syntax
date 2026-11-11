@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.8.0...markdown-syntax-v0.8.1) - 2026-11-11
+
+### Other
+
+- speed up parse, HTML, and write-back for editor use, and fix the bugs found on the way ([#39](https://github.com/plimeor/markdown-syntax/pull/39))
+
 ## [0.8.0](https://github.com/plimeor/markdown-syntax/compare/markdown-syntax-v0.7.3...markdown-syntax-v0.8.0) - 2026-10-22
 
 ### Added
